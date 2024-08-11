@@ -1,0 +1,492 @@
+<!--
+// Timelinize
+// Copyright (c) 2013 Matthew Holt
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Timelinize</title>
+
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<meta name="theme-color" content="#002848">
+
+		<link rel="icon" href="/resources/images/favicon.png">
+
+		<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.css">
+		<script src="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.js"></script>
+
+		<!-- First vendored styles, then Tabler, then ours -->
+		<link rel="stylesheet" href="/resources/css/vendor/tom-select-v2.2.2.css">
+		<link rel="stylesheet" href="/resources/css/vendor/air-datepicker.min.css">
+		<link rel="stylesheet" href="/resources/css/vendor/nouislider.v15.6.1.css">
+		<link rel="stylesheet" href="/resources/css/vendor/tabler.min.css">
+		<link rel="stylesheet" href="/resources/css/vendor/tabler-vendors.min.css">
+		<link rel="stylesheet" href="/resources/css/common.css">
+
+
+		<!-- First vendored scripts, then Tabler, then ours -->
+		<script src="/resources/js/vendor/luxon.v3.4.3.min.js"></script>
+		<script src="/resources/js/vendor/apexcharts.js"></script>
+		<script src="/resources/js/vendor/nouislider.v15.6.1.min.js"></script>
+		<script src="/resources/js/vendor/air-datepicker.min.js"></script>
+		<script src="/resources/js/vendor/tom-select.base.min.js"></script>
+		<script src="/resources/js/vendor/list.min.js"></script>
+		<script src="/resources/js/vendor/imask.js"></script>
+		<script src="/resources/js/vendor/thumbhash.js"></script>
+		<!-- <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta17/dist/js/tabler.min.js"></script> -->
+		<script src="/resources/js/vendor/tabler.min.js"></script>
+		<!-- <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+		<script src="https://cdn.jsdelivr.net/npm/@easepick/bundle@1.2.0/dist/index.umd.min.js"></script> -->
+
+		<!-- TODO: these should ideally NOT be deferred; separate out DOM-specific code that runs at page load -->
+		<script src="/resources/js/app.js"></script>
+		<script src="/resources/js/common-lib.js"></script>
+		<script src="/resources/js/common.js"></script>
+		<script src="/resources/js/modals.js" defer></script>
+		<script src="/resources/js/controllers.js"></script>
+
+
+
+
+					<!-- TODO: EXPERIMENTAL (for Manual Entry page) -->
+					<script src="https://unpkg.com/protomaps-leaflet@1.24.0/dist/protomaps-leaflet.min.js"></script>
+					<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+					<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+
+
+
+		<!-- individual page scripts -->
+		<script src="/resources/js/conversations.js"></script>
+		<script src="/resources/js/dashboard.js"></script>
+		<script src="/resources/js/entities.js"></script>
+		<script src="/resources/js/entity.js"></script>
+		<script src="/resources/js/gallery.js"></script>
+		<script src="/resources/js/item.js"></script>
+		<script src="/resources/js/items.js"></script>
+		<script src="/resources/js/map.js"></script>
+		<script src="/resources/js/setup.js"></script>
+		<script src="/resources/js/timeline.js"></script>
+	
+
+		<style>
+			@import url('/resources/css/vendor/font-inter.css');
+			:root, [data-bs-theme="light"] {
+				--tblr-font-sans-serif: Inter, -apple-system, BlinkMacSystemFont, San Francisco, Segoe UI, Roboto, Helvetica Neue, system-ui, sans-serif;
+			}
+		</style>
+
+
+
+
+		<script src="/resources/js/spa.js"></script>
+
+	</head>
+
+
+	<body>
+		<div id="app-loader">
+			<span class="app-loader"></span>
+		</div>
+
+		<div class="page">
+			<header class="application-bar navbar navbar-expand-md d-print-none">
+				<div class="container-xl">
+
+					<div class="d-flex">
+						<!-- Mobile menu toggler -->
+						<button class="navbar-toggler collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu"
+							aria-controls="navbar-menu" aria-expanded="false" aria-label="Toggle navigation">
+							<span class="navbar-toggler-icon"></span>
+						</button>
+			
+						<!-- Timelinize Logo! -->
+						<h1 class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3 ps-2 ps-md-0 pt-0 pb-0">
+							<a href="/" title="Dashboard">
+								<img src="/resources/images/timelinize-light.svg" class="logo logo-light">
+								<img src="/resources/images/timelinize-dark.svg" class="logo logo-dark">
+							</a>
+						</h1>
+					</div>
+			
+					<!-- Cluster of notifications, user info, and import button -->
+					<div class="navbar-nav flex-row order-md-last">
+						<!-- Notifications -->
+						<div class="nav-item dropdown d-flex me-3">
+							<a id="notifications-link" class="nav-link px-0" data-bs-toggle="dropdown" data-bs-auto-close="outside" tabindex="-1"
+								aria-label="Show notifications">
+								<svg xmlns="http://www.w3.org/2000/svg" class="icon" width="24" height="24" viewBox="0 0 24 24"
+									stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round"
+									stroke-linejoin="round">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+									<path d="M10 5a2 2 0 0 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" />
+									<path d="M9 17v1a3 3 0 0 0 6 0v-1" />
+								</svg>
+							</a>
+							<div class="dropdown-menu dropdown-menu-arrow dropdown-menu-end dropdown-menu-card" data-bs-theme="light">
+								<div class="card">
+									<div class="card-header">
+										<h3 class="card-title">Happening now</h3>
+									</div>
+									<div id="active-jobs" class="list-group list-group-flush list-group-hoverable">
+										
+									</div>
+								</div>
+							</div>
+						</div>
+						
+						<!-- User information -->
+						<div class="nav-item dropdown">
+							<a class="nav-link d-flex lh-1 text-reset p-0" data-bs-toggle="dropdown"
+								aria-label="Open user menu">
+								<span id="repo-owner-avatar"></span>
+								<div class="d-none d-sm-block ps-2">
+									<div id="repo-owner-name"></div>
+									<div id="repo-owner-title" class="mt-1 small text-secondary"></div>
+								</div>
+							</a>
+							<div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow" data-bs-theme="light">
+								<a class="dropdown-item profile-link">Profile</a>
+								<a href="/settings" class="dropdown-item">Settings</a>
+								<div class="dropdown-divider"></div>
+								<a class="dropdown-item" onclick="closeRepository()">Log Out</a>
+							</div>
+						</div>
+			
+						<!-- Import button -->
+						<div class="nav-item dropdown ms-4">
+							<a class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown">
+								<svg xmlns="http://www.w3.org/2000/svg" class="icon me-0" width="24" height="24"
+									viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
+									stroke-linecap="round" stroke-linejoin="round">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+									<line x1="12" y1="5" x2="12" y2="19" />
+									<line x1="5" y1="12" x2="19" y2="12" />
+								</svg>
+								<span class="d-none d-sm-inline-block">Timelinize</span>
+							</a>
+							<div class="dropdown-menu dropdown-menu-end" data-bs-theme="light">
+								<a class="dropdown-item" data-bs-toggle="modal" data-bs-target="#modal-import">
+									<div class="d-flex">
+										<!-- <svg xmlns="http://www.w3.org/2000/svg"
+											class="icon dropdown-item-icon icon-tabler icon-tabler-file-import" width="24"
+											height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+											fill="none" stroke-linecap="round" stroke-linejoin="round">
+											<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+											<path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+											<path
+												d="M5 13v-8a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2h-5.5m-9.5 -2h7m-3 -3l3 3l-3 3">
+											</path>
+										</svg> -->
+										<svg xmlns="http://www.w3.org/2000/svg" class="icon dropdown-item-icon icon-tabler icon-tabler-devices-pc" width="24" height="24"
+											viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round"
+											stroke-linejoin="round">
+											<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+											<path d="M3 5h6v14h-6z" />
+											<path d="M12 9h10v7h-10z" />
+											<path d="M14 19h6" />
+											<path d="M17 16v3" />
+											<path d="M6 13v.01" />
+											<path d="M6 16v.01" />
+										</svg>
+										<div>
+											<h4 class="mb-1">Files on computer</h4>
+											<div class="text-secondary small">Import files or folders already on your computer</div>
+										</div>
+									</div>
+								</a>
+								<a class="dropdown-item disabled position-relative">
+									<div class="ribbon bg-secondary">WIP</div>
+									<div class="d-flex">
+										<!-- <svg xmlns="http://www.w3.org/2000/svg"
+											class="icon dropdown-item-icon icon-tabler icon-tabler-cloud-rain" width="24"
+											height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+											fill="none" stroke-linecap="round" stroke-linejoin="round">
+											<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+											<path d="M7 18a4.6 4.4 0 0 1 0 -9a5 4.5 0 0 1 11 2h1a3.5 3.5 0 0 1 0 7"></path>
+											<path d="M11 13v2m0 3v2m4 -5v2m0 3v2"></path>
+										</svg> -->
+										<svg xmlns="http://www.w3.org/2000/svg" class="icon dropdown-item-icon icon-tabler icon-tabler-cloud-download" width="24" height="24"
+											viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round"
+											stroke-linejoin="round">
+											<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+											<path d="M19 18a3.5 3.5 0 0 0 0 -7h-1a5 4.5 0 0 0 -11 -2a4.6 4.4 0 0 0 -2.1 8.4" />
+											<path d="M12 13l0 9" />
+											<path d="M9 19l3 3l3 -3" />
+										</svg>
+										<div>
+											<h4 class="mb-1">Online data</h4>
+											<div class="text-secondary small">Download from an online account or service</div>
+										</div>
+									</div>
+								</a>
+								<a class="dropdown-item disabled position-relative">
+									<div class="ribbon bg-secondary">WIP</div>
+									<div class="d-flex">
+										<svg xmlns="http://www.w3.org/2000/svg" class="icon dropdown-item-icon icon-tabler icon-tabler-forms" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+											<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+											<path d="M12 3a3 3 0 0 0 -3 3v12a3 3 0 0 0 3 3"></path>
+											<path d="M6 3a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3"></path>
+											<path d="M13 7h7a1 1 0 0 1 1 1v8a1 1 0 0 1 -1 1h-7"></path>
+											<path d="M5 7h-1a1 1 0 0 0 -1 1v8a1 1 0 0 0 1 1h1"></path>
+											<path d="M17 12h.01"></path>
+											<path d="M13 12h.01"></path>
+										</svg>
+										<div>
+											<h4 class="mb-0">Manual input</h4>
+											<div class="text-secondary small">Add new content manually</div>
+										</div>
+									</div>						
+								</a>
+							</div>
+						</div>
+			
+					</div>
+			
+			
+					<!-- Main topbar navigation menu -->
+					<div class="collapse navbar-collapse" id="navbar-menu">
+						<div class="d-flex flex-column flex-md-row flex-fill align-items-stretch align-items-md-center">
+							<ul class="navbar-nav">
+			
+								<li class="nav-item dropdown">
+									<a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" role="button" aria-expanded="false">
+										<span class="nav-link-icon d-md-none d-lg-inline-block">
+											<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-compass"
+												width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+												fill="none" stroke-linecap="round" stroke-linejoin="round">
+												<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+												<polyline points="8 16 10 10 16 8 14 14 8 16"></polyline>
+												<circle cx="12" cy="12" r="9"></circle>
+												<line x1="12" y1="3" x2="12" y2="5"></line>
+												<line x1="12" y1="19" x2="12" y2="21"></line>
+												<line x1="3" y1="12" x2="5" y2="12"></line>
+												<line x1="19" y1="12" x2="21" y2="12"></line>
+											</svg>
+										</span>
+										<span class="nav-link-title">
+											Explore
+										</span>
+									</a>
+									<div class="dropdown-menu dropdown-menu-card"
+										style="--tblr-dropdown-min-width: 700px;" data-bs-theme="light">
+										<div class="card">
+			
+			
+											<div class="row row-0">
+												<div class="col">
+													<div class="list-group list-group-flush explore-pages">
+			
+														<a href="/timeline" class="list-group-item list-group-item-action" data-preview="timeline.png">
+															<h4>
+																<svg xmlns="http://www.w3.org/2000/svg"
+																	class="icon icon-tabler icon-tabler-timeline me-1" width="24"
+																	height="24" viewBox="0 0 24 24" stroke-width="2"
+																	stroke="currentColor" fill="none" stroke-linecap="round"
+																	stroke-linejoin="round">
+																	<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+																	<path d="M4 16l6 -7l5 5l5 -6"></path>
+																	<circle cx="15" cy="14" r="1"></circle>
+																	<circle cx="10" cy="9" r="1"></circle>
+																	<circle cx="4" cy="16" r="1"></circle>
+																	<circle cx="20" cy="8" r="1"></circle>
+																</svg>
+																Timeline
+															</h4>
+															<div class="text-secondary">All your items grouped semantically on a single
+																timeline</div>
+														</a>
+			
+														<a href="/map" class="list-group-item list-group-item-action" data-preview="map.png">
+															<h4>
+																<svg xmlns="http://www.w3.org/2000/svg"
+																	class="icon icon-tabler icon-tabler-map-2 me-1" width="24"
+																	height="24" viewBox="0 0 24 24" stroke-width="2"
+																	stroke="currentColor" fill="none" stroke-linecap="round"
+																	stroke-linejoin="round">
+																	<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+																	<line x1="18" y1="6" x2="18" y2="6.01"></line>
+																	<path d="M18 13l-3.5 -5a4 4 0 1 1 7 0l-3.5 5"></path>
+																	<polyline
+																		points="10.5 4.75 9 4 3 7 3 20 9 17 15 20 21 17 21 15">
+																	</polyline>
+																	<line x1="9" y1="4" x2="9" y2="17"></line>
+																	<line x1="15" y1="15" x2="15" y2="20"></line>
+																</svg>
+																Map
+															</h4>
+															<div class="text-secondary">Visualize items on an interactive map of the
+																world</div>
+														</a>
+			
+														<a href="/conversations" class="list-group-item list-group-item-action" data-preview="conversations.png">
+															<h4>
+																<svg xmlns="http://www.w3.org/2000/svg"
+																	class="icon icon-tabler icon-tabler-messages me-1" width="24"
+																	height="24" viewBox="0 0 24 24" stroke-width="2"
+																	stroke="currentColor" fill="none" stroke-linecap="round"
+																	stroke-linejoin="round">
+																	<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+																	<path
+																		d="M21 14l-3 -3h-7a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1h9a1 1 0 0 1 1 1v10">
+																	</path>
+																	<path d="M14 15v2a1 1 0 0 1 -1 1h-7l-3 3v-10a1 1 0 0 1 1 -1h2">
+																	</path>
+																</svg>
+																Conversations
+															</h4>
+															<div class="text-secondary">Follow connections with people across all kinds
+																of chats and messages</div>
+														</a>
+			
+														<a href="/gallery" class="list-group-item list-group-item-action" data-preview="gallery.png">
+															<h4>
+																<svg xmlns="http://www.w3.org/2000/svg"
+																	class="icon icon-tabler icon-tabler-layout-grid me-1" width="24"
+																	height="24" viewBox="0 0 24 24" stroke-width="2"
+																	stroke="currentColor" fill="none" stroke-linecap="round"
+																	stroke-linejoin="round">
+																	<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+																	<rect x="4" y="4" width="6" height="6" rx="1"></rect>
+																	<rect x="14" y="4" width="6" height="6" rx="1"></rect>
+																	<rect x="4" y="14" width="6" height="6" rx="1"></rect>
+																	<rect x="14" y="14" width="6" height="6" rx="1"></rect>
+																</svg>
+																Gallery
+															</h4>
+															<div class="text-secondary">Browse through a rich display of photos and
+																videos</div>
+														</a>
+			
+														<!-- TODO: calendar view... someday -->
+														<!-- <a href="/calendar" class="list-group-item list-group-item-action">
+															<h4>
+																<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-calendar-event" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+																	<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+																	<rect x="4" y="5" width="16" height="16" rx="2"></rect>
+																	<line x1="16" y1="3" x2="16" y2="7"></line>
+																	<line x1="8" y1="3" x2="8" y2="7"></line>
+																	<line x1="4" y1="11" x2="20" y2="11"></line>
+																	<rect x="8" y="15" width="2" height="2"></rect>
+																</svg>
+																Calendar
+															</h4>
+															<div class="text-secondary">See your content on a familiar calendar layout</div>
+														</a> -->
+			
+													</div>
+												</div>
+												<div class="col-4">
+													<img src="/resources/images/timeline.png" id="explore-page-preview" class="w-100 h-100 object-cover card-img-end">
+												</div>
+											</div>
+			
+			
+										</div>
+									</div>
+								</li>
+			
+								<li class="nav-item">
+									<a href="/items" class="nav-link">
+										<span class="nav-link-icon d-md-none d-lg-inline-block">
+											<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-file-search"
+												width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+												fill="none" stroke-linecap="round" stroke-linejoin="round">
+												<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+												<path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+												<path d="M12 21h-5a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v4.5"></path>
+												<circle cx="16.5" cy="17.5" r="2.5"></circle>
+												<line x1="18.5" y1="19.5" x2="21" y2="22"></line>
+											</svg>
+										</span>
+										<span class="nav-link-title">
+											Items
+										</span>
+									</a>
+								</li>
+			
+								<li class="nav-item">
+									<a href="/entities" class="nav-link">
+										<span class="nav-link-icon d-md-none d-lg-inline-block">
+											<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-user-search"
+												width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+												fill="none" stroke-linecap="round" stroke-linejoin="round">
+												<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+												<circle cx="12" cy="7" r="4"></circle>
+												<path d="M6 21v-2a4 4 0 0 1 4 -4h1"></path>
+												<circle cx="16.5" cy="17.5" r="2.5"></circle>
+												<path d="M18.5 19.5l2.5 2.5"></path>
+											</svg>
+										</span>
+										<span class="nav-link-title">
+											Entities
+										</span>
+									</a>
+								</li>
+							</ul>
+			
+						</div>
+					</div>
+					
+			
+				</div>
+			</header>
+
+
+			<div id="page-content" class="page-wrapper">
+				
+			</div>
+
+
+			<footer class="footer footer-transparent d-print-none">
+				<div class="container-xl">
+					<div class="row text-center align-items-center flex-row-reverse">
+						<div class="col-lg-auto ms-lg-auto">
+							<ul class="list-inline list-inline-dots mb-0">
+								<li class="list-inline-item">Development Preview</li>
+								<li class="list-inline-item fw-bold">Exipres {{ .Expiry.Format "2 Jan 2006" }}</li>
+								<li class="list-inline-item"><a href="https://discord.com/channels/1063526777844158535/1063526778309722233" class="link-secondary" target="_blank">Discord</a></li>
+							</ul>
+						</div>
+						<div class="col-12 col-lg-auto mt-3 mt-lg-0">
+							<ul class="list-inline list-inline-dots mb-0">
+								<li class="list-inline-item">
+									Timelinize &copy;
+									<a href="https://dyanim.com" class="link-secondary">Dyanim, LLC</a>.
+									All rights reserved.
+								</li>
+							</ul>
+						</div>
+					</div>
+				</div>
+			</footer>
+		</div>
+
+
+
+		<div id="alert-container"></div>
+
+
+
+		<div id="inline-components">
+			{{include "/resources/html/includes/modals.html"}}
+			{{include "/resources/html/includes/templates.html"}}
+		</div>
+
+	</body>
+</html>

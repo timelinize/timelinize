@@ -1,0 +1,246 @@
+/*
+	Timelinize
+	Copyright (c) 2013 Matthew Holt
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU Affero General Public License as published
+	by the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU Affero General Public License for more details.
+
+	You should have received a copy of the GNU Affero General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+package twitter
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/timelinize/timelinize/timeline"
+)
+
+func (Client) Authenticate(ctx context.Context, acc timeline.Account, dsOpt any) error {
+	return acc.AuthorizeOAuth2(ctx, oauth2)
+}
+
+func (c *Client) APIImport(ctx context.Context, acc timeline.Account, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+	var err error
+	c.httpClient, err = acc.NewHTTPClient(ctx, oauth2, rateLimit)
+	if err != nil {
+		return err
+	}
+	c.otherAccounts = make(map[string]twitterAccount)
+
+	twitOpt := *opt.DataSourceOptions.(*Options)
+
+	// load any previous checkpoint
+	c.checkpoint = opt.Checkpoint.(checkpoint)
+
+	// get account owner information
+	// TODO: restore this somehow
+	// cleanedScreenName := strings.TrimPrefix(c.acc.User.UserID, "@")
+	cleanedScreenName := strings.TrimPrefix("@TODO: get this...", "@")
+	ownerAccount, err := c.getAccountFromAPI(cleanedScreenName, "")
+	if err != nil {
+		return fmt.Errorf("getting user account information for @%s: %v", cleanedScreenName, err)
+	}
+	c.owner = ownerAccount.entity(ctx, nil)
+
+	log.Printf("OWNER ACCOUNT: %+v", ownerAccount)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			page, err := c.nextPageOfTweetsFromAPI(c.checkpoint.NextToken)
+			if err != nil {
+				return fmt.Errorf("getting next page of tweets: %v", err)
+			}
+
+			err = page.process(itemChan, twitOpt)
+			if err != nil {
+				return fmt.Errorf("processing page of tweets: %v", err)
+			}
+
+			// https://developer.twitter.com/en/docs/twitter-api/pagination
+			c.checkpoint.NextToken = page.Meta.NextToken
+			itemChan <- &timeline.Graph{Checkpoint: c.checkpoint}
+			if page.Meta.NextToken == "" {
+				return nil
+			}
+		}
+	}
+}
+
+func (c *Client) processTweetFromAPI(ctx context.Context, t tweet, itemChan chan<- *timeline.Graph, opt Options) error {
+	skip, err := c.prepareTweet(ctx, &t, "api", opt)
+	if err != nil {
+		return fmt.Errorf("preparing tweet: %v", err)
+	}
+	if skip {
+		return nil
+	}
+
+	ig, err := c.makeItemGraphFromTweet(ctx, t, nil, opt)
+	if err != nil {
+		return fmt.Errorf("processing tweet %s: %v", t.id(), err)
+	}
+
+	// send the tweet for processing
+	if ig != nil {
+		itemChan <- ig
+	}
+
+	return nil
+}
+
+func (c *Client) nextPageOfTweetsFromAPI(pageToken string) (userTweetsResponsePage, error) {
+	log.Println("TWITTER ENTITY:", c.owner)
+	q := url.Values{
+		"max_results":  {"5"}, // TODO: from 5 to 100, use 100 once I'm done testing
+		"tweet.fields": {"attachments,author_id,context_annotations,conversation_id,created_at,entities,geo,in_reply_to_user_id,lang,public_metrics,possibly_sensitive,referenced_tweets,reply_settings,source,text,withheld"},
+		"media.fields": {"duration_ms,height,media_key,preview_image_url,type,url,width,public_metrics,alt_text"},
+		"place.fields": {"contained_within,country,country_code,full_name,geo,id,name,place_type"},
+		"expansions":   {"attachments.media_keys,geo.place_id,author_id,referenced_tweets.id,referenced_tweets.id.author_id,in_reply_to_user_id"},
+		// others: https://developer.twitter.com/en/docs/twitter-api/tweets/timelines/api-reference/get-users-id-tweets
+	}
+	if pageToken != "" {
+		q.Set("pagination_token", pageToken)
+	}
+	u := fmt.Sprintf("%s/users/%s/tweets?%s", apiBase, c.owner.AttributeValue(identityAttribute), q.Encode())
+
+	resp, err := c.httpClient.Get(u)
+	if err != nil {
+		return userTweetsResponsePage{}, fmt.Errorf("performing API request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// TODO: handle HTTP errors, esp. rate limiting, a lot better; is there a uniform/shared way we can do this?
+	if resp.StatusCode != http.StatusOK {
+		return userTweetsResponsePage{}, fmt.Errorf("HTTP error: %s: %s", u, resp.Status)
+	}
+
+	// body, err := io.ReadAll(resp.Body)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// log.Printf("RESPONSE: %s", string(body))
+
+	var fullResp userTweetsResponsePage
+	err = json.NewDecoder(resp.Body).Decode(&fullResp)
+	if err != nil {
+		return userTweetsResponsePage{}, fmt.Errorf("reading response body: %v", err)
+	}
+
+	log.Printf("*** DECODED RESPONSE: %+v", fullResp)
+
+	return fullResp, nil
+}
+
+// getAccountFromAPI gets the account information for either
+// screenName, if set, or accountID, if set. Set only one;
+// leave the other argument empty string.
+func (c *Client) getAccountFromAPI(screenName, accountID string) (twitterAccount, error) {
+	var ta twitterAccount
+
+	// https://developer.twitter.com/en/docs/twitter-api/users/lookup/api-reference/get-users-by-username-username
+	v := make(url.Values)
+	v.Set("user.fields", strings.Join([]string{
+		"created_at",
+		"description",
+		"entities",
+		"id",
+		"location",
+		"name",
+		"pinned_tweet_id",
+		"profile_image_url",
+		"protected",
+		"public_metrics",
+		"url",
+		"username",
+		"verified",
+		"withheld"}, ","))
+
+	var u string
+	if screenName != "" {
+		u = fmt.Sprintf("%s/users/by/username/%s", apiBase, screenName)
+	} else {
+		u = fmt.Sprintf("%s/users/%s", apiBase, accountID)
+	}
+	u += "?" + v.Encode()
+
+	resp, err := c.httpClient.Get(u)
+	if err != nil {
+		return ta, fmt.Errorf("performing API request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// TODO: handle HTTP errors, esp. rate limiting, a lot better
+	if resp.StatusCode != http.StatusOK {
+		errBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return ta, fmt.Errorf("HTTP error: %s: %s - additionally, reading response body: %v", u, resp.Status, err)
+		}
+		return ta, fmt.Errorf("HTTP error: %s: %s - %s", u, resp.Status, string(errBody))
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&ta)
+	if err != nil {
+		return ta, fmt.Errorf("reading response body: %v", err)
+	}
+
+	return ta, nil
+}
+
+func (c *Client) getTweetFromAPI(id string) (tweet, error) {
+	var t tweet
+
+	q := url.Values{
+		"id":         {id},
+		"tweet_mode": {"extended"}, // https://developer.twitter.com/en/docs/tweets/tweet-updates
+	}
+	u := "https://api.twitter.com/1.1/statuses/show.json?" + q.Encode()
+
+	resp, err := c.httpClient.Get(u)
+	if err != nil {
+		return t, fmt.Errorf("performing API request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		// this is okay, because the tweet may simply have been deleted,
+		// and we skip empty tweets anyway
+		fallthrough
+	case http.StatusForbidden:
+		// this happens when the author's account is suspended
+		return t, nil
+	case http.StatusOK:
+		break
+	default:
+		// TODO: handle HTTP errors, esp. rate limiting, a lot better
+		return t, fmt.Errorf("HTTP error: %s: %s", u, resp.Status)
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&t)
+	if err != nil {
+		return t, fmt.Errorf("reading response body: %v", err)
+	}
+
+	return t, nil
+}
+
+const apiBase = "https://api.twitter.com/2"

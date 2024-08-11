@@ -1,0 +1,142 @@
+<title>Gallery</title>
+<link rel="stylesheet" href="/resources/css/gallery.css">
+
+
+<div class="page-body">
+	<div class="container-xl">
+		<div class="row">
+			<div id="filter-column" class="col-sm-4 col-lg-3">
+				<div class="page-pretitle">
+					Explore
+				</div>
+				<h2 class="page-title mb-4">
+					<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-photo"
+						width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+						fill="none" stroke-linecap="round" stroke-linejoin="round">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+						<line x1="15" y1="8" x2="15.01" y2="8"></line>
+						<rect x="4" y="4" width="16" height="16" rx="3"></rect>
+						<path d="M4 15l4 -4a3 5 0 0 1 3 0l5 5"></path>
+						<path d="M14 14l1 -1a3 5 0 0 1 3 0l2 2"></path>
+					</svg>
+					Gallery
+				</h2>
+
+
+				<form class="filter">
+					
+					<!-- Date picker goes here -->
+					
+					<label class="form-label">Person</label>
+					<div class="mb-4">
+						<select type="text" class="entity-input form-select" placeholder="Name or contact info">
+						</select>
+					</div>
+
+					<div class="subheader mb-2">Media format</div>
+					<div class="mb-4">
+						<label class="form-check form-switch">
+							<input type="checkbox" class="form-check-input" id="format-images" checked>
+							<span class="form-check-label">Images</span>
+						</label>
+						<label class="form-check form-switch">
+							<input type="checkbox" class="form-check-input" id="format-videos" checked>
+							<span class="form-check-label">Videos</span>
+						</label>
+					</div>
+
+					<div class="subheader mb-2">Include</div>
+					<div class="mb-4">
+						<label class="form-check">
+							<input type="checkbox" class="form-check-input" id="include-attachments"
+								value="message" checked>
+							<span class="form-check-label">Attachments</span>
+						</label>
+					</div>
+
+					<div class="tl-data-source-dropdown static-menu mb-3">
+
+					</div>
+
+					<div class="tl-item-class-dropdown static-menu mb-3">
+						
+					</div>
+				</form>
+			</div>
+
+			<div id="content-column" class="col-sm-8 col-lg-9">
+				<div class="filter-results" class="my-4">
+
+				</div>
+			</div>
+		</div>
+
+	</div>
+</div>
+
+
+
+<template id="tpl-media">
+	<a class="card card-sm card-link" data-bs-toggle="modal" data-bs-target="#modal-preview">
+		<div class="card-body">
+			<div class="d-flex align-items-center">
+				<div class="media-owner-avatar"></div>
+				<div>
+					<div class="media-owner-name"></div>
+					<div class="media-timestamp text-secondary"></div>
+				</div>
+			</div>
+		</div>
+	</a>
+</template>
+
+
+
+<div id="modal-preview" class="modal modal-blur fade" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-xl" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<div class="d-flex align-items-center">
+					<div class="media-owner-avatar"></div>
+					<div>
+						<div class="media-owner-name"></div>
+						<div class="media-timestamp text-secondary"></div>
+					</div>
+				</div>
+				<div class="text-center">
+					<h5 class="modal-title"></h5>
+					<div class="subheader"></div>
+				</div>
+				<div id="modal-preview-nav" class="d-flex me-2">
+					<a class="btn btn-prev">
+						<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-chevron-left"
+							width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+							fill="none" stroke-linecap="round" stroke-linejoin="round">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+							<polyline points="15 6 9 12 15 18"></polyline>
+						</svg>
+						Prev
+					</a>
+					<a class="btn btn-next">
+						Next
+						<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-chevron-right"
+							width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+							fill="none" stroke-linecap="round" stroke-linejoin="round">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+							<polyline points="9 6 15 12 9 18"></polyline>
+						</svg>
+					</a>
+				</div>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body">
+				<div id="modal-preview-content" class="d-flex justify-content-center">
+				</div>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn me-auto" data-bs-dismiss="modal">Close</button>
+				<button type="button" class="btn btn-primary" data-bs-dismiss="modal">View details</button>
+			</div>
+		</div>
+	</div>
+</div>

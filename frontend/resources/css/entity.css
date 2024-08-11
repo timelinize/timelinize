@@ -1,0 +1,17 @@
+.avatar-xxl {
+	--tblr-avatar-size: 16rem;
+}
+
+#entity-id::before {
+	content: '#';
+	margin-right: .25rem;
+}
+
+.name {
+	font-size: 38px;
+	/* font-weight: 800; */
+}
+
+.entity-type {
+	font-size: 18px;
+}

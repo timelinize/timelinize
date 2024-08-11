@@ -1,0 +1,86 @@
+:root {
+	--tl-clickable-padding-x: .5rem;
+}
+
+.item-card-left,
+.item-card-right {
+	background-color: var(--tblr-card-cap-bg);
+}
+.item-card-left {
+	border-top-left-radius: var(--tblr-card-border-radius);
+	border-bottom-left-radius: var(--tblr-card-border-radius);
+}
+.item-card-right {
+	border-top-right-radius: var(--tblr-card-border-radius);
+	border-bottom-right-radius: var(--tblr-card-border-radius);
+}
+
+.item-id::before {
+	content: '#';
+	margin-right: 2px;
+}
+
+.item-entities,
+.item-content {
+	margin-left: calc(var(--tl-clickable-padding-x) * -1);
+}
+
+.item-content video {
+	width: 100%;
+}
+
+
+.entity {
+	border: 0;
+	box-shadow: none;
+}
+
+.clickable {
+	cursor: pointer;
+}
+
+.entity,
+.clickable {
+	border-radius: 5px;
+	padding: .25rem var(--tl-clickable-padding-x);
+	text-decoration: none !important;
+}
+
+.entity:hover,
+.clickable:hover {
+	background: #f5f5f5;
+}
+
+.entity-name {
+	font-weight: var(--tblr-font-weight-medium);
+	color: var(--tblr-body-color);
+}
+
+.entity-attribute {
+	font-size: 12px;
+	text-decoration: none;
+}
+
+.item-content {
+	font-size: 18px;
+	word-wrap: anywhere;
+	text-overflow: ellipsis;
+}
+
+.item-content img,
+.item-content video,
+.item-content canvas,
+.item-content .loader-container,
+.item-content .thumbhash-container {
+	max-height: 400px;
+}
+
+.related-items video {
+	max-width: 80px;
+	max-height: 80px;
+}
+
+/* if we put the ds-icon in a list-inline (like if we swap places with the class-icon)
+.ds-icon {
+	--tblr-avatar-size: 20px;
+} */

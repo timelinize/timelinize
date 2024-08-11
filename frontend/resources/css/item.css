@@ -1,0 +1,86 @@
+#item-id::before {
+	content: '#';
+	margin-right: .25rem;
+}
+
+@font-face {
+	font-family: 'Lora';
+	/* font-style:  normal;
+	font-weight: 400;
+	font-display: swap; */
+	/* src: url('/resources/fonts/Inter-Regular.woff2?v=3.19') format("woff2"); */
+	src: url("/resources/fonts/Lora-VariableFont_wght.woff2") format("woff2-variations");
+  }
+
+.item-content-text {
+	font-family: Lora;
+	padding: 15px 25px;
+}
+
+#item-owner-name {
+	font-size: 16px;
+}
+
+.card-body h3 svg {
+	--tblr-icon-size: 1.5rem;
+}
+
+.card {
+	margin-bottom: var(--tblr-gutter-y);
+}
+
+#related-entities {
+	max-height: 175px;
+	overflow-y: auto;
+	--tblr-list-group-item-padding-x: 1rem;
+	--tblr-list-group-item-padding-y: .75rem;
+}
+
+.motionpic-controls {
+	position: absolute;
+	top: 15px;
+	right: 15px;
+	width: 60px;
+	height: 60px;
+	transition: all 0.25s;
+	cursor: pointer;
+	opacity: 0;
+	background: rgba(0, 0, 0, .5);
+	padding: 10px;
+	border-radius: 50%;
+}
+
+#item-content:hover .motionpic-controls {
+	opacity: 1;
+}
+
+.motionpic-controls:hover {
+	transform: scale(1.2);
+	transition: all 0.1s;
+}
+
+.motionpic-controls:active {
+	transform: scale(1);
+}
+
+.motionpic-controls svg {
+	width: 100%;
+	height: 100%;
+}
+
+.motionpic-controls .icon-tabler-player-play svg {
+	margin-left: 5px;
+}
+
+#item-content {
+	position: relative;
+}
+
+#item-content img,
+#item-content canvas {
+	max-width: 100%;
+}
+
+#item-content video {
+	width: 100%;
+}

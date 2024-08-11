@@ -1,0 +1,207 @@
+<title>Entities</title>
+<link rel="stylesheet" href="/resources/css/entities.css">
+
+
+<!-- Page header -->
+<div class="page-header d-print-none">
+	<div class="container-xl">
+		<div class="row g-2 align-items-center">
+			<div class="col">
+				<h2 class="page-title">
+					Entities
+				</h2>
+				<div class="text-secondary mt-1">People, places, creatures, and things</div>
+			</div>
+			<!-- Page title actions -->
+			<!-- <div class="col-auto ms-auto d-print-none">
+				<div class="d-flex">
+					<input type="search" class="form-control d-inline-block w-9 me-3" placeholder="Search user…" />
+					<a href="#" class="btn btn-primary">
+						<svg xmlns="http://www.w3.org/2000/svg" class="icon" width="24" height="24" viewBox="0 0 24 24"
+							stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round"
+							stroke-linejoin="round">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<line x1="12" y1="5" x2="12" y2="19" />
+							<line x1="5" y1="12" x2="19" y2="12" />
+						</svg>
+						New user
+					</a>
+				</div>
+			</div> -->
+		</div>
+	</div>
+</div>
+
+<!-- Page body -->
+<div class="page-body">
+	<div class="container-xl">
+		<div class="row row-cards">
+			<div class="col-12">
+				<div class="card">
+
+					<div class="sticky-top">
+						<div class="card-body border-bottom py-3">
+							<div class="d-flex align-items-center">
+								<!-- <div class="text-secondary">
+									Show
+									<div class="mx-2 d-inline-block">
+										<input type="text" class="form-control form-control-sm" value="8" size="3"
+											aria-label="Page size">
+									</div>
+									per page
+								</div> -->
+								<div class="text-secondary">
+									Filter:
+									<div class="ms-2 d-inline-block">
+										<input type="text" class="filter-entities form-control form-control-sm"
+											aria-label="Filter entities">
+									</div>
+								</div>
+								<div class="ms-auto text-secondary">
+									<a id="merge-entities" class="btn btn-ghost-warning disabled" data-bs-toggle="modal"
+										data-bs-target="#modal-merge-multiple-entities">
+										<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+											viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+											stroke-linecap="round" stroke-linejoin="round"
+											class="icon icon-tabler icons-tabler-outline icon-tabler-users">
+											<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+											<path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />
+											<path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
+											<path d="M16 3.13a4 4 0 0 1 0 7.75" />
+											<path d="M21 21v-2a4 4 0 0 0 -3 -3.85" />
+										</svg>
+										Merge
+									</a>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div class="table-responsive">
+						<table class="table table-vcenter table-mobile-md card-table table-striped">
+							<thead>
+								<tr>
+									<th class="w-1"></th>
+									<th>ID</th>
+									<th>Name</th>
+									<th>Attributes</th>
+									<th></th>
+									<th>Imported</th>
+									<th class="w-1"></th>
+								</tr>
+							</thead>
+							<tbody id="results-container">
+
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+
+<div class="modal modal-blur fade" id="modal-merge-multiple-entities" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+		<div class="modal-content">
+			<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			<div class="modal-status bg-warning"></div>
+			<div class="modal-body text-center py-4">
+				<!-- Download SVG icon from http://tabler-icons.io/i/alert-triangle -->
+				<svg xmlns="http://www.w3.org/2000/svg" class="icon mb-2 text-warning icon-lg" width="24" height="24"
+					viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round"
+					stroke-linejoin="round">
+					<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+					<path d="M12 9v4" />
+					<path
+						d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z" />
+					<path d="M12 16h.01" />
+				</svg>
+				<h3>Merge multiple entities</h3>
+				<div class="text-secondary">
+					Do you really want to combine the selected entities into one? This cannot be undone.
+				</div>
+			</div>
+			<div class="modal-footer">
+				<div class="w-100">
+					<div class="row">
+						<div class="col">
+							<a class="btn w-100" data-bs-dismiss="modal">
+								Cancel
+							</a>
+						</div>
+						<div class="col">
+							<a id="confirm-merge-entities" class="btn btn-warning w-100">
+								Merge entities
+							</a>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+<template id="tpl-entity">
+	<tr>
+		<td>
+			<input class="form-check-input m-0 align-middle select-entity" type="checkbox" aria-label="Select entity">
+		</td>
+		<td class="entity-id text-secondary">
+
+		</td>
+		<td data-label="Name">
+			<div class="entity-name-container d-flex py-1 align-items-center">
+				<div class="entity-picture"></div>
+				<div class="flex-fill">
+					<a class="entity-name fw-medium text-reset">
+
+					</a>
+					<div class="entity-type text-secondary">
+
+					</div>
+				</div>
+			</div>
+		</td>
+		<td data-label="Attribute" class="entity-attr1">
+
+		</td>
+		<td data-label="Attribute" class="entity-attr2">
+
+		</td>
+		<td data-label="Imported" class="entity-stored text-secondary">
+
+		</td>
+		<td>
+			<div class="btn-list flex-nowrap">
+				<a class="entity-view btn">
+					View
+				</a>
+				<div class="dropdown">
+					<button class="btn dropdown-toggle align-text-top" data-bs-toggle="dropdown" aria-expanded="false">
+						Actions
+					</button>
+					<div class="dropdown-menu dropdown-menu-end">
+						<a class="dropdown-item entity-list-merge-link" data-bs-toggle="modal"
+							data-bs-target="#modal-merge-entity">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+								fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+								stroke-linejoin="round"
+								class="icon dropdown-item-icon icon-tabler icons-tabler-outline icon-tabler-users">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+								<path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />
+								<path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
+								<path d="M16 3.13a4 4 0 0 1 0 7.75" />
+								<path d="M21 21v-2a4 4 0 0 0 -3 -3.85" />
+							</svg>
+							Merge...
+						</a>
+					</div>
+				</div>
+			</div>
+		</td>
+	</tr>
+</template>

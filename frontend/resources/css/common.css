@@ -1,0 +1,859 @@
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+
+/*
+
+MY OWN TABLER (BETA 19, 20) FIXES
+
+*/
+
+/* vertical spacing fix... ? hopefully not bad; ca. Tabler beta 20 */
+.row-cards {
+	align-content: flex-start;
+}
+
+/* override tabler's .navbar-brand:hover style  */
+.navbar h1.navbar-brand:hover {
+	opacity: 1;
+}
+
+/* Tabler's default .input-group styles don't work well for
+a textbox that has an icon in it, because it's contained in
+a parent div. this takes care of that by removing the >. */
+.input-group:not(.has-validation) :not(:last-child) :not(.dropdown-toggle):not(.dropdown-menu):not(.form-floating) {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.input-group :not(:first-child) :not(.dropdown-menu):not(.valid-tooltip):not(.valid-feedback):not(.invalid-tooltip):not(.invalid-feedback) {
+	margin-left: -1px;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+html,
+body {
+	font-family: Inter, sans-serif;
+	/* height: 100%; */
+}
+
+/* The conversations page needs this, I think (along with the height:100% above), but it breaks the dropdown menu for the mobile navbar */
+/* body {
+	overflow: hidden;
+	display: flex;
+	flex-flow: column;
+} */
+
+.page::-webkit-scrollbar-track {
+	margin-top: 56px !important;
+}
+
+.translucent {
+	backdrop-filter: blur(10px);
+	-webkit-backdrop-filter: blur(10px);
+}
+
+.translucent:not([data-bs-theme=dark]) {
+	--tblr-navbar-bg: rgba(255, 255, 255, .65);
+}
+
+.container-xl {
+	transition: max-width .35s ease-out;
+}
+
+#page-content,
+.filter-results {
+	transition: opacity .2s linear;
+}
+
+#page-content.opacity0,
+.filter-results.opacity0 {
+	opacity: 0;
+}
+
+.thumbhash-container {
+	position: relative;
+}
+
+.thumbhash-container .thumbhash {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.thumbhash-container .content {
+	width: 100%;
+	max-height: 100%;
+	object-fit: cover;
+}
+
+.thumbhash-container .absolute {
+	position: absolute;
+	top: 0;
+	left: 0;
+}
+
+.fade-in {
+	animation: fadeIn 1s;
+}
+
+.fade-out {
+	animation: reverse forwards fadeIn 1s;
+	pointer-events: none;
+}
+
+@keyframes fadeIn {
+	0% { opacity: 0; }
+	100% { opacity: 1; }
+}
+
+.loader-container {
+	padding: 1rem;
+	min-width: 150px;
+	width: 100%;
+	border-radius: 5px;
+}
+
+.loader-container-content {
+	position: absolute;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 1rem;
+}
+
+.loader-container .loader {
+	width: 50px;
+	height: 50px;
+}
+
+
+
+
+.navbar h1.navbar-brand {
+	position: relative;
+	overflow: hidden;
+}
+
+
+
+header .logo {
+	width: 140px;
+	max-height: 1.5em;
+}
+
+.logo-dark {
+	display: none;
+}
+
+[data-bs-theme=dark] .logo-light {
+	display: none;
+}
+
+[data-bs-theme=dark] .logo-dark {
+	display: block;
+}
+
+.page-wrapper .page-header-overlap {
+	margin-top: 0;
+	padding-top: 15px;
+	position: relative;
+	background: var(--tblr-navbar-bg);
+	--tblr-navbar-bg: var(--tblr-bg-surface);
+}
+
+.navbar-minimal {
+	background: rgba(233, 239, 244, .6);
+	-webkit-backdrop-filter: blur(4px);
+	backdrop-filter: blur(4px);
+}
+
+/* TODO: I don't remember having to set this before...
+	stolen from the .dark-theme .form-control styles,
+	but I don't want to enable dark-theme on this header,
+	since that affects dropdowns too - TODO: are these variables? 
+[data-bs-theme=dark] .form-control,
+[data-bs-theme=dark] .form-select {
+	background-color: #1a2234;
+	border-color: #243049;
+}
+[data-bs-theme=dark] .form-control,
+[data-bs-theme=dark] .form-select,
+[data-bs-theme=dark] .ts-control {
+	color: #f8fafc;
+}
+.ts-wrapper {
+	margin-left: -1px;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+[data-bs-theme=dark] .ts-control {
+	padding-top: inherit;
+	padding-bottom: inherit;
+	padding-right: inherit;
+	padding: inherit inherit inherit 8px;
+}
+[data-bs-theme=dark] .ts-wrapper {
+	width: 100px;
+}
+*/
+
+/* my own addition to prevent wrapping when it's crucial to not get taller */
+.ts-control.single-line {
+	flex-wrap: nowrap;
+	white-space: nowrap;
+}
+
+.dropdown-menu {
+	max-height: 75vh;
+	/* TODO: overflow-y: auto is needed here, but that breaks other dropdowns' overflow-x! (like the Timelinize dropdown menu) */
+}
+
+form .dropdown-menu {
+	max-height: 300px;
+	overflow: auto;
+}
+
+.dropdown-menu .dropdown-options .dropdown-item {
+	min-width: 0;
+	padding-top: 5px;
+	padding-bottom: 5px;
+	font-size: small;
+	text-align: center;
+	display: block;
+}
+
+
+
+
+
+video {
+	max-width: 100%;
+}
+audio {
+	width: 100%;
+}
+
+.tl-item-media img,
+.tl-item-media video,
+.tl-item-media canvas {
+	max-height: 250px;
+}
+
+.active-job-input {
+	direction: rtl;
+}
+
+.page-num-container {
+	display: flex;
+}
+
+
+.avatar-xxs {
+	--tblr-avatar-size: 1rem;
+	background-color: transparent;
+	box-shadow: none;
+}
+
+
+
+
+
+/*
+	My own modification to make dropdown toggling smooth and pleasant.
+	TODO: This requires some work... it requires that all dropdowns are in a 'position: relative' container, and a few other nuances (like with responsive design, collapsed menubar, etc)
+*/
+/* .dropdown-menu:not(.ts-dropdown),
+.navbar-nav .dropdown-menu {
+	position: absolute;
+	display: block;
+	visibility: hidden;
+	transition: all .2s;
+	top: 100%;
+	left: 0;
+	opacity: 0;
+	transform: scale(0.75) translateY(-30px);
+}
+.dropdown-menu-end,
+.navbar-nav .dropdown-menu-end {
+	right: 0;
+	left: auto;
+}
+.dropdown-menu.show {
+	visibility: visible;
+	opacity: 1;
+	transform: scale(1) translateY(0em);
+} */
+
+
+
+/* TODO: wish the z-index wasn't a problem */
+/* .page-header-overlap::after {
+	--wails-draggable: drag;
+} */
+
+
+
+label.dropdown-item,
+.system-file-picker,
+.system-folder-picker,
+.dropdown-item,
+.dropdown-toggle,
+.nav-link,
+.card-link,
+.link-secondary,
+a {
+	cursor: pointer;
+}
+
+
+
+
+
+
+.input-group .form-select {
+	width: auto;
+	padding-left: 1rem;
+}
+
+.static-menu .dropdown-menu {
+	display: inline-block;
+	width: 100%;
+	position: relative;
+	top: 0;
+	box-shadow: none;
+	z-index: inherit; /* don't cover actual dropdowns */
+}
+
+
+.static-menu .dropdown-menu .dropdown-header {
+	background: inherit;
+	top: calc(-1 * var(--tblr-dropdown-padding-y));
+}
+
+.pagination .btn-list {
+	align-items: center;
+}
+
+/* I think these buttons look better slightly taller */
+.pagination .btn-list .btn {
+	--tblr-btn-padding-y: .5rem;
+}
+
+/* for some reason, the disabled button looks taller next to its
+regular, un-disabled counterpart; lightening the border and very
+slightly reducing the padding makes a subtle improvement IMO */
+.pagination .btn-list .btn.disabled {
+	--tblr-btn-padding-y: .45rem;
+	--tblr-btn-disabled-border-color: #a6a6a6;
+}
+
+
+
+
+.message-reactions {
+	margin-top: .5em;
+	margin-bottom: -1em;
+}
+
+.message-reaction {
+	font-family: "Twemoji Mozilla",
+		"Apple Color Emoji",
+		"Segoe UI Emoji",
+		"Segoe UI Symbol",
+		"Noto Color Emoji",
+		"EmojiOne Color",
+		"Android Emoji";
+	cursor: default;
+	background: var(--tblr-card-bg);
+	border-radius: 50%;
+	padding: .25em .5em;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
+	margin-left: -.35em; 
+}
+
+
+
+
+
+.file-picker-table {
+	max-height: 350px;
+	user-select: none;
+	background: var(--tblr-bg-forms);
+	border: 1px solid var(--tblr-border-color);
+	border-top: 0;
+}
+
+.file-picker-table th {
+	position: sticky;
+	top: 0;
+}
+
+.file-picker-table tr:hover {
+	background: rgba(var(--tblr-primary-rgb), .04);
+}
+
+.file-picker-table tr.selected {
+	background: var(--tblr-indigo);
+	color: var(--tblr-light);
+}
+
+.file-picker-table td {
+	word-wrap: anywhere;
+}
+
+.file-picker-table td:nth-child(2),
+.file-picker-table td:nth-child(3) {
+	white-space: nowrap;
+}
+
+.file-picker-up {
+	cursor: pointer;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+/* TODO: still working on this */
+.map-container {
+	display: flex;
+	flex: 1;
+}
+#map {
+	flex: 1;
+}
+
+.minidisp-media {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+	align-content: stretch;
+}
+
+.minidisp-media:not(.minidisp-media-nocrop) > a {
+	display: flex;
+}
+
+.minidisp-media > a {
+	flex: 1;
+	align-content: stretch;
+}
+
+.minidisp-media .thumbhash-container,
+.minidisp-media .content {
+	max-height: 150px;
+	min-width: 180px;
+	max-width: 100%;
+	flex: 1;
+	object-fit: cover;
+	flex-basis: content;
+}
+
+.minidisp-media .thumbhash-container .content {
+	width: 100%;
+	height: 100%;
+	flex: 1;
+	object-fit: cover;
+	flex-basis: content;
+}
+
+.minidisp-media-nocrop > a > * {
+	flex: 0;
+}
+.minidisp-media-nocrop .content {
+	object-fit: inherit;
+}
+.minidisp-media-xl .thumbhash-container,
+.minidisp-media-xl .content {
+	max-height: 500px;
+}
+.minidisp-media-l .thumbhash-container,
+.minidisp-media-l .content {
+	max-height: 350px;
+}
+.minidisp-media-m .thumbhash-container,
+.minidisp-media-m .content {
+	max-height: 250px;
+}
+
+
+
+
+/*
+	THE FOLLOWING STYLES WERE REMOVED FROM TABLER 1.0 BETA 17.
+	THESE ARE TAKEN FROM BETA 16 UNTIL (IF?) WE CAN MOVE TO THE NEW SETUP.
+	TRACK THIS ISSUE: https://github.com/tabler/tabler/issues/1462
+*/
+.list-timeline {
+	position: relative;
+	padding: 0;
+	margin: 0;
+	list-style: none;
+}
+
+.list-timeline .list-timeline-card-item:not(.list-timeline-date-card) {
+	position: relative; /* the sticky time is sticky through the scrolling of the card */
+	margin-bottom: 1.5rem;
+	z-index: 1; /* above the timeline line thingie, but below the date sticky -- this becomes the sticky time's z-index since this is its relative ancestor */
+}
+
+.list-timeline-icon {
+	position: absolute;
+	top: 0;
+	left: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 2.5rem;
+	height: 2.5rem;
+	color: #fff;
+	text-align: center;
+	background: var(--tblr-muted);
+	border-radius: 100rem;
+}
+
+.list-timeline-icon .icon {
+	width: 1rem;
+	height: 1rem;
+	font-size: 1rem;
+}
+
+.list-timeline-content {
+	margin-left: 3.5rem;
+}
+
+.list-timeline {
+	/* See https://github.com/w3c/csswg-drafts/issues/2496 - there doesn't seem to be a way
+	to have multiple levels of stickies (not siblings) that don't overlap, but a hack is to
+	make sure the first level stickies all have the same height and then set the top of the
+	second level stickies to that height */
+	--date-height: 60px;
+}
+
+.list-timeline-date-anchor {
+	position: relative; /* the date sticky scrolls through all the items in this container */
+}
+
+.list-timeline-time-container {
+	float: right;
+	margin-left: 1rem;
+	color: var(--tblr-muted);
+	height: 100%;
+}
+
+/* because the date and time elements are sticky, we have to be careful
+what we position relative since the next relative ancestor needs to be
+the one that it is stuck to when scrolling */
+.list-timeline-date {
+	font-size: 110%;
+	font-weight: bold;
+	padding-top: 10px;
+	color: var(--tblr-body-color);
+	position: sticky;
+	top: 0;
+	height: var(--date-height);
+	background-color: var(--tblr-body-bg);
+	z-index: 2; /* on top of time that should slide underneath it */
+}
+
+.list-timeline-time {
+	position: sticky;
+	top: var(--date-height);
+}
+
+@media screen and (min-width: 768px) {
+	.list-timeline:not(.list-timeline-simple)::before {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: calc(7.5rem + 2px);
+		z-index: 1;
+		display: block;
+		width: 2px;
+		content: "";
+		background-color: var(--tblr-border-color);
+	}
+
+	.list-timeline:not(.list-timeline-simple) .list-timeline-card-item {
+		min-height: 40px;
+	}
+
+	.list-timeline:not(.list-timeline-simple) .list-timeline-date-card {
+		min-height: 80px;
+	}
+
+	.list-timeline:not(.list-timeline-simple) .list-timeline-icon {
+		top: 0;
+		left: 6.5rem;
+	}
+
+	.list-timeline:not(.list-timeline-simple) .list-timeline-content {
+		padding: .625rem 0 0 10rem;
+		margin: 0;
+	}
+
+	.list-timeline:not(.list-timeline-simple) .list-timeline-time-container {
+		position: absolute;
+		top: .5rem;
+		left: 0;
+		width: 5.5rem;
+		margin: 0;
+		text-align: right;
+	}
+}
+/* END STYLES RESTORED FROM TABLER BETA 16 */
+
+
+/* when displaying a timeline outside of a card, and instead showing individual items
+	within a card, the card creates extra padding/whitespace that we need to account
+	for, since it kind of requires elements next to the card to move down a little to
+	better align with its content: 1rem down works well
+*/
+.list-timeline:not(.list-timeline-simple):before {
+	top: 1rem;
+	width: 3px;
+	--tblr-border-color: #c3d3d9;
+	left: calc(10.25rem + 2px);
+	z-index: 0; /* must be behind the timeline elements */
+}
+
+.list-timeline:not(.list-timeline-simple) .list-timeline-card-item .list-timeline-time-container {
+	top: 1.75rem;
+}
+
+.list-timeline:not(.list-timeline-simple) .list-timeline-card-item .list-timeline-icon {
+	top: 1rem;
+}
+
+
+/* we made the timeline icons a bit bigger and gave more space for the time display */
+@media screen and (min-width:768px) {
+	.list-timeline-icon {
+		width: 3rem;
+		height: 3rem;
+	}
+	.list-timeline-icon .icon {
+		width: 1.5rem;
+		height: 1.5rem;
+	}
+	.list-timeline:not(.list-timeline-simple) .list-timeline-icon {
+		left: 9rem;
+	}
+	.list-timeline:not(.list-timeline-simple) .list-timeline-content {
+		padding: .75rem 0 0 13.5rem;
+	}
+	.list-timeline:not(.list-timeline-simple) .list-timeline-time-container {
+		width: 8rem;
+	}
+}
+
+/* since we do column-reverse, we need to reverse the last-child logic... */
+/* .messages-list-group .list-group-item:last-child {
+	border-bottom: var(--tblr-list-group-border-width) solid var(--tblr-list-group-border-color);
+}
+.messages-list-group .list-group-item:first-child {
+	border-bottom: 0;
+} */
+.messages-list-group {
+	/* flex-direction: column-reverse; */
+	max-height: 300px; /* TODO: 235px? */
+	overflow-y: auto;
+}
+.message-content {
+	word-break: break-word;
+}
+
+
+
+
+
+#app-loader {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	right: 0;
+
+	background: rgb(243 243 243);
+	backdrop-filter: blur(10px); /* NB: this breaks z-index of dropdowns, esp. when combined with the navbar-overlap layout... */
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 9999; /* gahhh why does bootstrap/tabler use z-index on everything!? */
+}
+
+/* From https://cssloaders.github.io/ */
+#app-loader .app-loader,
+.slow-loader {
+	display: block;
+	width: 48px;
+	height: 48px;
+	border-radius: 50%;
+	position: relative;
+	margin: 50px auto;
+	animation: loaderRotate 1s linear infinite;
+}
+#app-loader .app-loader::before,
+#app-loader .app-loader::after,
+.slow-loader::before,
+.slow-loader::after {
+	content: "";
+	box-sizing: border-box;
+	position: absolute;
+	inset: 0px;
+	border-radius: 50%;
+	border: 5px solid var(--tblr-link-color);
+	animation: loaderPrixClipFix 2s linear infinite alternate;
+}
+#app-loader .app-loader::after,
+.slow-loader::after {
+	border-color: var(--tblr-tertiary-color);
+	animation: loaderPrixClipFix 2s linear infinite alternate, loaderRotate 0.5s linear infinite reverse;
+	inset: 6px;
+}
+@keyframes loaderRotate {
+	0%   {transform: rotate(0deg)}
+	100% {transform: rotate(360deg)}
+}
+@keyframes loaderPrixClipFix {
+	0%   {clip-path:polygon(50% 50%,0 0,0 0,0 0,0 0,0 0)}
+	25%  {clip-path:polygon(50% 50%,0 0,100% 0,100% 0,100% 0,100% 0)}
+	50%  {clip-path:polygon(50% 50%,0 0,100% 0,100% 100%,100% 100%,100% 100%)}
+	75%  {clip-path:polygon(50% 50%,0 0,100% 0,100% 100%,0 100%,0 100%)}
+	100% {clip-path:polygon(50% 50%,0 0,100% 0,100% 100%,0 100%,0 0)}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.air-datepicker {
+	/* TODO: this could be a problem if a modal is opened while a separate datepicker is open */
+	z-index: 1056; /* one more than --tblr-modal-zindex */
+}
+.air-datepicker-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	align-content: stretch;
+}
+.air-datepicker-button {
+	height: auto;
+	padding: 10px 5px;
+	flex: 1;
+	min-width: 45%;
+}
+
+
+.noUi-base,
+.noUi-handle {
+	cursor: pointer;
+}
+
+
+
+
+
+.page-header .tl-date-picker,
+.navbar .tl-date-picker {
+	min-width: 300px;
+}
+
+
+
+
+
+
+
+#alert-container {
+	position: fixed;
+	z-index: 1021; /* .sticky-top is 1020... */
+	top: 65px;
+	right: 0;
+	padding-left: 1em;
+	padding-right: 1em;
+	width: 100%;
+	max-width: 400px;
+}
+
+.alert-timed {
+	position: relative;
+}
+
+.alert-timer-progress-bar-container {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	left: 0;
+	grid-column: auto !important;
+	overflow: hidden;
+	border-bottom-right-radius: 5px;
+}
+
+.alert-timer-progress-bar {
+	display: flex;
+	width: 100%;
+	height: 3px;
+	background: rgba(0, 0, 0, .2);
+}
+
+
+.alert-show {
+	animation: alert-toast-show 500ms;
+}
+.alert-hide {
+	animation: alert-toast-hide 250ms forwards;
+}
+
+@keyframes alert-toast-show {
+	0%   { transform: translateY(-0.625em) rotateZ(2deg); }
+	33%  { transform: translateY(0) rotateZ(-2deg); }
+	66%  { transform: translateY(0.3125em) rotateZ(2deg); }
+	100% { transform: translateY(0) rotateZ(0deg); }
+}
+@keyframes alert-toast-hide {
+	100% {
+		transform: scale(.4);
+		opacity: 0;
+	}
+}

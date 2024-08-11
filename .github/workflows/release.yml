@@ -1,0 +1,101 @@
+name: Release
+
+on: [workflow_dispatch]
+
+jobs:
+  Release:
+    strategy:
+      matrix:
+        os: [ubuntu, windows, macos]
+        go-version: [1.22.x]
+    runs-on: ${{ matrix.os }}-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
+      # but I haven't looked into using it. We'd have to install the packages using
+      # its shell, but I'm not sure how to do that.
+      - name: Install MSYS2 (Windows)
+        if: matrix.os == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          # TODO: Enable this for more current packages, I guess? But it takes longer.
+          # update: true
+          install: >-
+             base-devel
+             mingw-w64-x86_64-toolchain
+             mingw-w64-x86_64-libvips
+             mingw-w64-x86_64-libheif
+
+      - name: Install libraries (Linux)
+        if: matrix.os == 'ubuntu'
+        # install libheif (and dependency libde265) from the PPA which is more
+        # current; Ubuntu's is too old, resulting in failed compilation
+        run: |
+          sudo add-apt-repository ppa:strukturag/libheif
+          sudo add-apt-repository ppa:strukturag/libde265
+          sudo apt-get update
+          sudo apt-get install -y libheif-dev libvips-dev
+
+      - name: Install libraries (macOS)
+        if: matrix.os == 'macos'
+        run: brew install libheif vips
+
+      # It is crucial to use our gcc compiler instead of the preinstalled gcc,
+      # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
+      # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
+      - name: Update PATH (Windows)
+        if: matrix.os == 'windows'
+        shell: bash
+        run: echo "D:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
+
+      - name: Compile application
+        env:
+          CGO_ENABLED: 1
+        run: |
+          env
+          go env
+          echo "Building..."
+          go build
+          echo "Success."
+
+      # We have to make our own tarballs for GitHub Actions to preserve executable bit when uploading >:(
+      # This causes them to be downloaded as .zip containing another archive but oh well.
+
+      - name: Compress build (macOS)
+        if: matrix.os == 'macos'
+        run: tar -czvf timelinize-alpha-macos.tar.gz timelinize
+
+      - name: Compress build (Linux)
+        if: matrix.os == 'ubuntu'
+        run: tar -czvf timelinize-alpha-linux.tar.gz timelinize
+
+      - name: Compress build (Windows)
+        if: matrix.os == 'windows'
+        run: 7z a timelinize-alpha-windows.zip timelinize.exe -r
+
+      - name: Upload artifact (macOS)
+        if: matrix.os == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timelinize-alpha-macos.tar.gz
+          path: "*.tar.gz"
+      
+      - name: Upload artifact (Linux)
+        if: matrix.os == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timelinize-alpha-linux-amd64.tar.gz
+          path: "*.tar.gz"
+
+      - name: Upload artifact (Windows)
+        if: matrix.os == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timelinize-alpha-windows.zip
+          path: "*.zip"

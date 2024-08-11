@@ -1,0 +1,202 @@
+<title>Import</title>
+<link rel="stylesheet" href="/resources/css/new.css">
+
+
+
+<div class="page-header d-print-none">
+	<div class="container-xl">
+		<div class="row g-2 align-items-center">
+			<div class="col">
+				<h2 class="page-title">
+					Manual Entry
+				</h2>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Page body -->
+<div class="page-body">
+	<div class="container-xl">
+		<div class="row row-cards">
+			<div class="col-12">
+				<div class="card">
+					<div class="card-header">
+						<h4 class="card-title">
+							Item 1
+						</h4>
+					</div>
+
+					<div class="card-body">
+						<div class="btn-group w-25" role="group">
+							<input type="radio" class="btn-check" name="btn-radio-basic" id="btn-radio-basic-2"
+								autocomplete="off" checked>
+							<label for="btn-radio-basic-2" type="button" class="btn">Text input</label>
+							<input type="radio" class="btn-check" name="btn-radio-basic" id="btn-radio-basic-1"
+								autocomplete="off">
+							<label for="btn-radio-basic-1" type="button" class="btn">File upload</label>
+						</div>
+						<textarea rows="5" class="form-control mt-3" placeholder="Content"></textarea>
+					</div>
+
+					<div class="card-body">
+						<div class="row g-5 mb-4">
+							<div class="col-4">
+								<label class="form-label">Owner</label>
+
+								<div class="input-group mb-2">
+									<select class="entity-input form-select form-control" placeholder="Name or contact info"></select>
+									<button class="btn" type="button">New...</button>
+								</div>
+
+								<!-- <select class="entity-input form-select form-control" placeholder="Name or contact info"></select> -->
+								<small class="form-hint">Who owns or created this item?</small>
+							</div>
+						</div>
+
+						<div class="row g-5 mb-4">
+							<div class="col-md-5">
+								<div>
+									<label class="form-label">ID</label>
+									<input type="text" class="form-control">
+									<small class="form-hint">A unique name or number with which this item has been
+										referred to.</small>
+								</div>
+							</div>
+							<div class="col-sm-6 col-md-3">
+								<div class="mb-3">
+									<label class="form-label">Type of item</label>
+									<select name="classification" class="form-control form-select">
+										<option></option>
+									</select>
+								</div>
+							</div>
+							<div class="col-sm-6 col-md-4">
+								<div class="mb-3">
+									<label class="form-label mb-3">Flag</label>
+									<button class="switch-icon switch-icon-scale"
+										data-bs-toggle="switch-icon">
+										<span class="switch-icon-a text-secondary">
+											<svg xmlns="http://www.w3.org/2000/svg"
+												class="icon icon-tabler icon-tabler-star" width="24"
+												height="24" viewBox="0 0 24 24" stroke-width="2"
+												stroke="currentColor" fill="none" stroke-linecap="round"
+												stroke-linejoin="round">
+												<path stroke="none" d="M0 0h24v24H0z" fill="none">
+												</path>
+												<path
+													d="M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873z">
+												</path>
+											</svg>
+										</span>
+										<span class="switch-icon-b text-yellow">
+											<svg xmlns="http://www.w3.org/2000/svg"
+												class="icon icon-tabler icon-tabler-star-filled"
+												width="24" height="24" viewBox="0 0 24 24"
+												stroke-width="2" stroke="currentColor" fill="none"
+												stroke-linecap="round" stroke-linejoin="round">
+												<path stroke="none" d="M0 0h24v24H0z" fill="none">
+												</path>
+												<path
+													d="M8.243 7.34l-6.38 .925l-.113 .023a1 1 0 0 0 -.44 1.684l4.622 4.499l-1.09 6.355l-.013 .11a1 1 0 0 0 1.464 .944l5.706 -3l5.693 3l.1 .046a1 1 0 0 0 1.352 -1.1l-1.091 -6.355l4.624 -4.5l.078 -.085a1 1 0 0 0 -.633 -1.62l-6.38 -.926l-2.852 -5.78a1 1 0 0 0 -1.794 0l-2.853 5.78z"
+													stroke-width="0" fill="currentColor"></path>
+											</svg>
+										</span>
+									</button>
+									(TODO: more...)
+								</div>
+							</div>
+						</div>
+
+
+						<div class="row g-5 mb-4">
+							<div class="col-sm-4 col-md-4">
+								<label class="form-label required">Timestamp</label>
+								<div id="timestamp"></div>
+								<small class="form-hint mt-2">Be as specific as possible, or use a range if a precise date is not known.</small>
+
+							</div>
+							<div class="col-sm-4 col-md-4">
+								<label class="form-label">Ending timestamp</label>
+								<div id="timespan"></div>
+								<small class="form-hint mt-2">If the data spans a time period (such as a vocation), fill out its end date here.</small>
+							</div>
+							<div class="col-sm-4 col-md-4">
+								<label class="form-label">Time uncertainty</label>
+								<div class="row">
+									<div class="col-4">
+										<input type="number" class="form-control" min="0">
+									</div>
+									<div class="col-5">
+										<select class="form-control form-select">
+											<option></option>
+											<option>minutes</option>
+											<option>hours</option>
+											<option>days</option>
+											<option>months</option>
+											<option>years</option>
+										</select>
+									</div>
+								</div>
+								<small class="form-hint mt-2">Indicate if the time may be off by some amount.</small>
+							</div>
+						</div>
+
+						<div class="row g-5 mb-4">
+							<div class="col-8">
+								<div class="ratio ratio-21x9">
+									<div id="coordinate-map" class="h-100"></div>
+								</div>
+							</div>
+
+							<div class="col-sm-3 col-md-3">
+								<div class="mb-3">
+									<label class="form-label">Latitude</label>
+									<input type="text" class="form-control">
+								</div>
+								<div class="mb-3">
+									<label class="form-label">Longitude</label>
+									<input type="text" class="form-control">
+								</div>
+								<div class="mb-3">
+									<label class="form-label">Location uncertainty</label>
+									<div class="row">
+										<div class="col-5">
+											<input type="number" class="form-control" min="0">
+										</div>
+										<div class="col-7">
+											<select class="form-control form-select">
+												<option></option>
+												<option>feet</option>
+												<option>meters</option>
+												<option>miles</option>
+												<option>kilometers</option>
+											</select>
+										</div>
+									</div>
+									<small class="form-hint mt-2">Approximate coordinate precision, if known.</small>
+								</div>
+								<div>
+									<label class="form-label">Altitude</label>
+									<div class="row">
+										<div class="col-6">
+											<input type="number" class="form-control">
+										</div>
+										<div class="col-6">
+											<select class="form-control form-select">
+												<option></option>
+												<option>feet</option>
+												<option>meters</option>
+											</select>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+
+				</div>
+			</div>
+		</div>
+	</div>
+</div>

@@ -1,0 +1,117 @@
+/***
+
+	These changes, together with moving <header> into .page-wrapper, makes the scrolling almost work the way I want
+
+***/
+body {
+	/* position: relative; */
+	height: 100%;
+	min-height: 100%;
+}
+.page {
+	height: 100%;
+}
+.row.g-4 {
+	height: 100%;
+	margin-top: 0;
+}
+.row.g-4 > *,
+#convos-container {
+	margin-top: 0;
+}
+.page-body {
+	overflow: auto;
+	margin: 0;
+}
+.container-xl {
+	height: 100%;
+}
+.filter-column,
+.content-column {
+	padding-top: 2em;
+}
+.filter-column {
+	overflow-y: auto;
+	height: 100%;
+	max-height: 100%;
+}
+.content-column {
+	overflow: auto;
+	max-height: 100%;
+}
+.page-wrapper {
+	/* height: 100%; */
+	overflow: hidden;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+	Unfortunately, TomSelect seems to come with some styles that are hostile
+	when the width gets less than bootstrap's "c-4" width (at full window size).
+	These overrides fix it. Otherwise, clicking on the dropdown input to type
+	wraps the input to the next line, I can't figure out why it insists on being
+	so wide...
+*/
+/* .ts-control > .item {
+	flex-shrink: 0;
+} */
+
+.card-stacked {
+	--tblr-card-stacked-offset: .5rem;
+	/* height: 100%; */
+}
+
+.card-stacked,
+.card-stacked:after {
+	transition: all .2s;
+}
+
+
+#convos-container a.card-stacked:hover {
+	--tblr-card-stacked-offset: .75rem;
+	transform: scale(1.05);
+}
+
+#convos-container .avatar-list {
+	justify-content: flex-end;
+}
+
+#convos-container .card-stacked .col-auto {
+	flex: 1;
+}
+
+/* overrides tabler-vendors to accommodate small avatar in multi-select */
+.ts-wrapper.multi .ts-control > div {
+	padding: 3px 5px;
+	margin: 0 5px 5px 0;
+}
+
+.has-items .ts-control > input {
+	padding: 0 0 4px !important;
+}
+
+.message-content .thumbhash-container,
+.message-content video {
+	max-width: 500px;
+	max-height: 400px;
+}
+
+.footer {
+	padding: 1rem 0;
+}

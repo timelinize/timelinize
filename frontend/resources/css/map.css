@@ -1,0 +1,264 @@
+body {
+	position: relative;
+	height: 100%;
+	min-height: 100%;
+}
+.page,
+.page-wrapper {
+	height: 100%;
+}
+.page-body {
+	position: relative;
+	display: flex;
+	align-content: stretch;
+	height: 100%;
+	margin-bottom: 0;
+}
+footer {
+	display: none;
+}
+.map-container {
+	flex: 1;
+}
+
+
+
+#menu {
+	position: absolute;
+	background: #efefef;
+	padding: 10px;
+}
+
+/* make sure map features appear at the proper depth */
+.location-dot { z-index: 1; }
+ .map-marker { z-index: 2; }
+.mapboxgl-popup { z-index: 3; }
+
+.mapboxgl-marker .pin {
+	cursor: pointer;
+}
+
+.map-marker .more-dot {
+	fill: rgb(190,190,190);
+	stroke: black;
+	stroke-width: 2px;
+}
+
+.mapboxgl-marker .pin:hover {
+	filter: brightness(.75); /* TODO: This doesn't seem to work on webkit :( */
+}
+
+.mapboxgl-marker :not(svg, .pin) {
+	pointer-events: none;
+}
+
+.mapboxgl-marker.active {
+	z-index: 2;
+}
+
+.mapboxgl-marker.active svg {
+	transform: scale(1.5) translateY(-15%);
+	overflow: visible;
+}
+
+.mapboxgl-marker.active .pin {
+	stroke: black;
+	stroke-width: 3px;
+}
+
+.mapboxgl-popup-content {
+	background: var(--tblr-bg-surface);
+}
+
+.mapboxgl-popup-anchor-top .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-top-left .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-top-right .mapboxgl-popup-tip {
+	border-bottom-color: var(--tblr-bg-surface) !important;
+}
+.mapboxgl-popup-anchor-bottom .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-bottom-left .mapboxgl-popup-tip,
+.mapboxgl-popup-anchor-bottom-right .mapboxgl-popup-tip {
+	border-top-color: var(--tblr-bg-surface) !important;
+}
+.mapboxgl-popup-anchor-left .mapboxgl-popup-tip {
+	border-right-color: var(--tblr-bg-surface) !important;
+}
+.mapboxgl-popup-anchor-right .mapboxgl-popup-tip {
+	border-left-color: var(--tblr-bg-surface) !important;
+}
+
+.mapboxgl-popup.preview .mapboxgl-popup-content {
+	padding: 5px;
+	border-radius: 8px;
+	box-shadow: 0 5px 10px hsla(0, 0%, 0%, 0.2);
+}
+
+.mapboxgl-popup.preview .meta-container {
+	position: relative;
+	overflow: hidden;
+}
+
+.compact {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	justify-content: center;
+}
+
+.compact * {
+	width: 75px;
+	height: 75px;
+	object-fit: cover;
+	overflow: hidden;
+	font-size: 12px;
+	line-height: 1.25;
+}
+
+.compact [data-content-type=text] {
+	width: auto;
+	height: auto;
+	flex: 1;
+	max-height: 75px;
+	border: 1px solid var(--tblr-border-color);
+	border-radius: var(--tblr-border-radius);
+	background: var(--tblr-bg-surface-secondary);
+	padding: .5em;
+	position: relative;
+}
+
+.compact [data-content-type=text]:before {
+	content: '';
+	width: 100%;
+	height: 100%;
+	position: absolute;
+	left: 0;
+	top: 0;
+	background: linear-gradient(transparent 50%, var(--tblr-bg-surface));
+  }
+
+.compact .more {
+	font-size: 14px;
+	font-weight: bold;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+
+
+.mapboxgl-ctrl-attrib {
+	font-size: 10px;
+}
+
+
+#select-entity-container {
+	min-width: 200px;
+}
+
+
+.boxdraw {
+	background: rgba(56, 135, 190, 0.1);
+	border: 2px solid #3887be;
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 0;
+	height: 0;
+}
+
+#bbox:disabled {
+	/* override tabler's .form-control:disabled style because we're not on a white bg */
+	/* background-color: var(--tblr-bg-forms); */
+	background-color: none;
+	color: var(--tblr-gray-400);
+}
+
+/* #bbox {
+	max-width: 125px;
+} */
+
+
+
+
+#range-nearby {
+	width: 75px;
+}
+.noUi-handle {
+	cursor: grab
+}
+.noUi-handle:active {
+	cursor: grabbing;
+}
+
+
+
+
+
+.bottom-island {
+	position: absolute;
+	bottom: 0;
+	display: flex;
+	width: 100%;
+	justify-content: center;
+	z-index: 2;
+}
+
+.color-legend {
+	font-size: 10px;
+	font-weight: bold;
+	background-color: var(--tblr-body-bg);
+	border-top-right-radius: 5px;
+	border-top-left-radius: 5px;
+	padding: .5em;
+}
+
+.color-legend-gradient {
+	width: 150px;
+	height: 10px;
+	/* background: linear-gradient(
+		90deg,
+		hsl(55deg 100% 50%) 0%,
+		hsl(37deg 100% 50%) 20%,
+		hsl(6deg 98% 61%) 40%,
+		hsl(334deg 100% 40%) 60%,
+		hsl(311deg 100% 25%) 80%,
+		hsl(240deg 100% 20%) 100%
+	); */
+	background-image: linear-gradient(
+		90deg,
+		hsl(55deg 100% 55%) 0%,
+		hsl(346deg 90% 55%) 50%,
+		hsl(240deg 100% 50%) 100%
+	);
+	display: inline-block;
+}
+
+
+
+#infocard {
+	box-shadow: 0 0 5px 2px rgba(0, 0, 0, .1);
+	position: absolute;
+	top: 1em;
+	left: 1em;
+	z-index: 3;
+	max-height: 95%;
+	overflow-y: auto;
+	width: calc(100% - 2em);
+	max-width: 1000px;
+}
+@media (min-width: 1000px) and (max-width: 1400px) {
+	#infocard {
+		width: 65%;
+	}
+}
+
+#infocard .btn-action .icon {
+	stroke-width: 2; /* tabler sets this to 1, but it's too thin IMO */
+}
+
+#infocard .timestamp {
+	display: flex;
+	gap: 1em;
+	align-items: baseline;
+	font-weight: bold;
+}

@@ -1,0 +1,5 @@
+.DS_Store
+
+_gitignore/
+_storage/
+dist/

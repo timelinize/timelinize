@@ -1,0 +1,96 @@
+#filter-column {
+	max-width: 350px;
+}
+
+#content-column {
+	flex-grow: 1;
+}
+
+.filter-results {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 1em 0;
+}
+
+.filter-results > .card {
+	--tblr-card-spacer-x: 0; /* otherwise, tabler adds awkward margins in our case (.card-link + .card-link) */
+	min-width: 250px;
+	max-width: 500px;
+	flex: 1;
+	transition: transform .2s ease;
+}
+
+.page-body .card .thumbhash-container,
+.page-body .card .content {
+	max-height: 250px;
+}
+
+#modal-preview-content .thumbhash-container,
+#modal-preview-content video {
+	width: 100%;
+}
+
+#modal-preview-content video {
+	max-height: 1000px;
+}
+
+.card-link:hover {
+	transform: scale(1.05);
+}
+
+@media (min-width: 2000px) {
+	.filter-results > .card {
+		min-width: 350px;
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#modal-preview {
+	--tblr-btn-disabled-border-color: lightgray;
+}
+
+#modal-preview img,
+#modal-preview canvas {
+	max-height: 1000px;
+	max-width: 100%;
+}
+
+#modal-preview-nav {
+	gap: 1em;
+}
+
+
+/* the spacing around these particular SVG chevrons is a bit odd otherwise */
+#modal-preview-nav .btn svg {
+	margin: 0;
+}
+#modal-preview-nav .btn.btn-prev svg {
+	margin-left: calc(var(--tblr-btn-padding-x) * -.25);
+	margin-right: .4rem;
+}
+#modal-preview-nav .btn.btn-next svg {
+	margin-left: .4rem;
+	margin-right: calc(var(--tblr-btn-padding-x) * -.25);
+}

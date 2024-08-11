@@ -1,0 +1,292 @@
+<title>Item</title> <!-- TODO: use JS to change the title -->
+<link rel="stylesheet" href="/resources/css/item.css">
+
+<!-- Page header -->
+<div class="page-header d-print-none">
+	<div class="container-xl">
+		<div class="row g-2 align-items-center">
+			<div class="col">
+				<div class="page-pretitle">
+					Item
+				</div>
+				<h2 class="page-title">
+					<span id="item-id"></span>
+				</h2>
+			</div>
+			<div class="col-auto ms-auto">
+				<div class="btn-list">
+					<a class="btn btn-ghost-red">
+						Delete
+					</a>
+					<a class="btn btn-outline">
+						<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-edit"
+							width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+							fill="none" stroke-linecap="round" stroke-linejoin="round">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+							<path d="M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1"></path>
+							<path d="M20.385 6.585a2.1 2.1 0 0 0 -2.97 -2.97l-8.415 8.385v3h3l8.385 -8.415z">
+							</path>
+							<path d="M16 5l3 3"></path>
+						</svg>
+						Edit
+					</a>
+					<a id="download-item" class="btn btn-primary" target="_blank">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+							fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+							stroke-linejoin="round"
+							class="icon icon-tabler icons-tabler-outline icon-tabler-download">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" />
+							<path d="M7 11l5 5l5 -5" />
+							<path d="M12 4l0 12" />
+						</svg>
+						Download
+					</a>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Page body -->
+<div class="page-body">
+	<div class="container-xl">
+
+		<div class="row row-cards">
+
+			<div class="col-lg-9">
+
+				<div id="item-content">
+
+				</div>
+
+				<div id="related-items-container" class="mb-4 d-none">
+					<h3>Related Items</h3>
+
+					<div id="related-items" class="row row-cards">
+
+					</div>
+				</div>
+
+				<h3 class="mt-3">Metadata</h3>
+
+				<div class="card">
+					<div id="item-metadata" class="card-body datagrid">
+
+					</div>
+				</div>
+
+			</div>
+
+			<div class="col-lg-3">
+
+
+				<div id="primary-entities" class="card card-sm d-none">
+					<a id="entity-link" class="card-body row align-items-center">
+						<div id="item-owner-picture" class="col-auto">
+
+						</div>
+						<div class="col">
+							<div id="item-owner-name" class="fw-medium"></div>
+							<div id="item-owner-attribute" class="text-secondary"></div>
+						</div>
+					</a>
+					<div id="related-entities" class="list-group list-group-flush list-group-hoverable d-none">
+						<div class="subheader px-3 py-2 mb-0">Sent to:</div>
+						<!-- TODO: if wanting a sticky header in a scrollable container, for lots of recipients: <div class="list-group-header sticky-top">Sent to</div> -->
+					</div>
+				</div>
+
+				<div class="card card-sm">
+					<div class="card-body">
+						<h3 class="mb-2 fw-normal">
+							<svg xmlns="http://www.w3.org/2000/svg"
+								class="icon icon-tabler icon-tabler-calendar-event me-1" width="24" height="24"
+								viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
+								stroke-linecap="round" stroke-linejoin="round">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+								<rect x="4" y="5" width="16" height="16" rx="2"></rect>
+								<line x1="16" y1="3" x2="16" y2="7"></line>
+								<line x1="8" y1="3" x2="8" y2="7"></line>
+								<line x1="4" y1="11" x2="20" y2="11"></line>
+								<rect x="8" y="15" width="2" height="2"></rect>
+							</svg>
+							<span id="item-date"></span>
+						</h3>
+						<h3 class="fw-normal">
+							<svg id="time" xmlns="http://www.w3.org/2000/svg"
+								class="icon icon-tabler icon-tabler-clock-hour-12 me-1" width="24" height="24"
+								viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
+								stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="12" cy="12" r="9"></circle>
+								<path class="hour-hand" d="M12 8v3"></path>
+								<path class="minute-hand" d="M12 7v5"></path>
+							</svg>
+							<span id="item-time"></span>
+						</h3>
+						<div id="item-relative-time" class="text-secondary"></div>
+					</div>
+				</div>
+
+				<div class="card card-sm">
+					<div class="card-body">
+						<div class="card-title">Item origin</div>
+						<div>
+							<div class="subheader mb-2">Data source</div>
+							<span id="data-source-icon" class="avatar avatar-xs me-1 align-middle"></span>
+							<span id="data-source-title"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader">Name</div>
+							<span id="item-original-path"></span>
+						</div>
+						<div class="mt-3 d-none">
+							<div class="subheader mb-2">Original ID</div>
+							<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-id"
+								width="24" height="24" viewBox="0 0 24 24" stroke-width="2"
+								stroke="currentColor" fill="none" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+								<rect x="3" y="4" width="18" height="16" rx="3"></rect>
+								<circle cx="9" cy="10" r="2"></circle>
+								<line x1="15" y1="8" x2="17" y2="8"></line>
+								<line x1="15" y1="12" x2="17" y2="12"></line>
+								<line x1="7" y1="16" x2="17" y2="16"></line>
+							</svg>
+							<span id="item-original-id"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader mb-2">Original Path</div>
+							<span id="item-original-location"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader mb-2">Intermediate Path</div>
+							<span id="item-intermediate-location"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader mb-2">Classification</div>
+							<span id="item-class-icon"></span>
+							<span id="item-class-label"></span>
+						</div>
+					</div>
+				</div>
+
+				<div id="minimap-container" class="card overflow-hidden d-none">
+
+				</div>
+
+				<div class="card card-sm">
+					<div class="card-body">
+						<div class="card-title">Item details</div>
+						<div>
+							<div class="subheader mb-2">Size</div>
+							<span id="item-size"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader mb-2">Data type</div>
+							<span id="item-media-type"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader mb-2">Stored</div>
+							<span id="item-stored"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader mb-2">Coordinate</div>
+							<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-world"
+								width="24" height="24" viewBox="0 0 24 24" stroke-width="2"
+								stroke="currentColor" fill="none" stroke-linecap="round"
+								stroke-linejoin="round">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+								<path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"></path>
+								<path d="M3.6 9h16.8"></path>
+								<path d="M3.6 15h16.8"></path>
+								<path d="M11.5 3a17 17 0 0 0 0 18"></path>
+								<path d="M12.5 3a17 17 0 0 1 0 18"></path>
+							</svg>
+							<span id="item-coordinate"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader mb-2">Coordinate Uncertainty</div>
+							<span id="item-coordinate-uncertainty"></span>
+						</div>
+						<div class="mt-3">
+							<div class="subheader mb-2">Elevation</div>
+							<svg xmlns="http://www.w3.org/2000/svg"
+								class="icon icon-tabler icon-tabler-mountain" width="24" height="24"
+								viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
+								stroke-linecap="round" stroke-linejoin="round">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+								<path d="M3 20h18l-6.921 -14.612a2.3 2.3 0 0 0 -4.158 0l-6.921 14.612z"></path>
+								<path d="M7.5 11l2 2.5l2.5 -2.5l2 3l2.5 -2"></path>
+							</svg>
+							<span id="item-altitude"></span>
+						</div>
+					</div>
+				</div>
+
+			</div>
+		</div>
+
+	</div>
+</div>
+
+
+<template id="tpl-motionpicture">
+	<div class="motionpic-controls">
+		<a title="Play motion picture" class="d-none icon-tabler-player-play">
+			<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler" width="24" height="24"
+				viewBox="0 0 24 24" stroke="white" fill="none" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M3 3v20l16 -10z" stroke-width="3"></path>
+			</svg>
+		</a>
+		<a title="Show still photo" class="icon-tabler-player-pause">
+			<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler" width="24" height="24"
+				viewBox="0 0 24 24" stroke="white" fill="none" stroke-linecap="round" stroke-linejoin="round">
+				<rect rx="1" y="4" x="3" height="16" width="6" stroke-width="2.5"></rect>
+				<rect rx="1" y="4" x="15" height="16" width="6" stroke-width="2.5"></rect>
+			</svg>
+		</a>
+	</div>
+</template>
+
+
+
+<template id="tpl-metadata">
+	<div class="datagrid-item">
+		<div class="datagrid-title">
+
+		</div>
+		<div class="datagrid-content">
+
+		</div>
+	</div>
+</template>
+
+<template id="tpl-attachment">
+	<div class="col-lg-4">
+		<a class="card card-link">
+			<div class="card-body">
+
+			</div>
+			<div class="card-img-bottom">
+
+			</div>
+		</a>
+	</div>
+</template>
+
+<template id="tpl-related-entity">
+	<a class="list-group-item list-group-item-action">
+		<div class="d-flex align-items-center gap-2 text-truncate">
+			<div class="entity-picture col-auto">
+
+			</div>
+			<div class="entity-name fw-medium">
+
+			</div>
+			<div class="entity-attr text-secondary small">
+
+			</div>
+		</div>
+	</a>
+</template>

@@ -1,0 +1,11 @@
+.navbar {
+	display: none;
+}
+
+#phase-repo-person {
+	display: none;
+}
+
+.logo {
+	max-width: 150px;
+}

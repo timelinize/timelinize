@@ -1,0 +1,244 @@
+<title>Items</title>
+
+<link rel="stylesheet" href="/resources/css/items.css">
+
+
+<div class="navbar translucent sticky-top">
+	<div class="container-xl">
+		<div class="filter d-flex align-items-center gap-3">
+
+			<div class="tl-data-source-dropdown">
+				
+			</div>
+
+			<div class="tl-item-class-dropdown">
+				
+			</div>
+
+			<label class="form-check form-switch mb-0">
+				<input class="form-check-input" type="checkbox" checked="">
+				<span class="form-check-label">Root items only</span>
+			</label>
+
+		</div>
+
+		<div class="pagination-container ms-auto">
+			
+		</div>
+	</div>
+</div>
+
+<!-- Page header -->
+<div class="page-header d-print-none">
+	<div class="container-xl">
+		<div class="row g-2 align-items-center">
+			<div class="col">
+				<h2 class="page-title">
+					Items
+				</h2>
+				<div class="text-secondary mt-1">Showing results 1-50</div>
+			</div>
+
+			<div class="col-auto ms-auto d-flex align-items-center">
+				<div class="ms-3">
+					<div class="input-group">
+						<div class="input-group input-group-flat">
+							<input id="filter-limit" type="text"
+								class="filter-input form-control text-end pe-1" value="50" size="1"
+								autocomplete="off">
+							<span class="input-group-text">
+								items/page
+							</span>
+						</div>
+					</div>
+				</div>
+			</div>
+
+		</div>
+	</div>
+</div>
+
+
+
+
+
+
+
+<!-- Page body -->
+<div class="page-body">
+	<div class="container-xl">
+		<div class="row">
+			<div class="col-md-3">
+				
+				<form class="filter">
+					
+					<div class="tl-date-picker">
+
+					</div>
+
+					<label class="form-label">Entities</label>
+					<div class="mb-4">
+						<select type="text" class="entity-input form-select" placeholder="People">
+						</select>
+					</div>
+
+				</form>
+
+			</div>
+			<div class="col-md-9">
+				<div class="row row-cards">
+					<div class="filter-results space-y">
+						
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<template id="tpl-item">
+	<div class="card flex-row">
+		<div class="item-card-left">
+			<div class="card-body h-100 justify-content-between d-flex flex-column align-items-center gap-2">
+				<div class="ds-icon avatar mt-2">
+					
+				</div>
+				<a class="item-id text-secondary small">
+					
+				</a>
+			</div>
+		</div>
+
+		<div class="flex-grow-1">
+			<div class="card-body">
+				<div class="item-entities d-flex align-items-center mb-3">
+					<a class="entity owner-entity d-flex align-items-center gap-2">
+						<span class="entity-picture">
+
+						</span>
+						<span class="d-flex flex-column align-items-start">
+							<span class="entity-name"></span>
+							<span class="entity-attribute fw-normal text-secondary">
+
+							</span>
+						</span>
+					</a>
+					<div class="item-entity-rel">
+
+					</div>
+					<div class="other-entities d-flex flex-wrap">
+						
+					</div>
+				</div>
+
+				<div class="item-content clickable mb-3">
+
+				</div>
+
+				<div class="d-flex justify-content-between">
+					<div class="list-inline mb-0 text-secondary d-sm-block d-none">
+						<div class="list-inline-item">
+							<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-calendar-event" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+								<rect x="4" y="5" width="16" height="16" rx="2"></rect>
+								<line x1="16" y1="3" x2="16" y2="7"></line>
+								<line x1="8" y1="3" x2="8" y2="7"></line>
+								<line x1="4" y1="11" x2="20" y2="11"></line>
+								<rect x="8" y="15" width="2" height="2"></rect>
+							</svg>
+							<a class="item-timestamp text-secondary"></a>
+						</div>
+					</div>
+					<div class="list-inline mb-0 text-secondary d-sm-block d-none">
+						<div class="list-inline-item">
+							<span class="class-icon">
+
+							</span>
+							<span class="class-label">
+
+							</span>
+						</div>
+					</div>
+					<!-- <div class="col-md-auto">
+						<div class="badges">
+							<a href="#"
+								class="badge badge-outline text-secondary border fw-normal badge-pill">PHP</a>
+							<a href="#"
+								class="badge badge-outline text-secondary border fw-normal badge-pill">Laravel</a>
+							<a href="#"
+								class="badge badge-outline text-secondary border fw-normal badge-pill">CSS</a>
+							<a href="#"
+								class="badge badge-outline text-secondary border fw-normal badge-pill">Vue</a>
+						</div>
+					</div> -->
+				</div>
+			</div>
+
+			<div class="card-body item-card-footer d-none">
+				<div class="row related-items">
+
+				</div>
+				<div class="row mt-3">
+					<div class="col-md">
+						<div class="list-inline mb-0 text-secondary d-sm-block d-none">
+							<div class="list-inline-item">
+								<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-paperclip" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+									<path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5"></path>
+								</svg>
+								Attached
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+		</div>
+
+		<div class="item-card-right">
+			<div class="card-body d-flex flex-column align-items-center gap-2">
+				<a class="btn btn-primary">
+					View
+				</a>
+			</div>
+		</div>
+	</div>
+</template>
+
+<template id="tpl-item-entity">
+	<a class="entity d-flex align-items-center gap-2">
+		<span class="entity-picture">
+
+		</span>
+		<span class="d-flex flex-column align-items-start">
+			<span class="entity-name">
+
+			</span>
+			<span class="entity-attribute fw-normal text-secondary">
+
+			</span>
+		</span>
+	</a>
+</template>
+
+<template id="tpl-related-item">
+	<div class="col-auto">
+
+	</div>
+</template>

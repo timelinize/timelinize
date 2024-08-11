@@ -1,0 +1,305 @@
+/*
+	Timelinize
+	Copyright (c) 2013 Matthew Holt
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU Affero General Public License as published
+	by the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU Affero General Public License for more details.
+
+	You should have received a copy of the GNU Affero General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+package googlelocation
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/timelinize/timelinize/timeline"
+)
+
+// Awesome unofficial documentation: https://locationhistoryformat.com/
+
+// FINALLY! Official docs!
+// https://developers.google.com/data-portability/schema-reference/location_history
+// TODO: Add more fields from the official docs to the item metadata
+type location struct {
+	Accuracy int `json:"accuracy"` // meters; higher values are less accurate (should probably be called "error" instead)
+	Activity []struct {
+		Activity []struct {
+			Confidence int    `json:"confidence"`
+			Type       string `json:"type"`
+		} `json:"activity"`
+		Timestamp time.Time `json:"timestamp"`
+	} `json:"activity"`
+	Altitude         int   `json:"altitude"`    // meters
+	DeviceTag        int64 `json:"deviceTag"`   // may correspond with a device in Settings.json
+	Heading          int   `json:"heading"`     // degrees
+	LatitudeE7       int64 `json:"latitudeE7"`  // latitude times 1e7
+	LongitudeE7      int64 `json:"longitudeE7"` // longitude times 1e7
+	LocationMetadata []struct {
+		TimestampMs string `json:"timestampMs"`
+		WifiScan    struct {
+			AccessPoints []struct {
+				MAC      string `json:"mac"`
+				Strength int    `json:"strength"`
+			} `json:"accessPoints"`
+		} `json:"wifiScan"`
+	} `json:"locationMetadata"`
+	Platform         string    `json:"platform"`
+	PlatformType     string    `json:"platformType"` // ANDROID, IOS, or UNKNOWN
+	Source           string    `json:"source"`       // WIFI, CELL, GPS, or UNKNOWN (may also be lowercase sometimes)
+	Timestamp        time.Time `json:"timestamp"`    // old exports used to call this timestampMs, in milliseconds
+	Velocity         int       `json:"velocity"`     // meters/second
+	VerticalAccuracy int       `json:"verticalAccuracy"`
+
+	// Fields added in early 2024
+	DeviceTimestamp time.Time `json:"deviceTimestamp"` // "Timestamp at which the device uploaded the location batch containing this record."
+	ServerTimestamp time.Time `json:"serverTimestamp"` // "Timestamp at which the server received and created this record."
+	BatteryCharging bool      `json:"batteryCharging"`
+	FormFactor      string    `json:"formFactor"` // PHONE, TABLET, ...
+
+	// added after processing (but before becoming an item)
+	timespan time.Time
+	meta     timeline.Metadata
+}
+
+func (l location) toItem(opt *Options) *timeline.Item {
+	entity := timeline.Entity{ID: opt.OwnerEntityID}
+
+	if l.DeviceTag != 0 {
+		attr := timeline.Attribute{
+			Name:     "google_location_device",
+			Value:    strconv.FormatInt(l.DeviceTag, 10),
+			Identity: true, // I think the DeviceTag is basically a unique ID, but I am not 100% sure
+		}
+		if device, ok := opt.devices[l.DeviceTag]; ok {
+			attr.AltValue = device.DevicePrettyName
+			attr.Metadata = timeline.Metadata{
+				"Creation time":        device.DeviceCreationTime,
+				"Platform":             device.PlatformType,
+				"Android OS API level": device.AndroidOSLevel,
+				"Manufacturer":         device.DeviceSpec.Manufacturer,
+				"Brand":                device.DeviceSpec.Brand,
+				"Product":              device.DeviceSpec.Product,
+				"Device":               device.DeviceSpec.Device,
+				"Model":                device.DeviceSpec.Model,
+				"Low RAM":              device.DeviceSpec.IsLowRAM,
+			}
+		}
+		entity.Attributes = []timeline.Attribute{attr}
+	}
+
+	return &timeline.Item{
+		Timestamp:      l.Timestamp,
+		Timespan:       l.timespan,
+		Owner:          entity,
+		Classification: timeline.ClassLocation,
+		Location:       l.location(),
+		Metadata:       l.metadata(),
+	}
+}
+
+func (l location) location() timeline.Location {
+	lat := float64(l.LatitudeE7) / 1e7
+	lon := float64(l.LongitudeE7) / 1e7
+	alt := float64(l.Altitude)
+
+	// Ok, hear me out.
+	//
+	// We need to convert a vector offset in meters to the approximate
+	// degrees lat/lon -- both you say? yes, approximately; we're talking
+	// usually small amounts anyway and not right at the poles.
+	//
+	// A reverse haversine sounds complicated. But APPARENTLY, "the French
+	// originally defined the meter so that 10^7 (1e7) meters would be the
+	// distance along the Paris meridian from the equator to the north pole.
+	// Thus, 10^7 / 90 = 111,111.1 meters equals one degree of latitude to
+	// within the capabilities of French surveyors two centuries ago."
+	// https://gis.stackexchange.com/questions/2951/algorithm-for-offsetting-a-latitude-longitude-by-some-amount-of-meters#comment3018_2964
+	//
+	// And apparently the error of this approximatation stays below 10m
+	// until you get beyond 89.6 degrees latitude, which is well within
+	// our bounds; and once you get that far you're basically just "at
+	// the poles" for our purposes anyway.
+	//
+	// More context: https://gis.stackexchange.com/a/2964/5599
+	const oneDegOfLatInParisIn1789 = 1e7 / 90
+	unc := float64(l.Accuracy) / oneDegOfLatInParisIn1789
+
+	var loc timeline.Location
+	if lat != 0 {
+		loc.Latitude = &lat
+	}
+	if lon != 0 {
+		loc.Longitude = &lon
+	}
+	if alt != 0 {
+		loc.Altitude = &alt
+	}
+	if unc != 0 {
+		loc.CoordinateUncertainty = &unc
+	}
+	return loc
+}
+
+func (l location) metadata() timeline.Metadata {
+	meta := l.meta
+	if meta == nil {
+		meta = make(timeline.Metadata)
+	}
+
+	meta.Merge(timeline.Metadata{
+		"Velocity":          l.Velocity,
+		"Heading":           l.Heading,
+		"Vertical accuracy": l.VerticalAccuracy,
+		"Device tag":        l.DeviceTag,
+		"Platform":          l.Platform,
+		"Platform type":     l.PlatformType,
+		"Source":            l.Source,
+		"Server timestamp":  l.ServerTimestamp,
+		"Device timestamp":  l.DeviceTimestamp,
+		"Battery charging":  l.BatteryCharging,
+		"Form factor":       l.FormFactor,
+	}, timeline.MetaMergeSkip)
+
+	// activities are often duplicated, so eliminate duplicates first... we lose the order, but oh well
+	actsMap := make(map[string]int)
+	for _, act1 := range l.Activity {
+		for _, act2 := range act1.Activity {
+			if conf, ok := actsMap[act2.Type]; !ok || act2.Confidence > conf {
+				actsMap[act2.Type] = act2.Confidence
+			}
+		}
+	}
+	acts := make([]string, 0, len(actsMap))
+	for activityType, activityConfidence := range actsMap {
+		acts = append(acts, fmt.Sprintf("%s (%d%%)", activityType, activityConfidence))
+	}
+	if len(acts) > 0 {
+		meta["Activities"] = strings.Join(acts, ", ")
+	}
+
+	var wifis []string
+	for _, lm := range l.LocationMetadata {
+		for _, ap := range lm.WifiScan.AccessPoints {
+			wifis = append(wifis, fmt.Sprintf("[%s %d]", ap.MAC, ap.Strength))
+		}
+	}
+	if len(wifis) > 0 {
+		meta["WiFi APs"] = strings.Join(wifis, " ")
+	}
+
+	// TODO: if combining more than 1, maybe add to the metadata how many we combined here
+
+	return meta
+}
+
+// TODO: are we going to use these functions?
+
+// func (l location) primaryMovement() string {
+// 	if len(l.Activity) == 0 {
+// 		return ""
+// 	}
+
+// 	counts := make(map[string]int)
+// 	confidences := make(map[string]int)
+// 	for _, a := range l.Activity {
+// 		for _, aa := range a.Activity {
+// 			counts[aa.Type]++
+// 			confidences[aa.Type] += aa.Confidence
+// 		}
+// 	}
+
+// 	// turn confidence into average confidence,
+// 	// (ensure all activities are represented),
+// 	// and keep activities with high enough score
+// 	var top []activity
+// 	var hasOnFoot, hasWalking, hasRunning bool
+// 	for _, a := range movementActivities {
+// 		count := counts[a]
+// 		if count == 0 {
+// 			count = 1 // for the purposes of division
+// 		}
+// 		avg := confidences[a] / len(l.Activity)
+// 		avgSeen := confidences[a] / count
+// 		if avgSeen > 50 {
+// 			switch a {
+// 			case "ON_FOOT":
+// 				hasOnFoot = true
+// 			case "WALKING":
+// 				hasWalking = true
+// 			case "RUNNING":
+// 				hasRunning = true
+// 			}
+// 			top = append(top, activity{Type: a, Confidence: avg})
+// 		}
+// 	}
+// 	sort.Slice(top, func(i, j int) bool {
+// 		return top[i].Confidence > top[j].Confidence
+// 	})
+
+// 	// consolidate ON_FOOT, WALKING, and RUNNING if more than one is present
+// 	if hasOnFoot && (hasWalking || hasRunning) {
+// 		for i := 0; i < len(top); i++ {
+// 			if hasWalking && hasRunning &&
+// 				(top[i].Type == "WALKING" || top[i].Type == "RUNNING") {
+// 				// if both WALKING and RUNNING, prefer more general ON_FOOT
+// 				top = append(top[:i], top[i+1:]...)
+// 			} else if top[i].Type == "ON_FOOT" {
+// 				// if only one of WALKING or RUNNING, prefer that over ON_FOOT
+// 				top = append(top[:i], top[i+1:]...)
+// 			}
+// 		}
+// 	}
+
+// 	if len(top) > 0 {
+// 		return top[0].Type
+// 	}
+// 	return ""
+// }
+
+// func (l location) hasActivity(act string) bool {
+// 	for _, a := range l.Activity {
+// 		for _, aa := range a.Activity {
+// 			if aa.Type == act && aa.Confidence > 50 {
+// 				return true
+// 			}
+// 		}
+// 	}
+// 	return false
+// }
+
+// type activities struct {
+// 	TimestampMs string     `json:"timestampMs"`
+// 	Activity    []activity `json:"activity"`
+// }
+
+// type activity struct {
+// 	Type       string `json:"type"`
+// 	Confidence int    `json:"confidence"`
+// }
+
+// // movementActivities is the list of activities we care about
+// // for drawing relationships between two locations. For example,
+// // we don't care about TILTING (sudden accelerometer adjustment,
+// // like phone set down or person standing up), UNKNOWN, or STILL
+// // (where there is no apparent movement detected).
+// //
+// // https://developers.google.com/android/reference/com/google/android/gms/location/DetectedActivity
+// var movementActivities = []string{
+// 	"WALKING",
+// 	"RUNNING",
+// 	"IN_VEHICLE",
+// 	"ON_FOOT",
+// 	"ON_BICYCLE",
+// }

@@ -1,0 +1,94 @@
+<title>Entity</title> <!-- TODO: use JS to change the title -->
+<link rel="stylesheet" href="/resources/css/entity.css">
+
+<!-- Page header -->
+<div class="page-header d-print-none">
+	<div class="container-xl">
+		<div class="row g-2 align-items-center">
+			<div class="col">
+				<div class="page-pretitle">
+					Entity
+				</div>
+				<h2 class="page-title">
+					<span id="entity-id"></span>
+				</h2>
+			</div>
+			<div class="col-auto ms-auto">
+				<a id="merge-entity" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modal-merge-entity">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+						fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+						stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-users">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+						<path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />
+						<path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
+						<path d="M16 3.13a4 4 0 0 1 0 7.75" />
+						<path d="M21 21v-2a4 4 0 0 0 -3 -3.85" />
+					</svg>
+					Merge Entity
+				</a>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Page body -->
+<div class="page-body">
+	<div class="container-xl">
+		<div class="row g-4">
+			
+			<div class="col-3 text-center">
+				<div class="picture">
+
+				</div>
+				<h1 class="name mt-4">
+
+				</h1>
+				<div class="entity-type text-secondary d-flex align-items-center justify-content-center mt-3 mb-4">
+
+				</div>
+
+				<div id="attributes" class="form-selectgroup form-selectgroup-boxes d-flex flex-column">
+
+				</div>
+			</div>
+			
+			<div class="col-9">
+
+
+				<!-- <div class="row row-cards">
+					<div class="col-lg-4 col-xl-6">
+						<div class="card">
+							<div class="card-body">
+								<div id="chart-item-counts-by-attribute"></div>
+							</div>
+						</div>
+					</div>
+				</div> -->
+
+
+			</div>
+		</div>
+	</div>
+</div>
+
+<template id="tpl-attribute">
+	<label class="form-selectgroup-item flex-fill">
+		<input type="checkbox" class="form-selectgroup-input">
+		<div class="form-selectgroup-label d-flex p-3">
+			<div class="ribbon bg-yellow-lt">
+				<svg xmlns="http://www.w3.org/2000/svg" class="icon" width="16" height="16" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873z" /></svg>
+			</div>
+			<div class="me-3">
+				<span class="form-selectgroup-check"></span>
+			</div>
+			<div class="form-selectgroup-label-content">
+				<div class="attribute-value fw-medium">
+
+				</div>
+				<div class="attribute-name text-secondary">
+
+				</div>
+			</div>
+		</div>
+	</label>
+</template>

@@ -1,0 +1,94 @@
+<title>Dashboard</title>
+
+<link rel="stylesheet" href="/resources/css/dashboard.css">
+
+
+<!-- <div class="page-header page-header-overlap d-print-none">
+	<div class="container-xl">
+		<div class="row align-items-center">
+			<div class="col-2">
+				<div class="page-pretitle">
+					Overview
+				</div>
+				<h2 class="page-title">
+					Dashboard
+				</h2>
+			</div>
+		</div>
+	</div>
+</div> -->
+
+
+<div class="page-body">
+	<div class="container-xl">
+
+		<div class="row row-deck row-cards">
+
+			<div class="col-sm-12 col-lg-4">
+				<div class="row row-cards">
+					<div class="col-12">
+						<div id="recent-items" class="card">
+							<div class="card-body">
+								<div class="d-flex align-items-center">
+									<div class="subheader">Recent items</div>
+									<div class="ms-auto lh-1">
+										<div class="dropdown">
+											<a class="dropdown-toggle text-secondary" data-bs-toggle="dropdown"
+												aria-haspopup="true" aria-expanded="false">Monthly</a>
+											<div class="chart-scope dropdown-menu dropdown-menu-end">
+												<a class="dropdown-item" data-period="daily">Daily</a>
+												<a class="dropdown-item active" data-period="monthly">Monthly</a>
+												<a class="dropdown-item" data-period="yearly">Yearly</a>
+											</div>
+										</div>
+									</div>
+								</div>
+								<div class="d-flex align-items-baseline">
+									<div id="recent-items-count" class="h1 mb-0 me-2">0</div>
+									<div class="me-auto">
+										<span id="recent-items-trend-container"
+											class="d-inline-flex align-items-center lh-1">
+											<span id="recent-items-trend"></span>
+										</span>
+									</div>
+								</div>
+							</div>
+							<div id="chart-recent-items-count" class="chart-sm"></div>
+						</div>
+					</div>
+
+					<div class="col-12">
+						<div class="card">
+							<div class="card-body">
+								<div class="d-flex align-items-center">
+									<div class="subheader">All Items</div>
+								</div>
+								<div class="d-flex align-items-baseline">
+									<div id="item-class-count" class="h1 mb-0"></div>
+								</div>
+							</div>
+							<div id="chart-item-types" class="chart-sm"></div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="col-sm-12 col-lg-8">
+				<div id="recent-items" class="card overflow-hidden">
+					<div id="chart-data-sources" class="chart-sm"></div>
+				</div>
+			</div>
+			
+		</div>
+
+	</div>
+
+
+	<div class="layout-fluid p-2">
+		<div class="container-xl timeline-container-grid">
+
+		</div>
+	</div>
+</div>
+
+

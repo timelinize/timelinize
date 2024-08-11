@@ -1,0 +1,9 @@
+.entity-type {
+	text-transform: capitalize;
+}
+
+.card-body {
+	background: var(--tblr-card-bg);
+	border-top-left-radius: var(--tblr-border-radius);
+	border-top-right-radius: var(--tblr-border-radius);
+}

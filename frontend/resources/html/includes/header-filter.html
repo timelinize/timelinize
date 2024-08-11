@@ -1,0 +1,115 @@
+<!-- TODO: This is old, but holding onto it for inspiration -->
+
+<!-- <div class="filter"> -->
+	
+
+	<label class="search-container">
+		<svg class="search-icon"><use href="#svg-search"/></svg>
+		<input type="search" id="search" placeholder="Find">
+
+		<div class="search-results"></div>
+	</label>
+	
+	
+	
+	
+	<!-- <button id="filter-apply">Apply</button> -->
+	
+<!-- </div> -->
+
+<div class="spacer"></div>
+
+<template id="tpl-search-result">
+	<a class="search-result"></a>
+</template>
+
+<a class="button prev-page" title="Previous page" disabled>
+	&lsaquo; Prev
+</a>
+
+
+<div class="dropdown-container">
+	<button id="show-filter" class="dropdown-trigger">
+		<svg><use href="#svg-filter"/></svg>
+		Page
+	</button>
+
+	<div class="dropdown-wrapper">
+		<div class="filter dropdown">
+			<section>
+				<div class="section-title">Timeframe</div>
+				<input type="datetime-local" id="filter-timeframe-start">
+				&nbsp;&mdash;&nbsp;
+				<input type="datetime-local" id="filter-timeframe-end">
+			</section>
+
+			<section>
+				<div class="section-title">
+					<label title="Page number is a factor of item offset and items per page; starting at 1"><input type="radio" name="filter-offset-type" value="page" checked> Page</label>
+					<label title="Item offset, or the starting item, enables fine-tuned paging, and is the product of page number and items per page; starting at 0"><input type="radio" name="filter-offset-type" value="offset"> Offset</label>
+				</div>
+				<input type="number" id="filter-offset" min="1" value="1">
+			</section>
+
+			<section>
+				<div class="section-title">
+					Items per page
+				</div>
+				<input type="number" id="filter-limit" min="1" max="500" value="100">
+			</section>
+			
+			<section>
+				<div class="section-title">Sort</div>
+				<select size="1" id="filter-sort">
+					<option value="DESC" selected>Newest</option>
+					<option value="ASC">Oldest</option>
+				</select>
+			</section>
+
+			<section>
+				<div class="section-title">
+					Data sources
+				</div>
+				
+				<select size="1" id="filter-accounts" multiple></select>
+			</section>
+
+			<section>
+				<div class="section-title">
+					Person
+				</div>
+				
+				<select size="1" id="filter-people" multiple></select>
+			</section>
+
+			<section>
+				<div class="section-title">
+					To person
+				</div>
+				<select size="1" id="filter-to-people" multiple></select>
+			</section>
+
+			<!-- <input type="number" id="filter-n" min="0" max="9999">
+		
+			<select size="1" id="filter-range">
+				<option selected></option>
+				<option value="days-until">days until</option>
+				<option value="days-since">days since</option>
+				<option value="weeks-until">weeks until</option>
+				<option value="weeks-since">weeks since</option>
+				<option value="months-until">months until</option>
+				<option value="months-since">months since</option>
+				<option value="years-until">years until</option>
+				<option value="years-since">years since</option>
+				<option value="items-until">items until</option>
+				<option value="items-since">items since</option>
+			</select>
+
+			<input type="datetime-local" id="filter-timeframe-basis"> -->
+		</div>
+	</div>
+</div>
+
+<a class="button next-page" title="Next page" disabled>
+	Next &rsaquo;
+</a>

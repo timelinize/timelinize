@@ -1,0 +1,248 @@
+<title>Welcome to Timelinize</title>
+
+<link rel="stylesheet" href="/resources/css/setup.css">
+
+<div class="page">
+	<div class="container container-tight py-4">
+		<div id="phase-open-repo" class="card card-md">
+			<div class="card-body text-center py-4 p-sm-5">
+				<img src="/resources/images/timelinize-icon.svg" class="logo mb-5">
+				<h1 class="mt-2">Welcome to Timelinize</h1>
+				<p class="text-secondary">Organize your life's data onto your own storage device.</p>
+			</div>
+			<div class="hr-text hr-text-center hr-text-spaceless">Create or open timeline</div>
+			<div class="card-body">
+
+				<div class="mb-3">
+					<div class="input-group">
+						<button type="button" class="btn system-folder-picker" data-bs-toggle="modal" data-bs-target="#modal-timeline-folder">
+							<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-folders"
+								width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+								fill="none" stroke-linecap="round" stroke-linejoin="round">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+								<path
+									d="M9 4h3l2 2h5a2 2 0 0 1 2 2v7a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2">
+								</path>
+								<path d="M17 17v2a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2h2"></path>
+							</svg>
+							Browse...
+						</button>
+						<input type="text" id="repo-path" class="form-control"
+							placeholder="Paste folder path or browse">
+					</div>
+					<div class="form-hint">If a timeline does not exist here, you will be asked if you want to
+						create one. Choose a storage location that has plenty of free space. You can always
+						move or copy your timeline later.</div>
+				</div>
+			</div>
+		</div>
+
+		<div id="phase-repo-person" class="card card-md">
+			<div class="card-body text-center py-4 p-sm-5">
+				<!-- <img src="./static/illustrations/undraw_sign_in_e6hj.svg" height="120" class="mb-n2" alt=""> -->
+				<h1 class="mt-5">Create your profile</h1>
+				<p class="text-secondary">Your timeline starts with you! The information below helps Timelinize recognize you in the data you import. Like the rest of your timeline, this information stays private on your own computer.</p>
+			</div>
+			<div class="hr-text hr-text-center hr-text-spaceless">About you</div>
+			<div class="card-body">
+
+
+<!-- 
+TODO: profile picture... not sure if this is the best way to do it; would be nice if it looked nice though too (will need supporting css and js files)
+<form class="dropzone" id="dropzone-custom" action="../" autocomplete="off" novalidate>
+<div class="fallback">
+	<input name="file" type="file"  />
+</div>
+<div class="dz-message">
+	<h3 class="dropzone-msg-title">Your text here</h3>
+	<span class="dropzone-msg-desc">Your custom description here</span>
+</div>
+</form>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+	new Dropzone("#dropzone-custom")
+})
+</script>
+-->
+
+
+				<div class="mb-3">
+					<label class="form-label required">Your name</label>
+					<input type="text" class="form-control" name="name" placeholder="Mary Paxton" required>
+					<div class="form-hint">Full name is recommended to avoid ambiguity later on.</div>
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Date of birth</label>
+					<div class="row g-2">
+						<div class="col-5">
+							<select name="dob-month" class="form-select">
+								<option value="">Month</option>
+								<option value="0">January</option>
+								<option value="1">February</option>
+								<option value="2">March</option>
+								<option value="3">April</option>
+								<option value="4">May</option>
+								<option value="5">June</option>
+								<option value="6">July</option>
+								<option value="7">August</option>
+								<option value="8">September</option>
+								<option value="9">October</option>
+								<option value="10">November</option>
+								<option value="11">December</option>
+							</select>
+						</div>
+						<div class="col-3">
+							<select name="dob-day" class="form-select">
+								<option value="">Day</option>
+								<option value="1">1</option>
+								<option value="2">2</option>
+								<option value="3">3</option>
+								<option value="4">4</option>
+								<option value="5">5</option>
+								<option value="6">6</option>
+								<option value="7">7</option>
+								<option value="8">8</option>
+								<option value="9">9</option>
+								<option value="10">10</option>
+								<option value="11">11</option>
+								<option value="12">12</option>
+								<option value="13">13</option>
+								<option value="14">14</option>
+								<option value="15">15</option>
+								<option value="16">16</option>
+								<option value="17">17</option>
+								<option value="18">18</option>
+								<option value="19">19</option>
+								<option value="20">20</option>
+								<option value="21">21</option>
+								<option value="22">22</option>
+								<option value="23">23</option>
+								<option value="24">24</option>
+								<option value="25">25</option>
+								<option value="26">26</option>
+								<option value="27">27</option>
+								<option value="28">28</option>
+								<option value="29">29</option>
+								<option value="30">30</option>
+								<option value="31">31</option>
+							</select>
+						</div>
+						<div class="col-4">
+							<select name="dob-year" class="form-select">
+								<option value="">Year</option>
+							</select>
+						</div>
+					</div>
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Birth place</label>
+					<input type="text" class="form-control" name="birth_place" placeholder="City, State/Country">
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Email addresses</label>
+					<input type="text" class="form-control" name="email" placeholder="you@yours.com">
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Phone numbers</label>
+					<input type="text" class="form-control" name="phone" placeholder="123-456-7890">
+				</div>
+			</div>
+		</div>
+
+
+
+
+		<div class="row align-items-center mt-3">
+			<div class="col-4">
+				<div class="progress">
+					<div class="progress-bar" style="width: 25%" role="progressbar" aria-valuenow="25"
+						aria-valuemin="0" aria-valuemax="100" aria-label="25% Complete">
+						<span class="visually-hidden">25% Complete</span>
+					</div>
+				</div>
+			</div>
+			<div class="col">
+				<div class="btn-list justify-content-end">
+					<a id="continue" class="btn btn-primary">Continue</a>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="modal modal-blur fade" id="modal-create-confirm" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-dialog-centered" role="document">
+		<div class="modal-content">
+			<div class="modal-body">
+				<div class="modal-title">No timeline found there</div>
+				<div>Would you like to create a new one at <code id="new-repo-path"></code> or try another folder?
+				</div>
+			</div>
+			<div class="modal-footer">
+				<div class="w-100">
+					<div class="row">
+						<div class="col">
+							<a class="btn w-100" data-bs-dismiss="modal">Try another</a>
+						</div>
+						<div class="col">
+							<a id="create-repo" class="btn btn-success w-100" data-bs-dismiss="modal">
+								<svg xmlns="http://www.w3.org/2000/svg"
+									class="icon icon-tabler icon-tabler-north-star" width="24" height="24"
+									viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
+									stroke-linecap="round" stroke-linejoin="round">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+									<path d="M3 12h18"></path>
+									<path d="M12 21v-18"></path>
+									<path d="M7.5 7.5l9 9"></path>
+									<path d="M7.5 16.5l9 -9"></path>
+								</svg>
+								Create timeline
+							</a>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+
+<div id="modal-timeline-folder" class="modal modal-blur fade" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Choose a folder for your timeline</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body">
+
+				
+
+			</div>
+			<div class="modal-footer">
+				<a class="btn btn-link link-secondary" data-bs-dismiss="modal">
+					Cancel
+				</a>
+				<a id="select-timeline-folder" class="btn btn-primary disabled ms-auto" data-bs-dismiss="modal">
+					Select Folder
+				</a>
+			</div>
+		</div>
+	</div>
+</div>
+

@@ -1,0 +1,134 @@
+<title>Conversations</title>
+<link rel="stylesheet" href="/resources/css/conversations.css">
+
+
+<div class="page-body">
+	<div class="container-xl">
+		<div class="row g-4">
+			<div class="col-3 filter-column">
+				<form class="filter">
+					<div class="page-pretitle">
+						Explore
+					</div>
+					<h2 class="page-title">
+						<a href="/conversations">
+							<svg xmlns="http://www.w3.org/2000/svg"
+								class="icon icon-tabler icon-tabler-messages me-2" width="24" height="24"
+								viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
+								stroke-linecap="round" stroke-linejoin="round">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+								<path d="M21 14l-3 -3h-7a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1h9a1 1 0 0 1 1 1v10">
+								</path>
+								<path d="M14 15v2a1 1 0 0 1 -1 1h-7l-3 3v-10a1 1 0 0 1 1 -1h2"></path>
+							</svg>
+							Conversations
+						</a>
+					</h2>
+					<div id="showing-info" class="text-secondary mt-1 mb-4">Showing <span id="convos-count"></span> most recent (<span
+							id="convos-duration"></span>)</div>
+
+
+					<label class="form-label">People involved</label>
+					<div class="mb-4">
+						<select class="entity-input form-select" placeholder="Name or contact info">
+						</select>
+						<label class="form-check mt-2">
+							<input type="checkbox" class="form-check-input" id="selected-entities-only"
+								value="1" disabled>
+							<span class="form-check-label">Only these people</span>
+						</label>
+					</div>
+
+					<label class="form-label">Text search</label>
+					<div class="mb-4">
+						<input type="text" class="form-control" placeholder="Key word or phrase"
+							id="message-substring">
+					</div>
+
+					<!-- <div class="subheader mb-2">Message types</div> -->
+					<div class="mb-4 tl-item-class-dropdown">
+						<label class="form-check form-switch">
+							<input type="checkbox" class="form-check-input" id="type-message"
+								value="message" checked>
+							<span class="form-check-label">Messages</span>
+						</label>
+						<label class="form-check form-switch">
+							<input type="checkbox" class="form-check-input" id="type-email" value="email"
+								checked>
+							<span class="form-check-label">Emails</span>
+						</label>
+						<label class="form-check form-switch">
+							<input type="checkbox" class="form-check-input" id="type-social-media"
+								value="social" checked>
+							<span class="form-check-label">Social media</span>
+						</label>
+					</div>
+
+					<div class="tl-data-source-dropdown static-menu mb-3">
+
+					</div>
+				</form>
+			</div>
+
+			<div class="col-9 content-column">
+				<div id="convos-container" class="filter-results row row-cards d-none">
+
+				</div>
+				<div id="convo-container" class="filter-results card d-none">
+					<div class="list-group card-list-group">
+
+					</div>
+				</div>
+			</div>
+		</div>
+
+	</div>
+</div>
+
+
+<template id="tpl-convo">
+	<div class="col-sm-6 col-lg-4 mb-4">
+		<a class="card card-link card-stacked">
+			<div class="card-body">
+				<h3 class="card-title"></h3>
+				<p class="convo-preview text-secondary"></p>
+			</div>
+			<div class="card-footer">
+				<div class="row align-items-center justify-content-between">
+					<div class="col">
+						<div class="convo-datetime text-secondary"></div>
+					</div>
+					<div class="col-auto d-flex justify-content-center">
+						<div class="avatar-list avatar-list-stacked"></div>
+					</div>
+				</div>
+			</div>
+		</a>
+	</div>
+</template>
+
+<!-- TODO: This is no longer used, since we have smooth page transitions now... but maybe could still be useful if loading is taking a while? -->
+<template id="tpl-convo-placeholder">
+	<div class="col-sm-6 col-lg-4 mb-4">
+		<div class="card placeholder-glow">
+			<div class="card-body">
+				<div class="placeholder col-9 mb-3"></div>
+				<div class="placeholder placeholder-xs col-10"></div>
+				<div class="placeholder placeholder-xs col-11"></div>
+				<div class="placeholder placeholder-xs col-8"></div>
+				<div class="text-end mt-3">
+					<a tabindex="-1" class="btn btn-primary disabled placeholder col-4" aria-hidden="true"></a>
+				</div>
+			</div>
+			<div class="card-footer">
+				<div class="row align-items-center">
+					<div class="col-auto ms-auto">
+						<div class="avatar avatar-sm avatar-rounded placeholder"></div>
+						<div class="avatar avatar-sm avatar-rounded placeholder"></div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</template>
+
