@@ -48,18 +48,39 @@ These were captured using a dev repository of mine filled with a subset of my re
 > [!CAUTION]
 > Timelinize is in active development and is still considered unstable. The schema is still changing, necessitating starting over from a clean slate when updating. Always keep your original source data. Expect to delete and recreate your timelines as you upgrade during this alpha development period.
 
-## Dependencies / requirements
+## Download and run
 
 > [!IMPORTANT]
 > Please ensure [you have the necessary dependencies installed](https://timelinize.com/docs/setup/system-requirements) or Timelinize will not function properly.
 
+After you have the system requirements installed, you can download and run Timelinize from the latest [Release action](https://github.com/timelinize/timelinize/actions/workflows/release.yml). Click the most recent job and then choose the artifact at the bottom of the page that matches your platform.
+
+[Because of limitations in GitHub Actions](https://github.com/actions/upload-artifact?tab=readme-ov-file#zip-archives), all artifacts get downloaded as .zip files even though the artifact is already compressed, so you may have to double-extract the download.
+
+**While Timelinize is in development, it's a good idea to start over with a new timeline repository every time you upgrade your build. The schema is still changing!**
+
+I recommend running from the command line even if you can double-click to run, so that you can see the log/error output. Logs are also available in your browser dev tools console.
+
+
+## Build from source
+
 Timelinize compiles for Windows, Mac, and Linux.
 
-Although Timelinize is written in Go, advanced media-related features such as video transcoding and thumbnail generation (and in the future, indexing with on-device machine learning) are best done with external dependencies.
+Although Timelinize is written in Go, advanced media-related features such as video transcoding and thumbnail generation (and in the future, indexing with on-device machine learning) are best done with external dependencies. When building from source, you need to make sure the _development packages/versions of those dependencies_ are installed! Also, the latest version of Go is required.
 
-If building from source, the latest version of Go is required.
+### Dev dependencies
 
-Before running Timelinize, please ensure you have the [necessary dependencies](https://timelinize.com/docs/setup/system-requirements) installed.
+Note that, on some platforms, the compilation dependencies may be different from the dependencies needed to run an already-built binary (for example, on Ubuntu you need `libvips-dev` to compile, but on end user machines, you just need `libvips`).
+
+- [Go](https://go.dev) (latest version; do not use Debian or Ubuntu package managers)
+- [ffmpeg](https://ffmpeg.org/download.html) (executable must be in PATH)
+- libvips-dev
+	- Arch: `sudo pacman -S libvips`
+	- Ubuntu: `sudo apt install -y libvips-dev`
+	- macOS: `brew install libvips`
+- libheif (I think libheif is sometimes automatically installed when you install libvips)
+	- Ubuntu: `sudo add-apt-repository ppa:vpa1977/libheif && sudo apt update && sudo apt install libheif-dev libheif1`
+	- Arch: `sudo pacman -S libheif` (if not already installed)
 
 #### Installing dependencies on Windows
 
@@ -80,20 +101,9 @@ This is the easiest way I have found to get the project compiling on Windows, bu
 
 NOTE: Setting the `CC` env var to the path of MSYS's MINGW64 gcc isn't sufficient if a different `gcc` is in the `PATH`. You will need to _prepend_ the correct gcc folder to the PATH!
 
-
-## Download
-
-You can download prebuilt binaries at the latest [Release action](https://github.com/timelinize/timelinize/actions/workflows/release.yml). Click the latest job and then choose the artifact at the bottom of the page that matches your platform.
-
-[Because of limitations in GitHub Actions](https://github.com/actions/upload-artifact?tab=readme-ov-file#zip-archives), all artifacts get downloaded as a .zip file even though the artifact is already compressed, so you may have to double-extract the download.
-
-**While Timelinize is in development, it's a good idea to start over with a new timeline repository every time you upgrade your build. The schema is still changing!**
-
-I recommend running from the command line even if you can double-click to run, so that you can see the log/error output. Logs are also available in your browser dev tools console.
-
-## Build from source
-
 For compilation targeting the same platform (OS and architecture) as your dev machine, `go build` should suffice.
+
+### Compile
 
 Once you have the necessary dependencies installed, you can simply run `go build` from the project folder:
 
@@ -115,7 +125,7 @@ To only start the server and not open a web browser:
 $ go run main.go serve
 ```
 
-## Cross-compile
+### Cross-compile
 
 The use of cgo makes cross-compilation a little tricky, but doable, thanks to `zig`.
 
@@ -125,30 +135,30 @@ Make sure `zig` is installed. This makes cross-compiling C/C++ a breeze.
 
 To strip symbol tables and other debugging info, add `-ldflags "-s -w"` to these `go build` commands for a smaller binary. (This is not desirable for production builds.)
 
-### From Mac...
+#### From Mac...
 
-#### to Linux (amd64 / x86-64):
+##### to Linux (amd64 / x86-64):
 
 ```bash
 CGO_ENABLED=1 GOOS=linux GOARCH=amd64 CC="zig cc -target x86_64-linux" CXX="zig c++ -target x86_64-linux" go build
 ```
 
-#### to Linux (arm64):
+##### to Linux (arm64):
 
 ```bash
 CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC="zig cc -target aarch64-linux" CXX="zig c++ -target aarch64-linux" go build
 ```
 
-#### to Windows (amd64 / x86-64):
+##### to Windows (amd64 / x86-64):
 
 ```bash
 CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows" go build
 ```
 
 
-### From Linux...
+#### From Linux...
 
-#### to Windows (amd64 / x86-64):
+##### to Windows (amd64 / x86-64):
 
 ```bash
 CGO_ENABLED=1 GOOS=windows CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows" go build
