@@ -34,7 +34,7 @@ These were captured using a dev repository of mine filled with a subset of my re
 ![Item view](https://github.com/user-attachments/assets/41f5671c-df85-4af5-9f67-6358e7489442) Viewing an item shows all the information about it, regardless of type: text, photo, live photo, video, location, etc. | ![File picker](https://github.com/user-attachments/assets/ecf2482e-58a5-434f-a0d2-f9b1274af106) I had to make a custom file picker since browser APIs are too limiting. This is how you'll import most of your data into your timeline, but this flow is being revised soon.
 ![3D map](https://github.com/user-attachments/assets/051031c1-0659-4388-b01f-475bb4d24490) The large map view is capable of 3D exploration, showing your memories right where they happened with a color-coded path that represents time. | ![Map showing non-geolocated data](https://github.com/user-attachments/assets/7ddbe3cd-4bdc-4d3a-be92-d9c41e29ee1b) Because Timelinize is entity-aware and supports multiple data sources, it can show data on a map even if it doesn't have geolocation information. That's what the gray dots or pins represent. In this example, a text message was received while at church, even though it doesn't have any geolocation info associated with it directly.
 ![Entities](https://github.com/user-attachments/assets/832c6bce-029c-4abf-943e-84253458a9f7) Timelinize treats entities (people, pets/animals, organizations, etc.) as first-class data points which you can filter and organize. | ![Merge entities](https://github.com/user-attachments/assets/932259b1-fc1d-40bc-b27d-a58e37537c4c) Timelinize will automatically recognize the same entity across data sources with enough information, but if it isn't possible automatically, you can manually merge entities with a click.
-![Conversations](https://github.com/user-attachments/assets/0973df3c-eba9-49b8-b369-0e44f4120c37) Conversations are aggregated across data sources that have messaging capabilities. | ![Conversation view](https://github.com/user-attachments/assets/62ece383-6702-47ed-8f11-6c95af0cc3de) In this conversation view, you can see messages exchanged with this person across both Facebook and SMS/text message are displayed together.
+![Conversations](https://github.com/user-attachments/assets/0973df3c-eba9-49b8-b369-0e44f4120c37) Conversations are aggregated across data sources that have messaging capabilities. They become emergent from the database by querying relationships between items and entities. | ![Conversation view](https://github.com/user-attachments/assets/62ece383-6702-47ed-8f11-6c95af0cc3de) In this conversation view, you can see messages exchanged with this person across both Facebook and SMS/text message are displayed together. Reactions are also supported.
 ![Gallery](https://github.com/user-attachments/assets/fe89db8e-66b1-4854-9d47-a774bf20961f) A gallery displays photos and videos, but not just those in your photo library: it includes pictures and memes sent via messages, photos and videos uploaded to social media, and any other photos/videos in your data. You can always filter to drill down.
 
 
@@ -80,6 +80,16 @@ This is the easiest way I have found to get the project compiling on Windows, bu
 
 NOTE: Setting the `CC` env var to the path of MSYS's MINGW64 gcc isn't sufficient if a different `gcc` is in the `PATH`. You will need to _prepend_ the correct gcc folder to the PATH!
 
+
+## Download
+
+You can download prebuilt binaries at the latest [Release action](https://github.com/timelinize/timelinize/actions/workflows/release.yml). Click the latest job and then choose the artifact at the bottom of the page that matches your platform.
+
+[Because of limitations in GitHub Actions](https://github.com/actions/upload-artifact?tab=readme-ov-file#zip-archives), all artifacts get downloaded as a .zip file even though the artifact is already compressed, so you may have to double-extract the download.
+
+**While Timelinize is in development, it's a good idea to start over with a new timeline repository every time you upgrade your build. The schema is still changing!**
+
+I recommend running from the command line even if you can double-click to run, so that you can see the log/error output. Logs are also available in your browser dev tools console.
 
 ## Build from source
 
