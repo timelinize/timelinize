@@ -20,6 +20,24 @@ Timelinize lets you import your data from practically anywhere: your computer, p
 > [!NOTE]
 > I am looking for a better name for this project. If you have an idea for a good name that is short, relevant, unique, and available, [I'd love to hear it!](https://github.com/timelinize/timelinize/issues/2)
 
+## Screenshots
+
+These were captured using a dev repository of mine filled with a subset of my real data, so I've run Timelinize in obfuscation mode: images and videos are blurred (except profile pictures---need to fix that); names, identifiers, and locations around sensitive areas are all randomized, and text has been replaced with random words so that the string is about the same length.
+
+(I hope to make a video tour soon.)
+
+**Please remember this is an early alpha preview, and the software is very much evolving and improving. And you can help!**
+
+|  |  |
+| ---- | ---- |
+![WIP Dashboard](https://github.com/user-attachments/assets/293cbe57-ac75-4c4b-b78a-b75f6d442d99) WIP dashboard. **Very** WIP. The bubble chart is particularly interesting as it shows you what kinds of data are most common at which times of day throughout the years. | ![Timeline view](https://github.com/user-attachments/assets/01f808c4-7b0e-4ad0-b12a-6398f6321272) The classic timeline view is a combination of all data grouped by types and time segments for reconstructing a day or other custom time period.
+![Item view](https://github.com/user-attachments/assets/41f5671c-df85-4af5-9f67-6358e7489442) Viewing an item shows all the information about it, regardless of type: text, photo, live photo, video, location, etc. | ![File picker](https://github.com/user-attachments/assets/ecf2482e-58a5-434f-a0d2-f9b1274af106) I had to make a custom file picker since browser APIs are too limiting. This is how you'll import most of your data into your timeline, but this flow is being revised soon.
+![3D map](https://github.com/user-attachments/assets/051031c1-0659-4388-b01f-475bb4d24490) The large map view is capable of 3D exploration, showing your memories right where they happened with a color-coded path that represents time. | ![Map showing non-geolocated data](https://github.com/user-attachments/assets/7ddbe3cd-4bdc-4d3a-be92-d9c41e29ee1b) Because Timelinize is entity-aware and supports multiple data sources, it can show data on a map even if it doesn't have geolocation information. That's what the gray dots or pins represent. In this example, a text message was received while at church, even though it doesn't have any geolocation info associated with it directly.
+![Entities](https://github.com/user-attachments/assets/832c6bce-029c-4abf-943e-84253458a9f7) Timelinize treats entities (people, pets/animals, organizations, etc.) as first-class data points which you can filter and organize. | ![Merge entities](https://github.com/user-attachments/assets/932259b1-fc1d-40bc-b27d-a58e37537c4c) Timelinize will automatically recognize the same entity across data sources with enough information, but if it isn't possible automatically, you can manually merge entities with a click.
+![Conversations](https://github.com/user-attachments/assets/0973df3c-eba9-49b8-b369-0e44f4120c37) Conversations are aggregated across data sources that have messaging capabilities. | ![Conversation view](https://github.com/user-attachments/assets/62ece383-6702-47ed-8f11-6c95af0cc3de) In this conversation view, you can see messages exchanged with this person across both Facebook and SMS/text message are displayed together.
+![Gallery](https://github.com/user-attachments/assets/fe89db8e-66b1-4854-9d47-a774bf20961f) A gallery displays photos and videos, but not just those in your photo library: it includes pictures and memes sent via messages, photos and videos uploaded to social media, and any other photos/videos in your data. You can always filter to drill down.
+
+
 ## How it works
 
 1. [Obtain your data.](https://timelinize.com/docs/setup/data-preparation) This usually involves exporting your data from apps, online accounts, or devices. For example, requesting an archive from Google Takeout. (Apple iCloud, Facebook, Twitter/X, Strava, Instagram, etc. all offer similar features for GDPR compliance.) Do this early/soon, because some services take days to provide your data.
@@ -201,4 +219,4 @@ I've been working on this project since about 2013, even before I conceptualized
 
 ## License
 
-This project is licensed with AGPL. I chose this license because I do not want others to make proprietary or commercial software using this package. The point of this project is liberation of and control over one's own, personal data, and I want to ensure that this project won't be used in anything that would perpetuate the walled garden dilemma we already face today. Even if this project's official successor has proprietary source code, I can ensure it will stay aligned with my values and the project's original goals.
+This project is licensed with AGPL. I chose this license because I do not want others to make proprietary or commercial software using this package. The point of this project is liberation of and control over one's own, personal data, and I want to ensure that this project won't be used in anything that would perpetuate the walled garden dilemma we already face today. Even if the future of this project ever has proprietary source code, I can ensure it will stay aligned with my values and the project's original goals.
