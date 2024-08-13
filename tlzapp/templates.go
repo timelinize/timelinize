@@ -20,21 +20,18 @@ package tlzapp
 
 import (
 	"net/http"
-	"time"
-
-	"github.com/timelinize/timelinize/timeline"
 )
 
 var templateData = map[string]templateDataFunc{
-	"/": func(_ *http.Request) (any, error) {
-		return struct {
-			Build  time.Time
-			Expiry time.Time
-		}{
-			Build:  timeline.BuildPeriod,
-			Expiry: timeline.Expiry,
-		}, nil
-	},
+	// "/": func(_ *http.Request) (any, error) {
+	// 	return struct {
+	// 		Build  time.Time
+	// 		Expiry time.Time
+	// 	}{
+	// 		Build:  timeline.BuildPeriod,
+	// 		Expiry: timeline.Expiry,
+	// 	}, nil
+	// },
 }
 
 type templateDataFunc func(r *http.Request) (any, error)

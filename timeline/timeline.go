@@ -39,11 +39,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	BuildPeriod = time.Date(2024, 5, 1, 0, 0, 0, 0, time.Local)
-	Expiry      = BuildPeriod.AddDate(0, 4, 0)
-)
-
 // Timeline represents an opened timeline repository.
 // The zero value is NOT valid; use Open() to obtain
 // a valid value.
