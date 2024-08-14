@@ -1,19 +1,19 @@
 /*
-	Timelinize
-	Copyright (c) 2013 Matthew Holt
+Timelinize
+Copyright (c) 2013 Matthew Holt
 
-	This program is free software: you can redistribute it and/or modify
-	it under the terms of the GNU Affero General Public License as published
-	by the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU Affero General Public License for more details.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
 
-	You should have received a copy of the GNU Affero General Public License
-	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 package googlelocation
@@ -27,10 +27,105 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
+type onDeviceLocation struct {
+	EndTime   time.Time `json:"endTime"` // e.g. 2024-06-21T19:51:13.014-06:00
+	StartTime time.Time `json:"startTime"`
+	Activity  struct {
+		Start          geoString    `json:"start"`
+		End            geoString    `json:"end"`
+		TopCandidate   topCandidate `json:"topCandidate"`
+		DistanceMeters string       `json:"distanceMeters"`
+	} `json:"activity,omitempty"`
+	Visit struct {
+		HierarchyLevel string       `json:"hierarchyLevel"`
+		TopCandidate   topCandidate `json:"topCandidate"`
+		Probability    string       `json:"probability"`
+	} `json:"visit,omitempty"`
+	TimelinePath []struct {
+		Point                              geoString `json:"point"`
+		DurationMinutesOffsetFromStartTime string    `json:"durationMinutesOffsetFromStartTime"`
+	} `json:"timelinePath"`
+}
+
+func (l *onDeviceLocation) toItem(result *Location, opt *Options) (*timeline.Item, error) {
+	entity := timeline.Entity{ID: opt.OwnerEntityID}
+
+	if opt.Device != "" {
+		attr := timeline.Attribute{
+			Name:  "google_location_device",
+			Value: opt.Device,
+		}
+		entity.Attributes = []timeline.Attribute{attr}
+	}
+
+	meta := make(timeline.Metadata)
+
+	switch {
+	case l.Visit.TopCandidate.PlaceLocation != "":
+		meta["Hierarchy level"] = l.Visit.HierarchyLevel
+		meta["Visit probability"] = l.Visit.Probability
+		meta["Visit probability"] = l.Visit.TopCandidate.Probability
+		meta["Visit semantic type"] = l.Visit.TopCandidate.SemanticType
+		meta["Visited place ID"] = l.Visit.TopCandidate.PlaceID
+	case l.Activity.Start != "":
+		meta["Distance"] = l.Activity.DistanceMeters
+		if l.Activity.TopCandidate.Type != "unknown" || l.Activity.TopCandidate.Probability != "0.000000" {
+			meta["Activity type"] = l.Activity.TopCandidate.Type
+			meta["Activity probability"] = l.Activity.TopCandidate.Probability
+		}
+	}
+
+	meta.Merge(result.Metadata, timeline.MetaMergeReplace)
+
+	return &timeline.Item{
+		Classification: timeline.ClassLocation,
+		Timestamp:      result.Timestamp,
+		Timespan:       result.Timespan,
+		Location:       result.Location(),
+		Owner:          entity,
+		Metadata:       meta,
+	}, nil
+}
+
+type topCandidate struct {
+	Type          string    `json:"type"`
+	Probability   string    `json:"probability"`
+	SemanticType  string    `json:"semanticType"`
+	PlaceID       string    `json:"placeID"`
+	PlaceLocation geoString `json:"placeLocation"`
+}
+
+type geoString string // EXAMPLE: "geo:30.123456,-105.987654"
+
+func (g geoString) parse() (timeline.Location, error) {
+	const prefix = "geo:"
+	if !strings.HasPrefix(string(g), prefix) {
+		return timeline.Location{}, fmt.Errorf("not a valid geo string: missing prefix")
+	}
+	latStr, lonStr, ok := strings.Cut(string(g[len(prefix):]), ",")
+	if !ok {
+		return timeline.Location{}, fmt.Errorf("not a valid geo string: missing comma separator")
+	}
+	lat, err := strconv.ParseFloat(latStr, 64)
+	if err != nil {
+		return timeline.Location{}, fmt.Errorf("not a valid geo string: bad latitude: %s: %v", latStr, err)
+	}
+	lon, err := strconv.ParseFloat(lonStr, 64)
+	if err != nil {
+		return timeline.Location{}, fmt.Errorf("not a valid geo string: bad longitude: %s: %v", lonStr, err)
+	}
+	return timeline.Location{
+		Latitude:  &lat,
+		Longitude: &lon,
+	}, nil
+}
+
+///////////////////////////////
+
 // Awesome unofficial documentation: https://locationhistoryformat.com/
 
 // FINALLY! Official docs!
-// https://developers.google.com/data-portability/schema-reference/location_history
+// https://developers.google.com/data-portability/schema-reference/location_history (Update: Since disappeared...)
 // TODO: Add more fields from the official docs to the item metadata
 type location struct {
 	Accuracy int `json:"accuracy"` // meters; higher values are less accurate (should probably be called "error" instead)

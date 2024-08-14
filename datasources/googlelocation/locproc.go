@@ -384,6 +384,9 @@ func (lp *locationProcessor) denoiseNext(ctx context.Context) (*Location, error)
 // or very similar to the previously-decoded point. Should be called just after
 // being read from the source input.
 func (lp locationProcessor) sameAsPrevious(l *Location) bool {
+	if l.ResetTrack {
+		lp.previous = nil
+	}
 	if lp.previous == nil {
 		return false
 	}
@@ -484,6 +487,13 @@ type Location struct {
 	// location becomes a cluster. Copy these output values into the final resulting item.
 	Timespan time.Time
 	Metadata timeline.Metadata
+
+	// Typically, locations must be processed in chronological order in order to filter
+	// noise, duplicates, etc. But if the stream of data has multiple time series and
+	// "starts over" one or more times, set this to true when the stream has gone back
+	// in time. As long as subsequent data points after this are still in ascending
+	// chronological order, it's as if starting a new stream.
+	ResetTrack bool
 
 	distanceFromPrev float64 // distance from the location before this one in meters
 	changeInMean     float64 // how much this point changed the mean

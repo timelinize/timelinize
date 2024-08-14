@@ -67,6 +67,11 @@ type Options struct {
 	// (My preferred is ~2 when scaled to between 1000 and 50000; i.e. about epsilon=6-7k)
 	Simplification float64 `json:"simplification,omitempty"`
 
+	// When importing location data that was stored only on-device,
+	// any actual information about the device is not available
+	// unless the user provides a name or ID manually.
+	Device string `json:"device,omitempty"`
+
 	// keyed by deviceTag from Settings.json
 	devices map[int64]DeviceSettings
 }
@@ -96,6 +101,27 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 		if err != nil {
 			return timeline.Recognition{}, err
 		}
+		// first, see if this is a file not a directory, and if so, see if it's
+		// the newer on-device-only location history file from Q2 2024.
+		if fs, ok := fsys.(archiver.FileFS); ok {
+			f, err := fs.Open(".")
+			if err != nil {
+				return timeline.Recognition{}, err
+			}
+			defer f.Close()
+			dec := json.NewDecoder(f)
+			if token, err := dec.Token(); err == nil {
+				if _, ok := token.(json.Delim); ok {
+					var loc onDeviceLocation
+					if err := dec.Decode(&loc); err == nil {
+						if !loc.StartTime.IsZero() && !loc.EndTime.IsZero() {
+							return timeline.Recognition{Confidence: 0.9}, nil
+						}
+					}
+				}
+			}
+		}
+		// see if it's a Takeout-structured location history
 		for _, pathToTry := range []string{
 			takeoutLocationHistoryPath2024,
 			takeoutLocationHistoryPathPre2024,
@@ -117,11 +143,14 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 }
 
 func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	dsOpt := opt.DataSourceOptions.(*Options)
+	fi.dsOpt = opt.DataSourceOptions.(*Options)
+	fi.ctx = ctx
+	fi.itemChan = itemChan
+	fi.opt = opt
 
 	// verify input configuration
-	if dsOpt.Simplification < 0 || dsOpt.Simplification > 10 {
-		return fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", dsOpt.Simplification)
+	if fi.dsOpt.Simplification < 0 || fi.dsOpt.Simplification > 10 {
+		return fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", fi.dsOpt.Simplification)
 	}
 
 	for _, filename := range filenames {
@@ -129,6 +158,57 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 		if err != nil {
 			return fmt.Errorf("opening data file: %v", err)
 		}
+
+		// first see if this is a location history file that is the
+		// newer on-device location history export starting from Q2 2024
+		if fs, ok := fsys.(archiver.FileFS); ok {
+			f, err := fs.Open(".")
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			dec := json.NewDecoder(f)
+
+			// consume opening '['
+			if token, err := dec.Token(); err != nil {
+				return err
+			} else if tkn, ok := token.(json.Delim); !ok || tkn != '[' {
+				return fmt.Errorf("unexpected opening token: %v", token)
+			}
+
+			onDevDec := &onDeviceDecoder{Decoder: dec}
+			locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.Simplification)
+			if err != nil {
+				return err
+			}
+
+			for {
+				if err := fi.ctx.Err(); err != nil {
+					return err
+				}
+
+				result, err := locProc.NextLocation(ctx)
+				if err != nil {
+					return err
+				}
+				if result == nil {
+					break
+				}
+
+				item, err := result.Original.(*onDeviceLocation).toItem(result, fi.dsOpt)
+				if err != nil {
+					return err
+				}
+
+				if fi.opt.Timeframe.ContainsItem(item, false) {
+					fi.itemChan <- &timeline.Graph{Item: item}
+				}
+			}
+
+			return nil
+		}
+
+		// otherwise, this must/should be a (now-legacy) Takeout archive of location history
 
 		// try to load settings file; this helps us identify devices; however
 		// this list is often incomplete, especially if user has removed them
@@ -139,18 +219,14 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 		}
 
 		// key device settings to their device tag for future storage in DB
-		dsOpt.devices = make(map[int64]DeviceSettings)
+		fi.dsOpt.devices = make(map[int64]DeviceSettings)
 		for _, dev := range settings.DeviceSettings {
-			dsOpt.devices[dev.DeviceTag] = dev
+			fi.dsOpt.devices[dev.DeviceTag] = dev
 		}
 
 		// attach state to the struct to be read by goroutines during import
-		fi.ctx = ctx
 		fi.fsys = fsys
 		fi.filename = filename
-		fi.itemChan = itemChan
-		fi.opt = opt
-		fi.dsOpt = dsOpt
 
 		// The data looks much better when we only process one path
 		// at a time (a path being the points belonging to a DeviceTag),
