@@ -515,8 +515,8 @@ func (lc Location) Location() timeline.Location {
 		l.Altitude = &alt
 	}
 	if lc.Uncertainty > 0 {
-		unc := lc.Uncertainty
-		l.Latitude = &unc
+		unc := metersToApproxDegrees(lc.Uncertainty)
+		l.CoordinateUncertainty = &unc
 	}
 	return l
 }

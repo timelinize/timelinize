@@ -208,7 +208,27 @@ func (l location) location() timeline.Location {
 	lat := float64(l.LatitudeE7) / 1e7
 	lon := float64(l.LongitudeE7) / 1e7
 	alt := float64(l.Altitude)
+	unc := metersToApproxDegrees(float64(l.Accuracy))
 
+	var loc timeline.Location
+	if lat != 0 {
+		loc.Latitude = &lat
+	}
+	if lon != 0 {
+		loc.Longitude = &lon
+	}
+	if alt != 0 {
+		loc.Altitude = &alt
+	}
+	if unc != 0 {
+		loc.CoordinateUncertainty = &unc
+	}
+	return loc
+}
+
+// metersToApproxDegrees converts the number of meters to an approximate number
+// of degrees.
+func metersToApproxDegrees(m float64) float64 {
 	// Ok, hear me out.
 	//
 	// We need to convert a vector offset in meters to the approximate
@@ -229,22 +249,7 @@ func (l location) location() timeline.Location {
 	//
 	// More context: https://gis.stackexchange.com/a/2964/5599
 	const oneDegOfLatInParisIn1789 = 1e7 / 90
-	unc := float64(l.Accuracy) / oneDegOfLatInParisIn1789
-
-	var loc timeline.Location
-	if lat != 0 {
-		loc.Latitude = &lat
-	}
-	if lon != 0 {
-		loc.Longitude = &lon
-	}
-	if alt != 0 {
-		loc.Altitude = &alt
-	}
-	if unc != 0 {
-		loc.CoordinateUncertainty = &unc
-	}
-	return loc
+	return m / oneDegOfLatInParisIn1789
 }
 
 func (l location) metadata() timeline.Metadata {
