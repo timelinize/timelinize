@@ -329,8 +329,8 @@ type feature struct {
 type position []float64
 
 func (p position) location(feature feature, lenient bool) (*googlelocation.Location, error) {
-	if count := len(p); count != 2 {
-		return nil, fmt.Errorf("expected two values for coordinate, got %d: %+v", count, p)
+	if count := len(p); count < 2 {
+		return nil, fmt.Errorf("expected at least two values for coordinate, got %d: %+v", count, p)
 	}
 	latE7, err := googlelocation.FloatToIntE7(p[1])
 	if err != nil {
