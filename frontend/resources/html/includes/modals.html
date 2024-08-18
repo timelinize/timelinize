@@ -205,6 +205,34 @@
 	</fieldset>
 </template>
 
+<template id="tpl-dsopt-geojson">
+	<fieldset class="form-fieldset mb-0">
+		<div class="mb-3 row">
+			<label class="col-3 col-form-label required">Person</label>
+			<div class="col">
+				<select class="form-select" placeholder="Name or contact info" id="geojson-owner">
+				</select>
+				<div class="small form-hint">
+					Select the person whose location data this is.
+				</div>
+			</div>
+		</div>
+		<div class="mb-3 row">
+			<label class="col-3 col-form-label">Options</label>
+			<div class="col">
+				<label class="form-check mb-1">
+					<input id="geojson-lenient" class="form-check-input" type="checkbox">
+					<span class="form-check-label">Lenient mode</span>
+				</label>
+				<div class="small form-hint">
+					Useful, if the source data is non-spec-compliant.
+				</div>
+			</div>
+		</div>
+		<!-- todo: simplification -->
+	</fieldset>
+</template>
+
 <template id="tpl-dsopt-icloud">
 	<fieldset class="form-fieldset mb-0">
 		<div class="mb-4 row">

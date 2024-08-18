@@ -216,6 +216,12 @@ async function updateDataSourceOptions() {
 			}
 		});
 	}
+	if (ds == "geojson") {
+		const entitySelect = newEntitySelect('#geojson-owner', 1);
+		const owner = await getOwner(tlz.openRepos[0]);
+		entitySelect.addOption(owner);
+		entitySelect.addItem(owner.id);
+	}
 	if (ds == "email") {
 		new TomSelect("#email-skip-labels",{
 			persist: false,
@@ -321,6 +327,14 @@ on('click', '#start-import', async e => {
 		if (simplification) {
 			dsOpt.simplification = Number(simplification);
 		}
+	}
+	if (ds == "geojson") {
+		dsOpt = {};
+		const owner = $('#geojson-owner').tomselect.getValue();
+		if (owner.length) {
+			dsOpt.owner_entity_id = Number(owner[0]);
+		}
+		dsOpt.lenient = $('#geojson-lenient').checked;
 	}
 	if (ds == "media") {
 		dsOpt = {
