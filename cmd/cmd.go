@@ -78,7 +78,7 @@ func Main(embeddedWebsite fs.FS) {
 	// start the application server
 	// TODO: customized listen address?
 	// TODO: Use a host like tlz.localhost to serve HTTP/2 over HTTPS... just need to automate the CA and cert... - or maybe a public domain like timelinize.app or timelinize.run or something
-	startedServer, err := app.Serve("")
+	startedServer, err := app.Serve(os.Getenv("TIMELINIZE_ADMIN_ADDR"))
 	if err != nil {
 		timeline.Log.Fatal("could not start server", zap.Error(err))
 	}
@@ -171,7 +171,7 @@ func checkFlagParsing() error {
 var standardCommands = map[string]func() error{
 	"serve": func() error {
 		// TODO: customized listen address?
-		if err := app.MustServe(""); err != nil {
+		if err := app.MustServe(os.Getenv("TIMELINIZE_ADMIN_ADDR")); err != nil {
 			return err
 		}
 		select {}
