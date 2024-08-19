@@ -1,0 +1,129 @@
+name: goreleaser
+
+permissions:
+    contents: write
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  goreleaser:
+    strategy:
+      matrix:
+        os: [ubuntu, windows, macos]
+        go-version: [1.23.x]
+    runs-on: ${{ matrix.os }}-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Git
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
+
+      # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
+      # but I haven't looked into using it. We'd have to install the packages using
+      # its shell, but I'm not sure how to do that.
+      - name: Install MSYS2 (Windows)
+        if: matrix.os == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          # TODO: Enable this for more current packages, I guess? But it takes longer.
+          # update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-libvips
+            mingw-w64-x86_64-libheif
+
+      - name: Install libraries (Linux)
+        if: matrix.os == 'ubuntu'
+        # install libheif (and dependency libde265) from the PPA which is more
+        # current; Ubuntu's is too old, resulting in failed compilation
+        run: |
+          sudo add-apt-repository ppa:strukturag/libheif
+          sudo add-apt-repository ppa:strukturag/libde265
+          sudo apt-get update
+          sudo apt-get install -y libheif-dev libvips-dev 
+          sudo ldconfig
+
+      - name: Install libraries (macOS)
+        if: matrix.os == 'macos'
+        run: brew install libheif vips
+
+      # It is crucial to use our gcc compiler instead of the preinstalled gcc,
+      # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
+      # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
+      - name: Update PATH (Windows)
+        if: matrix.os == 'windows'
+        shell: bash
+        run: echo "D:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Switch to Windows only build
+        if: matrix.os == 'windows'
+        run: |
+          sed -i 's/_GOOS_/windows/g' .goreleaser.yml
+
+      - name: Switch to Mac OS X only build
+        if: matrix.os == 'macos'
+        run: |
+          sed -i.tmp -e 's/_GOOS_/darwin/g' .goreleaser.yml
+          # https://github.com/actions/runner-images?tab=readme-ov-file#available-images macos-14 is arm unless large.
+          sed -i.tmp -e 's/amd64/arm64/g' .goreleaser.yml
+
+      # Installed heif version must match the version requested by go otherwise you get C. errors.
+      # As writing jammy (22.04) uses 1.17.6 https://launchpad.net/~strukturag/+archive/ubuntu/libheif
+      - name: Downgrade heif on linux to match ppa version & switch to linux only build
+        if: matrix.os == 'ubuntu'
+        run: | 
+          go get github.com/strukturag/libheif@v1.17.6
+          sed -i 's/_GOOS_/linux/g' .goreleaser.yml
+          echo 'nfpms:' >> .goreleaser.yml
+          echo '  -' >> .goreleaser.yml
+          echo '    vendor:  Matt Holt' >> .goreleaser.yml
+          echo '    homepage: https://matt.life/' >> .goreleaser.yml
+          echo '    maintainer: "Matt Holt <changeme@example.com>"' >> .goreleaser.yml
+          echo '    description: NA' >> .goreleaser.yml
+          echo '    license: Private' >> .goreleaser.yml
+          echo '    formats:' >> .goreleaser.yml
+          echo '      - apk' >> .goreleaser.yml
+          echo '      - deb' >> .goreleaser.yml
+          echo '      - rpm' >> .goreleaser.yml
+          echo '      - termux.deb' >> .goreleaser.yml
+          echo '      - archlinux' >> .goreleaser.yml
+          echo '    release: "1"' >> .goreleaser.yml
+          echo '    section: default' >> .goreleaser.yml
+          echo '    priority: extra' >> .goreleaser.yml
+          
+
+      - name: Commit changes
+        run: |
+          # Sadly this breaks the compiled in git sha left via goreleaser
+          git add . && git commit --amend --no-edit
+          git tag -f "${{  github.ref_name }}"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

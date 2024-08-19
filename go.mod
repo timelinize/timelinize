@@ -20,7 +20,7 @@ require (
 	github.com/mholt/goexif2 v0.0.0-20230302025153-4d89d35092b2
 	github.com/seiflotfy/cuckoofilter v0.0.0-20240715131351-a2f2c23f1771
 	github.com/signal-golang/go-vcard v0.1.2
-	github.com/strukturag/libheif v1.18.2
+	github.com/strukturag/libheif v1.15.2
 	github.com/trimmer-io/go-xmp v1.0.0
 	github.com/ttacon/libphonenumber v1.2.1
 	github.com/zeebo/blake3 v0.2.3
