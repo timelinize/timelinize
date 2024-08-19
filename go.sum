@@ -527,6 +527,8 @@ github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsT
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/strukturag/libheif v1.15.2 h1:pgdcpDHqtLKRXL9ETSTeht0CsJODB3BojpTsb3S/3Wg=
 github.com/strukturag/libheif v1.15.2/go.mod h1:E/PNRlmVtrtj9j2AvBZlrO4dsBDu6KfwDZn7X1Ce8Ks=
+github.com/strukturag/libheif v1.18.2 h1:CrlRS7Kwl2odl4DYM/m6ay/HPXEcmQPK1xF8FxAqP7k=
+github.com/strukturag/libheif v1.18.2/go.mod h1:E/PNRlmVtrtj9j2AvBZlrO4dsBDu6KfwDZn7X1Ce8Ks=
 github.com/sunfish-shogi/bufseekio v0.0.0-20210207115823-a4185644b365/go.mod h1:dEzdXgvImkQ3WLI+0KQpmEx8T/C/ma9KeS3AfmU899I=
 github.com/tailscale/tscert v0.0.0-20240517230440-bbccfbf48933 h1:pV0H+XIvFoP7pl1MRtyPXh5hqoxB5I7snOtTHgrn6HU=
 github.com/tailscale/tscert v0.0.0-20240517230440-bbccfbf48933/go.mod h1:kNGUQ3VESx3VZwRwA9MSCUegIl6+saPL8Noq82ozCaU=
