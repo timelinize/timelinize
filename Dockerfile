@@ -36,7 +36,7 @@ RUN chown -R timelinize /repo
 
 COPY --from=builder /app/timelinize /app/timelinize
 
-ENV TIMELINIZE_ADMIN_ADDR="0.0.0.0:12002"
+ENV TLZ_ADMIN_ADDR="0.0.0.0:12002"
 EXPOSE 12002
 
 VOLUME /app/.config/timelinize
