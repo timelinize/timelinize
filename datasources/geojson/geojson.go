@@ -355,20 +355,18 @@ func (p position) location(feature feature, lenient bool) (*googlelocation.Locat
 			// non-spec-compliant
 			var inferredAltitude float64
 			var inferredTimestamp time.Time
-
 			minAltitude, maxAltitude := -100.0, 20000.0 // meters
-			if p[2] > maxAltitude {
-				inferredTimestamp = time.Unix(int64(p[2]), 0)
-			} else if p[2] > minAltitude {
-				altitude = p[2]
-			}
 
-			if len(p) > 3 {
-				if p[3] > maxAltitude {
-					inferredTimestamp = time.Unix(int64(p[3]), 0)
-				} else if p[3] > minAltitude {
-					altitude = p[3]
+			// iterate remaining positions
+			var remaining = len(p) - 2
+			for i := range remaining {
+				if p[2+i] > maxAltitude { // time can occur in any position
+					inferredTimestamp = time.Unix(int64(p[2+i]), 0)
+				} else if i == 0 && p[2+i] > minAltitude { // altitude must be in first position after coordinates
+					inferredAltitude = p[2+i]
 				}
+				// remaining positions can be altitude, speed, signal quality, number of satellites, etc.
+				// these are not easily detectable though.
 			}
 
 			if altitude == 0 && inferredAltitude != 0 {
