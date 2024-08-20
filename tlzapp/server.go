@@ -210,6 +210,7 @@ func (s *server) fillAllowedHosts(listenAddr string) {
 	for _, host := range []string{
 		"localhost",
 		"127.0.0.1",
+		"0.0.0.0",
 		"::1",
 	} {
 		// clients generally omit port if standard, so only expect port if non-standard
