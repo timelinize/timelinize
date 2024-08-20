@@ -76,7 +76,7 @@ docker run -p12002:12002 \
 ```
 
 That will run Timelinize on port `12002`, with the data repository mounted at `/path/to/repo` (change it to suite your needs) and the configuration directory mounted at `/path/to/config` (change it).
-When using Docker bind mounts like above, make sure the directories exist on your host machine and that they belong to use UID 1000.
+When using Docker bind mounts like above, make sure the directories exist on your host machine and that they belong to the user ID 1000.
 
 > [!NOTE]
 > Because Timelinize is running inside a Docker container, it won't have access to your host's filesystem. You will need to mount the directories you want to access as volumes, to be able to load data into Timelinize.
