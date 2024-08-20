@@ -94,9 +94,9 @@ jobs:
           sed -i 's/_GOOS_/linux/g' .goreleaser.yml
           echo 'nfpms:' >> .goreleaser.yml
           echo '  -' >> .goreleaser.yml
-          echo '    vendor:  Matt Holt' >> .goreleaser.yml
-          echo '    homepage: https://matt.life/' >> .goreleaser.yml
-          echo '    maintainer: "Matt Holt <changeme@example.com>"' >> .goreleaser.yml
+          echo '    vendor: Dyanim LLC' >> .goreleaser.yml
+          echo '    homepage: https://dyanim.com/' >> .goreleaser.yml
+          echo '    maintainer: "Matt Holt <mholt@users.noreply.github.com>"' >> .goreleaser.yml
           echo '    description: NA' >> .goreleaser.yml
           echo '    license: Private' >> .goreleaser.yml
           echo '    formats:' >> .goreleaser.yml
