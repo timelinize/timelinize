@@ -15,7 +15,10 @@ WORKDIR /app
 COPY . .
 
 ENV CGO_ENABLED=1
-RUN go build -o /app/timelinize
+RUN go env -w GOCACHE=/go/cache
+RUN go env -w GOMODCACHE=/go/modcache
+RUN --mount=type=cache,target=/go/modcache go mod download
+RUN --mount=type=cache,target=/go/modcache --mount=type=cache,target=/go/cache go build -o /app/timelinize
 
 FROM archlinux:latest AS final
 
