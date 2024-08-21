@@ -50,6 +50,8 @@ These were captured using a dev repository of mine filled with a subset of my re
 
 ## Download and run
 
+### From release binaries
+
 > [!IMPORTANT]
 > Please ensure [you have the necessary dependencies installed](https://timelinize.com/docs/setup/system-requirements) or Timelinize will not function properly.
 
@@ -61,6 +63,23 @@ After you have the system requirements installed, you can download and run Timel
 
 I recommend running from the command line even if you can double-click to run, so that you can see the log/error output. Logs are also available in your browser dev tools console.
 
+### Using Docker images
+
+> [!NOTE]
+> Docker images are not yet available. This section will be updated when they are.
+
+```
+docker run -p12002:12002 \
+           -v /path/to/repo:/repo \
+           -v /path/to/config:/app/.config/timelinize \
+           ghcr.io/timelinize/timelinize
+```
+
+That will run Timelinize on port `12002`, with the data repository mounted at `/path/to/repo` (change it to suite your needs) and the configuration directory mounted at `/path/to/config` (change it).
+When using Docker bind mounts like above, make sure the directories exist on your host machine and that they belong to the user ID 1000.
+
+> [!NOTE]
+> Because Timelinize is running inside a Docker container, it won't have access to your host's filesystem. You will need to mount the directories you want to access as volumes, to be able to load data into Timelinize.
 
 ## Build from source
 

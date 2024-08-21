@@ -244,7 +244,7 @@ func (a *App) serve(adminAddr string) error {
 
 	// set up HTTP client and request with short timeout and context cancellation
 	client := &http.Client{Timeout: 1 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+adminAddr, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:12002", nil)
 	if err != nil {
 		return err
 	}
