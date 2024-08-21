@@ -12,7 +12,7 @@ builds:
     goarch:
       - amd64
 checksum:
-  name_template: '_GOOS_-checksums.txt'
+  name_template: '{{ .Runtime.Goos }}-{{ .Runtime.Goarch }}-checksums.txt'
 archives:
   -
     format_overrides:
