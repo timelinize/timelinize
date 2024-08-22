@@ -245,10 +245,12 @@ async function updateRepoOwners() {
 		const repoOwner = tlz.openRepos[0].owner;
 		
 		let birthPlace = "";
-		for (const attr of repoOwner.attributes) {
-			if (attr.name == "birth_place") {
-				birthPlace = attr.value;
-				break;
+		if (repoOwner.attributes) {
+			for (const attr of repoOwner.attributes) {
+				if (attr.name == "birth_place") {
+					birthPlace = attr.value;
+					break;
+				}
 			}
 		}
 

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"path"
 	"path/filepath"
 	"strings"
@@ -184,18 +185,18 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 					break
 				}
 
-				point := l.Original.(feature)
+				feature := l.Original.(feature)
 
-				meta := timeline.Metadata{
-					"Provider":    point.Properties.Provider,
-					"Velocity":    point.Properties.Speed,   // same key as with Google Location History
-					"Heading":     point.Properties.Bearing, // same key as with Google Location History
-					"Name":        point.Properties.Name,
-					"Notes":       point.Properties.Notes,
-					"ISO Country": point.Properties.ISOCountry,
-					"Country":     point.Properties.Country,
-					"Time":        point.Properties.Time,
-				}
+				// use generic properties as metadata
+				meta := timeline.Metadata(feature.Properties)
+				meta.HumanizeKeys()
+
+				// fill in special-case, standardized metadata using
+				// the same keys as with Google Location History
+				meta["Velocity"] = feature.velocity
+				meta["Heading"] = feature.heading
+
+				// include any metadata added by location processor
 				meta.Merge(l.Metadata, timeline.MetaMergeReplace)
 
 				item := &timeline.Item{
@@ -283,6 +284,12 @@ func (dec *decoder) NextLocation(ctx context.Context) (*googlelocation.Location,
 			return nil, fmt.Errorf("invalid GeoJSON feature: %v", err)
 		}
 
+		// feature properties are basically arbitrary key-value pairs, but a few common
+		// ones exist, such as time, altitude, etc; we extract what we can
+		if err := dec.current.extractKnownProperties(); err != nil {
+			return nil, fmt.Errorf("reading well-known properties of geojson feature: %v", err)
+		}
+
 		switch dec.current.Geometry.Type {
 		case "Point":
 			var coord position
@@ -314,24 +321,176 @@ func (dec *decoder) NextLocation(ctx context.Context) (*googlelocation.Location,
 
 // see https://datatracker.ietf.org/doc/html/rfc7946#section-3.1
 type feature struct {
-	Type       string `json:"type"`
-	Properties struct {
-		Time       time.Time `json:"time"`
-		Provider   string    `json:"provider"`
-		TimeLong   int64     `json:"time_long"`
-		Accuracy   float64   `json:"accuracy"`
-		Altitude   float64   `json:"altitude"`
-		Bearing    float64   `json:"bearing"`
-		Speed      float64   `json:"speed"`
-		Name       string    `json:"name"`
-		ISOCountry string    `json:"iso_country"`
-		Country    string    `json:"country"`
-		Notes      string    `json:"notes"`
-	} `json:"properties,omitempty"`
-	Geometry struct {
+	Type       string         `json:"type"`
+	Properties map[string]any `json:"properties,omitempty"`
+	Geometry   struct {
 		Type        string          `json:"type"`
 		Coordinates json.RawMessage `json:"coordinates"`
 	} `json:"geometry"`
+
+	// certain values extracted (and removed) from "well-known" (obvious or common) keys in Properties
+	time     time.Time
+	altitude float64 // meters
+	accuracy float64 // meters (higher values are less accurate; should probably be called "error" instead)
+	velocity float64 // meters per second
+	heading  float64 // degrees
+}
+
+func (f *feature) extractKnownProperties() error {
+	// we use this to try to guess whether Unix timestamp may be in seconds or milliseconds
+	const year2286ApproxUnixSec = 10000000000
+
+	// time
+	for _, propName := range []string{
+		"time",
+		"timestamp",
+		"time_long",
+		"datetime",
+		"date_time",
+	} {
+		// stop trying once we've got a time value
+		if !f.time.IsZero() {
+			break
+		}
+
+		switch val := f.Properties[propName].(type) {
+		case string:
+			for _, format := range []string{
+				time.RFC3339,
+				time.RFC3339Nano,
+				time.RFC850,
+				time.RFC822,
+				time.RFC822Z,
+				time.RFC1123,
+				time.RFC1123Z,
+			} {
+				t, err := time.Parse(format, val)
+				if err == nil {
+					f.time = t
+					delete(f.Properties, propName)
+					break
+				}
+			}
+		case int:
+			if val < year2286ApproxUnixSec {
+				f.time = time.Unix(int64(val), 0)
+				delete(f.Properties, propName)
+			} else {
+				f.time = time.UnixMilli(int64(val))
+				delete(f.Properties, propName)
+			}
+		case int64:
+			if val < year2286ApproxUnixSec {
+				f.time = time.Unix(val, 0)
+				delete(f.Properties, propName)
+			} else {
+				f.time = time.UnixMilli(val)
+				delete(f.Properties, propName)
+			}
+		case float64:
+			sec, dec := math.Modf(val)
+			if sec < year2286ApproxUnixSec {
+				f.time = time.Unix(int64(sec), int64(dec*(1e9)))
+				delete(f.Properties, propName)
+			} else {
+				f.time = time.UnixMilli(int64(sec)) // we don't store more precise than milliseconds
+				delete(f.Properties, propName)
+			}
+		default:
+			return fmt.Errorf("unexpected type for time property %s: %T", propName, val)
+		}
+	}
+
+	// altitude
+	for _, propName := range []string{
+		"altitude",
+		"elevation",
+		"height",
+	} {
+		// stop trying once we've got a value
+		if f.altitude != 0 {
+			break
+		}
+		switch val := f.Properties[propName].(type) {
+		case int:
+			f.altitude = float64(val)
+			delete(f.Properties, propName)
+		case int64:
+			f.altitude = float64(val)
+			delete(f.Properties, propName)
+		case float64:
+			f.altitude = val
+			delete(f.Properties, propName)
+		}
+	}
+
+	// accuracy
+	for _, propName := range []string{
+		"accuracy",
+	} {
+		// stop trying once we've got a value
+		if f.accuracy != 0 {
+			break
+		}
+		switch val := f.Properties[propName].(type) {
+		case int:
+			f.accuracy = float64(val)
+			delete(f.Properties, propName)
+		case int64:
+			f.accuracy = float64(val)
+			delete(f.Properties, propName)
+		case float64:
+			f.accuracy = val
+			delete(f.Properties, propName)
+		}
+	}
+
+	// heading
+	for _, propName := range []string{
+		"heading",
+		"bearing",
+		"direction",
+	} {
+		// stop trying once we've got a value
+		if f.heading != 0 {
+			break
+		}
+		switch val := f.Properties[propName].(type) {
+		case int:
+			f.heading = float64(val)
+			delete(f.Properties, propName)
+		case int64:
+			f.heading = float64(val)
+			delete(f.Properties, propName)
+		case float64:
+			f.heading = val
+			delete(f.Properties, propName)
+		}
+	}
+
+	// velocity
+	for _, propName := range []string{
+		"velocity",
+		"speed",
+	} {
+		// stop trying once we've got a value
+		if f.velocity != 0 {
+			break
+		}
+		switch val := f.Properties[propName].(type) {
+		case int:
+			f.velocity = float64(val)
+			delete(f.Properties, propName)
+		case int64:
+			f.velocity = float64(val)
+			delete(f.Properties, propName)
+		case float64:
+			f.velocity = val
+			delete(f.Properties, propName)
+		}
+	}
+
+	return nil
 }
 
 // https://datatracker.ietf.org/doc/html/rfc7946#section-3.1.1
@@ -349,10 +508,7 @@ func (p position) location(feature feature, lenient bool) (*googlelocation.Locat
 	if err != nil {
 		return nil, err
 	}
-	altitude, ts := feature.Properties.Altitude, feature.Properties.Time
-	if ts.IsZero() && feature.Properties.TimeLong != 0 {
-		ts = time.UnixMilli(feature.Properties.TimeLong)
-	}
+	altitude, ts := feature.altitude, feature.time
 
 	// the GeoJSON spec advises against supporting more than the optional 3rd element (altitude),
 	// but we've seen messy data (https://github.com/timelinize/timelinize/issues/23) where the
@@ -396,7 +552,7 @@ func (p position) location(feature feature, lenient bool) (*googlelocation.Locat
 		LatitudeE7:  latE7,
 		LongitudeE7: lonE7,
 		Altitude:    altitude,
-		Uncertainty: feature.Properties.Accuracy,
+		Uncertainty: feature.accuracy,
 		Timestamp:   ts,
 	}, nil
 }

@@ -452,11 +452,16 @@ type DataFunc func(context.Context) (io.ReadCloser, error)
 type Metadata map[string]any
 
 // Clean removes keys with empty values (including numeric 0 and
-// non-empty strings and byte slices containing only spaces).
-// Floats are compared with some tolerance around zero.
-// Boolean false is not considered empty (TODO: should it be?).
+// non-empty strings and byte slices containing only spaces) or
+// keys that are the empty string. Floats are compared with some
+// tolerance around zero. Boolean false is not considered empty.
+// (TODO: Should false be considered empty?)
 func (m Metadata) Clean() {
 	for k, v := range m {
+		if k == "" {
+			delete(m, k)
+			continue
+		}
 		if m.isEmpty(v) {
 			delete(m, k)
 		}
@@ -535,6 +540,21 @@ func (Metadata) isEmpty(v any) bool {
 		return true
 	}
 	return false
+}
+
+// HumanizeKeys transforms the keys in m to be more human-friendly.
+// For example, it capitlizes the first character and replaces
+// underscores with spaces.
+func (m Metadata) HumanizeKeys() {
+	for key, val := range m {
+		if len(key) == 0 {
+			continue
+		}
+		normKey := strings.ToUpper(string(key[0])) + key[1:]
+		normKey = strings.ReplaceAll(normKey, "_", " ")
+		m[normKey] = val
+		delete(m, key)
+	}
 }
 
 // MetadataMergePolicy is a type that specifies how to handle
