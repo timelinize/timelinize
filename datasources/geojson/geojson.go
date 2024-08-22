@@ -187,9 +187,14 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 				point := l.Original.(feature)
 
 				meta := timeline.Metadata{
-					"Provider": point.Properties.Provider,
-					"Velocity": point.Properties.Speed,   // same key as with Google Location History
-					"Heading":  point.Properties.Bearing, // same key as with Google Location History
+					"Provider":    point.Properties.Provider,
+					"Velocity":    point.Properties.Speed,   // same key as with Google Location History
+					"Heading":     point.Properties.Bearing, // same key as with Google Location History
+					"Name":        point.Properties.Name,
+					"Notes":       point.Properties.Notes,
+					"ISO Country": point.Properties.ISOCountry,
+					"Country":     point.Properties.Country,
+					"Time":        point.Properties.Time,
 				}
 				meta.Merge(l.Metadata, timeline.MetaMergeReplace)
 
@@ -311,13 +316,17 @@ func (dec *decoder) NextLocation(ctx context.Context) (*googlelocation.Location,
 type feature struct {
 	Type       string `json:"type"`
 	Properties struct {
-		Time     time.Time `json:"time"`
-		Provider string    `json:"provider"`
-		TimeLong int64     `json:"time_long"`
-		Accuracy float64   `json:"accuracy"`
-		Altitude float64   `json:"altitude"`
-		Bearing  float64   `json:"bearing"`
-		Speed    float64   `json:"speed"`
+		Time       time.Time `json:"time"`
+		Provider   string    `json:"provider"`
+		TimeLong   int64     `json:"time_long"`
+		Accuracy   float64   `json:"accuracy"`
+		Altitude   float64   `json:"altitude"`
+		Bearing    float64   `json:"bearing"`
+		Speed      float64   `json:"speed"`
+		Name       string    `json:"name"`
+		ISOCountry string    `json:"iso_country"`
+		Country    string    `json:"country"`
+		Notes      string    `json:"notes"`
 	} `json:"properties,omitempty"`
 	Geometry struct {
 		Type        string          `json:"type"`
