@@ -189,7 +189,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 
 				// use generic properties as metadata
 				meta := timeline.Metadata(feature.Properties)
-				meta.HumanizeKeys()
+				meta = meta.HumanizeKeys()
 
 				// fill in special-case, standardized metadata using
 				// the same keys as with Google Location History
@@ -396,6 +396,8 @@ func (f *feature) extractKnownProperties() error {
 				f.time = time.UnixMilli(int64(sec)) // we don't store more precise than milliseconds
 				delete(f.Properties, propName)
 			}
+		case nil:
+			// having a time property isn't mandatory, ignore
 		default:
 			return fmt.Errorf("unexpected type for time property %s: %T", propName, val)
 		}
