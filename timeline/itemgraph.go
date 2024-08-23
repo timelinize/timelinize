@@ -545,16 +545,18 @@ func (Metadata) isEmpty(v any) bool {
 // HumanizeKeys transforms the keys in m to be more human-friendly.
 // For example, it capitlizes the first character and replaces
 // underscores with spaces.
-func (m Metadata) HumanizeKeys() {
+func (m Metadata) HumanizeKeys() map[string]any {
+	nk := map[string]any{}
 	for key, val := range m {
 		if len(key) == 0 {
 			continue
 		}
 		normKey := strings.ToUpper(string(key[0])) + key[1:]
 		normKey = strings.ReplaceAll(normKey, "_", " ")
-		m[normKey] = val
-		delete(m, key)
+		nk[normKey] = val
 	}
+
+	return nk
 }
 
 // MetadataMergePolicy is a type that specifies how to handle
