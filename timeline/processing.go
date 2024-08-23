@@ -1227,8 +1227,11 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it
 			sb.WriteRune(')')
 		}
 
-		// TODO: Experimental: select the row with the same retrieval key, in case this item is being
-		// imported piecewise across multiple imports
+		// also honor the retrieval key, if set, which allows an item to be pieced together
+		// regardless of what values are in the row already... since the whole item may not
+		// be known yet or some parts may be changing (for reasons known only to the data
+		// source which we trust), we use the retrieval key as a globally unique key to
+		// check for an existing item (even if only part of it is in the DB)
 		if len(it.Retrieval.key) > 0 {
 			sb.WriteString(" OR retrieval_key=?")
 			args = append(args, it.Retrieval.key)

@@ -222,7 +222,17 @@ type Item struct {
 	// TODO: STILL WIP, EXPERIMENTAL.
 	Annotations []Annotation
 
-	// TODO: Very experimental
+	// When an item cannot be fully conveyed at the same time, or
+	// has to be given in pieces, telling the processor how to
+	// retrieve the other existing part of the same item from the
+	// DB can be helpful, since the processor's built-in "check
+	// for existing item" logic assumes/requires complete items.
+	// When set, a "retrieval key" is stored in the DB as opaque
+	// bytes which the processor uses as a unique key to retrieve
+	// the part of an item that already exists in the DB. In other
+	// words, each part of the same item that is conveyed to the
+	// processor must have the same retrieval key, and no other
+	// item globally must use the same key at any time.
 	Retrieval ItemRetrieval
 
 	// Used for storing state during processing; either the
@@ -242,14 +252,30 @@ type Item struct {
 	contentHash  []byte
 }
 
+// ItemRetrieval dictates how to retrieve an existing item from the database.
+// It is used when items may be given to the processor in pieces, as in, the
+// whole item is not available all at once. Call SetKey() to set the key (it
+// gets hashed, so it simply opaque bytes to the processor and DB), and if
+// relevant, set PreferFields to control what gets updated or preferred when
+// data already exists in the DB.
 type ItemRetrieval struct {
 	key []byte
 
 	// Column names to prefer from the incoming item over whatever is stored in the DB;
-	// overrides user's configured update policies.
+	// overrides user's configured update policies. This is useful if multiple separate
+	// parts of an item may overlap, but one part is more reliable or preferred over
+	// another part. For example, in Google Takeout archives, some photo metadata is both
+	// embedded as EXIF and available in a sidecar JSON file, but it's fairly well known
+	// that the JSON file's metadata is less correct sometimes, for some reason. So even
+	// though both have metadata, when importing from the actual image, we prefer that,
+	// and this tells the processor to do so.
 	PreferFields []string
 }
 
+// SetKey sets the retrieval key for this item. It should be a globally unique
+// value; note that other data sources may collaborate on the same item if they
+// present items with the same retrieval key (this can be either a bug or a
+// feature, so set the key wisely).
 func (ret *ItemRetrieval) SetKey(key string) {
 	h := newHash()
 	h.Write([]byte(key))
