@@ -123,6 +123,7 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 		fitem := fileItem{fsys: fsys, path: fpath, dirEntry: d}
 
 		item := &timeline.Item{
+			Classification:       timeline.ClassFile,
 			Timestamp:            fitem.timestamp(),
 			Location:             fitem.location(),
 			IntermediateLocation: fpath,

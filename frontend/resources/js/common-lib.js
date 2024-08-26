@@ -403,7 +403,7 @@ function newDatePicker(opts) {
 			$('.date-sort', tpl).value = opts.defaultSort;
 		}
 	}
-	
+
 
 	// used for firing change events
 	const dateInputElem = $('.date-input', tpl)
@@ -455,7 +455,7 @@ function newDatePicker(opts) {
 				let viewDate = dp.viewDate;
 				let today = new Date();
 
-				// Since timepicker takes initial time from 'viewDate', set up time here, 
+				// Since timepicker takes initial time from 'viewDate', set up time here,
 				// otherwise time will be equal to 00:00 if user navigated through datepicker
 				viewDate.setHours(today.getHours());
 				viewDate.setMinutes(today.getMinutes());
@@ -618,7 +618,7 @@ async function newFilePicker(options) {
 	filePicker.navigate = async function (dir = "", options) {
 		// merge navigate options with those specified for the file picker
 		options = {...filePicker.options, ...options}
-		
+
 		// don't get new file listing if it's the same dir and refresh isn't forced
 		if (filePicker.dir && dir == filePicker.dir && !options?.refresh) {
 			return;
@@ -641,17 +641,17 @@ async function newFilePicker(options) {
 				dir: listing.dir,
 				options: options,
 				selectedItem: $('.file-picker-table .file-picker-item.selected', filePicker)
-			} 
+			}
 		});
 		filePicker.dispatchEvent(event);
-		
+
 		// reset the filepath box, listing table, and selected path(s),
 		// then emit event (intentionally named uniquely from standard events)
 		$('.file-picker-path').value = listing.dir;
 		$('.file-picker-table tbody', filePicker).innerHTML = '';
 		filePicker.filepaths = {};
 		filePicker.dispatchEvent(new CustomEvent("selection", { bubbles: true }));
-		
+
 		// show "Up" at the top if that's doable
 		if (listing.up) {
 			$('.file-picker-up', filePicker).style.display = '';
@@ -659,14 +659,14 @@ async function newFilePicker(options) {
 		} else {
 			$('.file-picker-up', filePicker).style.display = 'none';
 		}
-		
+
 		// render each file to the listing
 		let selectedItem;
 		for (const item of listing.files) {
 			const modDate = DateTime.fromISO(item.mod_time);
-	
+
 			const row = cloneTemplate('#tpl-file-picker-item');
-			
+
 			if (options?.only_dirs) {
 				$('.file-picker-col-size', row).remove();
 			} else if (!item.is_dir) {
@@ -970,7 +970,7 @@ function itemTimestampDisplay(item, endItem) {
 
 	const dt = DateTime.fromISO(item.timestamp);
 	result.relative = dt.toRelative();
-	
+
 	if (item.timeframe) {
 		// find the level of precision by looking at each major compontent of the timestamps
 
@@ -1067,7 +1067,7 @@ function itemContentElement(item, opts) {
 		container.classList.add('content');
 		container.dataset.contentType = "text";
 		if (opts?.compact) {
-			container.innerText = maxlenStr(item.data_text, 100);
+			container.innerText = item.data_text.split("\n")[0];
 		} else {
 			container.innerText = item.data_text;
 		}
@@ -1143,7 +1143,7 @@ function itemContentElement(item, opts) {
 
 				const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
 				thumbhashImgTag.classList.add('thumbhash');
-				
+
 				container.classList.add('thumbhash-container');
 				container.style.aspectRatio = aspectRatio;
 
@@ -1181,7 +1181,7 @@ function itemContentElement(item, opts) {
 					// In case the caller added classes to the returned element (the container),
 					// we will need to add those to the imgTag since it will replace the container.
 					container.classList.forEach(name => imgTag.classList.add(name));
-					
+
 					loader.parentElement.replaceWith(imgTag);
 				});
 			}
@@ -1328,6 +1328,8 @@ function itemMiniDisplay(items, options) {
 			return miniDisplayMedia(items, options);
 		case 'location':
 			return miniDisplayLocations(items, options);
+		case "file":
+		   return miniDisplayFile(items, options);
 		default:
 			console.warn("UNSUPPORTED CLASS:", representative);
 			const el = document.createElement('div');
@@ -1393,6 +1395,33 @@ function miniDisplayLocations(items, options) {
 	return minidisp;
 }
 
+function miniDisplayFile(items, options) {
+  const container = cloneTemplate("#tpl-file-picker-item");
+
+  for (const item of items) {
+    const a = document.createElement("a");
+    a.href = `/items/${item.repo_id}/${item.id}`;
+    const elem = itemContentElement(item, {
+      options,
+      thumbnail: true,
+      compact: true,
+    });
+    a.append(elem);
+    container.append(a);
+  }
+
+  return {
+    icon: `
+    <svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-file">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+      <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+    </svg>
+		`,
+    iconColor: "azure",
+    element: container,
+  };
+}
 
 function miniDisplayMedia(items, options) {
 	const container = cloneTemplate('#tpl-media-card');
@@ -1571,7 +1600,7 @@ function timelineGroups(items, options) {
 			}
 			groups[lastLocGroupIdx].push(item);
 		}
-		
+
 		if (groups[groups.length-1]?.[0]?._category != item._category) {
 			// current item is in different category as previous item, so create new group
 			groups.push([]);
@@ -1586,7 +1615,7 @@ function timelineGroups(items, options) {
 	// split messages into groups by conversation (participants)
 	for (let i = 0; i < groups.length; i++) {
 		const group = groups[i];
-		
+
 		if (group.length > 0 && group[0]._category != "conversation") {
 			continue;
 		}
@@ -1615,7 +1644,7 @@ function timelineGroups(items, options) {
 
 		groups.splice(i, 1, ...convosArray);
 	}
-	
+
 	// further divide groups by temporal locality and max size
 	const newGroups = [];
 	const maxGroupSizes = {
@@ -1697,7 +1726,7 @@ function renderTimelineGroups(groups, options) {
 
 	groups.forEach((group, i) => {
 		if (!group.length) return;
-		
+
 		const prevGroup = groups[i-1];
 		const groupDate = new Date(group[0].timestamp);
 		const prevGroupDate = new Date(prevGroup?.[prevGroup?.length-1]?.timestamp);
@@ -1717,11 +1746,11 @@ function renderTimelineGroups(groups, options) {
 		}
 
 		const itemEl = cloneTemplate('#tpl-tl-item-card');
-		
+
 		$('.list-timeline-time', itemEl).innerText = tsDisplay.time;
 
 		const display = itemMiniDisplay(group, options);
-		
+
 		if (display.element) {
 			$('.list-timeline-icon', itemEl).innerHTML = display.icon;
 			$('.list-timeline-icon', itemEl).classList.add(`bg-${display.iconColor}`);
@@ -1765,18 +1794,18 @@ const PreviewModal = (function() {
 		// prev, next functions should be set by the pages that use this modal
 		renderItem: async function(item) {
 			private.reset();
-	
+
 			$('#modal-preview .media-owner-avatar').innerHTML = avatar(true, item.entity, "me-3");
 			$('#modal-preview .media-owner-name').innerText = entityDisplayNameAndAttr(item.entity).name;
 			$('#modal-preview .text-secondary').innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
-	
+
 			$('#modal-preview .modal-title').innerHTML = `<span class="avatar avatar-xs rounded me-2" style="background-image: url('/resources/images/data-sources/${tlz.dataSources[item.data_source_name].icon}')"></span>`;
 			$('#modal-preview .modal-title').appendChild(document.createTextNode(item?.filename || baseFilename(item?.data_file)));
 			$('#modal-preview .subheader').innerText = `# ${item.id}`;
-	
+
 			const mediaElem = itemContentElement(item);
 			$('#modal-preview-content').append(mediaElem);
-	
+
 			// toggle prev/next buttons
 			private.prevItem = await this.prev(item);
 			private.nextItem = await this.next(item);
@@ -1785,13 +1814,13 @@ const PreviewModal = (function() {
 			} else {
 				$$('#modal-preview .btn-prev').forEach(elem => elem.classList.add('disabled'));
 			}
-	
+
 			if (private.nextItem) {
 				$$('#modal-preview .btn-next').forEach(elem => elem.classList.remove('disabled'));
 			} else {
 				$$('#modal-preview .btn-next').forEach(elem => elem.classList.add('disabled'));
 			}
-	
+
 			// TODO: is this used/needed?
 			private.currentItem = item;
 		}
@@ -2305,52 +2334,52 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 function base64ArrayBuffer(arrayBuffer) {
 	var base64    = ''
 	var encodings = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-  
+
 	var bytes         = new Uint8Array(arrayBuffer)
 	var byteLength    = bytes.byteLength
 	var byteRemainder = byteLength % 3
 	var mainLength    = byteLength - byteRemainder
-  
+
 	var a, b, c, d
 	var chunk
-  
+
 	// Main loop deals with bytes in chunks of 3
 	for (var i = 0; i < mainLength; i = i + 3) {
 	  // Combine the three bytes into a single integer
 	  chunk = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2]
-  
+
 	  // Use bitmasks to extract 6-bit segments from the triplet
 	  a = (chunk & 16515072) >> 18 // 16515072 = (2^6 - 1) << 18
 	  b = (chunk & 258048)   >> 12 // 258048   = (2^6 - 1) << 12
 	  c = (chunk & 4032)     >>  6 // 4032     = (2^6 - 1) << 6
 	  d = chunk & 63               // 63       = 2^6 - 1
-  
+
 	  // Convert the raw binary segments to the appropriate ASCII encoding
 	  base64 += encodings[a] + encodings[b] + encodings[c] + encodings[d]
 	}
-  
+
 	// Deal with the remaining bytes and padding
 	if (byteRemainder == 1) {
 	  chunk = bytes[mainLength]
-  
+
 	  a = (chunk & 252) >> 2 // 252 = (2^6 - 1) << 2
-  
+
 	  // Set the 4 least significant bits to zero
 	  b = (chunk & 3)   << 4 // 3   = 2^2 - 1
-  
+
 	  base64 += encodings[a] + encodings[b] + '=='
 	} else if (byteRemainder == 2) {
 	  chunk = (bytes[mainLength] << 8) | bytes[mainLength + 1]
-  
+
 	  a = (chunk & 64512) >> 10 // 64512 = (2^6 - 1) << 10
 	  b = (chunk & 1008)  >>  4 // 1008  = (2^6 - 1) << 4
-  
+
 	  // Set the 2 least significant bits to zero
 	  c = (chunk & 15)    <<  2 // 15    = 2^4 - 1
-  
+
 	  base64 += encodings[a] + encodings[b] + encodings[c] + '='
 	}
-	
+
 	return base64
 }
 

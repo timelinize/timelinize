@@ -994,6 +994,11 @@ var classifications = []Classification{
 		Labels:      []string{"Collection", "Album", "Playlist"},
 		Description: "A group of items",
 	},
+	{
+		Name:        "file",
+		Labels:      []string{"File"},
+		Description: "Filesystem file",
+	},
 
 	// {
 	// 	Name:        "image",
@@ -1023,6 +1028,7 @@ var (
 	ClassMedia = getClassification("media")
 	// ClassScreen = getClassification("screen") // TODO: screenshot...?
 	ClassCollection = getClassification("collection")
+	ClassFile       = getClassification("file")
 )
 
 func getClassification(name string) Classification {
