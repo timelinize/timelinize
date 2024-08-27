@@ -1554,7 +1554,7 @@ function timelineGroups(items, options) {
 	let lastLocGroupIdx;
 	for (const item of items) {
 		// TODO: only do social as conversation if it has a sent relation...
-		item._category = item.classification;
+		item._category = item.classification || "unknown"; // in case item is not classified, still have a category, otherwise no group is made and an error occurs below (see #36)
 		if (item.classification == 'message'
 			|| item.classification == 'email'
 			|| item.classification == 'social') {
