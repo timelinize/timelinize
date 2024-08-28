@@ -19,6 +19,7 @@
 package timeline
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -470,4 +471,48 @@ func (p processor) String() string {
 		accountIDOrFilename = "account:" + strconv.Itoa(int(p.acc.ID))
 	}
 	return p.ds.Name + ":" + accountIDOrFilename
+}
+
+// couldBeMarkdown is a very naive Markdown detector. I'm trying to avoid regexp for performance,
+// but this implementation is (admittedly) mildly effective. May have lots of false positives.
+func couldBeMarkdown(input []byte) bool {
+	for _, pattern := range [][]byte{
+		// links, images, and banners
+		[]byte("](http"),
+		[]byte("](/"),
+		[]byte("!["), // images
+		[]byte("[!"), // (GitHub-flavored) banners/notices
+		// blocks
+		[]byte("\n> "),
+		[]byte("\n```"),
+		// lists
+		[]byte("\n1. "),
+		[]byte("\n- "),
+		[]byte("\n* "),
+		// headings; ignore the h1 "# " since it could just as likely be a code comment
+		[]byte("\n## "),
+		[]byte("\n### "),
+		[]byte("\n=\n"),
+		[]byte("\n==\n"),
+		[]byte("\n==="),
+		[]byte("\n-\n"),
+		[]byte("\n--\n"),
+		[]byte("\n---"),
+	} {
+		if bytes.Contains(input, pattern) {
+			return true
+		}
+	}
+	for _, pair := range [][]byte{
+		{'_'},
+		{'*', '*'},
+		{'*'},
+		{'`'},
+	} {
+		// this isn't perfect, because the matching "end token" could have been truncated
+		if bytes.Count(input, pair)%2 == 0 {
+			return true
+		}
+	}
+	return false
 }

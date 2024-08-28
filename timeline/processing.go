@@ -1449,7 +1449,7 @@ func detectContentType(peekedBytes []byte, it *Item) {
 	contentType := http.DetectContentType(peekedBytes)
 
 	// but if it couldn't, then we can detect a couple more common ones
-	// (as of Q1 2024, Go's standard lib doesn't support HEIC or
+	// (last checked Q1 2024: Go's standard lib doesn't support HEIC or
 	// quicktime---a specific kind of .mv/.mp4 video---files,
 	// which are common with Apple devices)
 	if contentType == defaultContentType {
@@ -1461,19 +1461,23 @@ func detectContentType(peekedBytes []byte, it *Item) {
 	}
 
 	// if we still don't know, try the file extension as a last resort
+	ext := path.Ext(it.Content.Filename)
 	if contentType == defaultContentType {
-		ext := path.Ext(it.Content.Filename)
+		if typeByExt := typeByExtension(ext); typeByExt != "" {
+			contentType = typeByExt
+		}
+	}
 
-		if ctByExt := mime.TypeByExtension(ext); ctByExt != "" {
-			contentType = ctByExt
-		} else {
-			// Ugh, still not recognized. I was surprised that DNG and HEIC files don't
-			// have a match even on modern Macs (but they are recognized by Linux... go
-			// figure) -- so let's at least maintain our own list of common file types
-			// as a final fallback.
-			if hardcodedType, ok := commonFileTypes[strings.ToLower(ext)]; ok {
-				contentType = hardcodedType
-			}
+	// Markdown gets detected as plaintext or even HTML (if the first part of the file has HTML),
+	// so check for Markdown just in case; the file extension is actually a better indicator here;
+	// because you wouldn't have an HTML document or even a plaintext file with a .md extension,
+	// for example.
+	if strings.HasPrefix(contentType, "text/plain") || strings.HasPrefix(contentType, "text/html") {
+		// file extension can be the best indicator since, with Markdown, it's an explicit declaration of file type
+		if typeByExt := typeByExtension(ext); typeByExt != "" {
+			contentType = typeByExt
+		} else if couldBeMarkdown(peekedBytes) {
+			contentType = "text/markdown"
 		}
 	}
 
@@ -1514,6 +1518,26 @@ var commonFileTypes = map[string]string{
 
 	// video
 	".3gp": "video/3gpp",
+
+	// markdown
+	".md":       "text/markdown",
+	".mdown":    "text/markdown",
+	".markdown": "text/markdown",
+}
+
+func typeByExtension(ext string) string {
+	if ctByExt := mime.TypeByExtension(ext); ctByExt != "" {
+		return ctByExt
+	} else {
+		// Ugh, still not recognized. I was surprised that DNG and HEIC files don't
+		// have a match even on modern Macs (but they are recognized by Linux... go
+		// figure) -- so let's at least maintain our own list of common file types
+		// as a final fallback.
+		if hardcodedType, ok := commonFileTypes[strings.ToLower(ext)]; ok {
+			return hardcodedType
+		}
+	}
+	return ""
 }
 
 // Used to see if the size of content is big enough to go on disk

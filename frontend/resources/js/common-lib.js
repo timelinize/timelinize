@@ -1061,16 +1061,50 @@ function itemContentElement(item, opts) {
 		return noContent;
 	}
 
-	if (item.data_text && item.data_type.startsWith("text/"))
+	if (item.data_type.startsWith("text/"))
 	{
 		const container = document.createElement('div');
 		container.classList.add('content');
 		container.dataset.contentType = "text";
-		if (opts?.compact) {
-			container.innerText = maxlenStr(item.data_text, 100);
-		} else {
-			container.innerText = item.data_text;
+
+		function renderTextData(elem, text) {
+			if (opts?.maxLength) { 
+				text = maxlenStr(text, opts.maxLength);
+			}
+
+			if (item.data_type.startsWith("text/plain")) {
+				elem.innerText = text;
+			} else if (item.data_type.startsWith("text/markdown")) {
+				elem.innerHTML = DOMPurify.sanitize(marked.parse(text));
+			} else if (item.data_type.startsWith("text/html")) {
+				const iframe = document.createElement('iframe');
+				if (item.data_file) {
+					iframe.src = `/repo/${item.repo_id}/${item.data_file}`;
+				} else if (item.data_text) {
+					iframe.srcdoc = DOMPurify.sanitize(truncated);
+				}
+				elem.append(iframe);
+			}
 		}
+
+		if (item.data_text) {
+			renderTextData(container, item.data_text);
+		} else if (item.data_file) {
+			// render HTML files directly into an iframe using its URL,
+			// but other text data we download and truncate/parse
+			if (item.data_type.startsWith("text/html")) {
+				renderTextData(container);
+			} else {
+				fetch(`/repo/${item.repo_id}/${item.data_file}`)
+					.then((response) => response.text())
+					.then((text) => {
+						renderTextData(container, text);
+					});
+			}
+		} else {
+			return noContentElem();
+		}
+		
 		return container;
 	}
 	else if (item.data_file || item.data_hash)
@@ -1273,11 +1307,6 @@ function itemContentElement(item, opts) {
 			audioTag.src = `/repo/${item.repo_id}/${item.data_file}`;
 			return audioTag;
 		}
-		else if (item.data_type.startsWith("text/"))
-		{
-			// TODO: load and populate text file contents
-			console.error("TODO: text files not yet implemented");
-		}
 		else
 		{
 			const elem = noContentElem();
@@ -1328,20 +1357,12 @@ function itemMiniDisplay(items, options) {
 			return miniDisplayMedia(items, options);
 		case 'location':
 			return miniDisplayLocations(items, options);
+		case 'document':
+		case 'note':
+			return miniDisplayPaper(items);
 		default:
-			console.warn("UNSUPPORTED CLASS:", representative);
-			const el = document.createElement('div');
-			el.innerText = "No results";
-			return {
-				// icon: `
-				// <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-messages" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-				// 	<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-				// 	<path d="M21 14l-3 -3h-7a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1h9a1 1 0 0 1 1 1v10"></path>
-				// 	<path d="M14 15v2a1 1 0 0 1 -1 1h-7l-3 3v-10a1 1 0 0 1 1 -1h2"></path>
-				// </svg>`,
-				iconColor: 'gray',
-				element: el,
-			};
+			console.warn("TODO: UNSUPPORTED ITEM CLASS:", representative.classification, items);
+			return miniDisplayMisc(items);
 	}
 }
 
@@ -1425,6 +1446,62 @@ function miniDisplayMedia(items, options) {
 	};
 }
 
+
+function miniDisplayPaper(items) {
+	const container = document.createElement('div');
+	for (const item of items) {
+		container.append(renderPaperItem(item));
+	}
+
+	return {
+		icon: `
+			<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					class="icon icon-tabler icons-tabler-outline icon-tabler-file-text">
+				<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+				<path d="M14 3v4a1 1 0 0 0 1 1h4" />
+				<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+				<path d="M9 9l1 0" />
+				<path d="M9 13l6 0" />
+				<path d="M9 17l6 0" />
+			</svg>`,
+		iconColor: 'lime',
+		element: container,
+	};
+}
+
+function renderPaperItem(item) {
+	const el = document.createElement('div');
+	el.classList.add('paper', 'paper-fold');
+	el.append(itemContentElement(item, {
+		maxLength: 1024, // we don't want to show an entire big file on a mini-display
+	}));
+	return el;
+}
+
+
+function miniDisplayMisc(items) {
+	const container = document.createElement('div');
+	for (const item of items) {
+		container.append(itemContentElement(item, {
+			maxLength: 1024, // we don't want to show an entire big file on a mini-display
+		}));
+	}
+	return {
+		icon: `
+			<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					class="icon icon-tabler icons-tabler-outline icon-tabler-file-unknown">
+				<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+				<path d="M14 3v4a1 1 0 0 0 1 1h4" />
+				<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+				<path d="M12 17v.01" />
+				<path d="M12 14a1.5 1.5 0 1 0 -1.14 -2.474" />
+			</svg>`,
+		iconColor: 'gray',
+		element: container,
+	};
+}
 
 function miniDisplayMessages(items) {
 	const card = document.createElement('div');
@@ -1827,7 +1904,7 @@ function itemPreviews(items) {
 	for (const item of items) {
 		const contentEl = itemContentElement(item, {
 			thumbnail: true,
-			compact: true,
+			maxLength: 100,
 			autoplay: true
 		});
 		container.append(contentEl);

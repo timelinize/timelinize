@@ -1,8 +1,8 @@
 <a href="https://timelinize.com">
 	<picture>
-		<source media="(prefers-color-scheme: dark)" srcset="https://github.com/timelinize/timelinize/blob/main/frontend/resources/images/timelinize-dark.svg">
-		<source media="(prefers-color-scheme: light)" srcset="https://github.com/timelinize/timelinize/blob/main/frontend/resources/images/timelinize-light.svg">
-		<img src="https://github.com/timelinize/timelinize/blob/main/frontend/resources/images/timelinize-light.svg" alt="Timelinize" width="400">
+		<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-dark.svg">
+		<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-light.svg">
+		<img src="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-light.svg" alt="Timelinize" width="400">
 	</picture>
 </a>
 <hr>

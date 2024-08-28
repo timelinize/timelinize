@@ -694,6 +694,51 @@ the one that it is stuck to when scrolling */
 
 
 
+
+
+
+
+.paper {
+	background: white;
+	padding: 1.5em 2em;
+}
+
+.paper-fold {
+	position: relative;
+	background: linear-gradient(-150deg, transparent 1.5em, #fff 0);
+	border-radius: 8px;
+	box-shadow: 0 10px 13px -13px rgba(0, 0, 0, 0.25)
+}
+
+.paper-fold::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	right: 0;
+	background: linear-gradient(to left bottom, #fff0 50%, rgb(255, 255, 255) 0, rgb(239, 239, 239)) no-repeat 100% 0;
+	box-shadow: -10px 10px 15px -5px rgba(0,0,0,.15);
+	width: 1.73em;
+	height: 3em;
+	transform: translateY(-1.3em) rotate(-30deg);
+	transform-origin: bottom right;
+	border-bottom-left-radius: inherit;
+}
+
+iframe {
+	width: 100%;
+}
+
+
+
+
+
+
+
+
+
+
+
+
 #app-loader {
 	position: fixed;
 	top: 0;
