@@ -1,0 +1,107 @@
+[linters]
+    enable-all = true
+
+    enable = []
+
+    # We use a blocking approach, enabling all the linters by default and disabling
+    # only the ones we're not interested in.
+    disable = [
+    "exportloopref",
+    "gomoddirectives",
+    "asciicheck",
+    "containedctx",
+    "cyclop",
+    "dogsled",
+    "dupl",
+    "errcheck",
+    "execinquery",
+    "exhaustive",
+    "exhaustruct",
+    "forbidigo",
+    "funlen",
+    "gci",
+    "gochecknoglobals",
+    "gocognit",
+    "goconst",
+    "gocyclo",
+    "godox",
+    "err113",
+    "godot",
+    "gofmt",
+    "gofumpt",
+    "goheader",
+    "gomnd",
+    "mnd",
+    "importas",
+    "inamedparam",
+    "ireturn",
+    "lll",
+    "musttag",
+    "nilnil",
+    "nonamedreturns",
+    "nlreturn",
+    "paralleltest",
+    "perfsprint",
+    "prealloc",
+    "promlinter",
+    "protogetter",
+    "tagliatelle",
+    "testpackage",
+    "thelper",
+    "typecheck",
+    "unparam",
+    "wastedassign",
+    "whitespace",
+    "wrapcheck",
+    "wsl",
+    "varnamelen",
+    ]
+
+
+[run]
+    timeout = "5m"
+    issues-exit-code = 1
+    tests = true
+    build-tags = []
+    skip-dirs = []
+    skip-dirs-use-default = true
+    skip-files = []
+    modules-download-mode = ""
+    allow-parallel-runners = false
+
+
+[output]
+    show-stats = true
+    print-issued-lines = true
+    print-linter-name = true
+    uniq-by-line = true
+    path-prefix = ""
+    sort-results = true
+[[formats]]
+    format = "colored-line-number"
+
+[severity]
+    default-severity = "error"
+    case-sensitive = false
+
+[issues]
+    exclude = []
+
+    max-issues-per-linter = 0
+    max-same-issues = 0
+    exclude-use-default = false
+    include = []
+    new = false
+    fix = false
+
+	[[issues.exclude-rules]]
+        path = "_test.go"
+        linters = ["errcheck", "gosec", "noctx", "bodyclose", "forcetypeassert", "maintidx"]
+
+	[[issues.exclude-rules]]
+        path = "_test.go"
+        linters = ["revive"]
+        text = "unchecked-type-assertion:"
+
+[linters-settings.staticcheck]
+    checks = []
