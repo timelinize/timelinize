@@ -1061,7 +1061,7 @@ function itemContentElement(item, opts) {
 		return noContent;
 	}
 
-	if (item.data_type.startsWith("text/"))
+	if (item?.data_type?.startsWith("text/"))
 	{
 		const container = document.createElement('div');
 		container.classList.add('content');
