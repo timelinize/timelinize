@@ -1010,6 +1010,16 @@ var classifications = []Classification{
 		Labels:      []string{"Collection", "Album", "Playlist"},
 		Description: "A group of items",
 	},
+	{
+		Name:        "note",
+		Labels:      []string{"Note", "Text"},
+		Description: "A brief record written down to assist the memory",
+	},
+	{
+		Name:        "document",
+		Labels:      []string{"Document", "Excel", "Word", "PDF", "PowerPoint"},
+		Description: "A file that contains text, images, or other data",
+	},
 }
 
 var (
@@ -1020,6 +1030,8 @@ var (
 	ClassMedia    = getClassification("media")
 	// ClassScreen = getClassification("screen") // TODO: screenshot...?
 	ClassCollection = getClassification("collection")
+	ClassNote = getClassification("note")
+	ClassDocument = getClassification("document")
 )
 
 func getClassification(name string) Classification {
