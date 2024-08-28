@@ -165,6 +165,12 @@ type Item struct {
 	ID string
 
 	// Item classification, i.e. the kind of thing it represents.
+	// This value adds semantic context to the item, which helps
+	// programs know how to display, visualize, and even query
+	// the item; and helps users know how to think about it.
+	// For example, we display and think of chat messages very
+	// differently than we do memos-to-self, social media posts,
+	// and emails.
 	Classification Classification
 
 	// The timestamp when the item originated. If multiple
@@ -949,6 +955,16 @@ type Annotation struct {
 }
 type ReviewReason string
 
+// Classification represents item classes. Classifying items is used to
+// convey their semantic meaning or intent. For example, a text item
+// could be any number of things: an email, a social media post, a
+// chat message, a note to self, etc. Classifications help the UI
+// know how to display the items and how to craft more semantically-
+// relevant queries in the DB. Overly vague or generic classifications
+// should be avoided if possible, and classes should be distinct from
+// MIME types (Content-Type in HTTP; or data_type in the schema),
+// which help programs know how to read/parse data, classes help programs
+// know how to semantically interpret or display them.
 type Classification struct {
 	id          *int64
 	Standard    bool     `json:"standard"`
@@ -994,22 +1010,6 @@ var classifications = []Classification{
 		Labels:      []string{"Collection", "Album", "Playlist"},
 		Description: "A group of items",
 	},
-
-	// {
-	// 	Name:        "image",
-	// 	Labels:      []string{"Image", "Photo", "Picture", "Visualization"},
-	// 	Description: "An image: a photo, illustration, chart, screenshot, brief animation, or other visualization",
-	// },
-	// {
-	// 	Name:        "video",
-	// 	Labels:      []string{"Video"},
-	// 	Description: "A video: home video, video file, reel, or presentation; some sort of visual recording",
-	// },
-	// {
-	// 	Name:        "audio",
-	// 	Labels:      []string{"Audio", "Sound"},
-	// 	Description: "Sound: music, audiobook, speech, lecture, memo, or other audio recording",
-	// },
 }
 
 var (
@@ -1017,10 +1017,7 @@ var (
 	ClassEmail    = getClassification("email")
 	ClassSocial   = getClassification("social")
 	ClassLocation = getClassification("location")
-	// ClassImage    = getClassification("image")
-	// ClassVideo    = getClassification("video")
-	// ClassAudio    = getClassification("audio")
-	ClassMedia = getClassification("media")
+	ClassMedia    = getClassification("media")
 	// ClassScreen = getClassification("screen") // TODO: screenshot...?
 	ClassCollection = getClassification("collection")
 )
