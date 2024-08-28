@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package telegram implements a data source for Telegram data exports.
 package telegram
 
 import (

@@ -16,6 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package tlcmd facilitates the command line interface (CLI)
+// and implements the main().
 package tlcmd
 
 import (

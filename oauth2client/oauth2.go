@@ -16,6 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package oauth2client implements a pluggable OAuth2 client that can service
+// either local or remote applications.
 package oauth2client
 
 import (

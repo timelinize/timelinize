@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package gpx implements a data source for GPS Exchange Format (https://en.wikipedia.org/wiki/GPS_Exchange_Format).
 package gpx
 
 import (

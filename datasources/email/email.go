@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package email implements a data source for emails (mbox and eml files).
 package email
 
 import (

@@ -16,8 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Package googlephotos implements the Google Photos service
-// using its API, documented at https://developers.google.com/photos/.
+// Package googlephotos implements a data source for Google Photos albums and
+// exports, and also via its API documented at https://developers.google.com/photos/.
 package googlephotos
 
 import (

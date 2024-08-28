@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package vcard implements a data source for vCard files.
 package vcard
 
 import (

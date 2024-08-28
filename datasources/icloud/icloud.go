@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package icloud implements a data source for Apple account data exports (iCloud backups, exported from your account).
 package icloud
 
 import (

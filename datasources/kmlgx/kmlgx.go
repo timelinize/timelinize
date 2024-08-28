@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package kmlgx implements a data source for KML files with Google extensions (gx).
 package kmlgx
 
 import (

@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package nmea0183 implements a data source for NMEA 0183 logs (radios, marine electronics, etc).
 package nmea0183
 
 import (

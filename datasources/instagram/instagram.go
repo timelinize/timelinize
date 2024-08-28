@@ -16,8 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Package instagram implements a Timeliner data source for
-// importing data from Instagram archive files.
+// Package instagram implements a data source for importing data from Instagram archive files.
 package instagram
 
 import (

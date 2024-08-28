@@ -16,7 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Package generic implements a data source that generically imports files on disk.
+// Package generic implements a data source that imports generic files from
+// disk that aren't better supported by any other data source.
 package generic
 
 import (

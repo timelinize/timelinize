@@ -16,6 +16,9 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package tlzapp provides the application functionality for timelines, including
+// file utilities, the HTTP server and APIs, the registration of endpoints for the
+// CLI, signals, etc.
 package tlzapp
 
 import (

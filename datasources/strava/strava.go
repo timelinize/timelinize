@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package strava implements a data source for Strava account data.
 package strava
 
 import (

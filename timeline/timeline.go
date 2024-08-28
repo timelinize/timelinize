@@ -16,6 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package timeline facilitiates the timeline functions: database, data importing,
+// processing, fundamental data structures (for the data graph, etc).
 package timeline
 
 import (

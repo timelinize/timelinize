@@ -16,6 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package imessage implements a data source for Apple Messages (iMessage), either
+// directly from the iMessage folder on a Macbook, or an iPhone backup.
 package imessage
 
 import (

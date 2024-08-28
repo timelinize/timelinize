@@ -16,6 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package iphone implements a data source for iPhone backups. It supports
+// the camera roll, messages, and address book, along with basic device info.
 package iphone
 
 import (

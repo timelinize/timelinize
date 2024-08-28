@@ -18,6 +18,7 @@
 
 // Package gmail implements a Gmail data source using its API,
 // documented at https://developers.google.com/gmail/api/.
+// TODO: WIP - Development of this package has stalled for now; use the email data source.
 package gmail
 
 import (

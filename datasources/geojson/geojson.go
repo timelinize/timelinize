@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package geojson implements a data source for GeoJSON data (RFC 7946): https://geojson.org/
 package geojson
 
 import (

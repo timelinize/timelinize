@@ -16,8 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Package facebook implements the Facebook service using
-// the Graph API: https://developers.facebook.com/docs/graph-api
+// Package facebook implements the Facebook service by supporting account
+// export files and also the Graph API: https://developers.facebook.com/docs/graph-api
 package facebook
 
 import (

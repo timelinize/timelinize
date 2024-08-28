@@ -16,9 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Package googlelocation implements a Timeliner data source for
-// importing data from the Google Location History (aka Google
-// Maps Timeline).
+// Package googlelocation implements a data source for  importing data from
+// the Google Location History (aka Google Maps Timeline).
 //
 // I found this website very helpful as documentation of the Takeout format:
 // https://locationhistoryformat.com/

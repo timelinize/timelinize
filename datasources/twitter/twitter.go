@@ -16,8 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Package twitter implements a Timeliner service for importing
-// and downloading data from Twitter.
+// Package twitter implements a data source for importing and downloading data from X (formerly Twitter).
 package twitter
 
 import (

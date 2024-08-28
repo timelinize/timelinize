@@ -16,6 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package media implements a data source for general media files (photos, videos, and audio)
+// that may have come from a camera roll, photo library, etc.
 package media
 
 import (

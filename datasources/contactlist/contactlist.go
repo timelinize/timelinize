@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// Package contactlist implements a data source for contact lists.
 package contactlist
 
 import (
