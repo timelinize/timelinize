@@ -22,6 +22,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -51,6 +52,7 @@ func init() {
 type FileImporter struct {
 }
 
+// Recognize returns whether the input is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	for _, filename := range filenames {
 		fsys, err := archiver.FileSystem(ctx, filename)
@@ -111,6 +113,7 @@ func (jp jsonPath) String() string {
 	return strings.Join(parts, ".")
 }
 
+// FileImport imports data from the file.
 func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	// dsOpt := opt.DataSourceOptions.(*Options)
 
@@ -177,16 +180,16 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 				}
 
 				// TODO: hrm, any way we can do without this? maybe wrap Decode() or something?
-				if context == "object_value" {
+				if context == objectValue {
 					nesting = nesting[:len(nesting)-1]
-					context = "object_key"
+					context = objectKey
 				}
 
 			case ".profile_pictures":
 				opt.Log.Debug("TODO: process profile pictures")
 
 			case ".contacts.list":
-				dec.Token() // consume array opening '['
+				dec.Token() //nolint:errcheck // consume array opening '['
 
 				for dec.More() {
 					var c contact
@@ -213,10 +216,10 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 					}
 				}
 
-				dec.Token() // consume closing ']'
-				if context == "object_value" {
+				dec.Token() //nolint:errcheck // consume closing ']'
+				if context == objectValue {
 					nesting = nesting[:len(nesting)-1]
-					context = "object_key"
+					context = objectKey
 				}
 
 			case ".chats.list.type",
@@ -235,7 +238,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 					currentChatType = next.(string)
 
 					nesting = nesting[:len(nesting)-1]
-					context = "object_key"
+					context = objectKey
 					return nil
 				}
 				if scope == ".chats.list.id" {
@@ -251,7 +254,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 						},
 					}
 					nesting = nesting[:len(nesting)-1]
-					context = "object_key"
+					context = objectKey
 					return nil
 				}
 
@@ -260,7 +263,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 					return nil
 				}
 
-				dec.Token() // consume opening '['
+				dec.Token() //nolint:errcheck // consume opening '['
 
 				for dec.More() {
 					var m message
@@ -312,12 +315,11 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 					itemChan <- ig
 				}
 
-				dec.Token() // consume closing ']'
-				if context == "object_value" {
+				dec.Token() //nolint:errcheck // consume closing ']'
+				if context == objectValue {
 					nesting = nesting[:len(nesting)-1]
-					context = "object_key"
+					context = objectKey
 				}
-
 			}
 
 			return nil
@@ -336,16 +338,16 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 				if v, ok := above.Token.(json.Delim); ok {
 					switch v {
 					case '{':
-						context = "object_key"
+						context = objectKey
 					case '[':
 						context = "array"
 					}
-				} else if above.context == "object_key" {
-					context = "object_value"
+				} else if above.context == objectKey {
+					context = objectValue
 				}
 			}
 
-			if context != "object_key" {
+			if context != objectKey {
 				// if not an object key, let handler get it
 				if err := handler(nesting.String(), dec); err != nil {
 					return err
@@ -355,7 +357,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 			////////
 
 			next, err := dec.Token()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {
@@ -374,14 +376,14 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 					nesting = nesting[:len(nesting)-1]
 					if len(nesting) > 0 {
 						priorContext := nesting[len(nesting)-1].context
-						if priorContext != "array" && priorContext != "object_value" {
+						if priorContext != "array" && priorContext != objectValue {
 							nesting = nesting[:len(nesting)-1]
 						}
 					}
 				}
-			} else if context == "object_key" {
+			} else if context == objectKey {
 				nesting = append(nesting, tkn)
-			} else if context == "object_value" {
+			} else if context == objectValue {
 				nesting = nesting[:len(nesting)-1]
 			}
 		}
@@ -394,3 +396,8 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 type Options struct {
 	// remember to use JSON tags
 }
+
+const (
+	objectValue = "object_value"
+	objectKey   = "object_key"
+)

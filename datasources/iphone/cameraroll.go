@@ -41,7 +41,7 @@ func (fimp *FileImporter) cameraRoll(ctx context.Context) error {
 		var fileID, relativePath *string
 		err := rows.Scan(&fileID, &relativePath)
 		if err != nil {
-			return fmt.Errorf("scanning row: %v", err)
+			return fmt.Errorf("scanning row: %w", err)
 		}
 
 		// I haven't seen this, but just to avoid a panic
@@ -49,25 +49,20 @@ func (fimp *FileImporter) cameraRoll(ctx context.Context) error {
 			continue
 		}
 
-		if err := fimp.processCameraRollFile(ctx, *fileID, *relativePath); err != nil {
-			fimp.opt.Log.Error("processing camera roll file",
-				zap.String("fileID", *fileID),
-				zap.String("relativePath", *relativePath),
-				zap.Error(err))
-		}
+		fimp.processCameraRollFile(ctx, *fileID, *relativePath)
 	}
 	if err = rows.Err(); err != nil {
-		return fmt.Errorf("scanning rows: %v", err)
+		return fmt.Errorf("scanning rows: %w", err)
 	}
 
 	return nil
 }
 
-func (fimp *FileImporter) processCameraRollFile(ctx context.Context, fileID, relativePath string) error {
+func (fimp *FileImporter) processCameraRollFile(_ context.Context, fileID, relativePath string) {
 	// skip unsupported file types
 	class, supported := media.ItemClassByExtension(relativePath)
 	if !supported {
-		return nil
+		return
 	}
 
 	fsys := domainFS{fimp, cameraRollDomain}
@@ -75,7 +70,7 @@ func (fimp *FileImporter) processCameraRollFile(ctx context.Context, fileID, rel
 	// skip sidecar movie files ("live photos") because we'll connect it when
 	// we process the actual photograph
 	if media.IsSidecarVideo(fsys, relativePath) {
-		return nil
+		return
 	}
 
 	item := &timeline.Item{
@@ -103,6 +98,4 @@ func (fimp *FileImporter) processCameraRollFile(ctx context.Context, fileID, rel
 	media.ConnectMotionPhoto(fimp.opt.Log, fsys, relativePath, ig)
 
 	fimp.itemChan <- ig
-
-	return nil
 }

@@ -16,6 +16,8 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+// DISABLED SINCE TWITTER (X) REMOVED FREE API ACCESS
+
 package twitter
 
 import (
@@ -31,10 +33,12 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
+// Authenticate authenticates with the remote data service.
 func (Client) Authenticate(ctx context.Context, acc timeline.Account, dsOpt any) error {
 	return acc.AuthorizeOAuth2(ctx, oauth2)
 }
 
+// APIImport imports data using the API.
 func (c *Client) APIImport(ctx context.Context, acc timeline.Account, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	var err error
 	c.httpClient, err = acc.NewHTTPClient(ctx, oauth2, rateLimit)

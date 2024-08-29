@@ -47,6 +47,7 @@ func init() {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	Simplification float64 `json:"simplification,omitempty"`
 }
@@ -55,9 +56,10 @@ type Options struct {
 type FileImporter struct {
 }
 
+// Recognize returns whether the input is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	if len(filenames) != 1 {
-		return timeline.Recognition{}, fmt.Errorf("only one input is supported (an archive or directory)")
+		return timeline.Recognition{}, errors.New("only one input is supported (an archive or directory)")
 	}
 
 	filename := filenames[0]
@@ -84,9 +86,10 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
+// FileImport imports data from the input.
 func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	if len(filenames) != 1 {
-		return fmt.Errorf("only one input is supported (an archive or directory)")
+		return errors.New("only one input is supported (an archive or directory)")
 	}
 
 	fsys, err := archiver.FileSystem(ctx, filenames[0])
@@ -96,7 +99,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 
 	profile, err := fi.readProfile(ctx, fsys)
 	if err != nil {
-		return fmt.Errorf("reading profile: %v", err)
+		return fmt.Errorf("reading profile: %w", err)
 	}
 	owner := timeline.Entity{
 		Name: profile.FirstName + " " + profile.LastName,
@@ -156,7 +159,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 
 	for {
 		rec, err := reader.Read()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -268,9 +271,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 	return nil
 }
 
-func (FileImporter) processActivity(ctx context.Context, fsys fs.FS, filename string, owner timeline.Entity,
-	coll *timeline.Item, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-
+func (FileImporter) processActivity(ctx context.Context, fsys fs.FS, filename string, owner timeline.Entity, coll *timeline.Item, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 
 	file, err := fsys.Open(filename)
@@ -319,6 +320,10 @@ func (FileImporter) readProfile(ctx context.Context, fsys fs.FS) (profile, error
 
 	var profile profile
 	for {
+		if err := ctx.Err(); err != nil {
+			return profile, err
+		}
+
 		rec, err := reader.Read()
 		if err == io.EOF {
 			break

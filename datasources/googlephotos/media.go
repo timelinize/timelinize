@@ -93,13 +93,13 @@ func (m mediaItem) metadata() (timeline.Metadata, error) {
 
 	widthInt, err := strconv.Atoi(m.MediaMetadata.Width)
 	if err != nil {
-		return meta, fmt.Errorf("parsing width as int: %v (width=%s)",
+		return meta, fmt.Errorf("parsing width as int: %w (width=%s)",
 			err, m.MediaMetadata.Width)
 	}
 	meta["Width"] = widthInt
 	heightInt, err := strconv.Atoi(m.MediaMetadata.Height)
 	if err != nil {
-		return meta, fmt.Errorf("parsing height as int: %v (height=%s)",
+		return meta, fmt.Errorf("parsing height as int: %w (height=%s)",
 			err, m.MediaMetadata.Height)
 	}
 	meta["Height"] = heightInt
@@ -125,9 +125,10 @@ func (m mediaItem) dataFileReader(ctx context.Context) (io.ReadCloser, error) {
 	}
 
 	const maxTries = 5
+	const wait = 5 * time.Second
 	var err error
 	var resp *http.Response
-	for i := 0; i < maxTries; i++ {
+	for range maxTries {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -135,18 +136,22 @@ func (m mediaItem) dataFileReader(ctx context.Context) (io.ReadCloser, error) {
 		}
 
 		// TODO: custom HTTP client? and honor context
-		resp, err = http.Get(u)
+		resp, err = http.Get(u) //nolint
 		if err != nil {
-			err = fmt.Errorf("getting media contents: %v", err)
+			err = fmt.Errorf("getting media contents: %w", err)
 			// TODO: proper logger
 			// log.Printf("[ERROR] %s: %s: %v - retrying... (attempt %d/%d)", DataSourceID, u, err, i+1, maxTries)
-			// TODO: honor context cancellation
-			time.Sleep(30 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+				continue
+			}
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			bodyText, err2 := io.ReadAll(io.LimitReader(resp.Body, 1024*256))
+			const maxSize = 1024 * 256
+			bodyText, err2 := io.ReadAll(io.LimitReader(resp.Body, maxSize))
 			resp.Body.Close()
 
 			if err2 == nil {
@@ -158,9 +163,12 @@ func (m mediaItem) dataFileReader(ctx context.Context) (io.ReadCloser, error) {
 			// TODO: proper logger
 			// log.Printf("[ERROR %s: %s: Bad response: %v - waiting and retrying... (attempt %d/%d)",
 			// 	DataSourceID, u, err, i+1, maxTries)
-			// TODO: honor context cancellation
-			time.Sleep(15 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+				continue
+			}
 		}
 
 		break

@@ -39,7 +39,7 @@ func trapSignalsPosix() {
 			switch sig {
 			case syscall.SIGQUIT:
 				timeline.Log.Warn("SIGQUIT: quitting process immediately")
-				os.Exit(2)
+				os.Exit(2) //nolint:mnd
 
 			case syscall.SIGTERM:
 				timeline.Log.Warn("SIGTERM: cleaning up resources, then terminating")

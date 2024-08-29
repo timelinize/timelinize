@@ -74,7 +74,8 @@ type FileImporter struct {
 	owner             *timeline.Entity
 }
 
-func (FileImporter) Recognize(ctx context.Context, folders []string) (timeline.Recognition, error) {
+// Recognize returns whether the folder is recognized.
+func (FileImporter) Recognize(_ context.Context, folders []string) (timeline.Recognition, error) {
 	var found, total int
 	for _, folder := range folders {
 		for _, filename := range []string{
@@ -94,6 +95,7 @@ func (FileImporter) Recognize(ctx context.Context, folders []string) (timeline.R
 	return timeline.Recognition{Confidence: float64(found) / float64(total)}, nil
 }
 
+// FileImport imports data from the given folder.
 func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	fimp.dsOpt = opt.DataSourceOptions.(*Options)
 	fimp.itemChan = itemChan
@@ -113,7 +115,7 @@ func (fimp *FileImporter) importFolder(ctx context.Context, root string) error {
 
 	db, err := sql.Open("sqlite3", filepath.Join(root, "Manifest.db")+"?mode=ro")
 	if err != nil {
-		return fmt.Errorf("opening manifest DB: %v", err)
+		return fmt.Errorf("opening manifest DB: %w", err)
 	}
 	defer db.Close()
 
@@ -139,13 +141,13 @@ func (fimp *FileImporter) importFolder(ctx context.Context, root string) error {
 	}
 
 	if err = fimp.addressBook(ctx); err != nil {
-		return fmt.Errorf("importing iPhone address book: %v", err)
+		return fmt.Errorf("importing iPhone address book: %w", err)
 	}
 	if err = fimp.messages(ctx); err != nil {
-		return fmt.Errorf("importing iPhone messages: %v", err)
+		return fmt.Errorf("importing iPhone messages: %w", err)
 	}
 	if err = fimp.cameraRoll(ctx); err != nil {
-		return fmt.Errorf("importing iPhone camera roll: %v", err)
+		return fmt.Errorf("importing iPhone camera roll: %w", err)
 	}
 
 	return nil
@@ -191,7 +193,8 @@ func (fimp FileImporter) fileIDToPath(fileID string) string {
 // This relative path is relative to the backup root here, NOT the original path on the iPhone.
 // The return value uses the forward slash ("/") as a path separator (as used with fs.FS).
 func (fimp FileImporter) fileIDToRelativePath(fileID string) string {
-	if len(fileID) < 2 {
+	const requiredLen = 2
+	if len(fileID) < requiredLen {
 		return fileID // I dunno; this is probably safer than an empty path element?
 	}
 	return path.Join(fileID[:2], fileID)
@@ -214,7 +217,7 @@ func (fimp FileImporter) loadCommCenter(ctx context.Context) (commCenterInfo, er
 
 	var commCenter commCenterInfo
 	if err := dec.Decode(&commCenter); err != nil {
-		return commCenterInfo{}, fmt.Errorf("decoding commcenter.plist file: %v", err)
+		return commCenterInfo{}, fmt.Errorf("decoding commcenter.plist file: %w", err)
 	}
 
 	return commCenter, nil

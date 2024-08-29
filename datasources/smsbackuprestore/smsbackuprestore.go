@@ -53,6 +53,7 @@ func init() {
 // FileImporter can import the data from a file.
 type FileImporter struct{}
 
+// Recognize returns whether this input is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	for _, filename := range filenames {
 		result, err := recognizeFile(ctx, filename)
@@ -72,7 +73,7 @@ func recognizeFile(ctx context.Context, filename string) (timeline.Recognition, 
 		return timeline.Recognition{}, nil
 	}
 	if err != nil {
-		return timeline.Recognition{}, fmt.Errorf("opening file: %v", err)
+		return timeline.Recognition{}, fmt.Errorf("opening file: %w", err)
 	}
 	defer file.Close()
 
@@ -93,21 +94,21 @@ func recognizeFile(ctx context.Context, filename string) (timeline.Recognition, 
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			break // ignore short or empty files
 		}
-		if _, ok := err.(*xml.SyntaxError); ok {
+		var syntaxErr *xml.SyntaxError
+		if errors.As(err, &syntaxErr) {
 			break // invalid XML file
 		}
 		if err != nil {
 			// other errors indicate we're unsure whether we can recognize this
-			return timeline.Recognition{}, fmt.Errorf("parsing XML token: %v", err)
+			return timeline.Recognition{}, fmt.Errorf("parsing XML token: %w", err)
 		}
 
 		if startElem, ok := tkn.(xml.StartElement); ok {
 			if startElem.Name.Local == "smses" {
 				// has the start of the expected XML structure!
 				return timeline.Recognition{Confidence: 1}, nil
-			} else {
-				break
 			}
+			break
 		}
 	}
 
@@ -130,17 +131,18 @@ type Options struct {
 	DefaultRegion string `json:"default_region,omitempty"`
 }
 
+// FileImport imports data from the input file.
 func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := *opt.DataSourceOptions.(*Options)
 
 	if dsOpt.OwnerPhoneNumber == "" {
-		return fmt.Errorf("owner phone number cannot be empty")
+		return errors.New("owner phone number cannot be empty")
 	}
 
 	// standardize phone number, and ensure it is marked as identity
 	standardizedPhoneNum, err := timeline.NormalizePhoneNumber(dsOpt.OwnerPhoneNumber, dsOpt.DefaultRegion)
 	if err != nil {
-		return fmt.Errorf("standardizing owner's phone number '%s': %v", dsOpt.OwnerPhoneNumber, err)
+		return fmt.Errorf("standardizing owner's phone number '%s': %w", dsOpt.OwnerPhoneNumber, err)
 	}
 	dsOpt.OwnerPhoneNumber = standardizedPhoneNum
 
@@ -170,7 +172,8 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, opt ti
 	}
 
 	// processing messages concurrently can be faster; but don't allow too many goroutines
-	throttle := make(chan struct{}, 100)
+	const maxGoroutines = 100
+	throttle := make(chan struct{}, maxGoroutines)
 	var wg sync.WaitGroup
 
 	dec := xml.NewDecoder(xmlFile)
@@ -182,20 +185,19 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, opt ti
 		}
 
 		tkn, err := dec.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("decoding next XML token: %v", err)
+			return fmt.Errorf("decoding next XML token: %w", err)
 		}
 
-		switch startElem := tkn.(type) {
-		case xml.StartElement:
+		if startElem, ok := tkn.(xml.StartElement); ok {
 			switch startElem.Name.Local {
 			case "sms":
 				var sms SMS
 				if err := dec.DecodeElement(&sms, &startElem); err != nil {
-					return fmt.Errorf("decoding XML element as SMS: %v", err)
+					return fmt.Errorf("decoding XML element as SMS: %w", err)
 				}
 
 				throttle <- struct{}{}
@@ -205,14 +207,12 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, opt ti
 						<-throttle
 						wg.Done()
 					}()
-					if err := imp.processSMS(sms, opt, dsOpt, itemChan); err != nil {
-						opt.Log.Error("processing SMS element", zap.Error(err))
-					}
+					imp.processSMS(sms, opt, dsOpt, itemChan)
 				}()
 			case "mms":
 				var mms MMS
 				if err := dec.DecodeElement(&mms, &startElem); err != nil {
-					return fmt.Errorf("decoding XML element as MMS: %v", err)
+					return fmt.Errorf("decoding XML element as MMS: %w", err)
 				}
 
 				throttle <- struct{}{}
@@ -222,9 +222,7 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, opt ti
 						<-throttle
 						wg.Done()
 					}()
-					if err := imp.processMMS(mms, opt, dsOpt, itemChan); err != nil {
-						opt.Log.Error("processing MMS element", zap.Error(err))
-					}
+					imp.processMMS(mms, opt, dsOpt, itemChan)
 				}()
 			}
 		}
@@ -235,9 +233,9 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, opt ti
 	return nil
 }
 
-func (imp *FileImporter) processSMS(sms SMS, opt timeline.ListingOptions, dsOpt Options, itemChan chan<- *timeline.Graph) error {
+func (imp *FileImporter) processSMS(sms SMS, opt timeline.ListingOptions, dsOpt Options, itemChan chan<- *timeline.Graph) {
 	if !sms.within(opt.Timeframe) {
-		return nil
+		return
 	}
 
 	sender, receiver := sms.people(dsOpt)
@@ -258,13 +256,11 @@ func (imp *FileImporter) processSMS(sms SMS, opt timeline.ListingOptions, dsOpt 
 	ig.ToEntity(timeline.RelSent, &receiver)
 
 	itemChan <- ig
-
-	return nil
 }
 
-func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt Options, itemChan chan<- *timeline.Graph) error {
+func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt Options, itemChan chan<- *timeline.Graph) {
 	if !mms.within(opt.Timeframe) {
-		return nil
+		return
 	}
 
 	sender, recipients := mms.people(dsOpt)
@@ -299,7 +295,7 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt 
 			Owner:     sender,
 			Content: timeline.ItemData{
 				MediaType: part.ContentType,
-				Filename:  part.Filename,
+				Filename:  filename,
 				Data:      part.data(),
 			},
 			Metadata: mms.metadata(),
@@ -318,7 +314,7 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt 
 
 	// some MMS are empty (or only have Seq=-1); no content means nil ItemGraph
 	if ig == nil {
-		return nil
+		return
 	}
 
 	// add relations to make sure other participants in a group text
@@ -328,8 +324,6 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt 
 	}
 
 	itemChan <- ig
-
-	return nil
 }
 
 // openFile opens the XML file at filename. However, as the Pro version
@@ -354,7 +348,7 @@ func openFile(ctx context.Context, filename string) (fs.File, error) {
 // These filenames give us no information and waste space in the DB.
 // And yes I have seen all of these myself.
 var junkFilenames = map[string]struct{}{
-	"null":            {},
+	null:              {},
 	"0":               {},
 	"text.000000.txt": {},
 	"text.000001.txt": {},

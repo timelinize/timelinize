@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-func loadSettingsFromTakeoutArchive(fsys fs.FS) (Settings, error) {
+func loadSettingsFromTakeoutArchive(fsys fs.FS) (settings, error) {
 	var file fs.File
 	var err error
 	for _, pathToTry := range []string{
@@ -39,27 +39,27 @@ func loadSettingsFromTakeoutArchive(fsys fs.FS) (Settings, error) {
 		}
 	}
 	if err != nil {
-		return Settings{}, err
+		return settings{}, err
 	}
 	defer file.Close()
 
-	var settings Settings
+	var settings settings
 	err = json.NewDecoder(file).Decode(&settings)
 	return settings, err
 }
 
-type Settings struct {
+type settings struct {
 	CreatedTime          time.Time        `json:"createdTime"`
 	ModifiedTime         time.Time        `json:"modifiedTime"`
 	HistoryEnabled       bool             `json:"historyEnabled"`
 	HistoryDeletionTime  time.Time        `json:"historyDeletionTime"`
-	DeviceSettings       []DeviceSettings `json:"deviceSettings"`
+	DeviceSettings       []deviceSettings `json:"deviceSettings"`
 	RetentionWindowDays  int64            `json:"retentionWindowDays"`
 	HasReportedLocations bool             `json:"hasReportedLocations"`
 	HasSetRetention      bool             `json:"hasSetRetention"`
 }
 
-type DeviceSettings struct {
+type deviceSettings struct {
 	DeviceTag                            int64     `json:"deviceTag"`
 	ReportingEnabled                     bool      `json:"reportingEnabled"`
 	DevicePrettyName                     string    `json:"devicePrettyName"`

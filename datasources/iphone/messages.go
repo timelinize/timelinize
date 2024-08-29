@@ -38,7 +38,7 @@ func (fimp *FileImporter) messages(ctx context.Context) error {
 
 	db, err := sql.Open("sqlite3", fimp.fileIDToPath(messagesDBFileID)+"?mode=ro")
 	if err != nil {
-		return fmt.Errorf("opening messages DB: %v", err)
+		return fmt.Errorf("opening messages DB: %w", err)
 	}
 	defer db.Close()
 

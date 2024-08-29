@@ -50,6 +50,7 @@ func init() {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	// The ID of the owner entity. REQUIRED if entity is to be related in DB.
 	OwnerEntityID int64 `json:"owner_entity_id"`
@@ -61,12 +62,19 @@ type Options struct {
 // FileImporter implements the timeline.FileImporter interface.
 type FileImporter struct{}
 
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
+const (
+	icloudPhotosZip   = "iCloud Photos.zip"
+	icloudContactsZip = "iCloud Contacts.zip"
+	icloudInfoZip     = "Apple ID account and device information.zip"
+)
+
+// Recognize returns whether the file or folder is supported.
+func (FileImporter) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
 	for _, filename := range filenames {
 		baseName := filepath.Base(filename)
-		if baseName != "Apple ID account and device information.zip" &&
-			baseName != "iCloud Contacts.zip" &&
-			baseName != "iCloud Photos.zip" &&
+		if baseName != icloudInfoZip &&
+			baseName != icloudContactsZip &&
+			baseName != icloudPhotosZip &&
 			!strings.HasPrefix(baseName, "iCloud Photos Part ") {
 			return timeline.Recognition{}, nil
 		}
@@ -74,18 +82,19 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
+// FileImport imports data from a file or folder.
 func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	for _, filename := range filenames {
 		baseName := filepath.Base(filename)
 		switch baseName {
-		case "Apple ID account and device information.zip":
+		case icloudInfoZip:
 			// TODO: implement
-		case "iCloud Contacts.zip":
+		case icloudContactsZip:
 			// TODO: implement
-		case "iCloud Photos.zip":
+		case icloudPhotosZip:
 			fallthrough
 		default:
-			if baseName == "iCloud Photos.zip" || strings.HasPrefix(baseName, "iCloud Photos Part ") {
+			if baseName == icloudPhotosZip || strings.HasPrefix(baseName, "iCloud Photos Part ") {
 				fsys, err := archiver.FileSystem(ctx, filename)
 				if err != nil {
 					return err
@@ -107,11 +116,14 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 	return nil
 }
 
+const yes = "yes"
+
 func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys fs.FS, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 	owner := timeline.Entity{ID: dsOpt.OwnerEntityID}
 
-	for i := 0; i < 1000; i++ {
+	const likelyMaxNumberOfArchives = 1000
+	for i := range likelyMaxNumberOfArchives {
 		// TODO: parallelize this for faster imports
 		done, err := func(i int) (bool, error) {
 			filename := "Photo Details"
@@ -139,13 +151,14 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 					return false, ctx.Err()
 				}
 				row, err := csvr.Read()
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					break
 				}
 				if err != nil {
 					return false, err
 				}
-				if len(row) < 2 {
+				const requiredFields = 2
+				if len(row) < requiredFields {
 					continue
 				}
 				if len(cols) == 0 {
@@ -161,7 +174,7 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 				subfolder := "Photos"
 
 				// skip deleted items if preferred
-				if row[cols["deleted"]] == "yes" {
+				if row[cols["deleted"]] == yes {
 					if !dsOpt.RecentlyDeleted {
 						continue
 					}
@@ -199,13 +212,13 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 						"iCloud import date":   row[cols["importDate"]],
 					},
 				}
-				if row[cols["favorite"]] == "yes" {
+				if row[cols["favorite"]] == yes {
 					item.Metadata["Favorited"] = true
 				}
-				if row[cols["hidden"]] == "yes" {
+				if row[cols["hidden"]] == yes {
 					item.Metadata["Hidden"] = true
 				}
-				if row[cols["deleted"]] == "yes" {
+				if row[cols["deleted"]] == yes {
 					item.Metadata["Deleted"] = true
 				}
 
@@ -303,7 +316,7 @@ func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string
 		}
 
 		row, err := csvr.Read()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

@@ -23,6 +23,7 @@ package imessage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -52,7 +53,8 @@ func init() {
 // FileImporter can import from the iMessage database.
 type FileImporter struct{}
 
-func (FileImporter) Recognize(ctx context.Context, filepaths []string) (timeline.Recognition, error) {
+// Recognize returns whether this file or folder is supported.
+func (FileImporter) Recognize(_ context.Context, filepaths []string) (timeline.Recognition, error) {
 	for _, fpath := range filepaths {
 		if chatDBPath(fpath) != "" {
 			return timeline.Recognition{Confidence: .85}, nil
@@ -61,9 +63,10 @@ func (FileImporter) Recognize(ctx context.Context, filepaths []string) (timeline
 	return timeline.Recognition{}, nil
 }
 
+// FileImport imports data from the given file or folder.
 func (fimp *FileImporter) FileImport(ctx context.Context, inputPaths []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	if len(inputPaths) != 1 {
-		return fmt.Errorf("only 1 input path supported")
+		return errors.New("only 1 input path supported")
 	}
 	inputPath := inputPaths[0]
 
@@ -75,19 +78,19 @@ func (fimp *FileImporter) FileImport(ctx context.Context, inputPaths []string, i
 	// open messages DB and prepare importer
 	db, err := sql.Open("sqlite3", chatDBPath(inputPath)+"?mode=ro")
 	if err != nil {
-		return fmt.Errorf("opening chat.db: %v", err)
+		return fmt.Errorf("opening chat.db: %w", err)
 	}
 	defer db.Close()
 
 	im := Importer{
 		DB: db,
-		FillOutAttachmentItem: func(ctx context.Context, filename string, attachment *timeline.Item) {
+		FillOutAttachmentItem: func(_ context.Context, filename string, attachment *timeline.Item) {
 			chatDBFolderPath := filepath.FromSlash(filepath.Dir(chatDBPath(inputPath)))
 			relativeFilename := filepath.FromSlash(strings.TrimPrefix(filename, "~/Library/Messages/"))
 
 			attachment.OriginalLocation = relativeFilename
 			attachment.Content.Data = func(context.Context) (io.ReadCloser, error) {
-				return os.Open(filepath.Join(chatDBFolderPath, relativeFilename))
+				return os.Open(filepath.Join(filepath.Clean(chatDBFolderPath), filepath.Clean(relativeFilename)))
 			}
 		},
 	}
@@ -99,6 +102,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, inputPaths []string, i
 	return nil
 }
 
+// Importer is a type that can import messages from an Apple Messages chat DB.
 type Importer struct {
 	// An open chat.db sqlite file.
 	DB *sql.DB
@@ -114,6 +118,7 @@ type Importer struct {
 	DeviceID string
 }
 
+// ImportMessages imports messages from the chat DB.
 func (im Importer) ImportMessages(ctx context.Context, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	rows, err := im.DB.QueryContext(ctx,
 		`SELECT
@@ -203,7 +208,7 @@ func (im Importer) ImportMessages(ctx context.Context, itemChan chan<- *timeline
 			&msg.handle.country, &msg.handle.service, &joinedH.id, &joinedH.country, &joinedH.service,
 			&attach.guid, &attach.createdDate, &attach.filename, &attach.mimeType, &attach.transferName)
 		if err != nil {
-			return fmt.Errorf("scanning row: %v", err)
+			return fmt.Errorf("scanning row: %w", err)
 		}
 		if msg.rowid == 0 {
 			continue // I've never seen this, but might as well be careful
@@ -264,10 +269,9 @@ func (im Importer) ImportMessages(ctx context.Context, itemChan chan<- *timeline
 		if joinedH.id != nil {
 			currentMessage.participants = append(currentMessage.participants, joinedH)
 		}
-
 	}
 	if err = rows.Err(); err != nil {
-		return fmt.Errorf("scanning rows: %v", err)
+		return fmt.Errorf("scanning rows: %w", err)
 	}
 
 	// don't forget to process the last one too!
@@ -328,7 +332,7 @@ func (m message) timestamp() time.Time {
 	if m.date == nil {
 		return time.Time{}
 	}
-	return AppleNanoToUnix(*m.date)
+	return AppleNanoToTime(*m.date)
 }
 
 // fromMe returns true if the message was sent by the owner of the device.
@@ -388,7 +392,7 @@ func (m message) attachments(ctx context.Context, im Importer, sender timeline.E
 		}
 		var ts time.Time
 		if a.createdDate != nil {
-			ts = AppleSecondsToUnix(*a.createdDate)
+			ts = AppleSecondsToTime(*a.createdDate)
 		}
 
 		it := &timeline.Item{
@@ -442,10 +446,10 @@ func (m message) metadata() timeline.Metadata {
 		meta["Service"] = *m.service
 	}
 	if m.dateRead != nil {
-		meta["Date read"] = AppleNanoToUnix(*m.dateRead)
+		meta["Date read"] = AppleNanoToTime(*m.dateRead)
 	}
 	if m.dateDelivered != nil {
-		meta["Date delivered"] = AppleNanoToUnix(*m.dateDelivered)
+		meta["Date delivered"] = AppleNanoToTime(*m.dateDelivered)
 	}
 	return meta
 }
@@ -529,5 +533,5 @@ var messageReactions = map[int]string{
 	2005: "❓",
 }
 
-// TODO: ...
+// Options configures the data source.
 type Options struct{}

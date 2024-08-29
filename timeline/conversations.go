@@ -21,12 +21,15 @@ package timeline
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 )
 
+// Conversation represents a conversation, or items that are sent from
+// one entity to others.
 type Conversation struct {
 	Entities       []Entity  `json:"entities"`
 	RecentMessages []ItemRow `json:"messages"`
@@ -236,6 +239,7 @@ func (tl *Timeline) loadRecentConversations(tx *sql.Tx, params ItemSearchParams)
 
 		args = append(args, rowLimit)
 
+		//nolint:gosec
 		q := `SELECT ` + itemDBColumns + `,
 				relationships.to_attribute_id,
 				from_attr.name, to_attr.name,
@@ -258,6 +262,7 @@ func (tl *Timeline) loadRecentConversations(tx *sql.Tx, params ItemSearchParams)
 		if err != nil {
 			return nil, err
 		}
+		defer rows.Close() // FIXME: This is a bug since it's in a for loop; extract into own function
 
 		var count int
 
@@ -362,7 +367,7 @@ func (tl *Timeline) LoadConversation(ctx context.Context, params ItemSearchParam
 	// between phone numbers/email addresses/etc, right? but if the need arises we can
 	// probably make it work -- our code does support both but I haven't tested both together
 	if len(params.EntityID) > 0 && len(params.AttributeID) > 0 {
-		return SearchResults{}, fmt.Errorf("lookup by both entity and attribute not currently supported")
+		return SearchResults{}, errors.New("lookup by both entity and attribute not currently supported")
 	}
 
 	tl.dbMu.RLock()
@@ -512,7 +517,8 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 	where = "WHERE " + strings.TrimPrefix(where, " AND ")
 
 	// TODO: we might not need to use root_items, we could maybe use extended_items... see if one is faster or more correct
-	var selects, idsForExcept []string
+	selects := make([]string, 0, len(params.EntityID))
+	idsForExcept := make([]string, 0, len(params.EntityID))
 	for _, entityID := range params.EntityID {
 		idsForExcept = append(idsForExcept, strconv.FormatInt(entityID, 10))
 		selects = append(selects, fmt.Sprintf(
@@ -585,6 +591,6 @@ func (s *int64Slice) appendIfUnique(v int64) {
 }
 
 // Implement sort.Interface
-func (x int64Slice) Len() int           { return len(x) }
-func (x int64Slice) Less(i, j int) bool { return x[i] < x[j] }
-func (x int64Slice) Swap(i, j int)      { x[i], x[j] = x[j], x[i] }
+func (s int64Slice) Len() int           { return len(s) }
+func (s int64Slice) Less(i, j int) bool { return s[i] < s[j] }
+func (s int64Slice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }

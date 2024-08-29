@@ -42,7 +42,6 @@ func flagValPairs(args []string) []flagValPair {
 			if flag != "" {
 				// two flags in a row? previous one's value must be boolean!
 				pairs = append(pairs, flagValPair{flag: flag, val: true})
-				flag = ""
 			}
 			flag = arg
 			continue
@@ -60,9 +59,8 @@ func flagValPairs(args []string) []flagValPair {
 					vals = append(vals, autoType(elem[:len(elem)-1]))
 					i = j // skip the array, now that we've consumed it
 					break
-				} else {
-					vals = append(vals, autoType(elem))
 				}
+				vals = append(vals, autoType(elem))
 			}
 			val = vals
 		} else {
@@ -78,7 +76,6 @@ func flagValPairs(args []string) []flagValPair {
 	if flag != "" {
 		// the last argument must have been a boolean flag
 		pairs = append(pairs, flagValPair{flag: flag, val: true})
-		flag = ""
 	}
 
 	return pairs

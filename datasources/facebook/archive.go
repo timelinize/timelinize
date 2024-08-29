@@ -53,10 +53,12 @@ const (
 	year2024MessagesPrefix              = "your_facebook_activity/messages"
 )
 
+// Archive implements the importer for Facebook archives.
 type Archive struct {
 	owner timeline.Entity
 }
 
+// Recognize returns whether the input file is recognized.
 func (a Archive) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	for _, filename := range filenames {
 		fsys, err := archiver.FileSystem(ctx, filename)
@@ -72,13 +74,14 @@ func (a Archive) Recognize(ctx context.Context, filenames []string) (timeline.Re
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
+// FileImport imports the data in the file.
 func (a Archive) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	// dsOpt := opt.DataSourceOptions.(*Options)
 
 	for _, filename := range filenames {
 		fsys, err := archiver.FileSystem(ctx, filename)
 		if err != nil {
-			return fmt.Errorf("opening data archive: %v", err)
+			return fmt.Errorf("opening data archive: %w", err)
 		}
 
 		if err = a.setOwnerEntity(fsys); err != nil {
@@ -109,18 +112,18 @@ func (a Archive) FileImport(ctx context.Context, filenames []string, itemChan ch
 			err = a.processPostsFile(ctx, fsys, postsFile, itemChan, opt)
 			postsFile.Close()
 			if err != nil {
-				return fmt.Errorf("processing %s: %v", postsFilename, err)
+				return fmt.Errorf("processing %s: %w", postsFilename, err)
 			}
 		}
 
 		// uncategorized photos
 		if err := a.processUncategorizedPhotos(ctx, fsys, itemChan, opt); err != nil {
-			return fmt.Errorf("processing uncategorized photos: %v", err)
+			return fmt.Errorf("processing uncategorized photos: %w", err)
 		}
 
 		// (uncategorized) videos
 		if err := a.processVideos(ctx, fsys, itemChan, opt); err != nil {
-			return fmt.Errorf("processing videos: %v", err)
+			return fmt.Errorf("processing videos: %w", err)
 		}
 
 		// messages
@@ -201,10 +204,8 @@ func (a Archive) processVideos(ctx context.Context, fsys fs.FS,
 	return nil
 }
 
-func (a Archive) processPostsFile(ctx context.Context, fsys fs.FS, file fs.File,
-	itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-
-	var posts YourPosts
+func (a Archive) processPostsFile(ctx context.Context, fsys fs.FS, file fs.File, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+	var posts yourPosts
 	if err := json.NewDecoder(file).Decode(&posts); err != nil {
 		return err
 	}
@@ -235,7 +236,8 @@ func (a Archive) processPostsFile(ctx context.Context, fsys fs.FS, file fs.File,
 		}
 		ig := &timeline.Graph{Item: item}
 
-		if matches := wroteOnOtherTimelineRegex.FindStringSubmatch(post.Title); len(matches) == 2 {
+		const nameMatchIndex = 1
+		if matches := wroteOnOtherTimelineRegex.FindStringSubmatch(post.Title); len(matches) == nameMatchIndex+1 {
 			ig.ToEntity(timeline.RelSent, &timeline.Entity{
 				Name: matches[1],
 				Attributes: []timeline.Attribute{
@@ -288,18 +290,18 @@ func (a Archive) processPostsFile(ctx context.Context, fsys fs.FS, file fs.File,
 	return nil
 }
 
-func (Archive) loadProfileInfo(fsys fs.FS) (ProfileInfo, error) {
+func (Archive) loadProfileInfo(fsys fs.FS) (profileInfo, error) {
 	file, err := archiver.TopDirOpen(fsys, pre2024ProfileInfoPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		// try another archive version
 		file, err = archiver.TopDirOpen(fsys, year2024ProfileInfoPath)
 	}
 	if err != nil {
-		return ProfileInfo{}, err
+		return profileInfo{}, err
 	}
 	defer file.Close()
 
-	var profileInfo ProfileInfo
+	var profileInfo profileInfo
 	err = json.NewDecoder(file).Decode(&profileInfo)
 	return profileInfo, err
 }
@@ -373,7 +375,6 @@ func (a *Archive) setOwnerEntity(fsys fs.FS) error {
 	return nil
 }
 
-// TODO: what should we do in case of an error? continue, or would the whole string be malformed after?
 // FixString fixes a malformed string created by decoding UTF-8-encoded JSON string
 // values as UTF-16 strings. JSON string values *should* be encoded as UTF-16:
 // https://datatracker.ietf.org/doc/html/rfc7159#section-7 -- but as of January 2023,
@@ -383,11 +384,14 @@ func (a *Archive) setOwnerEntity(fsys fs.FS) error {
 // to runes, then back to bytes as long as their rune value is < 255.
 //
 // Thanks to Jorropo on the Gophers Slack for helping me figure this out.
+//
+// TODO: what should we do in case of an error? continue, or would the whole string be malformed after?
 func FixString(malformed string) string {
+	const maxByte = 255
 	asRunes := []rune(malformed)
 	final := make([]byte, len(asRunes))
 	for i, r := range asRunes {
-		if r > 255 {
+		if r > maxByte {
 			continue // TODO: FIXME: Is this the best thing to do? Would the rest of the string be corrupted?
 		}
 		final[i] = byte(r)
@@ -396,7 +400,7 @@ func FixString(malformed string) string {
 }
 
 // Generated January 2023
-type ProfileInfo struct {
+type profileInfo struct {
 	ProfileV2 struct {
 		Name struct {
 			FullName   string `json:"full_name"`
@@ -470,7 +474,7 @@ type fbDate struct {
 	Day   int `json:"day"`
 }
 
-type YourPosts []struct {
+type yourPosts []struct {
 	Timestamp   int64 `json:"timestamp"`
 	Attachments []struct {
 		Data []struct {

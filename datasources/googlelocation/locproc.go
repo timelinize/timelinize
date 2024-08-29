@@ -34,7 +34,7 @@ type LocationSource interface {
 	// (nil, nil).
 	//
 	// Implementations must honor context cancellation.
-	NextLocation(context.Context) (*Location, error)
+	NextLocation(ctx context.Context) (*Location, error)
 }
 
 // NewLocationProcessor returns a new location source that filters, refines, clusters,
@@ -161,7 +161,7 @@ func (lp *locationProcessor) clusteredNext(ctx context.Context) (*Location, erro
 		}
 
 		prev := lp.clusterWindow[len(lp.clusterWindow)-2]
-		next.distanceFromPrev = haversineDistanceEarth(prev.LatitudeE7, prev.LongitudeE7, next.LatitudeE7, next.LongitudeE7) * 1000
+		next.distanceFromPrev = haversineDistanceEarth(prev.LatitudeE7, prev.LongitudeE7, next.LatitudeE7, next.LongitudeE7) * kmToMeters
 
 		oldLatAvg, oldLonAvg := lp.latAvg, lp.lonAvg
 
@@ -179,7 +179,7 @@ func (lp *locationProcessor) clusteredNext(ctx context.Context) (*Location, erro
 		lp.latAvg += (next.LatitudeE7 - oldestLat) / clusterWindowSize
 		lp.lonAvg += (next.LongitudeE7 - oldestLon) / clusterWindowSize
 
-		next.changeInMean = haversineDistanceEarth(oldLatAvg, oldLonAvg, lp.latAvg, lp.lonAvg) * 1000
+		next.changeInMean = haversineDistanceEarth(oldLatAvg, oldLonAvg, lp.latAvg, lp.lonAvg) * kmToMeters
 
 		lp.windowDistance += next.distanceFromPrev
 		lp.windowDistance -= oldest.distanceFromPrev
@@ -287,8 +287,8 @@ func (lp *locationProcessor) endClusterFunc() *Location {
 		Metadata: timeline.Metadata{
 			"Cluster size": len(lp.cluster),
 			// convert to actual lat/lon units; I don't think we need to stay at 1e7 integers
-			"Standard deviation (latitude)":  math.Sqrt(latVariance) / 1e7,
-			"Standard deviation (longitude)": math.Sqrt(lonVariance) / 1e7,
+			"Standard deviation (latitude)":  math.Sqrt(latVariance) / placesMult,
+			"Standard deviation (longitude)": math.Sqrt(lonVariance) / placesMult,
 		},
 	}
 }
@@ -330,8 +330,9 @@ func (lp *locationProcessor) denoiseNext(ctx context.Context) (*Location, error)
 			// hard to differentiate noise with higher accuracy values; maybe statistics similar to
 			// our clustering phase can do better, but so far I haven't seen much need to denoise
 			// points that are within ~100m accurate, esp. with clustering
-			if candidate.Uncertainty > 115 {
-				avgSurroundingUncertainty := float64(before.Uncertainty+after.Uncertainty) / 2
+			const thresholdMeters = 115
+			if candidate.Uncertainty > thresholdMeters {
+				avgSurroundingUncertainty := float64(before.Uncertainty+after.Uncertainty) / 2 //nolint:mnd
 
 				// TODO: maybe should consider temporal locality as well (are the points close enough in time? -- might need to be relative to time deltas)
 				if candidate.Uncertainty > avgSurroundingUncertainty*1.5 {
@@ -354,7 +355,8 @@ func (lp *locationProcessor) denoiseNext(ctx context.Context) (*Location, error)
 			elapsedSincePrev := candidate.Timestamp.Sub(before.Timestamp).Seconds()
 			if elapsedSincePrev > 0 {
 				velocity := candidate.distanceFromPrev / elapsedSincePrev
-				if velocity > 350 { // 350 m/s ~= 800 mph (commercial jets fly at < 600 mph)
+				const fasterThanCommercialJet = 350 // 350 m/s ~= 800 mph (commercial jets fly at < 600 mph)
+				if velocity > fasterThanCommercialJet {
 					// this person is likely NOT using their phone in the SR-71 Blackbird
 					lp.denoiseWindow = lp.denoiseWindow[:len(lp.denoiseWindow)-1]
 					continue
@@ -400,9 +402,10 @@ func (lp locationProcessor) sameAsPrevious(l *Location) bool {
 	}
 
 	distanceKM := haversineDistanceEarth(lp.previous.LatitudeE7, lp.previous.LongitudeE7, l.LatitudeE7, l.LongitudeE7)
-	distanceM := distanceKM * 1000
+	distanceM := distanceKM * kmToMeters
 	l.distanceFromPrev = distanceM // memoize (keep temporarily) even though we may need to change this if previous point changes (during denoising)
-	return distanceM < 5           // TODO: subtract accuracy as well? TODO: consider time as well? (like 12 hours or something)
+	const threshold = 5
+	return distanceM < threshold // TODO: subtract accuracy as well? TODO: consider time as well? (like 12 hours or something)
 }
 
 const (
@@ -410,6 +413,7 @@ const (
 	clusterWindowSize = 4
 )
 
+//nolint:dupword
 /*
 	NOTES
 
@@ -503,11 +507,11 @@ type Location struct {
 func (lc Location) Location() timeline.Location {
 	var l timeline.Location
 	if lc.LatitudeE7 != 0 {
-		lat := float64(lc.LatitudeE7) / 1e7
+		lat := float64(lc.LatitudeE7) / placesMult
 		l.Latitude = &lat
 	}
 	if lc.LongitudeE7 != 0 {
-		lon := float64(lc.LongitudeE7) / 1e7
+		lon := float64(lc.LongitudeE7) / placesMult
 		l.Longitude = &lon
 	}
 	if lc.Altitude != 0 {
@@ -520,3 +524,9 @@ func (lc Location) Location() timeline.Location {
 	}
 	return l
 }
+
+const (
+	kmToMeters = 1000
+	places     = 7
+	placesMult = 1e7
+)

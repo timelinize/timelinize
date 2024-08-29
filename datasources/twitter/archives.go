@@ -34,9 +34,10 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
+// Recognize returns whether the input is supported.
 func (Client) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	if len(filenames) != 1 {
-		return timeline.Recognition{}, fmt.Errorf("only 1 archive may be imported at a time")
+		return timeline.Recognition{}, errors.New("only 1 archive may be imported at a time")
 	}
 
 	fsys, err := archiver.FileSystem(ctx, filenames[0])
@@ -66,9 +67,10 @@ func (Client) Recognize(ctx context.Context, filenames []string) (timeline.Recog
 	}, nil
 }
 
+// FileImport imports data from the input.
 func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	if len(filenames) != 1 {
-		return fmt.Errorf("only 1 archive may be imported at a time")
+		return errors.New("only 1 archive may be imported at a time")
 	}
 
 	dsOpt := *opt.DataSourceOptions.(*Options)
@@ -82,14 +84,14 @@ func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan ch
 	// load the owner info
 	acc, err := c.loadOwnerAccountFromArchive(fsys)
 	if err != nil {
-		return fmt.Errorf("unable to get owner account: %v", err)
+		return fmt.Errorf("unable to get owner account: %w", err)
 	}
 	c.owner = acc.entity(ctx, fsys)
 
 	// first pass - add tweets to timeline
 	err = c.processArchive(ctx, fsys, itemChan, c.makeItemGraphFromTweet, dsOpt)
 	if err != nil {
-		return fmt.Errorf("processing tweets: %v", err)
+		return fmt.Errorf("processing tweets: %w", err)
 	}
 
 	// TODO: not ready yet
@@ -101,7 +103,7 @@ func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan ch
 
 	err = c.processDirectMessages(ctx, fsys, itemChan, dsOpt)
 	if err != nil {
-		return fmt.Errorf("processing direct messages: %v", err)
+		return fmt.Errorf("processing direct messages: %w", err)
 	}
 
 	return nil
@@ -117,18 +119,18 @@ func (c *Client) processArchive(ctx context.Context, fsys fs.FS, itemChan chan<-
 	// consume non-JSON preface (JavaScript variable definition)
 	err = stripPreface(file)
 	if err != nil {
-		return fmt.Errorf("reading tweet file preface: %v", err)
+		return fmt.Errorf("reading tweet file preface: %w", err)
 	}
 
 	err = c.processTweetsFromArchive(ctx, itemChan, file, fsys, processFunc, opt)
 	if err != nil {
-		return fmt.Errorf("processing tweet file: %v", err)
+		return fmt.Errorf("processing tweet file: %w", err)
 	}
 
 	return nil
 }
 
-func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan chan<- *timeline.Graph, opt Options) error {
+func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan chan<- *timeline.Graph, _ Options) error {
 	file, err := fsys.Open(dmsFile)
 	if err != nil {
 		return err
@@ -138,7 +140,7 @@ func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan
 	// consume non-JSON preface (JavaScript variable definition)
 	err = stripPreface(file)
 	if err != nil {
-		return fmt.Errorf("reading direct messages file preface: %v", err)
+		return fmt.Errorf("reading direct messages file preface: %w", err)
 	}
 
 	dec := json.NewDecoder(file)
@@ -146,7 +148,7 @@ func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan
 	// read array opening bracket '['
 	_, err = dec.Token()
 	if err != nil {
-		return fmt.Errorf("decoding opening token: %v", err)
+		return fmt.Errorf("decoding opening token: %w", err)
 	}
 
 	for dec.More() {
@@ -157,7 +159,7 @@ func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan
 		var convo directMessages
 		err := dec.Decode(&convo)
 		if err != nil {
-			return fmt.Errorf("decoding conversation element: %v", err)
+			return fmt.Errorf("decoding conversation element: %w", err)
 		}
 
 		for _, msg := range convo.DMConversation.Messages {
@@ -232,7 +234,7 @@ func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan
 					},
 					Content: timeline.ItemData{
 						Filename: parts[len(parts)-1],
-						Data: func(ctx context.Context) (io.ReadCloser, error) {
+						Data: func(_ context.Context) (io.ReadCloser, error) {
 							return fsys.Open(filename)
 						},
 					},
@@ -246,15 +248,13 @@ func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan
 	return nil
 }
 
-func (c *Client) processTweetsFromArchive(ctx context.Context, itemChan chan<- *timeline.Graph,
-	file io.Reader, fsys fs.FS, processFunc archiveProcessFn, opt Options) error {
-
+func (c *Client) processTweetsFromArchive(ctx context.Context, itemChan chan<- *timeline.Graph, file io.Reader, fsys fs.FS, processFunc archiveProcessFn, opt Options) error {
 	dec := json.NewDecoder(file)
 
 	// read array opening bracket '['
 	_, err := dec.Token()
 	if err != nil {
-		return fmt.Errorf("decoding opening token: %v", err)
+		return fmt.Errorf("decoding opening token: %w", err)
 	}
 
 	for dec.More() {
@@ -263,13 +263,13 @@ func (c *Client) processTweetsFromArchive(ctx context.Context, itemChan chan<- *
 		}
 		err := dec.Decode(&container)
 		if err != nil {
-			return fmt.Errorf("decoding tweet element: %v", err)
+			return fmt.Errorf("decoding tweet element: %w", err)
 		}
 		t := container.Tweet
 
 		skip, err := c.prepareTweet(ctx, &t, "archive", opt)
 		if err != nil {
-			return fmt.Errorf("preparing tweet: %v", err)
+			return fmt.Errorf("preparing tweet: %w", err)
 		}
 		if skip {
 			continue
@@ -277,7 +277,7 @@ func (c *Client) processTweetsFromArchive(ctx context.Context, itemChan chan<- *
 
 		ig, err := processFunc(ctx, t, fsys, opt)
 		if err != nil {
-			return fmt.Errorf("processing tweet: %v", err)
+			return fmt.Errorf("processing tweet: %w", err)
 		}
 
 		// send the tweet(s) for processing
@@ -289,29 +289,29 @@ func (c *Client) processTweetsFromArchive(ctx context.Context, itemChan chan<- *
 	return nil
 }
 
-func (c *Client) processReplyRelationFromArchive(ctx context.Context, t tweet, fsys fs.FS, opt Options) (*timeline.Graph, error) {
-	if t.InReplyToStatusIDStr == "" {
-		// current tweet is not a reply, so no relationship to add
-		return nil, nil
-	}
-	if t.InReplyToUserIDStr != "" && t.InReplyToUserIDStr != c.owner.AttributeValue(identityAttribute) {
-		// from archives, we only support storing replies to self... (TODO:)
-		return nil, nil
-	}
+// func (c *Client) processReplyRelationFromArchive(_ context.Context, t tweet, _ fs.FS, _ Options) (*timeline.Graph, error) {
+// 	if t.InReplyToStatusIDStr == "" {
+// 		// current tweet is not a reply, so no relationship to add
+// 		return nil, nil
+// 	}
+// 	if t.InReplyToUserIDStr != "" && t.InReplyToUserIDStr != c.owner.AttributeValue(identityAttribute) {
+// 		// from archives, we only support storing replies to self... (TODO:)
+// 		return nil, nil
+// 	}
 
-	// TODO: with the new Relationship struct, we'll have to get the actual items, not just their IDs...
-	// ig := &timeline.ItemGraph{
-	// 	Relationships: []timeline.Relationship{
-	// 		{
-	// 			FromItemID: t.TweetIDStr,
-	// 			ToItemID:   t.InReplyToStatusIDStr,
-	// 			Relation:   timeline.RelReplyTo,
-	// 		},
-	// 	},
-	// }
+// 	// TODO: with the new Relationship struct, we'll have to get the actual items, not just their IDs...
+// 	// ig := &timeline.ItemGraph{
+// 	// 	Relationships: []timeline.Relationship{
+// 	// 		{
+// 	// 			FromItemID: t.TweetIDStr,
+// 	// 			ToItemID:   t.InReplyToStatusIDStr,
+// 	// 			Relation:   timeline.RelReplyTo,
+// 	// 		},
+// 	// 	},
+// 	// }
 
-	return nil, fmt.Errorf("TODO: not implemented")
-}
+// 	return nil, errors.New("TODO: not implemented")
+// }
 
 func (c *Client) loadOwnerAccountFromArchive(fsys fs.FS) (twitterAccount, error) {
 	acc, err := c.getAccountInfoFromArchive(fsys)
@@ -342,16 +342,16 @@ func (c *Client) getAccountInfoFromArchive(fsys fs.FS) (twitterAccount, error) {
 	// consume non-JSON preface (JavaScript variable definition)
 	err = stripPreface(file)
 	if err != nil {
-		return twitterAccount{}, fmt.Errorf("reading account file preface: %v", err)
+		return twitterAccount{}, fmt.Errorf("reading account file preface: %w", err)
 	}
 
 	var accFile twitterAccountFile
 	err = json.NewDecoder(file).Decode(&accFile)
 	if err != nil {
-		return twitterAccount{}, fmt.Errorf("decoding account file: %v", err)
+		return twitterAccount{}, fmt.Errorf("decoding account file: %w", err)
 	}
 	if len(accFile) == 0 {
-		return twitterAccount{}, fmt.Errorf("account file was empty")
+		return twitterAccount{}, errors.New("account file was empty")
 	}
 
 	return accFile[0].Account, nil
@@ -370,7 +370,7 @@ func (c *Client) addPhoneNumbersFromArchive(fsys fs.FS, acc *twitterAccount) err
 	// consume non-JSON preface (JavaScript variable definition)
 	err = stripPreface(file)
 	if err != nil {
-		return fmt.Errorf("reading preface: %v", err)
+		return fmt.Errorf("reading preface: %w", err)
 	}
 
 	return json.NewDecoder(file).Decode(&acc.PhoneNumbers)
@@ -389,7 +389,7 @@ func (c *Client) addProfileFromArchive(fsys fs.FS, acc *twitterAccount) error {
 	// consume non-JSON preface (JavaScript variable definition)
 	err = stripPreface(file)
 	if err != nil {
-		return fmt.Errorf("reading preface: %v", err)
+		return fmt.Errorf("reading preface: %w", err)
 	}
 
 	return json.NewDecoder(file).Decode(&acc.Profile)

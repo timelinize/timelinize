@@ -23,7 +23,7 @@ package tlzapp
 import (
 	"bufio"
 	"bytes"
-	"fmt"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -62,7 +62,7 @@ func (rww *responseWriterWrapper) Unwrap() http.ResponseWriter {
 
 // ErrNotImplemented is returned when an underlying
 // ResponseWriter does not implement the required method.
-var ErrNotImplemented = fmt.Errorf("method not implemented")
+var ErrNotImplemented = errors.New("method not implemented")
 
 type responseRecorder struct {
 	*responseWriterWrapper

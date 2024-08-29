@@ -22,9 +22,8 @@ import "testing"
 
 func TestMakeForm(t *testing.T) {
 	for i, tc := range []struct {
-		input     []string
-		expected  string
-		shouldErr bool
+		input    []string
+		expected string
 	}{
 		{
 			input:    []string{"--foo", "bar"},
@@ -47,12 +46,7 @@ func TestMakeForm(t *testing.T) {
 			expected: "bool1=true&bool2=true",
 		},
 	} {
-		actual, err := makeForm(tc.input)
-		if err == nil && tc.shouldErr {
-			t.Errorf("Test %d: Should have errored, but did not", i)
-		} else if err != nil && !tc.shouldErr {
-			t.Errorf("Test %d: Should NOT have errored, but did: %v", i, err)
-		}
+		actual := makeForm(tc.input)
 		if actual != tc.expected {
 			t.Errorf("Test %d: Expected '%s' but got '%s'", i, tc.expected, actual)
 		}

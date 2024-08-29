@@ -65,34 +65,34 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 
 	tx, err := tl.db.Begin()
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %v", err)
+		return fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
 
 	// first identify which items are ready to be erased; we need their row
 	// IDs and data files (we could do the erasure in a single UPDATE query,
 	// but we do need to get their data files first so we can delete those after)
-	rowIDsToEmpty, dataFilesToDelete, err := tl.findExpiredDeletedItems(tl.ctx, tx)
+	rowIDsToEmpty, dataFilesToDelete, err := tl.findExpiredDeletedItems(ctx, tx)
 	if err != nil {
-		return fmt.Errorf("finding expired deleted items: %v", err)
+		return fmt.Errorf("finding expired deleted items: %w", err)
 	}
 	if len(rowIDsToEmpty) == 0 && len(dataFilesToDelete) == 0 {
 		return nil // nothing to do
 	}
 
 	// clear out their rows
-	err = tl.deleteDataInItemRows(tl.ctx, tx, rowIDsToEmpty, false)
+	err = tl.deleteDataInItemRows(ctx, tx, rowIDsToEmpty, false)
 	if err != nil {
-		return fmt.Errorf("erasing deleted items (before deleting data files): %v", err)
+		return fmt.Errorf("erasing deleted items (before deleting data files): %w", err)
 	}
 
 	// commit transaction so that the items in the DB are at least marked as
 	// deleted; if deleting any of the data files fails, we'll log it, but
-	// but there's no good way to roll back the transaction for only the items
+	// there's no good way to roll back the transaction for only the items
 	// of which the data file failed to delete (TODO: maybe we need a sweeper routine to clean up zombie/stray data files)
 	// this way the DB remains the source of truth
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("commiting transaction (no data files have been deleted yet): %v", err)
+		return fmt.Errorf("committing transaction (no data files have been deleted yet): %w", err)
 	}
 
 	// now that the database shows the new truth, delete the data files to match
@@ -144,7 +144,7 @@ func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (ro
 		FROM items
 		WHERE deleted > 1 AND deleted <= ?`, now, now)
 	if err != nil {
-		return nil, nil, fmt.Errorf("querying for deleted items: %v", err)
+		return nil, nil, fmt.Errorf("querying for deleted items: %w", err)
 	}
 	defer rows.Close()
 
@@ -157,7 +157,7 @@ func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (ro
 		var dataFile *string
 		var otherItemsUsingFile int
 		if err := rows.Scan(&id, &dataFile, &otherItemsUsingFile); err != nil {
-			return nil, nil, fmt.Errorf("scanning item row: %v", err)
+			return nil, nil, fmt.Errorf("scanning item row: %w", err)
 		}
 		rowIDs = append(rowIDs, id)
 
@@ -206,7 +206,7 @@ func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs
 
 	_, err := tx.ExecContext(ctx, sb.String(), args...)
 	if err != nil {
-		return fmt.Errorf("erasing item rows: %v", err)
+		return fmt.Errorf("erasing item rows: %w", err)
 	}
 
 	return nil
@@ -214,6 +214,10 @@ func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs
 
 func (tl *Timeline) deleteDataFiles(ctx context.Context, logger *zap.Logger, dataFilesToDelete []string) (int, error) {
 	for _, dataFile := range dataFilesToDelete {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+
 		dataFileFullPath := tl.FullPath(dataFile)
 		err := os.Remove(dataFileFullPath)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -228,8 +232,8 @@ func (tl *Timeline) deleteDataFiles(ctx context.Context, logger *zap.Logger, dat
 		}
 
 		// if parent dir is empty, delete it too (go up to 2 parent dirs = data source folder then month)
-		parentDir := dataFileFullPath // incorrect for now, will be Dir()'ed at beginning of loop iteration
-		for i := 0; i < 2; i++ {
+		var parentDir string
+		for range 2 {
 			parentDir = filepath.Dir(dataFileFullPath)
 
 			isEmpty, _, err := directoryEmpty(parentDir, true)

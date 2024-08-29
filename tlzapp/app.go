@@ -24,7 +24,7 @@ package tlzapp
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	_ "embed" // enable go:embed directive
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -44,7 +44,7 @@ import (
 
 var app *App
 
-func (a *App) RunCommand(args []string) error {
+func (a *App) RunCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("no command specified")
 	}
@@ -60,10 +60,7 @@ func (a *App) RunCommand(args []string) error {
 	var body io.Reader
 	switch endpoint.GetContentType() {
 	case Form:
-		bodyStr, err := makeForm(args[1:])
-		if err != nil {
-			return err
-		}
+		bodyStr := makeForm(args[1:])
 		body = strings.NewReader(bodyStr)
 	case JSON:
 		bodyBytes, err := makeJSON(args[1:])
@@ -73,13 +70,14 @@ func (a *App) RunCommand(args []string) error {
 		if len(bodyBytes) > 0 {
 			body = bytes.NewReader(bodyBytes)
 		}
+	case None:
 	}
 
 	url := "http://" + defaultAdminAddr + apiBasePath + commandName
 
-	req, err := http.NewRequest(endpoint.Method, url, body)
+	req, err := http.NewRequestWithContext(ctx, endpoint.Method, url, body)
 	if err != nil {
-		return fmt.Errorf("building request: %v", err)
+		return fmt.Errorf("building request: %w", err)
 	}
 	req.Header.Set("Content-Type", string(endpoint.GetContentType()))
 	req.Header.Set("Origin", req.URL.Scheme+"://"+req.URL.Host)
@@ -90,18 +88,18 @@ func (a *App) RunCommand(args []string) error {
 	var resp *http.Response
 	if a.serverRunning() {
 		httpClient := &http.Client{Timeout: 1 * time.Minute}
-		resp, err = httpClient.Do(req)
+		resp, err = httpClient.Do(req) //nolint:bodyclose // bug filed: https://github.com/timakin/bodyclose/issues/61
 		if err != nil {
-			return fmt.Errorf("running command on server: %v", err)
+			return fmt.Errorf("running command on server: %w", err)
 		}
 	} else {
 		if err := a.openRepos(); err != nil {
-			return fmt.Errorf("opening repos from last time: %v", err)
+			return fmt.Errorf("opening repos from last time: %w", err)
 		}
 		vrw := &virtualResponseWriter{body: new(bytes.Buffer), header: make(http.Header)}
 		err := endpoint.ServeHTTP(vrw, req)
 		if err != nil {
-			return fmt.Errorf("running command: %v", err)
+			return fmt.Errorf("running command: %w", err)
 		}
 		resp = &http.Response{
 			StatusCode:    vrw.status,
@@ -131,10 +129,10 @@ func (a *App) RunCommand(args []string) error {
 			return err
 		}
 	} else {
-		io.Copy(os.Stdout, resp.Body)
+		_, _ = io.Copy(os.Stdout, resp.Body)
 	}
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= lowestErrorStatus {
 		return fmt.Errorf("server returned error: HTTP %d %s",
 			resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
@@ -158,7 +156,7 @@ func (a *App) MustServe(adminAddr string) error {
 
 func (a *App) serve(adminAddr string) error {
 	if err := a.openRepos(); err != nil {
-		return fmt.Errorf("opening previously-opened repositories: %v", err)
+		return fmt.Errorf("opening previously-opened repositories: %w", err)
 	}
 
 	if a.server.adminLn != nil {
@@ -173,7 +171,7 @@ func (a *App) serve(adminAddr string) error {
 
 	ln, err := net.Listen("tcp", adminAddr)
 	if err != nil {
-		return fmt.Errorf("opening listener: %v", err)
+		return fmt.Errorf("opening listener: %w", err)
 	}
 	a.server.adminLn = ln
 
@@ -228,7 +226,10 @@ func (a *App) serve(adminAddr string) error {
 	a.log.Info("started admin server", zap.String("listener", ln.Addr().String()))
 
 	go func() {
-		if err := http.Serve(ln, a.server); err != nil {
+		server := &http.Server{
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		if err := server.Serve(ln); err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				// normal; the listener was closed
 				a.log.Info("stopped admin server", zap.String("listener", ln.Addr().String()))
@@ -241,8 +242,9 @@ func (a *App) serve(adminAddr string) error {
 	// don't return until server is actually serving
 
 	// ensure we don't wait longer than a set amount of time
+	const maxWait = 30 * time.Second
 	var cancel context.CancelFunc
-	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(a.ctx, maxWait)
 	defer cancel()
 
 	// set up HTTP client and request with short timeout and context cancellation
@@ -255,11 +257,16 @@ func (a *App) serve(adminAddr string) error {
 	// since some operating systems sometimes do weird things with
 	// port reuse (*cough* Windows), poll until connection succeeds
 	for {
-		if resp, err := client.Do(req); err == nil && resp.Header.Get("Server") == "Timelinize" {
-			return nil
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.Header.Get("Server") == "Timelinize" {
+				return nil
+			}
 		}
 
-		timer := time.NewTimer(500 * time.Millisecond)
+		const interval = 500 * time.Millisecond
+		timer := time.NewTimer(interval)
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
@@ -282,6 +289,7 @@ func (a *App) serverRunning() bool {
 	if err != nil {
 		return false
 	}
+	resp.Body.Close()
 	return resp.Header.Get("Server") == "Timelinize"
 }
 
@@ -307,7 +315,7 @@ func Init(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error)
 		}
 		frontend, err = fs.Sub(embeddedWebsite, topLevelDir)
 		if err != nil {
-			return nil, fmt.Errorf("stripping top level folder from frontend FS: %v", err)
+			return nil, fmt.Errorf("stripping top level folder from frontend FS: %w", err)
 		}
 	} else {
 		frontend = os.DirFS(cfg.WebsiteDir)
@@ -336,7 +344,7 @@ func (a *App) openRepos() error {
 	// TODO: use race detector to verify ^
 	lastOpenedRepos := a.cfg.Repositories
 	for i, repoDir := range lastOpenedRepos {
-		_, err := app.OpenRepository(repoDir, false)
+		_, err := app.openRepository(repoDir, false)
 		if err != nil {
 			app.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(a.cfg.Repositories)),
 				zap.Error(err),
@@ -346,7 +354,7 @@ func (a *App) openRepos() error {
 
 	// persist config so it can be used on restart
 	if err := a.cfg.save(); err != nil {
-		return fmt.Errorf("persisting config file: %v", err)
+		return fmt.Errorf("persisting config file: %w", err)
 	}
 
 	return nil
@@ -432,5 +440,7 @@ func (vrw *virtualResponseWriter) WriteHeader(statusCode int) {
 func (vrw *virtualResponseWriter) Write(data []byte) (int, error) {
 	return vrw.body.Write(data)
 }
+
+const lowestErrorStatus = 400
 
 const defaultAdminAddr = "127.0.0.1:12002"

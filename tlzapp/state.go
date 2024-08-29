@@ -41,8 +41,7 @@ func shutdownTimelines() {
 
 		logger := timeline.Log.With(zap.Time("started", job.Started))
 
-		switch job.Type {
-		case "import":
+		if job.Type == "import" {
 			logger = timeline.Log.With(
 				zap.String("repo", job.ImportParameters.Repo),
 				zap.Strings("filenames", job.ImportParameters.Filenames),
@@ -89,7 +88,7 @@ func getOpenTimeline(repoID string) (openedTimeline, error) {
 	return otl, nil
 }
 
-type activeJob struct {
+type ActiveJob struct {
 	ID      string    `json:"id"`
 	Type    string    `json:"type"`
 	Started time.Time `json:"started"`
@@ -101,7 +100,7 @@ type activeJob struct {
 	cancel context.CancelFunc
 }
 
-func (job activeJob) cleanUp() {
+func (job ActiveJob) cleanUp() {
 	job.cancel()
 	activeJobsMu.Lock()
 	delete(activeJobs, job.ID)
@@ -109,7 +108,7 @@ func (job activeJob) cleanUp() {
 }
 
 var (
-	activeJobs   = make(map[string]activeJob)
+	activeJobs   = make(map[string]ActiveJob)
 	activeJobsMu sync.Mutex
 )
 

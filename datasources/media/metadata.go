@@ -131,7 +131,7 @@ func ExtractAllMetadata(logger *zap.Logger, fsys fs.FS, path string, item *timel
 func extractEXIFMetadata(logger *zap.Logger, file io.Reader, item *timeline.Item) (timeline.Metadata, error) {
 	ex, err := exif.Decode(file)
 	if err != nil && exif.IsCriticalError(err) {
-		return nil, fmt.Errorf("decoding exif from file: %v", err)
+		return nil, fmt.Errorf("decoding exif from file: %w", err)
 	}
 
 	// fill in timestamp
@@ -163,7 +163,7 @@ func extractEXIFMetadata(logger *zap.Logger, file io.Reader, item *timeline.Item
 
 		switch tag.Format() {
 		case tiff.IntVal:
-			for i := 0; i < int(tag.Count); i++ {
+			for i := range int(tag.Count) {
 				key := splitCamelCaseIntoWords(string(name))
 				if tag.Count > 1 {
 					key += fmt.Sprintf(" %d", i+1)
@@ -178,7 +178,7 @@ func extractEXIFMetadata(logger *zap.Logger, file io.Reader, item *timeline.Item
 			}
 
 		case tiff.FloatVal:
-			for i := 0; i < int(tag.Count); i++ {
+			for i := range int(tag.Count) {
 				key := splitCamelCaseIntoWords(string(name))
 				if tag.Count > 1 {
 					key += fmt.Sprintf(" %d", i+1)
@@ -193,7 +193,7 @@ func extractEXIFMetadata(logger *zap.Logger, file io.Reader, item *timeline.Item
 			}
 
 		case tiff.RatVal:
-			for i := 0; i < int(tag.Count); i++ {
+			for i := range int(tag.Count) {
 				key := splitCamelCaseIntoWords(string(name))
 				if tag.Count > 1 {
 					key += fmt.Sprintf(" %d", i+1)
@@ -415,7 +415,6 @@ func readMP4Metadata(logger *zap.Logger, item *timeline.Item, fileSeeker io.Read
 
 			// traverse child nodes
 			return h.Expand()
-
 		} else if h.BoxInfo.Context.UnderUdta && h.BoxInfo.Type == [4]byte{'©', 'x', 'y', 'z'} {
 			// Google cameras store location data in this box
 			var buf bytes.Buffer
@@ -496,7 +495,8 @@ func readAudioMetadata(logger *zap.Logger, fileSeeker io.ReadSeeker) (timeline.M
 // our code will, of course, handle it just fine).
 func mp4XYZCoordsToLocation(xyzRaw string) (timeline.Location, error) {
 	matches := cXYZCoordsRegex.FindStringSubmatch(xyzRaw)
-	if len(matches) < 4 {
+	const minMatches = 4
+	if len(matches) < minMatches {
 		return timeline.Location{}, fmt.Errorf("lat+lon not found in expected format in input string '%s'", xyzRaw)
 	}
 
@@ -568,12 +568,13 @@ func isoIEC14496Timestamp(ts uint64) time.Time {
 	if ts == isoIEC14496_12_5thEdition_2015EpochToUnixEpochSeconds {
 		return time.Time{}
 	}
-	return time.Unix(int64(ts-isoIEC14496_12_5thEdition_2015EpochToUnixEpochSeconds), 0)
+	unixSec := ts - isoIEC14496_12_5thEdition_2015EpochToUnixEpochSeconds
+	return time.Unix(int64(unixSec), 0) //nolint:gosec // This could technically overflow but I don't think the incoming timestamp is going to be THAT big
 }
 
 // The difference between January 1, 1904 (the epoch used by MP4 file metadata)
 // and January 1, 1970 (the Unix epoch) in seconds.
-const isoIEC14496_12_5thEdition_2015EpochToUnixEpochSeconds uint64 = 2082844800
+const isoIEC14496_12_5thEdition_2015EpochToUnixEpochSeconds uint64 = 2082844800 //nolint // Yeah screw it, I'm using underscores for this one
 
 // Regex to extract lat-lon data from the ©xyz field of MP4 metadata which
 // takes the form: "*data+50.1234-101.1234+000.000/" in North America.

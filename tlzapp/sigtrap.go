@@ -46,7 +46,7 @@ func trapSignalsCrossPlatform() {
 
 			if i > 0 {
 				timeline.Log.Fatal("SIGINT: force quit")
-				os.Exit(2)
+				os.Exit(2) //nolint:mnd
 			}
 
 			timeline.Log.Warn("SIGINT: shutting down")
@@ -61,7 +61,6 @@ func shutdown(exitCode int) {
 	if !atomic.CompareAndSwapInt32(shuttingDown, 0, 1) {
 		return
 	}
-	defer timeline.Log.Sync()
 
 	shutdownTimelines()
 	vips.Shutdown()
@@ -74,6 +73,8 @@ func shutdown(exitCode int) {
 			app.server.adminLn.Close()
 		}
 	}
+
+	_ = timeline.Log.Sync()
 
 	os.Exit(exitCode)
 }

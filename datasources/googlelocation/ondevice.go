@@ -37,7 +37,7 @@ type onDeviceDecoder struct {
 	doingPaths bool
 }
 
-func (dec *onDeviceDecoder) NextLocation(ctx context.Context) (*Location, error) {
+func (dec *onDeviceDecoder) NextLocation(_ context.Context) (*Location, error) {
 	handleTimelinePathPoint := func() (*Location, error) {
 		vertex := dec.multiLoc.TimelinePath[0]
 
@@ -52,8 +52,8 @@ func (dec *onDeviceDecoder) NextLocation(ctx context.Context) (*Location, error)
 
 		loc := &Location{
 			Original:    dec.multiLoc,
-			LatitudeE7:  int64(*coord.Latitude * float64(1e7)),
-			LongitudeE7: int64(*coord.Longitude * float64(1e7)),
+			LatitudeE7:  int64(*coord.Latitude * float64(placesMult)),
+			LongitudeE7: int64(*coord.Longitude * float64(placesMult)),
 			Timestamp:   dec.multiLoc.StartTime.Add(time.Duration(offsetMin) * time.Minute),
 		}
 
@@ -86,8 +86,8 @@ func (dec *onDeviceDecoder) NextLocation(ctx context.Context) (*Location, error)
 			}
 			loc := &Location{
 				Original:    dec.multiLoc,
-				LatitudeE7:  int64(*coord.Latitude * float64(1e7)),
-				LongitudeE7: int64(*coord.Longitude * float64(1e7)),
+				LatitudeE7:  int64(*coord.Latitude * float64(placesMult)),
+				LongitudeE7: int64(*coord.Longitude * float64(placesMult)),
 				Timestamp:   dec.multiLoc.EndTime,
 			}
 			dec.multiLoc = nil
@@ -100,30 +100,30 @@ func (dec *onDeviceDecoder) NextLocation(ctx context.Context) (*Location, error)
 
 	// decode next array element
 	for dec.More() {
-		var new *onDeviceLocation
-		if err := dec.Decode(&new); err != nil {
-			return nil, fmt.Errorf("decoding on-device location element: %v", err)
+		var newLoc *onDeviceLocation
+		if err := dec.Decode(&newLoc); err != nil {
+			return nil, fmt.Errorf("decoding on-device location element: %w", err)
 		}
 
 		// there are different kinds of data points
 		switch {
-		case new.Visit.TopCandidate.PlaceLocation != "":
+		case newLoc.Visit.TopCandidate.PlaceLocation != "":
 			// this one is a single, self-contained location
-			coord, err := new.Visit.TopCandidate.PlaceLocation.parse()
+			coord, err := newLoc.Visit.TopCandidate.PlaceLocation.parse()
 			if err != nil {
 				return nil, err
 			}
 			return &Location{
-				Original:    new,
-				LatitudeE7:  int64(*coord.Latitude * float64(1e7)),
-				LongitudeE7: int64(*coord.Longitude * float64(1e7)),
-				Timestamp:   new.StartTime,
-				Timespan:    new.EndTime,
+				Original:    newLoc,
+				LatitudeE7:  int64(*coord.Latitude * float64(placesMult)),
+				LongitudeE7: int64(*coord.Longitude * float64(placesMult)),
+				Timestamp:   newLoc.StartTime,
+				Timespan:    newLoc.EndTime,
 			}, nil
 
-		case new.Activity.Start != "" && new.Activity.End != "":
+		case newLoc.Activity.Start != "" && newLoc.Activity.End != "":
 			// two locations; the next location will be this one's End value
-			dec.multiLoc = new
+			dec.multiLoc = newLoc
 
 			coord, err := dec.multiLoc.Activity.Start.parse()
 			if err != nil {
@@ -131,14 +131,14 @@ func (dec *onDeviceDecoder) NextLocation(ctx context.Context) (*Location, error)
 			}
 			return &Location{
 				Original:    dec.multiLoc,
-				LatitudeE7:  int64(*coord.Latitude * float64(1e7)),
-				LongitudeE7: int64(*coord.Longitude * float64(1e7)),
+				LatitudeE7:  int64(*coord.Latitude * float64(placesMult)),
+				LongitudeE7: int64(*coord.Longitude * float64(placesMult)),
 				Timestamp:   dec.multiLoc.StartTime,
 			}, nil
 
-		case len(new.TimelinePath) > 0:
+		case len(newLoc.TimelinePath) > 0:
 			// many locations; pop the first one and process it
-			dec.multiLoc = new
+			dec.multiLoc = newLoc
 			return handleTimelinePathPoint()
 		}
 	}

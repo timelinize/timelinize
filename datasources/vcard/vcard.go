@@ -49,6 +49,7 @@ func init() {
 // FileImporter can import the data from a file.
 type FileImporter struct{}
 
+// Recognize returns whether the input is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	var totalCount, matchCount int
 
@@ -69,9 +70,8 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 				// skip hidden files; they are cruft
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil // traverse into subdirectories
@@ -120,13 +120,14 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 // fails to parse, a nil time is returned.
 // TODO: move this into the timeline package? maybe if --MMDD format is somewhat standard...
 func ParseBirthday(bday string) *time.Time {
+	const fullBdayFormat = "20060102"
 	if len(bday) == 6 && bday[:2] == "--" {
 		monthDay, err := time.Parse("--0102", bday)
 		if err == nil {
 			return &monthDay
 		}
-	} else if len(bday) == 8 {
-		fullDate, err := time.Parse("20060102", bday)
+	} else if len(bday) == len(fullBdayFormat) {
+		fullDate, err := time.Parse(fullBdayFormat, bday)
 		if err == nil {
 			return &fullDate
 		}
@@ -134,7 +135,8 @@ func ParseBirthday(bday string) *time.Time {
 	return nil
 }
 
-func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+// FileImport imports data from the given file/folder.
+func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
 	for _, filename := range filenames {
 		fsys, err := archiver.FileSystem(ctx, filename)
 		if err != nil {
@@ -152,9 +154,8 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 				// skip hidden files; they are cruft
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil // traverse into subdirectories
@@ -169,7 +170,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 			dec := vcard.NewDecoder(file)
 			for {
 				card, err := dec.Decode()
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					break
 				}
 				if err != nil {
@@ -221,7 +222,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 					photoURL = card.PreferredValue(vcard.FieldLogo)
 				}
 				if photoURL != "" {
-					p.NewPicture = timeline.DownloadData(ctx, photoURL)
+					p.NewPicture = timeline.DownloadData(photoURL)
 				}
 
 				// the following fields are less common or useful, but still good to have if specified

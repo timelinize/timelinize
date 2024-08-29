@@ -54,7 +54,7 @@ type RemoteAppSource struct {
 	// authorization.
 	Scopes []string
 
-	// The URL to redirect to to finish
+	// The URL to redirect to finish
 	// the ceremony.
 	RedirectURL string
 
@@ -93,7 +93,7 @@ func (s RemoteAppSource) InitialToken(ctx context.Context) (*oauth2.Token, error
 	// now obtain the code
 	code, err := s.AuthCodeGetter.Get(ctx, info.State, info.AuthCodeURL)
 	if err != nil {
-		return nil, fmt.Errorf("getting code via browser: %v", err)
+		return nil, fmt.Errorf("getting code via browser: %w", err)
 	}
 
 	// and complete the ceremony
@@ -120,7 +120,7 @@ func (s RemoteAppSource) getDirectAuthURLFromProxy(ctx context.Context) (CodeExc
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxyURL+"/auth-code-url?"+v.Encode(), nil)
 	if err != nil {
-		return CodeExchangeInfo{}, fmt.Errorf("creating request: %v", err)
+		return CodeExchangeInfo{}, fmt.Errorf("creating request: %w", err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)

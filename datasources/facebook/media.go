@@ -20,6 +20,7 @@ package facebook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -58,7 +59,6 @@ type fbMedia struct {
 	mediaType          string
 	bestSourceURL      string
 	bestSourceFilename string
-	exifData           map[string]any
 }
 
 func (m *fbMedia) item() *timeline.Item {
@@ -116,14 +116,19 @@ func (m *fbMedia) timestamp() time.Time {
 	return fbTimeToGoTime(m.CreatedTime)
 }
 
-func (m *fbMedia) dataReader(_ context.Context) (io.ReadCloser, error) {
+func (m *fbMedia) dataReader(ctx context.Context) (io.ReadCloser, error) {
 	if m.bestSourceURL == "" {
-		return nil, fmt.Errorf("no way to get data file: no best source URL")
+		return nil, errors.New("no way to get data file: no best source URL")
 	}
 
-	resp, err := http.Get(m.bestSourceURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.bestSourceURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("getting media contents: %v", err)
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("getting media contents: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()

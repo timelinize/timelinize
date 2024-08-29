@@ -29,7 +29,7 @@ import (
 
 // oauth2App returns an oauth2client.App for the OAuth2 provider
 // with the given ID.
-func oauth2App(providerID string, scopes []string) (oauth2client.App, error) {
+func oauth2App(providerID string, scopes []string) oauth2client.App {
 	// TODO: if we ever allow user-configurable OAuth2 apps (so they can have their own rate limits and such)
 	// then using a LocalAppSource would be the way to go:
 	// cfg := oauth2.Config{
@@ -50,7 +50,7 @@ func oauth2App(providerID string, scopes []string) (oauth2client.App, error) {
 		ProxyURL:   "http://localhost:7233/oauth2", // TODO: put url of backend oauth2proxy here
 		ProviderID: providerID,
 		Scopes:     scopes,
-	}, nil
+	}
 }
 
 // NewOAuth2HTTPClient returns a new HTTP client which performs
@@ -64,7 +64,7 @@ func (acc Account) NewOAuth2HTTPClient(ctx context.Context, oa OAuth2) (*http.Cl
 	if len(acc.authorization) > 0 {
 		err := unmarshalGob(acc.authorization, &tkn)
 		if err != nil {
-			return nil, fmt.Errorf("gob-decoding OAuth2 token: %v", err)
+			return nil, fmt.Errorf("gob-decoding OAuth2 token: %w", err)
 		}
 		if tkn == nil || tkn.AccessToken == "" {
 			return nil, fmt.Errorf("OAuth2 token is empty: %+v", tkn)
@@ -74,10 +74,7 @@ func (acc Account) NewOAuth2HTTPClient(ctx context.Context, oa OAuth2) (*http.Cl
 	// load the service's "oauth app", which can provide both tokens and
 	// oauth configs -- in this case, we need the oauth config; we should
 	// already have a token
-	oapp, err := oauth2App(oa.ProviderID, oa.Scopes)
-	if err != nil {
-		return nil, fmt.Errorf("getting token source for %s: %v", acc.DataSource.Name, err)
-	}
+	oapp := oauth2App(oa.ProviderID, oa.Scopes)
 
 	// obtain a token source from the oauth's config so that it can keep
 	// the token refreshed if it expires
@@ -87,7 +84,7 @@ func (acc Account) NewOAuth2HTTPClient(ctx context.Context, oa OAuth2) (*http.Cl
 	// but wrapping the underlying token source so we can persist any
 	// changes to the database
 	return oauth2.NewClient(ctx, &persistedTokenSource{
-		tl:        acc.t,
+		tl:        acc.tl,
 		ts:        src,
 		accountID: acc.ID,
 		token:     tkn,
@@ -97,13 +94,10 @@ func (acc Account) NewOAuth2HTTPClient(ctx context.Context, oa OAuth2) (*http.Cl
 // authorizeWithOAuth2 gets an initial OAuth2 token from the user.
 // It requires OAuth2AppSource to be set or it will panic.
 func authorizeWithOAuth2(ctx context.Context, oc OAuth2) ([]byte, error) {
-	src, err := oauth2App(oc.ProviderID, oc.Scopes)
-	if err != nil {
-		return nil, fmt.Errorf("getting token source: %v", err)
-	}
+	src := oauth2App(oc.ProviderID, oc.Scopes)
 	tkn, err := src.InitialToken(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getting token from source: %v", err)
+		return nil, fmt.Errorf("getting token from source: %w", err)
 	}
 	return marshalGob(tkn)
 }
@@ -130,12 +124,12 @@ func (ps *persistedTokenSource) Token() (*oauth2.Token, error) {
 
 		authBytes, err := marshalGob(tkn)
 		if err != nil {
-			return nil, fmt.Errorf("gob-encoding new OAuth2 token: %v", err)
+			return nil, fmt.Errorf("gob-encoding new OAuth2 token: %w", err)
 		}
 
 		_, err = ps.tl.db.Exec(`UPDATE accounts SET authorization=? WHERE id=?`, authBytes, ps.accountID)
 		if err != nil {
-			return nil, fmt.Errorf("storing refreshed OAuth2 token: %v", err)
+			return nil, fmt.Errorf("storing refreshed OAuth2 token: %w", err)
 		}
 	}
 

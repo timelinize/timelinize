@@ -22,11 +22,12 @@ import (
 	"context"
 	"encoding/csv"
 	"os"
+	"path/filepath"
 
 	"github.com/timelinize/timelinize/timeline"
 )
 
-// Recognizes returns true if the file is recognized as a contact list.
+// Recognize returns true if the file is recognized as a contact list.
 func (fimp *FileImporter) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
 nextFile:
 	for _, filename := range filenames {
@@ -45,7 +46,7 @@ nextFile:
 }
 
 func recognizeCSV(filename string, delim rune) (timeline.Recognition, error) {
-	file, err := os.Open(filename)
+	file, err := os.Open(filepath.Clean(filename))
 	if err != nil {
 		return timeline.Recognition{}, err
 	}

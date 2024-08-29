@@ -46,7 +46,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan c
 
 	albumFolders, err := archiver.TopDirReadDir(fsys, googlePhotosPath)
 	if err != nil {
-		return fmt.Errorf("getting album list from %s: %v", googlePhotosPath, err)
+		return fmt.Errorf("getting album list from %s: %w", googlePhotosPath, err)
 	}
 
 	// We don't use Walk() because we need to control the order in which we read
@@ -96,7 +96,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan c
 
 		for _, dirEntry := range albumItems {
 			if err := fimp.processAlbumItem(ctx, albumMeta, thisAlbumFolderPath, dirEntry, itemChan, opt, fsys); err != nil {
-				return fmt.Errorf("processing album item '%s': %v", path.Join(thisAlbumFolderPath, dirEntry.Name()), err)
+				return fmt.Errorf("processing album item '%s': %w", path.Join(thisAlbumFolderPath, dirEntry.Name()), err)
 			}
 		}
 	}
@@ -136,7 +136,7 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	if path.Ext(fpath) == ".json" {
 		err = json.NewDecoder(f).Decode(&itemMeta)
 		if err != nil {
-			return fmt.Errorf("decoding item metadata file %s: %v", fpath, err)
+			return fmt.Errorf("decoding item metadata file %s: %w", fpath, err)
 		}
 
 		// I've heard that some JSON files in albums (other than the album metadata)
@@ -150,7 +150,7 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 		// in case the actual media file doesn't contain any
 		itemMeta.parsedPhotoTakenTime, err = itemMeta.timestamp()
 		if err != nil && !errors.Is(err, errNoTimestamp) {
-			return fmt.Errorf("parsing timestamp from item %s: %v", fpath, err)
+			return fmt.Errorf("parsing timestamp from item %s: %w", fpath, err)
 		}
 
 		// ensure item is within configured timeframe before continuing
@@ -165,7 +165,6 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			zap.String("target_file", mediaFilePath))
 	} else {
 		itemMeta.source = fsys
-		mediaFilePath = fpath
 	}
 
 	ig := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
@@ -217,7 +216,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 			// always use the filename in the DB row when showing the filename
 			item.Content.Filename = path.Base(mediaFilePath)
 		}
-		item.Content.Data = func(ctx context.Context) (io.ReadCloser, error) {
+		item.Content.Data = func(_ context.Context) (io.ReadCloser, error) {
 			return archiver.TopDirOpen(itemMeta.source, mediaFilePath)
 		}
 
@@ -294,7 +293,8 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 func (fimp *FileImporter) archiveFilenameWithoutPositionPart() string {
 	base := filepath.Base(fimp.filename)
 	parts := strings.Split(base, "-")
-	if len(parts) < 3 {
+	const requiredParts = 3
+	if len(parts) < requiredParts {
 		return base
 	}
 	return strings.Join(parts[:2], "-")
@@ -304,14 +304,14 @@ func (fimp *FileImporter) readAlbumMetadata(fsys fs.FS, albumFolderPath string) 
 	albumMetadataFilePath := path.Join(albumFolderPath, albumMetadataFilename)
 	albumMetadataFile, err := archiver.TopDirOpen(fsys, albumMetadataFilePath)
 	if err != nil {
-		return albumArchiveMetadata{}, fmt.Errorf("opening metadata file %s: %v", albumMetadataFilename, err)
+		return albumArchiveMetadata{}, fmt.Errorf("opening metadata file %s: %w", albumMetadataFilename, err)
 	}
 	defer albumMetadataFile.Close()
 
 	var albumMeta albumArchiveMetadata
 	err = json.NewDecoder(albumMetadataFile).Decode(&albumMeta)
 	if err != nil {
-		return albumArchiveMetadata{}, fmt.Errorf("decoding album metadata file %s: %v", albumMetadataFilename, err)
+		return albumArchiveMetadata{}, fmt.Errorf("decoding album metadata file %s: %w", albumMetadataFilename, err)
 	}
 
 	return albumMeta, nil
@@ -415,7 +415,7 @@ func (m mediaArchiveMetadata) location() timeline.Location {
 	return loc
 }
 
-var errNoTimestamp = fmt.Errorf("no timestamp available")
+var errNoTimestamp = errors.New("no timestamp available")
 
 // timestamp returns a timestamp derived from the metadata. It first
 // prefers the PhotoTakenTime, then the CreationTime, then the

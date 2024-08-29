@@ -22,12 +22,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"io/fs"
+	"log"
 	"math"
-	"net/http"
 	"net/url"
 	"path"
 	"strconv"
@@ -37,299 +38,299 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-type tweetFromAPI struct {
-	InReplyToUserID  string `json:"in_reply_to_user_id,omitempty"`
-	ReferencedTweets []struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-	} `json:"referenced_tweets,omitempty"`
-	Text          string `json:"text"`
-	PublicMetrics struct {
-		RetweetCount int `json:"retweet_count"`
-		ReplyCount   int `json:"reply_count"`
-		LikeCount    int `json:"like_count"`
-		QuoteCount   int `json:"quote_count"`
-	} `json:"public_metrics"`
-	Lang           string    `json:"lang"`
-	ConversationID string    `json:"conversation_id"`
-	CreatedAt      time.Time `json:"created_at"`
-	ID             string    `json:"id"`
-	Entities       struct {
-		Mentions []struct {
-			Start    int    `json:"start"`
-			End      int    `json:"end"`
-			Username string `json:"username"`
-			ID       string `json:"id"`
-		} `json:"mentions"`
-		URLs []struct {
-			Start       int    `json:"start"`
-			End         int    `json:"end"`
-			URL         string `json:"url"`
-			ExpandedURL string `json:"expanded_url"`
-			DisplayURL  string `json:"display_url"`
-			Images      []struct {
-				URL    string `json:"url"`
-				Width  int    `json:"width"`
-				Height int    `json:"height"`
-			} `json:"images"`
-			Status      int    `json:"status"`
-			Title       string `json:"title"`
-			Description string `json:"description"`
-			UnwoundURL  string `json:"unwound_url"`
-		} `json:"urls"`
-		Annotations []struct {
-			Start          int     `json:"start"`
-			End            int     `json:"end"`
-			Probability    float64 `json:"probability"`
-			Type           string  `json:"type"`
-			NormalizedText string  `json:"normalized_text"`
-		} `json:"annotations"`
-	} `json:"entities,omitempty"`
-	AuthorID           string `json:"author_id"`
-	ReplySettings      string `json:"reply_settings"`
-	Source             string `json:"source"`
-	PossiblySensitive  bool   `json:"possibly_sensitive"`
-	ContextAnnotations []struct {
-		Domain idNameDesc `json:"domain"`
-		Entity idNameDesc `json:"entity"`
-	} `json:"context_annotations,omitempty"`
-	Attachments struct {
-		MediaKeys []string `json:"media_keys"`
-	} `json:"attachments,omitempty"`
-	Geo struct {
-		Coordinates struct {
-			Type        string    `json:"type"`        // "Point"
-			Coordinates []float64 `json:"coordinates"` // latitude, longitude pair
-		} `json:"coordinates"`
-		PlaceID string `json:"place_id,omitempty"`
-	} `json:"geo,omitempty"`
-}
+// type tweetFromAPI struct {
+// 	InReplyToUserID  string `json:"in_reply_to_user_id,omitempty"`
+// 	ReferencedTweets []struct {
+// 		Type string `json:"type"`
+// 		ID   string `json:"id"`
+// 	} `json:"referenced_tweets,omitempty"`
+// 	Text          string `json:"text"`
+// 	PublicMetrics struct {
+// 		RetweetCount int `json:"retweet_count"`
+// 		ReplyCount   int `json:"reply_count"`
+// 		LikeCount    int `json:"like_count"`
+// 		QuoteCount   int `json:"quote_count"`
+// 	} `json:"public_metrics"`
+// 	Lang           string    `json:"lang"`
+// 	ConversationID string    `json:"conversation_id"`
+// 	CreatedAt      time.Time `json:"created_at"`
+// 	ID             string    `json:"id"`
+// 	Entities       struct {
+// 		Mentions []struct {
+// 			Start    int    `json:"start"`
+// 			End      int    `json:"end"`
+// 			Username string `json:"username"`
+// 			ID       string `json:"id"`
+// 		} `json:"mentions"`
+// 		URLs []struct {
+// 			Start       int    `json:"start"`
+// 			End         int    `json:"end"`
+// 			URL         string `json:"url"`
+// 			ExpandedURL string `json:"expanded_url"`
+// 			DisplayURL  string `json:"display_url"`
+// 			Images      []struct {
+// 				URL    string `json:"url"`
+// 				Width  int    `json:"width"`
+// 				Height int    `json:"height"`
+// 			} `json:"images"`
+// 			Status      int    `json:"status"`
+// 			Title       string `json:"title"`
+// 			Description string `json:"description"`
+// 			UnwoundURL  string `json:"unwound_url"`
+// 		} `json:"urls"`
+// 		Annotations []struct {
+// 			Start          int     `json:"start"`
+// 			End            int     `json:"end"`
+// 			Probability    float64 `json:"probability"`
+// 			Type           string  `json:"type"`
+// 			NormalizedText string  `json:"normalized_text"`
+// 		} `json:"annotations"`
+// 	} `json:"entities,omitempty"`
+// 	AuthorID           string `json:"author_id"`
+// 	ReplySettings      string `json:"reply_settings"`
+// 	Source             string `json:"source"`
+// 	PossiblySensitive  bool   `json:"possibly_sensitive"`
+// 	ContextAnnotations []struct {
+// 		Domain idNameDesc `json:"domain"`
+// 		Entity idNameDesc `json:"entity"`
+// 	} `json:"context_annotations,omitempty"`
+// 	Attachments struct {
+// 		MediaKeys []string `json:"media_keys"`
+// 	} `json:"attachments,omitempty"`
+// 	Geo struct {
+// 		Coordinates struct {
+// 			Type        string    `json:"type"`        // "Point"
+// 			Coordinates []float64 `json:"coordinates"` // latitude, longitude pair
+// 		} `json:"coordinates"`
+// 		PlaceID string `json:"place_id,omitempty"`
+// 	} `json:"geo,omitempty"`
+// }
 
-func (t tweetFromAPI) owner(page userTweetsResponsePage) timeline.Entity {
-	owner := timeline.Entity{
-		Attributes: []timeline.Attribute{
-			{
-				Name:     identityAttribute,
-				Value:    t.AuthorID,
-				Identity: true,
-			},
-		},
-	}
-	for _, u := range page.Includes.Users {
-		if u.Data.ID == t.AuthorID {
-			owner.Name = u.Data.Name
-			owner.Attributes = append(owner.Attributes, timeline.Attribute{
-				Name:  "twitter_username",
-				Value: u.Data.Username,
-			})
-			break
-		}
-	}
-	return owner
-}
+// func (t tweetFromAPI) owner(page userTweetsResponsePage) timeline.Entity {
+// 	owner := timeline.Entity{
+// 		Attributes: []timeline.Attribute{
+// 			{
+// 				Name:     identityAttribute,
+// 				Value:    t.AuthorID,
+// 				Identity: true,
+// 			},
+// 		},
+// 	}
+// 	for _, u := range page.Includes.Users {
+// 		if u.Data.ID == t.AuthorID {
+// 			owner.Name = u.Data.Name
+// 			owner.Attributes = append(owner.Attributes, timeline.Attribute{
+// 				Name:  "twitter_username",
+// 				Value: u.Data.Username,
+// 			})
+// 			break
+// 		}
+// 	}
+// 	return owner
+// }
 
-type idNameDesc struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
+// type idNameDesc struct {
+// 	ID          string `json:"id"`
+// 	Name        string `json:"name"`
+// 	Description string `json:"description"`
+// }
 
-type userTweetsResponsePage struct {
-	Data []tweetFromAPI `json:"data"`
+// type userTweetsResponsePage struct {
+// 	Data []tweetFromAPI `json:"data"`
 
-	Includes struct {
-		Tweets []tweetFromAPI   `json:"tweets"`
-		Users  []twitterAccount `json:"users"`
-		Media  []struct {
-			MediaKey        string `json:"media_key"`
-			Height          int    `json:"height"`
-			URL             string `json:"url,omitempty"`
-			Type            string `json:"type"`
-			Width           int    `json:"width"`
-			DurationMs      int    `json:"duration_ms,omitempty"`
-			PreviewImageURL string `json:"preview_image_url,omitempty"`
-			PublicMetrics   struct {
-				ViewCount int `json:"view_count"`
-			} `json:"public_metrics,omitempty"`
-		} `json:"media"`
-		Places []struct {
-			Geo struct { // GeoJSON format (look it up)
-				Type       string    `json:"type"`
-				BBox       []float64 `json:"bbox"` // bounding box is the rectangle (usually 4 points) that contain the object
-				Properties struct {
-				} `json:"properties"`
-			} `json:"geo"`
-			CountryCode string `json:"country_code"`
-			Name        string `json:"name"`
-			ID          string `json:"id"`
-			PlaceType   string `json:"place_type"`
-			Country     string `json:"country"`
-			FullName    string `json:"full_name"`
-		} `json:"places"`
-	} `json:"includes"`
+// 	Includes struct {
+// 		Tweets []tweetFromAPI   `json:"tweets"`
+// 		Users  []twitterAccount `json:"users"`
+// 		Media  []struct {
+// 			MediaKey        string `json:"media_key"`
+// 			Height          int    `json:"height"`
+// 			URL             string `json:"url,omitempty"`
+// 			Type            string `json:"type"`
+// 			Width           int    `json:"width"`
+// 			DurationMs      int    `json:"duration_ms,omitempty"`
+// 			PreviewImageURL string `json:"preview_image_url,omitempty"`
+// 			PublicMetrics   struct {
+// 				ViewCount int `json:"view_count"`
+// 			} `json:"public_metrics,omitempty"`
+// 		} `json:"media"`
+// 		Places []struct {
+// 			Geo struct { // GeoJSON format (look it up)
+// 				Type       string    `json:"type"`
+// 				BBox       []float64 `json:"bbox"` // bounding box is the rectangle (usually 4 points) that contain the object
+// 				Properties struct {
+// 				} `json:"properties"`
+// 			} `json:"geo"`
+// 			CountryCode string `json:"country_code"`
+// 			Name        string `json:"name"`
+// 			ID          string `json:"id"`
+// 			PlaceType   string `json:"place_type"`
+// 			Country     string `json:"country"`
+// 			FullName    string `json:"full_name"`
+// 		} `json:"places"`
+// 	} `json:"includes"`
 
-	Meta struct {
-		NextToken   string `json:"next_token"`
-		ResultCount int    `json:"result_count"`
-		NewestID    string `json:"newest_id"`
-		OldestID    string `json:"oldest_id"`
-	} `json:"meta"`
+// 	Meta struct {
+// 		NextToken   string `json:"next_token"`
+// 		ResultCount int    `json:"result_count"`
+// 		NewestID    string `json:"newest_id"`
+// 		OldestID    string `json:"oldest_id"`
+// 	} `json:"meta"`
 
-	Errors []struct {
-		ResourceType string `json:"resource_type"`
-		Field        string `json:"field"`
-		Title        string `json:"title"`
-		Section      string `json:"section"`
-		Detail       string `json:"detail"`
-		Type         string `json:"type"`
-	} `json:"errors"`
-}
+// 	Errors []struct {
+// 		ResourceType string `json:"resource_type"`
+// 		Field        string `json:"field"`
+// 		Title        string `json:"title"`
+// 		Section      string `json:"section"`
+// 		Detail       string `json:"detail"`
+// 		Type         string `json:"type"`
+// 	} `json:"errors"`
+// }
 
-func (tweet tweetFromAPI) toItemGraph(page userTweetsResponsePage) *timeline.Graph {
-	owner := tweet.owner(page)
+// func (tweet tweetFromAPI) toItemGraph(page userTweetsResponsePage) *timeline.Graph {
+// 	owner := tweet.owner(page)
 
-	// get location info; prefer user's precise location if available, otherwise use place's geo info
-	var geo timeline.Location
-	if len(tweet.Geo.Coordinates.Coordinates) == 2 {
-		geo.Latitude, geo.Longitude = &tweet.Geo.Coordinates.Coordinates[0], &tweet.Geo.Coordinates.Coordinates[1]
-	} else if tweet.Geo.PlaceID != "" {
-		for _, pl := range page.Includes.Places {
-			if len(pl.Geo.BBox) == 4 {
-				// TODO: we only support a single point, so find center of bounding box... supposedly they should go from SW to NE (counterclockwise)
-			}
-		}
-	}
+// 	// get location info; prefer user's precise location if available, otherwise use place's geo info
+// 	var geo timeline.Location
+// 	if len(tweet.Geo.Coordinates.Coordinates) == 2 {
+// 		geo.Latitude, geo.Longitude = &tweet.Geo.Coordinates.Coordinates[0], &tweet.Geo.Coordinates.Coordinates[1]
+// 	} else if tweet.Geo.PlaceID != "" {
+// 		for _, pl := range page.Includes.Places {
+// 			if len(pl.Geo.BBox) == 4 {
+// 				// TODO: we only support a single point, so find center of bounding box... supposedly they should go from SW to NE (counterclockwise)
+// 			}
+// 		}
+// 	}
 
-	it := &timeline.Item{
-		ID:        tweet.ID,
-		Timestamp: tweet.CreatedAt,
-		Location:  geo,
-		Owner:     owner,
-		Metadata: timeline.Metadata{
-			"Retweets": tweet.PublicMetrics.RetweetCount,
-			"Quotes":   tweet.PublicMetrics.QuoteCount,
-			"Likes":    tweet.PublicMetrics.LikeCount,
-			"Source":   tweet.Source,
-			"Language": tweet.Lang,
-		},
-	}
-	if tweet.Text != "" {
-		expandedText := tweet.Text
+// 	it := &timeline.Item{
+// 		ID:        tweet.ID,
+// 		Timestamp: tweet.CreatedAt,
+// 		Location:  geo,
+// 		Owner:     owner,
+// 		Metadata: timeline.Metadata{
+// 			"Retweets": tweet.PublicMetrics.RetweetCount,
+// 			"Quotes":   tweet.PublicMetrics.QuoteCount,
+// 			"Likes":    tweet.PublicMetrics.LikeCount,
+// 			"Source":   tweet.Source,
+// 			"Language": tweet.Lang,
+// 		},
+// 	}
+// 	if tweet.Text != "" {
+// 		expandedText := tweet.Text
 
-		// replace any shortened URLs with their fully-expanded (and unwound) form
-		// (according to Twitter API docs, "unwound" means after following redirects
-		// from URL shorteners like bitly, etc.)
-		for _, urlEnt := range tweet.Entities.URLs {
-			textToReplace := tweet.Text[urlEnt.Start:urlEnt.End]
-			expandedText = strings.Replace(expandedText, textToReplace, urlEnt.UnwoundURL, 1)
-		}
+// 		// replace any shortened URLs with their fully-expanded (and unwound) form
+// 		// (according to Twitter API docs, "unwound" means after following redirects
+// 		// from URL shorteners like bitly, etc.)
+// 		for _, urlEnt := range tweet.Entities.URLs {
+// 			textToReplace := tweet.Text[urlEnt.Start:urlEnt.End]
+// 			expandedText = strings.Replace(expandedText, textToReplace, urlEnt.UnwoundURL, 1)
+// 		}
 
-		it.Content = timeline.ItemData{
-			Data: timeline.StringData(expandedText),
-		}
-	}
+// 		it.Content = timeline.ItemData{
+// 			Data: timeline.StringData(expandedText),
+// 		}
+// 	}
 
-	ig := &timeline.Graph{Item: it}
+// 	ig := &timeline.Graph{Item: it}
 
-	// attach media elements to the main tweet's item graph
-	for _, mediaKey := range tweet.Attachments.MediaKeys {
-		// find this media item in the attachments list
-		for _, attachment := range page.Includes.Media {
-			// skip attachments that aren't the one we're looking for,
-			// or which have an empty URL (sigh)
-			if attachment.MediaKey != mediaKey || attachment.URL == "" {
-				continue
-			}
+// 	// attach media elements to the main tweet's item graph
+// 	for _, mediaKey := range tweet.Attachments.MediaKeys {
+// 		// find this media item in the attachments list
+// 		for _, attachment := range page.Includes.Media {
+// 			// skip attachments that aren't the one we're looking for,
+// 			// or which have an empty URL (sigh)
+// 			if attachment.MediaKey != mediaKey || attachment.URL == "" {
+// 				continue
+// 			}
 
-			mediaItem := &timeline.Item{
-				ID:        attachment.MediaKey,
-				Timestamp: tweet.CreatedAt,
-				Owner:     it.Owner,
-				Content: timeline.ItemData{
-					Filename: path.Base(attachment.URL),
-					Data: func(context.Context) (io.ReadCloser, error) {
-						resp, err := http.Get(attachment.URL)
-						if err != nil {
-							return nil, err
-						}
-						return resp.Body, nil
-					},
-				},
-				Metadata: timeline.Metadata{
-					"Width":                   attachment.Width,
-					"Height":                  attachment.Height,
-					"Duration (milliseconds)": attachment.DurationMs,
-					"Views":                   attachment.PublicMetrics.ViewCount,
-				},
-			}
+// 			mediaItem := &timeline.Item{
+// 				ID:        attachment.MediaKey,
+// 				Timestamp: tweet.CreatedAt,
+// 				Owner:     it.Owner,
+// 				Content: timeline.ItemData{
+// 					Filename: path.Base(attachment.URL),
+// 					Data: func(context.Context) (io.ReadCloser, error) {
+// 						resp, err := http.Get(attachment.URL)
+// 						if err != nil {
+// 							return nil, err
+// 						}
+// 						return resp.Body, nil
+// 					},
+// 				},
+// 				Metadata: timeline.Metadata{
+// 					"Width":                   attachment.Width,
+// 					"Height":                  attachment.Height,
+// 					"Duration (milliseconds)": attachment.DurationMs,
+// 					"Views":                   attachment.PublicMetrics.ViewCount,
+// 				},
+// 			}
 
-			ig.ToItem(timeline.RelAttachment, mediaItem)
-			break
-		}
-	}
+// 			ig.ToItem(timeline.RelAttachment, mediaItem)
+// 			break
+// 		}
+// 	}
 
-	return ig
-}
+// 	return ig
+// }
 
-func (page userTweetsResponsePage) process(itemChan chan<- *timeline.Graph, opt Options) error {
-nextTweet:
-	for _, tweet := range page.Data {
-		// skip retweets unless configured
-		if !opt.Retweets {
-			for _, ref := range tweet.ReferencedTweets {
-				if ref.Type == "retweeted" || ref.Type == "quoted" {
-					continue nextTweet
-				}
-			}
-		}
+// func (page userTweetsResponsePage) process(itemChan chan<- *timeline.Graph, opt Options) error {
+// nextTweet:
+// 	for _, tweet := range page.Data {
+// 		// skip retweets unless configured
+// 		if !opt.Retweets {
+// 			for _, ref := range tweet.ReferencedTweets {
+// 				if ref.Type == "retweeted" || ref.Type == "quoted" {
+// 					continue nextTweet
+// 				}
+// 			}
+// 		}
 
-		ig := tweet.toItemGraph(page)
+// 		ig := tweet.toItemGraph(page)
 
-		// if this tweet is in reply to another tweet, we add that
-		// other tweet to the graph; but since our unidirectional
-		// relation ReplyTo goes FROM the first message TO the reply,
-		// we need to actually create a graph for the first message,
-		// then connect the original tweet which is the reply; this
-		// is a little awkward since we're starting with the reply
-		// and getting its "parent", which is backwards from how it
-		// was designed (start with parent, get replies).
+// 		// if this tweet is in reply to another tweet, we add that
+// 		// other tweet to the graph; but since our unidirectional
+// 		// relation ReplyTo goes FROM the first message TO the reply,
+// 		// we need to actually create a graph for the first message,
+// 		// then connect the original tweet which is the reply; this
+// 		// is a little awkward since we're starting with the reply
+// 		// and getting its "parent", which is backwards from how it
+// 		// was designed (start with parent, get replies).
 
-		// TODO: skip replies unless configured to have them
+// 		// TODO: skip replies unless configured to have them
 
-		// attach tweet this tweet is in reply to (if any)
-		for _, ref := range tweet.ReferencedTweets {
-			if ref.Type != "replied_to" {
-				continue
-			}
+// 		// attach tweet this tweet is in reply to (if any)
+// 		for _, ref := range tweet.ReferencedTweets {
+// 			if ref.Type != "replied_to" {
+// 				continue
+// 			}
 
-			// find the referenced tweet in the list of attached tweets
-			for _, refTweet := range page.Includes.Tweets {
-				if refTweet.ID != ref.ID {
-					continue
-				}
+// 			// find the referenced tweet in the list of attached tweets
+// 			for _, refTweet := range page.Includes.Tweets {
+// 				if refTweet.ID != ref.ID {
+// 					continue
+// 				}
 
-				// TODO: I think this relationship is backwards... double-check this!
-				refTweetItemGraph := refTweet.toItemGraph(page)
-				refTweetItemGraph.Edges = append(refTweetItemGraph.Edges, timeline.Relationship{
-					Relation: timeline.RelReply,
-					To:       ig,
-				})
+// 				// TODO: I think this relationship is backwards... double-check this!
+// 				refTweetItemGraph := refTweet.toItemGraph(page)
+// 				refTweetItemGraph.Edges = append(refTweetItemGraph.Edges, timeline.Relationship{
+// 					Relation: timeline.RelReply,
+// 					To:       ig,
+// 				})
 
-				// TODO: How much of the conversation can/should we do? Maybe make it configurable?
+// 				// TODO: How much of the conversation can/should we do? Maybe make it configurable?
 
-				// this will add both the first tweet and the reply to
-				// the timeline, then we'll end up sending the reply again,
-				// but that should be OK since the timeline should be able
-				// to deduplicate for us
-				itemChan <- refTweetItemGraph
-			}
-		}
+// 				// this will add both the first tweet and the reply to
+// 				// the timeline, then we'll end up sending the reply again,
+// 				// but that should be OK since the timeline should be able
+// 				// to deduplicate for us
+// 				itemChan <- refTweetItemGraph
+// 			}
+// 		}
 
-		itemChan <- ig
-	}
+// 		itemChan <- ig
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 type tweet struct {
 	Contributors         any               `json:"contributors"`
@@ -368,9 +369,9 @@ type tweet struct {
 	source          string // "api|archive"
 }
 
-func (t *tweet) id() string {
-	return t.TweetIDStr
-}
+// func (t *tweet) id() string {
+// 	return t.TweetIDStr
+// }
 
 // content returns the text of the tweet, or, if text is empty, it
 // returns the first media item as data (if any).
@@ -411,7 +412,8 @@ func (t *tweet) text() string {
 	// replace any annoying t.co shortened URLs with their fully-expanded form
 	if t.Entities != nil {
 		for _, urlEnt := range t.Entities.URLs {
-			if len(urlEnt.Indices) != 2 {
+			const requiredCount = 2
+			if len(urlEnt.Indices) != requiredCount {
 				continue
 			}
 			textToReplace := txt[urlEnt.Indices[0]:urlEnt.Indices[1]]
@@ -424,7 +426,8 @@ func (t *tweet) text() string {
 	// media in our own way, without a URL)
 	if t.ExtendedEntities != nil {
 		for _, ent := range t.ExtendedEntities.Media {
-			if len(ent.Indices) != 2 {
+			const requiredCount = 2
+			if len(ent.Indices) != requiredCount {
 				continue
 			}
 			textToReplace := txt[ent.Indices[0]:ent.Indices[1]]
@@ -469,7 +472,8 @@ func (t *tweet) location() timeline.Location {
 	if err != nil {
 		return loc
 	}
-	if math.Abs(c0) > 90 {
+	const maxLatitude = 90
+	if math.Abs(c0) > maxLatitude {
 		loc.Latitude = &c1
 		loc.Longitude = &c0
 	} else {
@@ -486,27 +490,27 @@ type tweetGeo struct {
 	Coordinates []string `json:"coordinates"` // TODO: these are not in any particular order! That's *GREAT*... sigh. My own export has 2 tweets with coords, and they're the same point, but both are in a different order
 }
 
-type tweetPlace struct {
-	ID          string      `json:"id"`
-	URL         string      `json:"url"`
-	PlaceType   string      `json:"place_type"`
-	Name        string      `json:"name"`
-	FullName    string      `json:"full_name"`
-	CountryCode string      `json:"country_code"`
-	Country     string      `json:"country"`
-	BoundingBox boundingBox `json:"bounding_box"`
-}
+// type tweetPlace struct {
+// 	ID          string      `json:"id"`
+// 	URL         string      `json:"url"`
+// 	PlaceType   string      `json:"place_type"`
+// 	Name        string      `json:"name"`
+// 	FullName    string      `json:"full_name"`
+// 	CountryCode string      `json:"country_code"`
+// 	Country     string      `json:"country"`
+// 	BoundingBox boundingBox `json:"bounding_box"`
+// }
 
-type boundingBox struct {
-	Type string `json:"type"`
+// type boundingBox struct {
+// 	Type string `json:"type"`
 
-	// "A series of longitude and latitude points, defining a box which will contain
-	// the Place entity this bounding box is related to. Each point is an array in
-	// the form of [longitude, latitude]. Points are grouped into an array per bounding
-	// box. Bounding box arrays are wrapped in one additional array to be compatible
-	// with the polygon notation."
-	Coordinates [][][]float64 `json:"coordinates"`
-}
+// 	// "A series of longitude and latitude points, defining a box which will contain
+// 	// the Place entity this bounding box is related to. Each point is an array in
+// 	// the form of [longitude, latitude]. Points are grouped into an array per bounding
+// 	// box. Bounding box arrays are wrapped in one additional array to be compatible
+// 	// with the polygon notation."
+// 	Coordinates [][][]float64 `json:"coordinates"`
+// }
 
 type twitterEntities struct {
 	Hashtags     []hashtagEntity     `json:"hashtags"`
@@ -612,7 +616,7 @@ func (m mediaItem) fileName() string {
 	}
 	// media in the export archives are prefixed by the
 	// tweet ID they were posted with and a hyphen
-	if m.parent.source == "archive" {
+	if m.parent.source == srcArchive {
 		source = fmt.Sprintf("%s-%s", m.parent.TweetIDStr, source)
 	}
 	return source
@@ -635,7 +639,8 @@ func (m mediaItem) mediaType() string {
 	case "animated_gif":
 		fallthrough
 	case "video":
-		_, contentType, _ := m.getLargestVideo()
+		bitrate, contentType, _ := m.getLargestVideo()
+		log.Printf("[DEBUG] Largest video bitrate: %d", bitrate)
 		return contentType
 	case "photo":
 		fname := m.fileName()
@@ -667,7 +672,6 @@ func (m mediaItem) getLargestVideo() (bitrate int, contentType, source string) {
 			bitrate = int(v.Bitrate)
 		}
 	}
-
 	return
 }
 
@@ -845,29 +849,29 @@ type twitterAccount struct {
 	} `json:"data"`
 }
 
-func (ta twitterAccount) screenName() string {
-	if ta.Data.Username != "" {
-		return ta.Data.Username // from API
-	}
-	return ta.Username // from archive file
-}
+// func (ta twitterAccount) screenName() string {
+// 	if ta.Data.Username != "" {
+// 		return ta.Data.Username // from API
+// 	}
+// 	return ta.Username // from archive file
+// }
 
-func (ta twitterAccount) id() string {
-	if ta.Data.ID != "" {
-		return ta.Data.ID // from API
-	}
-	return ta.AccountID // from archive file
-}
+// func (ta twitterAccount) id() string {
+// 	if ta.Data.ID != "" {
+// 		return ta.Data.ID // from API
+// 	}
+// 	return ta.AccountID // from archive file
+// }
 
-func (ta twitterAccount) name() string {
-	if ta.Data.Name != "" {
-		return ta.Data.Name // from API
-	}
-	return ta.AccountDisplayName // from archive file
-}
+// func (ta twitterAccount) name() string {
+// 	if ta.Data.Name != "" {
+// 		return ta.Data.Name // from API
+// 	}
+// 	return ta.AccountDisplayName // from archive file
+// }
 
 // entity returns a populated Entity from a populated twitterAccount.
-func (ta twitterAccount) entity(ctx context.Context, fsys fs.FS) timeline.Entity {
+func (ta twitterAccount) entity(_ context.Context, fsys fs.FS) timeline.Entity {
 	ent := timeline.Entity{
 		Name: ta.AccountDisplayName,
 		Attributes: []timeline.Attribute{
@@ -906,9 +910,9 @@ func (ta twitterAccount) entity(ctx context.Context, fsys fs.FS) timeline.Entity
 		profile := ta.Profile[0].Profile
 		if profile.AvatarMediaURL != "" {
 			if fsys == nil {
-				ent.NewPicture = timeline.DownloadData(ctx, profile.AvatarMediaURL)
+				ent.NewPicture = timeline.DownloadData(profile.AvatarMediaURL)
 			} else {
-				ent.NewPicture = func(ctx context.Context) (io.ReadCloser, error) {
+				ent.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
 					avatarFilename := ta.AccountID + "-" + path.Base(profile.AvatarMediaURL)
 					picPath := path.Join("data", "profile_media", avatarFilename)
 					return fsys.Open(picPath)
@@ -989,7 +993,7 @@ type transInt int64
 
 func (ti *transInt) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 {
-		return fmt.Errorf("no value")
+		return errors.New("no value")
 	}
 	b = bytes.Trim(b, "\"")
 	var i int64
@@ -1006,7 +1010,7 @@ type transFloat float64
 
 func (tf *transFloat) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 {
-		return fmt.Errorf("no value")
+		return errors.New("no value")
 	}
 	b = bytes.Trim(b, "\"")
 	var f float64
@@ -1019,3 +1023,5 @@ func (tf *transFloat) UnmarshalJSON(b []byte) error {
 }
 
 const identityAttribute = "twitter_id"
+
+const srcArchive = "archive"

@@ -118,7 +118,8 @@ func TestSplitCamelCaseIntoWords(t *testing.T) {
 		"GPSAltitudeRef":                   "GPS Altitude Ref",
 		"GPSAltitude":                      "GPS Altitude",
 		"GPSTimeStamp":                     "GPS Time Stamp",
-		"GPSSatelites":                     "GPS Satelites",
+		"GPSSatelites":                     "GPS Satellites", // OK so it's misspelled in the EXIF data I encountered!
+		"GPSSatellites":                    "GPS Satellites", // obviously, support the correct spelling too
 		"GPSStatus":                        "GPS Status",
 		"GPSMeasureMode":                   "GPS Measure Mode",
 		"GPSDOP":                           "GPSDOP",

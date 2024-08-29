@@ -34,7 +34,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/timeline"
@@ -55,6 +54,7 @@ func init() {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	// The ID of the owner entity. REQUIRED for linking entity in DB.
 	OwnerEntityID int64 `json:"owner_entity_id"`
@@ -72,7 +72,7 @@ type Options struct {
 	Device string `json:"device,omitempty"`
 
 	// keyed by deviceTag from Settings.json
-	devices map[int64]DeviceSettings
+	devices map[int64]deviceSettings
 }
 
 // FileImporter implements the timeline.FileImporter interface.
@@ -94,6 +94,7 @@ type FileImporter struct {
 	throttle chan struct{}
 }
 
+// Recognize returns whether the file is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	for _, filename := range filenames {
 		fsys, err := archiver.FileSystem(ctx, filename)
@@ -141,6 +142,7 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	return timeline.Recognition{}, nil
 }
 
+// FileImport imports data from a file.
 func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	fi.dsOpt = opt.DataSourceOptions.(*Options)
 	fi.ctx = ctx
@@ -155,7 +157,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 	for _, filename := range filenames {
 		fsys, err := archiver.FileSystem(ctx, filename)
 		if err != nil {
-			return fmt.Errorf("opening data file: %v", err)
+			return fmt.Errorf("opening data file: %w", err)
 		}
 
 		// first see if this is a location history file that is the
@@ -194,10 +196,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 					break
 				}
 
-				item, err := result.Original.(*onDeviceLocation).toItem(result, fi.dsOpt)
-				if err != nil {
-					return err
-				}
+				item := result.Original.(*onDeviceLocation).toItem(result, fi.dsOpt)
 
 				if fi.opt.Timeframe.ContainsItem(item, false) {
 					fi.itemChan <- &timeline.Graph{Item: item}
@@ -218,7 +217,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 		}
 
 		// key device settings to their device tag for future storage in DB
-		fi.dsOpt.devices = make(map[int64]DeviceSettings)
+		fi.dsOpt.devices = make(map[int64]deviceSettings)
 		for _, dev := range settings.DeviceSettings {
 			fi.dsOpt.devices[dev.DeviceTag] = dev
 		}
@@ -241,8 +240,9 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 		fi.seenDevices = make(map[int64]struct{})
 		fi.seenDevicesMu = new(sync.Mutex)
 
+		const maxGoroutines = 128
 		fi.wg = new(sync.WaitGroup)
-		fi.throttle = make(chan struct{}, 128)
+		fi.throttle = make(chan struct{}, maxGoroutines)
 
 		fi.wg.Add(1)
 		err = fi.processFile(ctx, &decoder{fi: fi})
@@ -280,9 +280,9 @@ type decoder struct {
 // When a new device is discovered, a new goroutine is spawned to process it.
 func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 	for dec.More() {
-		var new *location
-		if err := dec.Decode(&new); err != nil {
-			return nil, fmt.Errorf("decoding location element: %v", err)
+		var newLoc *location
+		if err := dec.Decode(&newLoc); err != nil {
+			return nil, fmt.Errorf("decoding location element: %w", err)
 		}
 
 		// enforce device affinity: if enabled, only process points
@@ -290,9 +290,9 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 		dec.fi.seenDevicesMu.Lock()
 		if dec.fi.seenDevices != nil {
 			// see if the device for this data point is already claimed by a goroutine
-			if _, claimed := dec.fi.seenDevices[new.DeviceTag]; claimed {
+			if _, claimed := dec.fi.seenDevices[newLoc.DeviceTag]; claimed {
 				// a goroutine is working on this device; is it ours?
-				if new.DeviceTag != dec.deviceTag {
+				if newLoc.DeviceTag != dec.deviceTag {
 					// not ours; skip it
 					dec.fi.seenDevicesMu.Unlock()
 					continue
@@ -300,11 +300,11 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 				// it is ours, so we'll just go out of this block
 			} else {
 				// a new unclaimed device! who will get it?
-				dec.fi.seenDevices[new.DeviceTag] = struct{}{}
+				dec.fi.seenDevices[newLoc.DeviceTag] = struct{}{}
 
 				if dec.deviceTag == 0 {
 					// this goroutine has no assignment yet, so we'll claim this one
-					dec.deviceTag = new.DeviceTag
+					dec.deviceTag = newLoc.DeviceTag
 				} else {
 					// we are assigned a different one, but we can start a new goroutine to work on this one
 
@@ -327,7 +327,7 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 								zap.Int64("device_tag", deviceTag),
 								zap.Error(err))
 						}
-					}(new.DeviceTag)
+					}(newLoc.DeviceTag)
 
 					dec.fi.seenDevicesMu.Unlock()
 					continue
@@ -337,12 +337,12 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 		dec.fi.seenDevicesMu.Unlock()
 
 		return &Location{
-			Original:    new,
-			LatitudeE7:  new.LatitudeE7,
-			LongitudeE7: new.LongitudeE7,
-			Altitude:    float64(new.Altitude),
-			Uncertainty: float64(new.Accuracy),
-			Timestamp:   new.Timestamp,
+			Original:    newLoc,
+			LatitudeE7:  newLoc.LatitudeE7,
+			LongitudeE7: newLoc.LongitudeE7,
+			Altitude:    float64(newLoc.Altitude),
+			Uncertainty: float64(newLoc.Accuracy),
+			Timestamp:   newLoc.Timestamp,
 		}, nil
 	}
 
@@ -364,7 +364,7 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("locating data file: %v", err)
+		return fmt.Errorf("locating data file: %w", err)
 	}
 	defer file.Close()
 
@@ -374,10 +374,10 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 	// 1. open brace '{'
 	// 2. "locations" field name,
 	// 3. the array value's opening bracket '['
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := dec.Token()
 		if err != nil {
-			return fmt.Errorf("decoding opening token: %v", err)
+			return fmt.Errorf("decoding opening token: %w", err)
 		}
 	}
 
@@ -418,14 +418,14 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 	return nil
 }
 
-// timeDelta returns the difference between times a and b,
-// but always returns a positive duration (absolute value).
-func timeDelta(a, b time.Time) time.Duration {
-	if a.After(b) {
-		return a.Sub(b)
-	}
-	return b.Sub(a)
-}
+// // timeDelta returns the difference between times a and b,
+// // but always returns a positive duration (absolute value).
+// func timeDelta(a, b time.Time) time.Duration {
+// 	if a.After(b) {
+// 		return a.Sub(b)
+// 	}
+// 	return b.Sub(a)
+// }
 
 // FloatToIntE7 converts a float into the equivalent integer value
 // with the decimal point moved right 7 places by string manipulation
@@ -438,7 +438,7 @@ func FloatToIntE7(coord float64) (int64, error) {
 // a string representation of a float as input.
 func FloatStringToIntE7(coord string) (int64, error) {
 	dotPos := strings.Index(coord, ".")
-	endPos := dotPos + 1 + 7
+	endPos := dotPos + 1 + places
 	if endPos >= len(coord) {
 		coord += strings.Repeat("0", endPos-len(coord))
 		endPos = len(coord)
@@ -467,8 +467,8 @@ func flexibleOpen(fsys fs.FS, filename string) (file fs.File, err error) {
 // TODO: consider using Vincenty distance? but that is way more expensive
 func haversineDistanceEarth(lat1E7, lon1E7, lat2E7, lon2E7 int64) float64 {
 	lat1Fl, lon1Fl, lat2Fl, lon2Fl :=
-		float64(lat1E7)/1e7, float64(lon1E7)/1e7,
-		float64(lat2E7)/1e7, float64(lon2E7)/1e7
+		float64(lat1E7)/placesMult, float64(lon1E7)/placesMult,
+		float64(lat2E7)/placesMult, float64(lon2E7)/placesMult
 
 	phi1 := degreesToRadians(lat1Fl)
 	phi2 := degreesToRadians(lat2Fl)
@@ -479,11 +479,11 @@ func haversineDistanceEarth(lat1E7, lon1E7, lat2E7, lon2E7 int64) float64 {
 }
 
 func haversin(theta float64) float64 {
-	return 0.5 * (1 - math.Cos(theta))
+	return 0.5 * (1 - math.Cos(theta)) //nolint:mnd
 }
 
 func degreesToRadians(d float64) float64 {
-	return d * (math.Pi / 180)
+	return d * (math.Pi / 180) //nolint:mnd
 }
 
 const (

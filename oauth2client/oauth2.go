@@ -44,12 +44,13 @@ type Getter interface {
 // AuthCodeExchangeInfo generates a state and a code verifier challenge string,
 // along with the assembled URL for a request to get an authorization code.
 func AuthCodeExchangeInfo(cfg *oauth2.Config) (CodeExchangeInfo, error) {
-	state := randString(14)
+	const stateValLength = 14
+	state := randString(stateValLength)
 
 	// support PKCE; we use the "S256" method which is theoretically superior to "plain"
 	pkceVerifier, err := generatePKCEVerifier()
 	if err != nil {
-		return CodeExchangeInfo{}, fmt.Errorf("generating PKCE verifier: %v", err)
+		return CodeExchangeInfo{}, fmt.Errorf("generating PKCE verifier: %w", err)
 	}
 	pkceVerifierSha256 := sha256.Sum256([]byte(pkceVerifier))
 	pkceVerifierSha256Base64 := base64.RawURLEncoding.EncodeToString(pkceVerifierSha256[:])
@@ -60,7 +61,7 @@ func AuthCodeExchangeInfo(cfg *oauth2.Config) (CodeExchangeInfo, error) {
 		AuthCodeURL: cfg.AuthCodeURL(state,
 			oauth2.AccessTypeOffline,
 			// PKCE extension
-			oauth2.SetAuthURLParam("code_challenge", string(pkceVerifierSha256Base64)),
+			oauth2.SetAuthURLParam("code_challenge", pkceVerifierSha256Base64),
 			oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 		),
 	}, nil
@@ -75,7 +76,8 @@ func AuthCodeExchangeInfo(cfg *oauth2.Config) (CodeExchangeInfo, error) {
 // The resulting string meets these criteria even if it does not
 // exercise the full range of the character set.
 func generatePKCEVerifier() (string, error) {
-	p := make([]byte, 43) // encoded length is longer, but this guarantees at least 43 characters
+	const minLength = 43
+	p := make([]byte, minLength) // encoded length is longer, but this guarantees at least 43 characters
 	if _, err := io.ReadFull(rand.Reader, p); err != nil {
 		return "", err
 	}
@@ -87,7 +89,7 @@ func randString(n int) string {
 	const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = letterBytes[mathrand.Intn(len(letterBytes))]
+		b[i] = letterBytes[mathrand.Intn(len(letterBytes))] //nolint:gosec // the whole point is that it's not crypto-safe, it's fine
 	}
 	return string(b)
 }
@@ -103,8 +105,8 @@ type (
 	// App provides a way to get an initial OAuth2 token
 	// as well as a continuing token source.
 	App interface {
-		InitialToken(context.Context) (*oauth2.Token, error)
-		TokenSource(context.Context, *oauth2.Token) oauth2.TokenSource
+		InitialToken(ctx context.Context) (*oauth2.Token, error)
+		TokenSource(ctx context.Context, token *oauth2.Token) oauth2.TokenSource
 	}
 )
 

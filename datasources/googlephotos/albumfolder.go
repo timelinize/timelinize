@@ -36,9 +36,13 @@ func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, itemChan chan
 
 	// process files in parallel for faster imports
 	var wg sync.WaitGroup
-	throttle := make(chan struct{}, 100)
+	const maxGoroutines = 100
+	throttle := make(chan struct{}, maxGoroutines)
 
 	err := fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}

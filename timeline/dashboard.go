@@ -25,27 +25,29 @@ import (
 	"time"
 )
 
+// PeriodicStats represents period statistics.
 // TODO: This is very much an experimental, WIP type... might need to generalize it or make way more of these
-type periodicStats struct {
+type PeriodicStats struct {
 	Period string `json:"period"`
 	Count  int    `json:"count"`
 }
 
-func (tl *Timeline) RecentItemStats(params url.Values) ([]periodicStats, error) {
+// RecentItemStats returns period statistics about recent items.
+func (tl *Timeline) RecentItemStats(params url.Values) ([]PeriodicStats, error) {
 	period := params.Get("period")
 
 	var dateAdjust, startOf, periodColumn string
 	switch period {
-	case "daily":
-		dateAdjust = "-28 days"
-		startOf = "day"
-		periodColumn = "date(timestamp/1000, 'unixepoch')"
 	default:
 		fallthrough
 	case "monthly":
 		dateAdjust = "-11 months"
 		startOf = "month"
 		periodColumn = "strftime('%m', date(timestamp/1000, 'unixepoch'))"
+	case "daily":
+		dateAdjust = "-28 days"
+		startOf = "day"
+		periodColumn = "date(timestamp/1000, 'unixepoch')"
 	case "yearly":
 		dateAdjust = "-10 years"
 		startOf = "year"
@@ -58,6 +60,7 @@ func (tl *Timeline) RecentItemStats(params url.Values) ([]periodicStats, error) 
 	// go back 11 months to the start of the last November, since we don't want to include partial October
 	// that happened 12 months ago) -- with that value, we can then select the count of items in each period
 	// that are newer than the cutoff date we calculated in the CTE.
+	//nolint:gosec // all our values are hard-coded
 	query := fmt.Sprintf(`
 	WITH bounds AS (
 		SELECT unixepoch(
@@ -80,8 +83,9 @@ func (tl *Timeline) RecentItemStats(params url.Values) ([]periodicStats, error) 
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	var results []periodicStats
+	var results []PeriodicStats
 	for rows.Next() {
 		var group string
 		var count int
@@ -92,11 +96,11 @@ func (tl *Timeline) RecentItemStats(params url.Values) ([]periodicStats, error) 
 		if period == "monthly" {
 			monthInt, err := strconv.Atoi(group)
 			if err != nil {
-				return nil, fmt.Errorf("bad month group: %s: %v", group, err)
+				return nil, fmt.Errorf("bad month group: %s: %w", group, err)
 			}
 			group = time.Month(monthInt).String()
 		}
-		results = append(results, periodicStats{group, count})
+		results = append(results, PeriodicStats{group, count})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -105,12 +109,14 @@ func (tl *Timeline) RecentItemStats(params url.Values) ([]periodicStats, error) 
 	return results, nil
 }
 
-type classificationStat struct {
+// ClassificationStat holds counts of item classes.
+type ClassificationStat struct {
 	ClassificationName string `json:"x"`
 	Count              int    `json:"y"`
 }
 
-func (tl *Timeline) ItemTypeStats() ([]classificationStat, error) {
+// ItemTypeStats returns info about items by their classifications.
+func (tl *Timeline) ItemTypeStats() ([]ClassificationStat, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
@@ -118,8 +124,9 @@ func (tl *Timeline) ItemTypeStats() ([]classificationStat, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	var results []classificationStat
+	var results []ClassificationStat
 	for rows.Next() {
 		var className *string
 		var count int
@@ -131,7 +138,7 @@ func (tl *Timeline) ItemTypeStats() ([]classificationStat, error) {
 			classNameStr := "unknown"
 			className = &classNameStr
 		}
-		results = append(results, classificationStat{*className, count})
+		results = append(results, ClassificationStat{*className, count})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -156,19 +163,22 @@ ORDER BY timestamp
 LIMIT 1000;
 */
 
-type dsUsageSeries struct {
+// DSUsageSeries correlates data source name with a series of statistics.
+type DSUsageSeries struct {
 	Name string        `json:"name"`
-	Data []dsUsageStat `json:"data"`
+	Data []DSUsageStat `json:"data"`
 }
 
-type dsUsageStat struct {
+// DSUsageStat is a data point containing the date, hour of day, and number of items.
+type DSUsageStat struct {
 	// DataSource string `json:"data_source"`
 	Date  string `json:"x"`
 	Hour  int    `json:"y"`
 	Count int    `json:"z"`
 }
 
-func (tl *Timeline) DataSourceUsageStats() ([]dsUsageSeries, error) {
+// DataSourceUsageStats returns the counts by data source.
+func (tl *Timeline) DataSourceUsageStats() ([]DSUsageSeries, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
@@ -206,8 +216,9 @@ func (tl *Timeline) DataSourceUsageStats() ([]dsUsageSeries, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	var all []dsUsageSeries
+	var all []DSUsageSeries
 
 	// var results []dsUsageStat
 	for rows.Next() {
@@ -218,9 +229,9 @@ func (tl *Timeline) DataSourceUsageStats() ([]dsUsageSeries, error) {
 			return nil, err
 		}
 		if len(all) == 0 || all[len(all)-1].Name != dsName {
-			all = append(all, dsUsageSeries{Name: dsName})
+			all = append(all, DSUsageSeries{Name: dsName})
 		}
-		all[len(all)-1].Data = append(all[len(all)-1].Data, dsUsageStat{date, hour, count})
+		all[len(all)-1].Data = append(all[len(all)-1].Data, DSUsageStat{date, hour, count})
 		// results = append(results, dsUsageStat{date, hour, count})
 	}
 	if err := rows.Err(); err != nil {

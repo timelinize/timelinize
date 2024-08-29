@@ -38,61 +38,61 @@ type contact struct {
 	DateUnixtime string `json:"date_unixtime"`
 }
 
-type desktopExport struct {
-	desktopExportHeader
-	ProfilePictures []any `json:"profile_pictures"`
-	Contacts        struct {
-		About string    `json:"about"`
-		List  []contact `json:"list"`
-	} `json:"contacts"`
-	FrequentContacts struct {
-		About string `json:"about"`
-		List  []any  `json:"list"`
-	} `json:"frequent_contacts"`
-	Sessions struct {
-		About string `json:"about"`
-		List  []struct {
-			LastActive         string `json:"last_active"`
-			LastActiveUnixtime string `json:"last_active_unixtime"`
-			LastIP             string `json:"last_ip"`
-			LastCountry        string `json:"last_country"`
-			LastRegion         string `json:"last_region"`
-			ApplicationName    string `json:"application_name"`
-			ApplicationVersion string `json:"application_version"`
-			DeviceModel        string `json:"device_model"`
-			Platform           string `json:"platform"`
-			SystemVersion      string `json:"system_version"`
-			Created            string `json:"created"`
-			CreatedUnixtime    string `json:"created_unixtime"`
-		} `json:"list"`
-	} `json:"sessions"`
-	WebSessions struct {
-		About string `json:"about"`
-		List  []any  `json:"list"`
-	} `json:"web_sessions"`
-	OtherData struct {
-		AboutMeta         string `json:"about_meta"`
-		ChangesLog        []any  `json:"changes_log"`
-		Help              string `json:"help"`
-		InstalledStickers []struct {
-			URL string `json:"url"`
-		} `json:"installed_stickers"`
-		IPs []struct {
-			IP string `json:"ip"`
-		} `json:"ips"`
-	} `json:"other_data"`
-	Chats struct {
-		About string `json:"about"`
-		List  []chat `json:"list"`
-	} `json:"chats"`
-}
+// type desktopExport struct {
+// 	desktopExportHeader
+// 	ProfilePictures []any `json:"profile_pictures"`
+// 	Contacts        struct {
+// 		About string    `json:"about"`
+// 		List  []contact `json:"list"`
+// 	} `json:"contacts"`
+// 	FrequentContacts struct {
+// 		About string `json:"about"`
+// 		List  []any  `json:"list"`
+// 	} `json:"frequent_contacts"`
+// 	Sessions struct {
+// 		About string `json:"about"`
+// 		List  []struct {
+// 			LastActive         string `json:"last_active"`
+// 			LastActiveUnixtime string `json:"last_active_unixtime"`
+// 			LastIP             string `json:"last_ip"`
+// 			LastCountry        string `json:"last_country"`
+// 			LastRegion         string `json:"last_region"`
+// 			ApplicationName    string `json:"application_name"`
+// 			ApplicationVersion string `json:"application_version"`
+// 			DeviceModel        string `json:"device_model"`
+// 			Platform           string `json:"platform"`
+// 			SystemVersion      string `json:"system_version"`
+// 			Created            string `json:"created"`
+// 			CreatedUnixtime    string `json:"created_unixtime"`
+// 		} `json:"list"`
+// 	} `json:"sessions"`
+// 	WebSessions struct {
+// 		About string `json:"about"`
+// 		List  []any  `json:"list"`
+// 	} `json:"web_sessions"`
+// 	OtherData struct {
+// 		AboutMeta         string `json:"about_meta"`
+// 		ChangesLog        []any  `json:"changes_log"`
+// 		Help              string `json:"help"`
+// 		InstalledStickers []struct {
+// 			URL string `json:"url"`
+// 		} `json:"installed_stickers"`
+// 		IPs []struct {
+// 			IP string `json:"ip"`
+// 		} `json:"ips"`
+// 	} `json:"other_data"`
+// 	Chats struct {
+// 		About string `json:"about"`
+// 		List  []chat `json:"list"`
+// 	} `json:"chats"`
+// }
 
-type chat struct {
-	Name     string    `json:"name"`
-	Type     string    `json:"type"`
-	ID       int       `json:"id"`
-	Messages []message `json:"messages"`
-}
+// type chat struct {
+// 	Name     string    `json:"name"`
+// 	Type     string    `json:"type"`
+// 	ID       int       `json:"id"`
+// 	Messages []message `json:"messages"`
+// }
 
 type message struct {
 	ID           int    `json:"id"`

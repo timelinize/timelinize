@@ -21,6 +21,7 @@ package tlzapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -93,11 +94,11 @@ import (
 // 	return path
 // }
 
-func (a App) FileSelectorRoots() ([]fileSelectorRoot, error) {
+func (a App) fileSelectorRoots() ([]fileSelectorRoot, error) {
 	return getFileSelectorRoots()
 }
 
-func (a App) GetOpenRepositories() []openedTimeline {
+func (a App) getOpenRepositories() []openedTimeline {
 	openTimelinesMu.RLock()
 	repos := make([]openedTimeline, 0, len(openTimelines))
 	for _, otl := range openTimelines {
@@ -111,7 +112,12 @@ func (a App) GetOpenRepositories() []openedTimeline {
 				zap.String("repo", otl.InstanceID.String()),
 				zap.String("db", dbFile))
 			// defer because it needs a write lock on the openTimelinesMu
-			defer a.CloseRepository(otl.InstanceID.String())
+			defer func() {
+				err := a.CloseRepository(otl.InstanceID.String())
+				if err != nil {
+					a.log.Error("closing repository", zap.Error(err))
+				}
+			}()
 		} else {
 			// ok, it's still there
 			repos = append(repos, otl)
@@ -121,12 +127,12 @@ func (a App) GetOpenRepositories() []openedTimeline {
 	return repos
 }
 
-// OpenRepository opens the timeline at repoDir as long as it
+// openRepository opens the timeline at repoDir as long as it
 // is not already open.
-func (a *App) OpenRepository(repoDir string, create bool) (openedTimeline, error) {
+func (a *App) openRepository(repoDir string, create bool) (openedTimeline, error) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
-		return openedTimeline{}, fmt.Errorf("forming absolute path to repo at '%s': %v", repoDir, err)
+		return openedTimeline{}, fmt.Errorf("forming absolute path to repo at '%s': %w", repoDir, err)
 	}
 
 	openTimelinesMu.Lock()
@@ -389,20 +395,21 @@ func (a *App) Recognize(filenames []string) ([]timeline.RecognizeResult, error) 
 			return nil, err
 		}
 	}
-	results, err := timeline.DataSourcesRecognize(a.ctx, filenames, 2*time.Second)
+	const dsTimeout = 2 * time.Second
+	results, err := timeline.DataSourcesRecognize(a.ctx, filenames, dsTimeout)
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(results, func(i, j int) bool {
+	sort.Slice(results, func(i, _ int) bool {
 		return results[i].Name != generic.DataSourceID
 	})
 	return results, nil
 }
 
-func (a App) Import(params ImportParameters) (activeJob, error) {
+func (a App) Import(params ImportParameters) (ActiveJob, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
-		return activeJob{}, err
+		return ActiveJob{}, err
 	}
 
 	activeJobsMu.Lock()
@@ -411,11 +418,11 @@ func (a App) Import(params ImportParameters) (activeJob, error) {
 	params.JobID = params.Hash()
 
 	if _, ok := activeJobs[params.JobID]; ok {
-		return activeJob{}, fmt.Errorf("job is not unique; another similar job is already running")
+		return ActiveJob{}, errors.New("job is not unique; another similar job is already running")
 	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
-	job := activeJob{
+	job := ActiveJob{
 		ID:               params.JobID,
 		Type:             "import",
 		Started:          time.Now(),
@@ -512,7 +519,7 @@ func (a App) Import(params ImportParameters) (activeJob, error) {
 	// }
 
 	// ctx, cancel := context.WithCancel(context.Background())
-	// job := activeJob{
+	// job := ActiveJob{
 	// 	ID:         jobID,
 	// 	Started:    time.Now(),
 	// 	Parameters: payload,
@@ -590,9 +597,9 @@ func (a *App) ItemClassifications(repo string) ([]timeline.Classification, error
 	return tl.ItemClassifications()
 }
 
-func (a *App) ActiveJobs() ([]activeJob, error) {
+func (a *App) ActiveJobs() ([]ActiveJob, error) {
 	activeJobsMu.Lock()
-	jobs := make([]activeJob, 0, len(activeJobs))
+	jobs := make([]ActiveJob, 0, len(activeJobs))
 	for _, job := range activeJobs {
 		jobs = append(jobs, job)
 	}

@@ -29,6 +29,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,13 +75,13 @@ type Client struct {
 	checkpoint *checkpoint
 }
 
-func (c *Client) Authenticate(ctx context.Context, acc timeline.Account, dsOpt any) error {
+// Authenticate authenticates with the remote service.
+func (c *Client) Authenticate(ctx context.Context, acc timeline.Account, _ any) error {
 	return acc.AuthorizeOAuth2(ctx, oauth2)
 }
 
-func (c *Client) APIImport(ctx context.Context, account timeline.Account,
-	itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-
+// APIImport imports data from the service via its API.
+func (c *Client) APIImport(ctx context.Context, account timeline.Account, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	httpClient, err := account.NewHTTPClient(ctx, oauth2, rateLimit)
 	if err != nil {
 		return err
@@ -106,7 +107,7 @@ func (c *Client) APIImport(ctx context.Context, account timeline.Account,
 	// read exactly 2 errors (or nils) because we
 	// started 2 goroutines to do things
 	var errs []string
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		err := <-errChan
 		if err != nil {
 			errs = append(errs, err.Error())
@@ -170,7 +171,7 @@ func (c *Client) getFeed(ctx context.Context, itemChan chan<- *timeline.Graph, t
 		case <-ctx.Done():
 			return nil
 		default:
-			nextPageURL, err = c.getFeedNextPage(itemChan, nextPageURL, timeframe)
+			nextPageURL, err = c.getFeedNextPage(ctx, itemChan, nextPageURL, timeframe)
 			if err != nil {
 				return err
 			}
@@ -189,9 +190,7 @@ func (c *Client) getFeed(ctx context.Context, itemChan chan<- *timeline.Graph, t
 	}
 }
 
-func (c *Client) getFeedNextPage(itemChan chan<- *timeline.Graph,
-	nextPageURL *string, timeframe timeline.Timeframe) (*string, error) {
-
+func (c *Client) getFeedNextPage(ctx context.Context, itemChan chan<- *timeline.Graph, nextPageURL *string, timeframe timeline.Timeframe) (*string, error) {
 	nextPageURLStr := ""
 	if nextPageURL != nil {
 		nextPageURLStr = *nextPageURL
@@ -203,9 +202,9 @@ func (c *Client) getFeedNextPage(itemChan chan<- *timeline.Graph,
 	// their "order" method is broken: https://developers.facebook.com/support/bugs/2231843933505877/
 	// - that all needs to be figured out before we do much more here
 	// with regards to timeframes
-	user, err := c.requestPage(nextPageURLStr, timeframe)
+	user, err := c.requestPage(ctx, nextPageURLStr, timeframe)
 	if err != nil {
-		return nil, fmt.Errorf("requesting next page: %v", err)
+		return nil, fmt.Errorf("requesting next page: %w", err)
 	}
 
 	// TODO: Refactor this into smaller functions...
@@ -242,7 +241,6 @@ func (c *Client) getFeedNextPage(itemChan chan<- *timeline.Graph,
 
 		for _, att := range post.Attachments.Data {
 			if att.Type == "album" {
-
 				// add all the items to a collection
 				coll := &timeline.Item{
 					ID:             att.Target.ID,
@@ -256,7 +254,7 @@ func (c *Client) getFeedNextPage(itemChan chan<- *timeline.Graph,
 				for i, subatt := range att.Subattachments.Data {
 					mediaID := subatt.Target.ID
 
-					media, err := c.requestMedia(subatt.Type, mediaID)
+					media, err := c.requestMedia(ctx, subatt.Type, mediaID)
 					if err != nil {
 						log.Printf("[ERROR] Getting media: %v", err)
 						continue
@@ -276,14 +274,14 @@ func (c *Client) getFeedNextPage(itemChan chan<- *timeline.Graph,
 	return user.Feed.Paging.Next, nil
 }
 
-func (c *Client) requestPage(nextPageURL string, timeframe timeline.Timeframe) (fbUser, error) {
+func (c *Client) requestPage(ctx context.Context, nextPageURL string, timeframe timeline.Timeframe) (fbUser, error) {
 	var user fbUser
 
 	// if a URL for the "next" page was given, then we can just use that
 	if nextPageURL != "" {
-		err := c.apiRequestFullURL("GET", nextPageURL, nil, &user)
+		err := c.apiRequestFullURL(ctx, http.MethodGet, nextPageURL, nil, &user)
 		if err != nil {
-			return user, fmt.Errorf("requesting page using full URL: %s: %v", nextPageURL, err)
+			return user, fmt.Errorf("requesting page using full URL: %s: %w", nextPageURL, err)
 		}
 		return user, nil
 	}
@@ -298,20 +296,20 @@ func (c *Client) requestPage(nextPageURL string, timeframe timeline.Timeframe) (
 		"order":  {"reverse_chronological"}, // TODO: see https://developers.facebook.com/support/bugs/2231843933505877/ (thankfully, reverse_chronological is their default for feed)
 	}
 
-	err := c.apiRequest("GET", "me?"+v.Encode(), nil, &user)
+	err := c.apiRequest(ctx, http.MethodGet, "me?"+v.Encode(), nil, &user)
 	return user, err
 }
 
-func (c *Client) requestMedia(mediaType, mediaID string) (*fbMedia, error) {
-	if mediaType != "photo" && mediaType != "video" {
+func (c *Client) requestMedia(ctx context.Context, mediaType, mediaID string) (*fbMedia, error) {
+	if mediaType != mediaPhoto && mediaType != mediaVideo {
 		return nil, fmt.Errorf("unknown media type: %s", mediaType)
 	}
 
 	fields := []string{"backdated_time", "created_time", "from", "id", "place", "updated_time"}
 	switch mediaType {
-	case "photo":
+	case mediaPhoto:
 		fields = append(fields, "album", "images", "name", "name_tags")
-	case "video":
+	case mediaVideo:
 		fields = append(fields, "description", "length", "source", "status", "title")
 	}
 
@@ -321,7 +319,7 @@ func (c *Client) requestMedia(mediaType, mediaID string) (*fbMedia, error) {
 	endpoint := fmt.Sprintf("%s?%s", mediaID, vals.Encode())
 
 	var media fbMedia
-	err := c.apiRequest("GET", endpoint, nil, &media)
+	err := c.apiRequest(ctx, http.MethodGet, endpoint, nil, &media)
 	if err != nil {
 		return nil, err
 	}
@@ -329,6 +327,11 @@ func (c *Client) requestMedia(mediaType, mediaID string) (*fbMedia, error) {
 
 	return &media, nil
 }
+
+const (
+	mediaPhoto = "photo"
+	mediaVideo = "video"
+)
 
 func (c *Client) getCollections(ctx context.Context, itemChan chan<- *timeline.Graph, timeframe timeline.Timeframe) error {
 	c.checkpoint.Lock()
@@ -341,7 +344,7 @@ func (c *Client) getCollections(ctx context.Context, itemChan chan<- *timeline.G
 		case <-ctx.Done():
 			return nil
 		default:
-			nextPageURL, err = c.getCollectionsNextPage(itemChan, nextPageURL, timeframe)
+			nextPageURL, err = c.getCollectionsNextPage(ctx, itemChan, nextPageURL, timeframe)
 			if err != nil {
 				return err
 			}
@@ -359,9 +362,7 @@ func (c *Client) getCollections(ctx context.Context, itemChan chan<- *timeline.G
 	}
 }
 
-func (c *Client) getCollectionsNextPage(itemChan chan<- *timeline.Graph,
-	nextPageURL *string, timeframe timeline.Timeframe) (*string, error) {
-
+func (c *Client) getCollectionsNextPage(ctx context.Context, itemChan chan<- *timeline.Graph, nextPageURL *string, timeframe timeline.Timeframe) (*string, error) {
 	var page fbMediaPage
 	var err error
 	if nextPageURL == nil {
@@ -371,14 +372,14 @@ func (c *Client) getCollectionsNextPage(itemChan chan<- *timeline.Graph,
 			"fields": {"created_time,id,name,photos" + timeConstraint + "{album,backdated_time,created_time,from,id,images,updated_time,place,source}"},
 		}
 		v = qsTimeConstraint(v, timeframe)
-		endpoint := fmt.Sprintf("me/albums?%s", v.Encode())
-		err = c.apiRequest("GET", endpoint, nil, &page)
+		endpoint := "me/albums?%s" + v.Encode()
+		err = c.apiRequest(ctx, http.MethodGet, endpoint, nil, &page)
 	} else {
 		// get subsequent pages
-		err = c.apiRequestFullURL("GET", *nextPageURL, nil, &page)
+		err = c.apiRequestFullURL(ctx, http.MethodGet, *nextPageURL, nil, &page)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("requesting next page: %v", err)
+		return nil, fmt.Errorf("requesting next page: %w", err)
 	}
 
 	// iterate each album on this page
@@ -422,24 +423,23 @@ func (c *Client) getCollectionsNextPage(itemChan chan<- *timeline.Graph,
 
 				// request next page
 				var nextPage *fbMediaPage
-				err := c.apiRequestFullURL("GET", *album.Photos.Paging.Next, nil, &nextPage)
+				err := c.apiRequestFullURL(ctx, http.MethodGet, *album.Photos.Paging.Next, nil, &nextPage)
 				if err != nil {
-					return nil, fmt.Errorf("requesting next page of photos in album: %v", err)
+					return nil, fmt.Errorf("requesting next page of photos in album: %w", err)
 				}
 				album.Photos = nextPage
 			}
 		}
-
 	}
 
 	return page.Paging.Next, nil
 }
 
-func (c *Client) apiRequest(method, endpoint string, reqBodyData, respInto any) error {
-	return c.apiRequestFullURL(method, apiBase+endpoint, reqBodyData, respInto)
+func (c *Client) apiRequest(ctx context.Context, method, endpoint string, reqBodyData, respInto any) error {
+	return c.apiRequestFullURL(ctx, method, apiBase+endpoint, reqBodyData, respInto)
 }
 
-func (c *Client) apiRequestFullURL(method, fullURL string, reqBodyData, respInto any) error {
+func (c *Client) apiRequestFullURL(ctx context.Context, method, fullURL string, reqBodyData, respInto any) error {
 	// make the request body just once (so we can retry safely)
 	var reqBodyBytes []byte
 	var err error
@@ -450,17 +450,19 @@ func (c *Client) apiRequestFullURL(method, fullURL string, reqBodyData, respInto
 		}
 	}
 
+	const waitDuration = 30 * time.Second
 	const maxTries = 5
-	for i := 0; i < maxTries; i++ {
+
+	for i := range maxTries {
 		var reqBody io.Reader
 		if len(reqBodyBytes) > 0 {
 			reqBody = bytes.NewReader(reqBodyBytes)
 		}
 
 		var req *http.Request
-		req, err = http.NewRequest(method, fullURL, reqBody)
+		req, err = http.NewRequestWithContext(ctx, method, fullURL, reqBody)
 		if err != nil {
-			return fmt.Errorf("making request to %s %s: %v", method, fullURL, err)
+			return fmt.Errorf("making request to %s %s: %w", method, fullURL, err)
 		}
 		if reqBody != nil {
 			req.Header.Set("Content-Type", "application/json")
@@ -476,14 +478,18 @@ func (c *Client) apiRequestFullURL(method, fullURL string, reqBodyData, respInto
 				zap.Int("attempt", i+1),
 				zap.Int("max_attempts", maxTries),
 			)
-			// TODO: honor context cancellation
-			time.Sleep(30 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(waitDuration):
+				continue
+			}
 		}
 		defer resp.Body.Close() // yes, this is in a loop, so just a few sockets might leak for a few minutes
 
 		if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-			bodyText, err2 := io.ReadAll(io.LimitReader(resp.Body, 1024*256))
+			const maxBodySize = 1024 * 256
+			bodyText, err2 := io.ReadAll(io.LimitReader(resp.Body, maxBodySize))
 
 			if err2 == nil {
 				err = fmt.Errorf("HTTP %d: %s: >>> %s <<<", resp.StatusCode, resp.Status, bodyText)
@@ -498,15 +504,19 @@ func (c *Client) apiRequestFullURL(method, fullURL string, reqBodyData, respInto
 				zap.Int("attempt", i+1),
 				zap.Int("max_attempts", maxTries),
 			)
-			time.Sleep(30 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(waitDuration):
+				continue
+			}
 		} else if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 		}
 
 		err = json.NewDecoder(resp.Body).Decode(&respInto)
 		if err != nil {
-			return fmt.Errorf("decoding JSON: %v", err)
+			return fmt.Errorf("decoding JSON: %w", err)
 		}
 		break
 	}
@@ -530,10 +540,10 @@ func fieldTimeConstraint(timeframe timeline.Timeframe) string {
 }
 func qsTimeConstraint(v url.Values, timeframe timeline.Timeframe) url.Values {
 	if timeframe.Since != nil {
-		v.Set("since", fmt.Sprintf("%d", timeframe.Since.Unix()))
+		v.Set("since", strconv.FormatInt(timeframe.Since.Unix(), 10))
 	}
 	if timeframe.Until != nil {
-		v.Set("until", fmt.Sprintf("%d", timeframe.Until.Unix()))
+		v.Set("until", strconv.FormatInt(timeframe.Until.Unix(), 10))
 	}
 	return v
 }

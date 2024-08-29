@@ -41,7 +41,7 @@ import (
 
 // downloadDataFile downloads the data file and hashes it. It attaches the
 // results to the item.
-func (p *processor) downloadDataFile(ctx context.Context, it *Item) error {
+func (p *processor) downloadDataFile(_ context.Context, it *Item) error {
 	if it == nil {
 		return nil
 	}
@@ -105,7 +105,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 
 		// delete duplicate data file
 		if err := os.Remove(it.dataFileOut.Name()); err != nil {
-			return fmt.Errorf("deleting duplicate data file %s: %v", it.dataFileOut.Name(), err)
+			return fmt.Errorf("deleting duplicate data file %s: %w", it.dataFileOut.Name(), err)
 		}
 
 		// update references to the newly-inserted row to refer to the existing row instead,
@@ -117,27 +117,27 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		// (SQL has an "ON CONFLICT REPLACE" but it's a SQLite extension I guess)
 		if _, err := tx.Exec(`UPDATE relationships SET from_item_id=? WHERE from_item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant relationships (from->to)", zap.Error(
-				fmt.Errorf("updating relationships referencing from_item_id %d to %d: %v", existingItemRow.ID, it.row.ID, err)))
+				fmt.Errorf("updating relationships referencing from_item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
 		if _, err := tx.Exec(`UPDATE relationships SET to_item_id=? WHERE to_item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant relationships (to->from)",
-				zap.Error(fmt.Errorf("updating relationships referencing to_item_id %d to %d: %v", existingItemRow.ID, it.row.ID, err)))
+				zap.Error(fmt.Errorf("updating relationships referencing to_item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
 		if _, err := tx.Exec(`UPDATE collection_items SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant collection items",
-				zap.Error(fmt.Errorf("updating collection_items referencing item_id %d to %d: %v", existingItemRow.ID, it.row.ID, err)))
+				zap.Error(fmt.Errorf("updating collection_items referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
 		if _, err := tx.Exec(`UPDATE curation_elements SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant curation elements",
-				zap.Error(fmt.Errorf("updating curation_elements referencing item_id %d to %d: %v", existingItemRow.ID, it.row.ID, err)))
+				zap.Error(fmt.Errorf("updating curation_elements referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
 		if _, err := tx.Exec(`UPDATE tagged SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant tags",
-				zap.Error(fmt.Errorf("updating tagged referencing item_id %d to %d: %v", existingItemRow.ID, it.row.ID, err)))
+				zap.Error(fmt.Errorf("updating tagged referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
 		if _, err = tx.Exec(`DELETE FROM items WHERE id=?`, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not delete item row",
-				zap.Error(fmt.Errorf("deleting duplicate item row %d: %v", it.row.ID, err)))
+				zap.Error(fmt.Errorf("deleting duplicate item row %d: %w", it.row.ID, err)))
 		}
 
 		return nil
@@ -157,12 +157,12 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		// files if we can know the DB is the ultimate source of truth, because nothing points to them
 		// TODO: LIMIT 1... (see https://github.com/mattn/go-sqlite3/pull/802)
 		if _, err := tx.Exec(`UPDATE items SET data_file=NULL, data_hash=NULL WHERE id=?`, it.row.ID); err != nil {
-			return fmt.Errorf("unlinking data file from item row: %v", err)
+			return fmt.Errorf("unlinking data file from item row: %w", err)
 		}
 
 		// delete the empty data file
 		if err := os.Remove(it.dataFileOut.Name()); err != nil {
-			return fmt.Errorf("deleting empty data file: %v", err)
+			return fmt.Errorf("deleting empty data file: %w", err)
 		}
 
 		return nil
@@ -175,7 +175,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	// (this is where it's important that it.row.DataFile is not a pointer to it.dataFileName,
 	// because we end up changing the value of it.dataFileName in this method)
 	if err := p.replaceWithExisting(tx, &it.dataFileName, it.dataFileHash, it.row.ID); err != nil {
-		return fmt.Errorf("replacing data file with identical existing file: %v", err)
+		return fmt.Errorf("replacing data file with identical existing file: %w", err)
 	}
 
 	// save the file's name and hash to all items which use it, to confirm it was downloaded successfully
@@ -214,7 +214,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 // an error is returned.
 func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error) {
 	if it == nil {
-		return 0, fmt.Errorf("missing item for which to download file")
+		return 0, errors.New("missing item for which to download file")
 	}
 
 	// make sure that the data files get closed even if only one is set
@@ -246,7 +246,7 @@ func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error
 	n, err := io.Copy(it.dataFileOut, tr)
 	if err != nil {
 		os.Remove(it.dataFileOut.Name())
-		return n, fmt.Errorf("copying contents: %v", err)
+		return n, fmt.Errorf("copying contents: %w", err)
 	}
 
 	// TODO: If n == 0, should we retry? (would need to call h.Reset() first) - to help handle sporadic I/O issues maybe
@@ -255,7 +255,7 @@ func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error
 	if n > 0 {
 		if err := it.dataFileOut.Sync(); err != nil {
 			os.Remove(it.dataFileOut.Name())
-			return n, fmt.Errorf("syncing file after downloading: %v", err)
+			return n, fmt.Errorf("syncing file after downloading: %w", err)
 		}
 	}
 
@@ -278,28 +278,30 @@ func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error
 // a collision to occur, as the DB is the source of truth, and this function creates a file
 // but does not update the DB, so it is expected that the filename is "claimed" in the DB in
 // the transaction tx before tx is committed.
-func (t *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logger, it *Item, dataSourceID string) (*os.File, string, error) {
+func (tl *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logger, it *Item, dataSourceID string) (*os.File, string, error) {
 	if dataSourceID == "" {
-		return nil, "", fmt.Errorf("missing data source ID")
+		return nil, "", errors.New("missing data source ID")
 	}
 
-	dir := t.canonicalItemDataFileDir(it, dataSourceID)
+	dir := tl.canonicalItemDataFileDir(it, dataSourceID)
 
-	err := os.MkdirAll(t.FullPath(dir), 0700)
+	err := os.MkdirAll(tl.FullPath(dir), 0700)
 	if err != nil {
-		return nil, "", fmt.Errorf("making directory for data file: %v", err)
+		return nil, "", fmt.Errorf("making directory for data file: %w", err)
 	}
 
 	// find a unique filename for this item
-	canonicalFilename := t.canonicalItemDataFileName(it, dataSourceID)
+	canonicalFilename := tl.canonicalItemDataFileName(it)
 	canonicalFilenameExt := path.Ext(canonicalFilename)
 	canonicalFilenameWithoutExt := strings.TrimSuffix(canonicalFilename, canonicalFilenameExt)
 
-	for i := 0; i < 10; i++ {
+	const randSuffixLen = 4
+
+	for i := range 10 {
 		// build the filepath to try; only add randomness to the filename if the original name isn't available
 		tryPath := path.Join(dir, canonicalFilenameWithoutExt)
 		if i > 0 {
-			tryPath += fmt.Sprintf("__%s", safeRandomString(4, true, nil)) // same case == true for portability to case-insensitive file systems
+			tryPath += "__" + safeRandomString(randSuffixLen, true, nil) // same case == true for portability to case-insensitive file systems
 		}
 		tryPath += canonicalFilenameExt
 
@@ -307,12 +309,12 @@ func (t *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logge
 		// file, and instead we should get a special error that the file already exists if it's taken...
 		// if it is taken we can try another filename, but if it doesn't, this syscall will immediately
 		// claim it for us
-		f, err := os.OpenFile(t.FullPath(tryPath), os.O_CREATE|os.O_RDWR|os.O_EXCL, 0600)
+		f, err := os.OpenFile(tl.FullPath(tryPath), os.O_CREATE|os.O_RDWR|os.O_EXCL, 0600)
 		if errors.Is(err, fs.ErrExist) {
 			continue // filename already taken; try another one
 		}
 		if err != nil {
-			return nil, "", fmt.Errorf("creating data file: %v", err)
+			return nil, "", fmt.Errorf("creating data file: %w", err)
 		}
 
 		// also check with the database to see if filename is taken, case-insensitively (the column or index
@@ -323,7 +325,7 @@ func (t *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logge
 		var count int
 		err = tx.QueryRow(`SELECT count() FROM items WHERE data_file=? LIMIT 1`, tryPath).Scan(&count)
 		if err != nil {
-			return nil, "", fmt.Errorf("checking DB for file uniqueness: %v", err)
+			return nil, "", fmt.Errorf("checking DB for file uniqueness: %w", err)
 		}
 		if count > 0 {
 			// an existing item has claim to it, so let
@@ -347,17 +349,17 @@ func (t *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logge
 // Things considered deterministic for filename construction include the
 // item's filename, the item's original ID, and its timestamp.
 // TODO: fix godoc (this returns only the name now, not the whole dir)
-func (t *Timeline) canonicalItemDataFileName(it *Item, dataSourceID string) string {
+func (tl *Timeline) canonicalItemDataFileName(it *Item) string {
 	// ideally, the filename is simply the one provided with the item
 	var filename string
 	if fname := it.Content.Filename; fname != "" {
-		filename = t.safePathComponent(fname)
+		filename = tl.safePathComponent(fname)
 	}
 
 	// otherwise, try a filename based on the item's original ID
 	if filename == "" {
 		if it.ID != "" {
-			filename = fmt.Sprintf("item_%s", it.ID)
+			filename = "item_" + it.ID
 			if exts, err := mime.ExtensionsByType(it.Content.MediaType); err == nil && len(exts) > 0 {
 				filename += exts[0]
 			}
@@ -376,14 +378,15 @@ func (t *Timeline) canonicalItemDataFileName(it *Item, dataSourceID string) stri
 	// otherwise, out of options; revert to a random string
 	// since no deterministic filename is available
 	if filename == "" {
-		filename = safeRandomString(24, true, nil) // same case == true for portability to case-insensitive file systems
+		const randomNameLen = 24
+		filename = safeRandomString(randomNameLen, true, nil) // same case == true for portability to case-insensitive file systems
 		if exts, err := mime.ExtensionsByType(it.Content.MediaType); err == nil && len(exts) > 0 {
 			filename += exts[0]
 		}
 	}
 
 	// shorten the name if needed (thanks for nothing, Windows)
-	filename = t.ensureDataFileNameShortEnough(filename)
+	filename = tl.ensureDataFileNameShortEnough(filename)
 
 	return filename
 }
@@ -391,7 +394,7 @@ func (t *Timeline) canonicalItemDataFileName(it *Item, dataSourceID string) stri
 // canonicalItemDataFileDir returns the path to the directory for the given item
 // relative to the timeline root, using forward slash as path separators (this
 // is the form used in the data_file column of the DB).
-func (t *Timeline) canonicalItemDataFileDir(it *Item, dataSourceID string) string {
+func (tl *Timeline) canonicalItemDataFileDir(it *Item, dataSourceID string) string {
 	ts := it.Timestamp
 	if ts.IsZero() {
 		ts = time.Now()
@@ -406,17 +409,24 @@ func (t *Timeline) canonicalItemDataFileDir(it *Item, dataSourceID string) strin
 	return path.Join(DataFolderName,
 		fmt.Sprintf("%04d", ts.Year()),
 		fmt.Sprintf("%02d", ts.Month()),
-		t.safePathComponent(dataSourceID))
+		tl.safePathComponent(dataSourceID))
 }
 
-func (t *Timeline) ensureDataFileNameShortEnough(filename string) string {
-	// Windows max path length is about 256, but it's unclear exactly what the limit is
-	if len(filename) > 250 {
+func (tl *Timeline) ensureDataFileNameShortEnough(filename string) string {
+	// Windows max filename length is 255, but it's unclear exactly what the limit is; choose slightly less...
+	// see https://www.fileside.app/blog/2023-03-17_windows-file-paths/
+	// "Traditionally, a path on Windows could not exceed a total of 260 characters. Even today, this is
+	// still the case for some apps, unless they have taken care to implement a workaround."
+	const (
+		maxWindowsFilenameLen = 250
+		maxExtLen             = 20 // arbitrary and unlikely, but just in case
+	)
+	if len(filename) > maxWindowsFilenameLen {
 		ext := path.Ext(filename)
-		if len(ext) > 20 { // arbitrary and unlikely, but just in case
-			ext = ext[:20]
+		if len(ext) > maxExtLen {
+			ext = ext[:maxExtLen]
 		}
-		filename = filename[:250-len(ext)]
+		filename = filename[:maxWindowsFilenameLen-len(ext)]
 		filename += ext
 	}
 	return filename
@@ -425,17 +435,17 @@ func (t *Timeline) ensureDataFileNameShortEnough(filename string) string {
 // TODO:/NOTE: If changing a file name, all items with same data_hash must also be updated to use same file name
 func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum []byte, itemRowID int64) error {
 	if canonical == nil || *canonical == "" || len(checksum) == 0 {
-		return fmt.Errorf("missing data filename and/or hash of contents")
+		return errors.New("missing data filename and/or hash of contents")
 	}
 
 	var existingDatafile *string
 	err := tx.QueryRow(`SELECT data_file FROM items WHERE data_hash = ? AND id != ? AND data_file != ? LIMIT 1`,
 		checksum, itemRowID, *canonical).Scan(&existingDatafile)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil // file is unique; carry on
 	}
 	if err != nil {
-		return fmt.Errorf("querying DB: %v", err)
+		return fmt.Errorf("querying DB: %w", err)
 	}
 
 	// file is a duplicate! by the time this function returns (if successful),
@@ -464,13 +474,13 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 	f, err := os.Open(p.tl.FullPath(*existingDatafile))
 	if err != nil {
 		// TODO: This error is happening often when (re-?)importing SMS backup & restore MMS data files ("no such file or directory")
-		return fmt.Errorf("opening existing file: %v", err)
+		return fmt.Errorf("opening existing file: %w", err)
 	}
 	defer f.Close()
 
 	_, err = io.Copy(h, f)
 	if err != nil {
-		return fmt.Errorf("checking file integrity: %v", err)
+		return fmt.Errorf("checking file integrity: %w", err)
 	}
 
 	existingFileHash := h.Sum(nil)
@@ -487,7 +497,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 			zap.Binary("actual_checksum", existingFileHash))
 		err := os.Rename(p.tl.FullPath(*canonical), p.tl.FullPath(*existingDatafile))
 		if err != nil {
-			return fmt.Errorf("replacing modified data file: %v", err)
+			return fmt.Errorf("replacing modified data file: %w", err)
 		}
 	} else {
 		// everything checks out; delete the newly-downloaded file
@@ -498,7 +508,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 			zap.Binary("checksum", checksum))
 		err = os.Remove(p.tl.FullPath(*canonical))
 		if err != nil {
-			return fmt.Errorf("removing duplicate data file: %v", err)
+			return fmt.Errorf("removing duplicate data file: %w", err)
 		}
 	}
 
@@ -531,7 +541,7 @@ func randomString(n int, sameCase bool, r mathrand.Source) string {
 	for i := range b {
 		var rnd int64
 		if r == nil {
-			rnd = mathrand.Int63()
+			rnd = mathrand.Int63() //nolint:gosec
 		} else {
 			rnd = r.Int63()
 		}
@@ -542,13 +552,13 @@ func randomString(n int, sameCase bool, r mathrand.Source) string {
 
 // FullPath returns the full file system path for a data file, including the repo path.
 // It converts forward slashes in the input to the file system path separator.
-func (t *Timeline) FullPath(canonicalDatafileName string) string {
-	return filepath.Join(t.repoDir, filepath.FromSlash(canonicalDatafileName))
+func (tl *Timeline) FullPath(canonicalDatafileName string) string {
+	return filepath.Join(tl.repoDir, filepath.FromSlash(canonicalDatafileName))
 }
 
-func (t *Timeline) safePathComponent(s string) string {
+func (*Timeline) safePathComponent(s string) string {
 	s = safePathRE.ReplaceAllLiteralString(s, "")
-	s = strings.Replace(s, "..", "", -1)
+	s = strings.ReplaceAll(s, "..", "")
 	if s == "." {
 		s = ""
 	}
@@ -557,7 +567,7 @@ func (t *Timeline) safePathComponent(s string) string {
 
 func safeRandomString(n int, sameCase bool, r mathrand.Source) string {
 	var s string
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		s = randomString(n, sameCase, r)
 		if !containsBlocklistedWord(s) {
 			break

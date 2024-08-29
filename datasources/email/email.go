@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -54,7 +55,8 @@ func init() {
 // FileImporter can import the data from a file.
 type FileImporter struct{}
 
-func (imp FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
+// Recognize returns whether the file is recognized for this data source.
+func (fi FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	// TODO: proper detection, not just filename
 
 	var totalCount, matchCount int
@@ -86,15 +88,14 @@ func (imp FileImporter) Recognize(ctx context.Context, filenames []string) (time
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 
 			totalCount++
 
 			ext := strings.ToLower(filepath.Ext(fpath))
-			if ext == ".mbox" || ext == ".eml" {
+			if ext == extMbox || ext == extEml {
 				matchCount++
 			}
 
@@ -113,13 +114,13 @@ func (imp FileImporter) Recognize(ctx context.Context, filenames []string) (time
 	return timeline.Recognition{Confidence: confidence}, nil
 }
 
+// Options configures the data source.
 type Options struct {
 	// Gmail labels to skip
 	GmailSkipLabels []string `json:"gmail_skip_labels"`
 }
 
-const googleTakeoutMailFolder = "Takeout/Mail"
-
+// FileImport imports data from a file.
 func (fi FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 
@@ -146,9 +147,8 @@ func (fi FileImporter) FileImport(ctx context.Context, filenames []string, itemC
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil // traverse into subdirectories
@@ -190,7 +190,7 @@ func (fi FileImporter) FileImport(ctx context.Context, filenames []string, itemC
 				}
 
 				line, err := bufr.ReadBytes('\n')
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					// don't forget to process last message in file
 					fi.processMessage(buf, msg, itemChan, opt, dsOpt)
 					break
@@ -246,14 +246,14 @@ func (FileImporter) messageToGraph(r io.Reader, msg message, opt timeline.Listin
 	// parse message
 	env, err := enmime.ReadEnvelope(r)
 	if err != nil {
-		return nil, fmt.Errorf("reading envelope: %v (message_index=%d)", err, msg.index)
+		return nil, fmt.Errorf("reading envelope: %w (message_index=%d)", err, msg.index)
 	}
 	msg.Envelope = env
 
 	// process the result
 	ig, err := itemGraphFromEnvelope(msg, opt, dsOpt)
 	if err != nil {
-		return nil, fmt.Errorf("building item graph from envelope: %v (message_index=%d)", err, msg.index)
+		return nil, fmt.Errorf("building item graph from envelope: %w (message_index=%d)", err, msg.index)
 	}
 
 	return ig, nil
@@ -267,11 +267,12 @@ func parseFromLine(msg *message, line []byte) error {
 	if len(fields) > 1 {
 		msg.FromLineEmail = string(fields[1])
 	}
-	if len(fields) >= 8 {
-		tsStr := string(bytes.Join(fields[2:8], spaceBytes))
+	const minFieldsRequired = 8
+	if len(fields) >= minFieldsRequired {
+		tsStr := string(bytes.Join(fields[2:minFieldsRequired], spaceBytes))
 		ts, err := time.Parse("Mon Jan 02 15:04:05 -0700 2006", tsStr)
 		if err != nil {
-			return fmt.Errorf("parsing timestamp: %v", err)
+			return fmt.Errorf("parsing timestamp: %w", err)
 		}
 		msg.FromLineTimestamp = ts
 	}
@@ -480,3 +481,10 @@ var (
 	doubleLFbytes      = []byte("\n\n")
 	doubleCRLFbytes    = []byte("\r\n\r\n")
 )
+
+const (
+	extMbox = ".mbox"
+	extEml  = ".eml"
+)
+
+const googleTakeoutMailFolder = "Takeout/Mail"

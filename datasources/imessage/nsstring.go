@@ -20,6 +20,7 @@ package imessage
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"unicode/utf8"
 )
@@ -34,13 +35,13 @@ import (
 func parseStreamTypedNSString(stream []byte) (string, error) {
 	startIdx := bytes.Index(stream, nsStringStartPattern)
 	if startIdx == -1 {
-		return "", fmt.Errorf("no start pattern")
+		return "", errors.New("no start pattern")
 	}
 	stream = stream[startIdx+len(nsStringStartPattern):]
 
 	endIdx := bytes.Index(stream, nsStringEndPattern)
 	if endIdx == -1 {
-		return "", fmt.Errorf("no end pattern")
+		return "", errors.New("no end pattern")
 	}
 	stream = stream[:endIdx]
 
@@ -66,7 +67,7 @@ func parseStreamTypedNSString(stream []byte) (string, error) {
 // dropChars drops 'offset' characters from the front of a string.
 func dropChars(offset int, str string) (string, error) {
 	// Find the index of the specified character offset
-	for i := 0; i < offset; i++ {
+	for range offset {
 		_, size := utf8.DecodeRuneInString(str)
 		if size == 0 {
 			return "", fmt.Errorf("invalid prefix: '%s' (offset %d)", str, offset)

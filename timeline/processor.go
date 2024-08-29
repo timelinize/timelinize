@@ -61,7 +61,7 @@ type processor struct {
 	downloadThrottle chan struct{}
 }
 
-func (t *Timeline) Import(ctx context.Context, params ImportParameters) error {
+func (tl *Timeline) Import(ctx context.Context, params ImportParameters) error {
 	// ensure data source is compatible with mode of import
 	ds, ok := dataSources[params.DataSourceName]
 	if !ok {
@@ -82,14 +82,14 @@ func (t *Timeline) Import(ctx context.Context, params ImportParameters) error {
 		if len(params.Filenames) > 0 {
 			mode = importModeFile
 		}
-		impRow, err = t.newImport(ctx, params.DataSourceName, mode, params.ProcessingOptions, params.AccountID)
+		impRow, err = tl.newImport(ctx, params.DataSourceName, mode, params.ProcessingOptions, params.AccountID)
 		if err != nil {
-			return fmt.Errorf("creating new import row: %v", err)
+			return fmt.Errorf("creating new import row: %w", err)
 		}
 	} else {
-		impRow, err = t.loadImport(ctx, params.ResumeImportID)
+		impRow, err = tl.loadImport(ctx, params.ResumeImportID)
 		if err != nil {
-			return fmt.Errorf("loading existing import row: %v", err)
+			return fmt.Errorf("loading existing import row: %w", err)
 		}
 		if impRow.checkpoint == nil {
 			return fmt.Errorf("import %d has no checkpoint to resume from", impRow.id)
@@ -98,7 +98,7 @@ func (t *Timeline) Import(ctx context.Context, params ImportParameters) error {
 			len(params.Filenames) > 0 || !params.ProcessingOptions.IsEmpty() ||
 			params.DataSourceOptions != nil {
 			// no need to specify these; it only risks being different and thus in conflict
-			return fmt.Errorf("pointless to specify any other parameters when resuming import")
+			return errors.New("pointless to specify any other parameters when resuming import")
 		}
 
 		// adjust parameters to set up resumption
@@ -110,7 +110,7 @@ func (t *Timeline) Import(ctx context.Context, params ImportParameters) error {
 		params.ProcessingOptions = impRow.checkpoint.ProcOpt
 	}
 
-	return t.doImport(ctx, ds, params, impRow)
+	return tl.doImport(ctx, ds, params, impRow)
 }
 
 // TODO: detect a moved repo while processing, somehow...? weird edge case, but might be good to be resilient against...
@@ -119,11 +119,11 @@ func (t *Timeline) Import(ctx context.Context, params ImportParameters) error {
 // Import adds items to the timeline. If filename is non-empty, the items will be imported
 // from the specified file. Any data-source-specific options should be passed in as dsOptJSON.
 // Processing will follow the rules specified in procOpt.
-func (t *Timeline) doImport(ctx context.Context, ds DataSource, params ImportParameters, impRow importRow) error {
+func (tl *Timeline) doImport(ctx context.Context, ds DataSource, params ImportParameters, impRow importRow) error {
 	var acc Account
 	if params.AccountID > 0 {
 		var err error
-		acc, err = t.LoadAccount(ctx, params.AccountID)
+		acc, err = tl.LoadAccount(ctx, params.AccountID)
 		if err != nil {
 			return err
 		}
@@ -137,10 +137,13 @@ func (t *Timeline) doImport(ctx context.Context, ds DataSource, params ImportPar
 		logger = logger.With(zap.Strings("filenames", params.Filenames))
 	}
 
-	dsRowID, ok := t.dataSources[ds.Name]
+	dsRowID, ok := tl.dataSources[ds.Name]
 	if !ok {
 		return fmt.Errorf("unknown data source: %s", ds.Name)
 	}
+
+	// batchSize is a minimum, so multiplier speeds up larger batches
+	const multiplier = 2
 
 	proc := processor{
 		itemCount:        new(int64),
@@ -151,35 +154,35 @@ func (t *Timeline) doImport(ctx context.Context, ds DataSource, params ImportPar
 		ds:               ds,
 		dsRowID:          dsRowID,
 		params:           params,
-		tl:               t,
+		tl:               tl,
 		acc:              acc,
 		impRow:           impRow,
 		log:              logger,
 		progress:         logger.Named("progress"),
 		batchMu:          new(sync.Mutex),
-		downloadThrottle: make(chan struct{}, batchSize*workers*2), // batchSize is a minimum, so multiplier speeds up larger batches
+		downloadThrottle: make(chan struct{}, batchSize*workers*multiplier),
 	}
 
 	return proc.doImport(ctx)
 }
 
-func (proc *processor) doImport(ctx context.Context) error {
-	ctx = context.WithValue(ctx, processorCtxKey, proc) // for checkpoints
+func (p *processor) doImport(ctx context.Context) error {
+	ctx = context.WithValue(ctx, processorCtxKey, p) // for checkpoints
 
-	timeframe := proc.params.ProcessingOptions.Timeframe
+	timeframe := p.params.ProcessingOptions.Timeframe
 
 	// convert data source options to their concrete type (we know it
 	// only as interface{}, but actual data source can type-assert)
-	dsOpt, err := proc.ds.UnmarshalOptions(proc.params.DataSourceOptions)
+	dsOpt, err := p.ds.UnmarshalOptions(p.params.DataSourceOptions)
 	if err != nil {
 		return err
 	}
 
 	// get latest should only get the latest items since the last pull, i.e. from the most recent item from this account
-	if proc.params.ProcessingOptions.GetLatest {
-		if len(proc.params.ProcessingOptions.ItemFieldUpdates) > 0 || proc.params.ProcessingOptions.Prune ||
-			proc.params.ProcessingOptions.Integrity || proc.params.ProcessingOptions.Timeframe.Since != nil {
-			return fmt.Errorf("get latest does not support reprocessing, pruning, integrity checking, and timeframe since constraints")
+	if p.params.ProcessingOptions.GetLatest {
+		if len(p.params.ProcessingOptions.ItemFieldUpdates) > 0 || p.params.ProcessingOptions.Prune ||
+			p.params.ProcessingOptions.Integrity || p.params.ProcessingOptions.Timeframe.Since != nil {
+			return errors.New("get latest does not support reprocessing, pruning, integrity checking, and timeframe since constraints")
 		}
 
 		// get date and original ID of the most recent item from the last successful run,
@@ -201,8 +204,8 @@ func (proc *processor) doImport(ctx context.Context) error {
 		// 		return fmt.Errorf("getting most recent item: %v", err)
 		// 	}
 		// }
-		proc.tl.dbMu.RLock()
-		err := proc.tl.db.QueryRow(`
+		p.tl.dbMu.RLock()
+		err := p.tl.db.QueryRow(`
 			SELECT items.original_id, items.timestamp
 			FROM items, imports, data_sources
 			WHERE imports.status=?
@@ -210,14 +213,14 @@ func (proc *processor) doImport(ctx context.Context) error {
 				AND data_sources.id = imports.data_source_id
 				AND data_sources.name = ?
 			ORDER BY imports.started DESC
-			LIMIT 1`, importStatusSuccess, proc.params.DataSourceName).Scan(&mostRecentOriginalID, &mostRecentTimestamp)
-		proc.tl.dbMu.RUnlock()
+			LIMIT 1`, importStatusSuccess, p.params.DataSourceName).Scan(&mostRecentOriginalID, &mostRecentTimestamp)
+		p.tl.dbMu.RUnlock()
 		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("getting most recent item: %v", err)
+			return fmt.Errorf("getting most recent item: %w", err)
 		}
 
 		// constrain the pull to the recent timeframe
-		timeframe.Until = proc.params.ProcessingOptions.Timeframe.Until
+		timeframe.Until = p.params.ProcessingOptions.Timeframe.Until
 		if mostRecentTimestamp != nil {
 			ts := time.Unix(*mostRecentTimestamp, 0)
 			timeframe.Since = &ts
@@ -232,12 +235,12 @@ func (proc *processor) doImport(ctx context.Context) error {
 	}
 
 	var checkpointData any
-	if proc.impRow.checkpoint != nil {
-		checkpointData = proc.impRow.checkpoint.Data
+	if p.impRow.checkpoint != nil {
+		checkpointData = p.impRow.checkpoint.Data
 	}
 
 	listOpt := ListingOptions{
-		Log:               proc.log,
+		Log:               p.log,
 		Timeframe:         timeframe,
 		Checkpoint:        checkpointData,
 		DataSourceOptions: dsOpt,
@@ -246,12 +249,12 @@ func (proc *processor) doImport(ctx context.Context) error {
 	start := time.Now()
 
 	// TODO: for an interactive import, we'd want to use only 1 worker, to get 1 item at most
-	wg, ch := proc.beginProcessing(ctx, proc.params.ProcessingOptions)
+	wg, ch := p.beginProcessing(ctx, p.params.ProcessingOptions)
 
-	if len(proc.params.Filenames) > 0 {
-		err = proc.ds.NewFileImporter().FileImport(ctx, proc.params.Filenames, ch, listOpt)
+	if len(p.params.Filenames) > 0 {
+		err = p.ds.NewFileImporter().FileImport(ctx, p.params.Filenames, ch, listOpt)
 	} else {
-		err = proc.ds.NewAPIImporter().APIImport(ctx, proc.acc, ch, listOpt)
+		err = p.ds.NewAPIImporter().APIImport(ctx, p.acc, ch, listOpt)
 	}
 	// handle error in a little bit (see below)
 
@@ -261,13 +264,13 @@ func (proc *processor) doImport(ctx context.Context) error {
 	// when we return, update the import row in the DB with the results
 	importResult := "ok"
 	defer func() {
-		proc.tl.dbMu.Lock()
-		_, err := proc.tl.db.Exec(`UPDATE imports SET ended=?, status=? WHERE id=?`, // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
-			time.Now().Unix(), importResult, proc.impRow.id)
-		proc.tl.dbMu.Unlock()
+		p.tl.dbMu.Lock()
+		_, err := p.tl.db.Exec(`UPDATE imports SET ended=?, status=? WHERE id=?`, // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
+			time.Now().Unix(), importResult, p.impRow.id)
+		p.tl.dbMu.Unlock()
 		if err != nil {
-			proc.log.Error("updating import status",
-				zap.Int64("import_id", proc.impRow.id),
+			p.log.Error("updating import status",
+				zap.Int64("import_id", p.impRow.id),
 				zap.String("status", importResult),
 				zap.Error(err))
 		}
@@ -276,33 +279,33 @@ func (proc *processor) doImport(ctx context.Context) error {
 	// handle any error returned from import
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			proc.log.Error("import aborted",
+			p.log.Error("import aborted",
 				zap.Error(err),
 				zap.Duration("duration", time.Since(start)))
 			importResult = "abort"
 		} else {
 			importResult = "err"
 		}
-		return fmt.Errorf("import: %v", err)
+		return fmt.Errorf("import: %w", err)
 	}
 
-	proc.log.Info("all items received; waiting for processing to finish",
-		zap.Int64("import_id", proc.impRow.id),
+	p.log.Info("all items received; waiting for processing to finish",
+		zap.Int64("import_id", p.impRow.id),
 		zap.String("status", importResult),
 		zap.Error(err))
 
 	// wait for all processing workers to complete
 	wg.Wait()
 
-	proc.log.Info("import complete", zap.Duration("duration", time.Since(start)))
+	p.log.Info("import complete", zap.Duration("duration", time.Since(start)))
 
 	// clear checkpoint and update last item ID for account
-	err = proc.successCleanup()
+	err = p.successCleanup()
 	if err != nil {
-		return fmt.Errorf("processing completed, but error cleaning up: %v", err)
+		return fmt.Errorf("processing completed, but error cleaning up: %w", err)
 	}
 
-	go proc.generateThumbnailsForImportedItems()
+	go p.generateThumbnailsForImportedItems()
 
 	return nil
 }
@@ -310,7 +313,7 @@ func (proc *processor) doImport(ctx context.Context) error {
 func (p *processor) successCleanup() error {
 	// delete empty items from this import (items with no content and no meaningful relationships)
 	if err := p.deleteEmptyItems(p.impRow.id); err != nil {
-		return fmt.Errorf("deleting empty items: %v (import_id=%d)", err, p.impRow.id)
+		return fmt.Errorf("deleting empty items: %w (import_id=%d)", err, p.impRow.id)
 	}
 
 	// TODO: If no items were inserted or associated with this import, delete it from the DB?
@@ -320,7 +323,7 @@ func (p *processor) successCleanup() error {
 	_, err := p.tl.db.Exec(`UPDATE imports SET checkpoint=NULL WHERE id=?`, p.impRow.id) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
 	p.tl.dbMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("clearing checkpoint: %v", err)
+		return fmt.Errorf("clearing checkpoint: %w", err)
 	}
 	p.impRow.checkpoint = nil
 
@@ -371,7 +374,7 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL)`, importID) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
 	if err != nil {
 		p.tl.dbMu.RUnlock()
-		return fmt.Errorf("querying empty items: %v", err)
+		return fmt.Errorf("querying empty items: %w", err)
 	}
 
 	var emptyItems []int64
@@ -379,16 +382,16 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 		var rowID int64
 		err := rows.Scan(&rowID)
 		if err != nil {
-			rows.Close()
-			p.tl.dbMu.RUnlock()
-			return fmt.Errorf("scanning item: %v", err)
+			defer p.tl.dbMu.RUnlock()
+			defer rows.Close()
+			return fmt.Errorf("scanning item: %w", err)
 		}
 		emptyItems = append(emptyItems, rowID)
 	}
 	rows.Close()
 	p.tl.dbMu.RUnlock()
 	if err = rows.Err(); err != nil {
-		return fmt.Errorf("iterating item rows: %v", err)
+		return fmt.Errorf("iterating item rows: %w", err)
 	}
 
 	// nothing to do if no items were empty
@@ -405,7 +408,7 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 }
 
 // DeleteItemRows deletes the item rows specified by their row IDs. If remember is true, the item rows will
-// be hashed, and the hash will be stored with the row,
+// be hashed, and the hash will be stored with the row, (TODO: Finish godoc)
 func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember bool, retention *time.Duration) error {
 	if len(rowIDs) == 0 {
 		return nil
@@ -418,7 +421,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 
 	tx, err := tl.db.Begin()
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %v", err)
+		return fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -434,12 +437,12 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 							AND data_file != "" LIMIT 1)`,
 			rowID).Scan(&count, &dataFile)
 		if err != nil {
-			return fmt.Errorf("querying count of rows sharing data file: %v", err)
+			return fmt.Errorf("querying count of rows sharing data file: %w", err)
 		}
 
 		_, err = tx.Exec(`DELETE FROM items WHERE id=?`, rowID) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
 		if err != nil {
-			return fmt.Errorf("deleting item %d from DB: %v", rowID, err)
+			return fmt.Errorf("deleting item %d from DB: %w", rowID, err)
 		}
 
 		// if this row is the only one that references the data file, we can delete it
@@ -454,12 +457,12 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 	// and we aren't sure whether we need to recover it or finish deleting it... by deleting the
 	// DB row first we can know that we just need to delete the file if there's no row using it
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing deletion transaction: %v", err)
+		return fmt.Errorf("committing deletion transaction: %w", err)
 	}
 
 	_, err = tl.deleteDataFiles(ctx, Log, dataFilesToDelete)
 	if err != nil {
-		return fmt.Errorf("deleting data files (after deleting associated item rows from DB): %v", err)
+		return fmt.Errorf("deleting data files (after deleting associated item rows from DB): %w", err)
 	}
 
 	return nil

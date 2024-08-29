@@ -25,26 +25,30 @@ import (
 	"time"
 )
 
-// TODO: This does seem to result in a timestamp offset by the local timezone (e.g. GMT -6 gets stored as 6 hours later than actual timestamp)
 // ParseAppleDate converts a date represented by a string of the decimal number of
 // seconds since the Apple epoch to a Unix date. Example input: "-23919039.000000"
+// TODO: This does seem to result in a timestamp offset by the local timezone (e.g. GMT -6 gets stored as 6 hours later than actual timestamp)
 func ParseAppleDate(date string) (time.Time, error) {
 	fractionalSeconds, err := strconv.ParseFloat(date, 64)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("parsing string '%s' as float: %v", date, err)
+		return time.Time{}, fmt.Errorf("parsing string '%s' as float: %w", date, err)
 	}
 	sec, fraction := math.Modf(fractionalSeconds)
-	return time.Unix(int64(sec)+timestampOffsetSeconds, int64(fraction*1e9)), nil
+	return time.Unix(int64(sec)+timestampOffsetSeconds, int64(fraction*nanoToSec)), nil
 }
 
-func AppleSecondsToUnix(appleSec int64) time.Time {
+// AppleSecondsToTime converts Apple timestamp in seconds to a normal timestamp.
+func AppleSecondsToTime(appleSec int64) time.Time {
 	return time.Unix(appleSec+timestampOffsetSeconds, 0)
 }
 
-func AppleNanoToUnix(appleNano int64) time.Time {
-	sec, nano := appleNano/1e9, appleNano%1e9
+// AppleNanoToTime converts Apple timestamp in nanoseconds to a normal timestamp.
+func AppleNanoToTime(appleNano int64) time.Time {
+	sec, nano := appleNano/nanoToSec, appleNano%nanoToSec
 	return time.Unix(sec+timestampOffsetSeconds, nano)
 }
+
+const nanoToSec = 1e9
 
 // Apple uses an epoch of Jan 1, 2001.
 // This is the number of seconds that is after the Unix epoch.

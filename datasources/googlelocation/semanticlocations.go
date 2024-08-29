@@ -18,6 +18,7 @@
 
 package googlelocation
 
+//nolint:unused // TODO: This represents the structure of the semantic location history which is not implemented yet.
 type semanticLocationTimelineObject struct {
 	Activitysegment struct {
 		Activities []struct {
@@ -68,7 +69,7 @@ type semanticLocationTimelineObject struct {
 				LatitudeE7  int    `json:"latitudeE7"`
 				LongitudeE7 int    `json:"longitudeE7"`
 				Name        string `json:"name"`
-				PlaceId     string `json:"placeId"`
+				PlaceID     string `json:"placeId"`
 			} `json:"transitStops"`
 		} `json:"transitPath"`
 		WaypointPath struct {
@@ -95,7 +96,7 @@ type semanticLocationTimelineObject struct {
 				LongitudeE7        int     `json:"longitudeE7"`
 				LocationConfidence float64 `json:"locationConfidence"`
 				Name               string  `json:"name"`
-				PlaceId            string  `json:"placeId"`
+				PlaceID            string  `json:"placeId"`
 				SourceInfo         struct {
 					DeviceTag int `json:"deviceTag"`
 				} `json:"sourceInfo"`
@@ -104,7 +105,7 @@ type semanticLocationTimelineObject struct {
 				LatitudeE7         int     `json:"latitudeE7"`
 				LongitudeE7        int     `json:"longitudeE7"`
 				LocationConfidence float64 `json:"locationConfidence"`
-				PlaceId            string  `json:"placeId"`
+				PlaceID            string  `json:"placeId"`
 			} `json:"otherCandidateLocations"`
 			PlaceConfidence string `json:"placeConfidence"`
 			VisitConfidence int    `json:"visitConfidence"`
@@ -120,7 +121,7 @@ type semanticLocationTimelineObject struct {
 			LongitudeE7        int     `json:"longitudeE7"`
 			LocationConfidence float64 `json:"locationConfidence"`
 			Name               string  `json:"name"`
-			PlaceId            string  `json:"placeId"`
+			PlaceID            string  `json:"placeId"`
 			SemanticType       string  `json:"semanticType"`
 			SourceInfo         struct {
 				DeviceTag int `json:"deviceTag"`
@@ -130,7 +131,7 @@ type semanticLocationTimelineObject struct {
 			LatitudeE7         int     `json:"latitudeE7"`
 			LongitudeE7        int     `json:"longitudeE7"`
 			LocationConfidence float64 `json:"locationConfidence"`
-			PlaceId            string  `json:"placeId"`
+			PlaceID            string  `json:"placeId"`
 			SemanticType       string  `json:"semanticType"`
 		} `json:"otherCandidateLocations"`
 		Placeconfidence   string `json:"placeConfidence"`
@@ -139,7 +140,7 @@ type semanticLocationTimelineObject struct {
 				AccuracyMeters int    `json:"accuracyMeters"`
 				LatE7          int    `json:"latE7"`
 				LngE7          int    `json:"lngE7"`
-				TimestampMs    string `json:"timestampMs"`
+				TimestampMS    string `json:"timestampMs"`
 			} `json:"points"`
 		} `json:"simplifiedRawPath"`
 		VisitConfidence int `json:"visitConfidence"`

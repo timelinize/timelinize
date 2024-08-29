@@ -23,9 +23,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/timelinize/timelinize/datasources/vcard"
@@ -48,19 +50,20 @@ func init() {
 // FileImporter can import the data from a file.
 type FileImporter struct{}
 
-func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+// FileImport imports data from a file.
+func (fimp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	for _, filename := range filenames {
-		if err := imp.importFile(ctx, filename, itemChan, opt); err != nil {
+		if err := fimp.importFile(ctx, filename, itemChan, opt); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (imp *FileImporter) importFile(ctx context.Context, filename string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	file, err := os.Open(filename)
+func (fimp *FileImporter) importFile(_ context.Context, filename string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
+	file, err := os.Open(filepath.Clean(filename))
 	if err != nil {
-		return err
+		return fmt.Errorf("opening file: %w", err)
 	}
 	defer file.Close()
 
@@ -76,7 +79,7 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, itemCh
 			break
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("error reading next record: %w", err)
 		}
 
 		// header row
@@ -91,7 +94,7 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, itemCh
 			// like an email by itself (or a name by itself) has no value I think... esp.
 			// since no items are attached from a contact list
 			if len(bestMapping) < recognizeAtLeastFields {
-				return fmt.Errorf("insufficient header row")
+				return errors.New("insufficient header row")
 			}
 
 			continue
@@ -133,7 +136,7 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, itemCh
 					}
 				case "picture":
 					if strings.HasPrefix(value, "http") {
-						p.NewPicture = timeline.DownloadData(ctx, value)
+						p.NewPicture = timeline.DownloadData(value)
 					} else {
 						picBytes, err := base64.RawStdEncoding.DecodeString(value)
 						if err == nil {

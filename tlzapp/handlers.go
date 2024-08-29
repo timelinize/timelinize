@@ -34,8 +34,8 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-func (s *server) handleFileSelectorRoots(w http.ResponseWriter, r *http.Request) error {
-	results, err := s.app.FileSelectorRoots()
+func (s *server) handleFileSelectorRoots(w http.ResponseWriter, _ *http.Request) error {
+	results, err := s.app.fileSelectorRoots()
 	return jsonResponse(w, results, err)
 }
 
@@ -94,7 +94,7 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) error {
 	return jsonResponse(w, stats, err)
 }
 
-func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) error {
+func (s *server) handleJobs(w http.ResponseWriter, _ *http.Request) error {
 	jobs, err := s.app.ActiveJobs()
 	return jsonResponse(w, jobs, err)
 }
@@ -161,15 +161,15 @@ func (server) handleLogs(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (s *server) handleRepos(w http.ResponseWriter, r *http.Request) error {
-	return jsonResponse(w, s.app.GetOpenRepositories(), nil)
+func (s *server) handleRepos(w http.ResponseWriter, _ *http.Request) error {
+	return jsonResponse(w, s.app.getOpenRepositories(), nil)
 }
 
-func (s *server) handleBuildInfo(w http.ResponseWriter, r *http.Request) error {
+func (s *server) handleBuildInfo(w http.ResponseWriter, _ *http.Request) error {
 	return jsonResponse(w, s.app.BuildInfo(), nil)
 }
 
-func (s *server) handleGetDataSources(w http.ResponseWriter, r *http.Request) error {
+func (s *server) handleGetDataSources(w http.ResponseWriter, _ *http.Request) error {
 	return jsonResponse(w, s.app.DataSources(), nil)
 }
 
@@ -188,7 +188,7 @@ func (s *server) handleOpenRepo(w http.ResponseWriter, r *http.Request) error {
 	payload := r.Context().Value(ctxKeyPayload).(*openRepoPayload)
 
 	// TODO: maybe have the app methods return structured errors
-	openedTL, err := s.app.OpenRepository(payload.RepoPath, payload.Create)
+	openedTL, err := s.app.openRepository(payload.RepoPath, payload.Create)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return Error{

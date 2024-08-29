@@ -41,13 +41,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// TODO: update godoc
 // Entity represents a person. All these fields go into the persons table,
 // except for UserID which goes into person_identities and which maps that
 // user ID to the person being described by name and birth information.
 // Birth information is almost always added manually by users, since
 // data sources don't usually provide this, and is used to distinguish
 // different persons of the same name, and is totally optional.
+// TODO: update godoc
 type Entity struct {
 	// database row IDs
 	ID     int64  `json:"id,omitempty"`
@@ -116,8 +116,9 @@ func (e Entity) dbName() *string {
 // 	return &ddUnix
 // }
 
-func (p Entity) Attribute(name string) (Attribute, bool) {
-	for _, attr := range p.Attributes {
+// Attribute gets the (first-)named attribute from the entity.
+func (e Entity) Attribute(name string) (Attribute, bool) {
+	for _, attr := range e.Attributes {
 		if attr.Name == name {
 			return attr, true
 		}
@@ -125,8 +126,9 @@ func (p Entity) Attribute(name string) (Attribute, bool) {
 	return Attribute{}, false
 }
 
-func (p Entity) AttributeValue(name string) any {
-	for _, attr := range p.Attributes {
+// AttributeValue gets the value of the (first-)named attribute from the entity.
+func (e Entity) AttributeValue(name string) any {
+	for _, attr := range e.Attributes {
 		if attr.Name == name {
 			return attr.Value
 		}
@@ -166,7 +168,7 @@ func (tl *Timeline) normalizeEntity(e *Entity) error {
 	if e.typeID == 0 {
 		typeID, err := tl.entityTypeNameToID(e.Type)
 		if err != nil {
-			return fmt.Errorf("getting entity type ID: %v (entity_type=%s)", err, e.Type)
+			return fmt.Errorf("getting entity type ID: %w (entity_type=%s)", err, e.Type)
 		}
 		e.typeID = typeID
 	}
@@ -182,12 +184,13 @@ func (e Entity) metadataString() (*string, error) {
 	}
 	metaBytes, err := json.Marshal(e.Metadata)
 	if err != nil {
-		return nil, fmt.Errorf("encoding entity metadata as JSON: %v", err)
+		return nil, fmt.Errorf("encoding entity metadata as JSON: %w", err)
 	}
 	metaString := string(metaBytes)
 	return &metaString, nil
 }
 
+// Attribute describes an entity.
 type Attribute struct {
 	// The name of the attribute. For attributes that define
 	// a user's identity on a data source, this name *MUST*
@@ -253,6 +256,7 @@ type Attribute struct {
 	ItemCount int64 `json:"item_count,omitempty"`
 }
 
+// Empty returns true if the name or value is empty or only whitespace.
 func (a Attribute) Empty() bool {
 	if strings.TrimSpace(a.Name) == "" {
 		return true
@@ -303,8 +307,7 @@ func (a Attribute) valueString() string {
 func normalizeAttribute(attr Attribute) Attribute {
 	attr.Name = strings.TrimSpace(attr.Name)
 
-	switch val := attr.Value.(type) {
-	case string:
+	if val, ok := attr.Value.(string); ok {
 		// if this is a time value that was deserialized from JSON, convert it to a time type
 		// (values coming directly from data sources should already be time type); we do this
 		// because we conventionally store timestamps as unix timestamps in the DB, and the
@@ -316,8 +319,7 @@ func normalizeAttribute(attr Attribute) Attribute {
 		}
 	}
 
-	switch attr.Name {
-	case AttributePhoneNumber:
+	if attr.Name == AttributePhoneNumber {
 		// TODO: region could be stored in metadata now
 		region, num, ok := strings.Cut(attr.Value.(string), ":")
 		if !ok {
@@ -333,7 +335,7 @@ func normalizeAttribute(attr Attribute) Attribute {
 	return attr
 }
 
-// normalizePhoneNumber attempts to parse number and returns
+// NormalizePhoneNumber attempts to parse number and returns
 // a standardized version in E164 format. If the number does
 // not have an explicit region/country code, the country code
 // for the region is used instead. The default region is US.
@@ -362,7 +364,7 @@ func (p *processor) processEntityPicture(ctx context.Context, e Entity) (string,
 
 	r, err := e.NewPicture(ctx)
 	if err != nil {
-		return "", fmt.Errorf("opening profile picture reader: %v", err)
+		return "", fmt.Errorf("opening profile picture reader: %w", err)
 	}
 	if r == nil {
 		return "", nil // this could happen if the data source finds out there's no picture and no error
@@ -371,31 +373,32 @@ func (p *processor) processEntityPicture(ctx context.Context, e Entity) (string,
 
 	buffered := bufio.NewReader(r)
 
-	peekedBytes, err := buffered.Peek(512)
+	const bytesNeededToSniff = 512
+	peekedBytes, err := buffered.Peek(bytesNeededToSniff)
 	if err != nil {
-		return "", fmt.Errorf("could not peek profile picture to determine type: %v", err)
+		return "", fmt.Errorf("could not peek profile picture to determine type: %w", err)
 	}
 
 	contentType := http.DetectContentType(peekedBytes)
 
-	// use "/" separators here; the fullpath() method will adjust for OS path seperator
+	// use "/" separators here; the fullpath() method will adjust for OS path separator
 	// (we use the "%09d" formatter so file systems sort more conveniently, but it
 	// also does not look like a date/time)
 	pictureFile := path.Join(AssetsFolderName, "profile_pictures", fmt.Sprintf("entity_%09d", e.ID))
 	disposition, _, _ := mime.ParseMediaType(contentType)
 	switch disposition {
-	case "image/png":
+	case imagePng:
 		pictureFile += ".png"
-	case "image/webp":
+	case imageWebp:
 		pictureFile += ".webp"
-	case "image/gif":
+	case imageGif:
 		pictureFile += ".gif"
-	case "image/jpeg", "":
+	case imageJpeg, "":
 		fallthrough
 	default:
-		pictureFile += ".jpg"
+		pictureFile += extJpg
 	}
-	fullPath := p.tl.FullPath(pictureFile)
+	fullPath := filepath.Clean(p.tl.FullPath(pictureFile))
 
 	// ensure parent dir exists, then open file for writing
 	if err = os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
@@ -418,6 +421,14 @@ func (p *processor) processEntityPicture(ctx context.Context, e Entity) (string,
 
 	return pictureFile, nil
 }
+
+const (
+	imagePng, extPng           = "image/png", ".png"
+	imageWebp, extWebp         = "image/webp", ".webp"
+	imageGif, extGif           = "image/gif", ".gif"
+	imageJpeg, extJpg, extJpeg = "image/jpeg", ".jpg", ".jpeg"
+	imageAvif, extAvif         = "image/avif", ".avif"
+)
 
 // TODO: update this godoc related to latentID; and note that an empty latentID and nil error is a possible and valid return value here.
 // processEntity ingests the incoming person into the timeline. The person's attributes are
@@ -452,14 +463,14 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 	inCopy.ID = 0
 	entities, entityAutolinkAttrs, err := p.loadEntities(ctx, tx, &inCopy)
 	if err != nil {
-		return latentID{}, fmt.Errorf("searching entities by attributes: %v", err)
+		return latentID{}, fmt.Errorf("searching entities by attributes: %w", err)
 	}
 
 	// then only if that didn't yield any results, try ID next
 	if len(entities) == 0 && in.ID > 0 {
 		entities, entityAutolinkAttrs, err = p.loadEntities(ctx, tx, &in)
 		if err != nil {
-			return latentID{}, fmt.Errorf("searching entities by ID: %v", err)
+			return latentID{}, fmt.Errorf("searching entities by ID: %w", err)
 		}
 	}
 
@@ -484,7 +495,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 				RETURNING id`,
 			in.typeID, p.impRow.id, in.dbName(), metadata).Scan(&in.ID)
 		if err != nil {
-			return latentID{}, fmt.Errorf("adding new person %+v: %v", in, err)
+			return latentID{}, fmt.Errorf("adding new person %+v: %w", in, err)
 		}
 
 		// now that we have the row ID, save profile picture
@@ -506,7 +517,6 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 		entities = append(entities, in)
 
 		atomic.AddInt64(p.newEntityCount, 1)
-
 	} else if len(entities) == 1 {
 		// if the identity attribute(s) matched exactly 1 person, update their info in the DB
 		// (if it matched more than 1 person, we don't update multiple of them, because we only
@@ -549,9 +559,9 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 
 		if len(args) > 0 {
 			args = append(args, entity.ID)
-			_, err := tx.ExecContext(ctx, `UPDATE entities SET `+setClause+` WHERE id=?`, args...)
+			_, err := tx.ExecContext(ctx, `UPDATE entities SET `+setClause+` WHERE id=?`, args...) //nolint:gosec
 			if err != nil {
-				return latentID{}, fmt.Errorf("updating person %d (%+v): %v", entity.ID, in, err)
+				return latentID{}, fmt.Errorf("updating person %d (%+v): %w", entity.ID, in, err)
 			}
 		}
 	}
@@ -596,7 +606,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 			err = tx.QueryRowContext(ctx, q, args...).Scan(&eaID, &existingDataSourceID)
 			noRows := errors.Is(err, sql.ErrNoRows)
 			if err != nil && !noRows {
-				return latentID{}, fmt.Errorf("checking for existing link of entity to attribute: %v (entity_id=%d attribute_id=%d)", err, entity.ID, attrID)
+				return latentID{}, fmt.Errorf("checking for existing link of entity to attribute: %w (entity_id=%d attribute_id=%d)", err, entity.ID, attrID)
 			}
 
 			// TODO: I want to revise the autolink fields. I am not sure how useful they are presently. What actual information do we (want to) gain?
@@ -615,7 +625,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 					VALUES (?, ?, ?, ?, ?, ?)`,
 					entity.ID, attrID, linkedDataSourceID, p.impRow.id, autolinkImportID, autolinkAttrIDPtr)
 				if err != nil {
-					return latentID{}, fmt.Errorf("linking entity %d to attribute %d: %v (data_source_id=%#v import_id=%d autolink_import_id=%#v autolink_attribute_id=%#v)",
+					return latentID{}, fmt.Errorf("linking entity %d to attribute %d: %w (data_source_id=%#v import_id=%d autolink_import_id=%#v autolink_attribute_id=%#v)",
 						entity.ID, attrID, err, linkedDataSourceID, p.impRow.id, autolinkImportID, autolinkAttrIDPtr)
 				}
 			} else if eaID > 0 && existingDataSourceID == nil {
@@ -625,7 +635,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 					`UPDATE entity_attributes SET data_source_id=?, import_id=?, autolink_import_id=?, autolink_attribute_id=? WHERE id=?`, // TODO: LIMIT 1 would be nice...
 					linkedDataSourceID, p.impRow.id, autolinkImportID, autolinkAttrIDPtr, eaID)
 				if err != nil {
-					return latentID{}, fmt.Errorf("updating entity %d link to to attribute %d: %v", entity.ID, attrID, err)
+					return latentID{}, fmt.Errorf("updating entity %d link to attribute %d: %w", entity.ID, attrID, err)
 				}
 			}
 		}
@@ -681,7 +691,7 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 		// share an account or the account has attributes spanning nultiple positively-ID'ed people)
 		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {
-			return nil, nil, fmt.Errorf("querying entity attributes: %v", err)
+			return nil, nil, fmt.Errorf("querying entity attributes: %w", err)
 		}
 		defer rows.Close()
 
@@ -691,7 +701,7 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 			var attrID *int64
 			err := rows.Scan(&ent.ID, &name, &ent.Picture, &attrID)
 			if err != nil {
-				return nil, nil, fmt.Errorf("scanning entity ID: %v", err)
+				return nil, nil, fmt.Errorf("scanning entity ID: %w", err)
 			}
 			if name != nil {
 				ent.Name = *name
@@ -702,7 +712,7 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 			entities = append(entities, ent)
 		}
 		if err := rows.Err(); err != nil {
-			return nil, nil, fmt.Errorf("iterating entity rows: %v", err)
+			return nil, nil, fmt.Errorf("iterating entity rows: %w", err)
 		}
 	}
 
@@ -715,7 +725,7 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (int64, err
 	if len(attr.Metadata) > 0 {
 		metaBytes, err := json.Marshal(attr.Metadata)
 		if err != nil {
-			return 0, fmt.Errorf("encoding attribute metadata as JSON: %v", err)
+			return 0, fmt.Errorf("encoding attribute metadata as JSON: %w", err)
 		}
 		metaString := string(metaBytes)
 		metadata = &metaString
@@ -731,7 +741,7 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (int64, err
 		`INSERT OR IGNORE INTO attributes (name, value, alt_value, metadata) VALUES (?, ?, ?, ?) RETURNING id`,
 		attr.Name, attr.valueForDB(), altValue, metadata).Scan(&attrID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("storing attribute '%+v': %v", attr, err)
+		return 0, fmt.Errorf("storing attribute '%+v': %w", attr, err)
 	}
 
 	if attrID == 0 {
@@ -742,20 +752,21 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (int64, err
 			`SELECT id FROM attributes WHERE name=? AND value=? LIMIT 1`,
 			attr.Name, attr.valueForDB()).Scan(&attrID)
 		if err != nil {
-			return 0, fmt.Errorf("retrieving attribute ID for attribute %+v: %v", attr, err)
+			return 0, fmt.Errorf("retrieving attribute ID for attribute %+v: %w", attr, err)
 		}
 	}
 
 	return attrID, nil
 }
 
+// MergeEntities combines the entities to merge into the entity to keep.
 func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep int64, entityIDsToMerge []int64) error {
 	// input verification / sanity checks, as well as loading entity information
 	if entityIDToKeep <= 0 {
-		return fmt.Errorf("entity to keep must have an ID greater than 0")
+		return errors.New("entity to keep must have an ID greater than 0")
 	}
-	var entitiesToMerge []Entity
-	seen := make(map[int64]struct{}) //deduplication
+	entitiesToMerge := make([]Entity, 0, len(entityIDsToMerge))
+	seen := make(map[int64]struct{}) // deduplication
 	for i, id := range entityIDsToMerge {
 		if id <= 0 {
 			return fmt.Errorf("entities to merge must have IDs greater than 0 (%d)", id)
@@ -775,13 +786,13 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep int64, ent
 		// load all the entities before we get a lock on the DB to do the changes
 		entMerge, err := tl.LoadEntity(id)
 		if err != nil {
-			return fmt.Errorf("loading entity to merge: %v", err)
+			return fmt.Errorf("loading entity to merge: %w", err)
 		}
 		entitiesToMerge = append(entitiesToMerge, entMerge)
 	}
 	entKeep, err := tl.LoadEntity(entityIDToKeep)
 	if err != nil {
-		return fmt.Errorf("loading entity to keep: %v", err)
+		return fmt.Errorf("loading entity to keep: %w", err)
 	}
 
 	// lock DB and start transaction
@@ -821,28 +832,28 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep int64, ent
 		_, err = tx.ExecContext(ctx, `UPDATE entities SET name=?, picture_file=?, metadata=? WHERE id=?`,
 			entKeep.Name, entKeep.Picture, metadata, entityIDToKeep)
 		if err != nil {
-			return fmt.Errorf("updating entity row: %v", err)
+			return fmt.Errorf("updating entity row: %w", err)
 		}
 
 		// replace entity IDs in the database
 		if _, err := tx.ExecContext(ctx, `UPDATE entity_attributes SET entity_id=? WHERE entity_id=?`, entityIDToKeep, entMerge.ID); err != nil {
-			return fmt.Errorf("replacing entity ID in entity_attributes: %v", err)
+			return fmt.Errorf("replacing entity ID in entity_attributes: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE tagged SET entity_id=? WHERE entity_id=?`, entityIDToKeep, entMerge.ID); err != nil {
-			return fmt.Errorf("replacing entity ID in tagged: %v", err)
+			return fmt.Errorf("replacing entity ID in tagged: %w", err)
 		}
 
 		// handle pass-through attribute for the entity being merged (start by seeing if there's one for the entity to keep)
 		var passThruAttrIDKeep int64
 		if err = tx.QueryRowContext(ctx, `SELECT id FROM attributes WHERE name=? AND value=? LIMIT 1`, passThruAttribute, entityIDToKeep).Scan(&passThruAttrIDKeep); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("selecting pass-thru attribute for entity to keep: %v", err)
+			return fmt.Errorf("selecting pass-thru attribute for entity to keep: %w", err)
 		}
 		if passThruAttrIDKeep == 0 {
 			// a pass-thru attribute doesn't exist for the entity to keep, so we can safely
 			// just update the pass-thru attribute (if any) for the one to merge to point to
 			// the one to keep
 			if _, err := tx.ExecContext(ctx, `UPDATE attributes SET value=? WHERE name=? AND value=?`, entityIDToKeep, passThruAttribute, entMerge.ID); err != nil {
-				return fmt.Errorf("updating pass-thru attribute to point to entity to keep: %v", err)
+				return fmt.Errorf("updating pass-thru attribute to point to entity to keep: %w", err)
 			}
 		} else {
 			// this is a little more work: we can't just update an attribute because it would
@@ -850,30 +861,30 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep int64, ent
 			// attribute to point to the new one instead
 			var passThruAttrIDMerge int64
 			if err = tx.QueryRowContext(ctx, `SELECT id FROM attributes WHERE name=? AND value=? LIMIT 1`, passThruAttribute, entMerge.ID).Scan(&passThruAttrIDMerge); err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("selecting pass-thru attribute for entity to merge: %v", err)
+				return fmt.Errorf("selecting pass-thru attribute for entity to merge: %w", err)
 			}
 			if passThruAttrIDMerge > 0 {
 				if _, err := tx.ExecContext(ctx, `UPDATE items SET attribute_id=? WHERE attribute_id=?`, passThruAttrIDKeep, passThruAttrIDMerge); err != nil {
-					return fmt.Errorf("updating attribute ID in items table: %v", err)
+					return fmt.Errorf("updating attribute ID in items table: %w", err)
 				}
 				if _, err := tx.ExecContext(ctx, `UPDATE relationships SET from_attribute_id=? WHERE from_attribute_id=?`, passThruAttrIDKeep, passThruAttrIDMerge); err != nil {
-					return fmt.Errorf("updating 'from' attribute ID in relationships table: %v", err)
+					return fmt.Errorf("updating 'from' attribute ID in relationships table: %w", err)
 				}
 				if _, err := tx.ExecContext(ctx, `UPDATE relationships SET to_attribute_id=? WHERE to_attribute_id=?`, passThruAttrIDKeep, passThruAttrIDMerge); err != nil {
-					return fmt.Errorf("updating 'to' attribute ID in relationships table: %v", err)
+					return fmt.Errorf("updating 'to' attribute ID in relationships table: %w", err)
 				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM entity_attributes WHERE attribute_id=?`, passThruAttrIDMerge); err != nil {
-					return fmt.Errorf("deleting row in entity_attributes table: %v (attribute_id=%d)", err, passThruAttrIDMerge)
+					return fmt.Errorf("deleting row in entity_attributes table: %w (attribute_id=%d)", err, passThruAttrIDMerge)
 				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM attributes WHERE id=?`, passThruAttrIDMerge); err != nil {
-					return fmt.Errorf("deleting pass-thru attribute for entity to merge: %v (attribute_id=%d)", err, passThruAttrIDMerge)
+					return fmt.Errorf("deleting pass-thru attribute for entity to merge: %w (attribute_id=%d)", err, passThruAttrIDMerge)
 				}
 			}
 		}
 
 		// clean up the entity to merge
 		if _, err := tx.ExecContext(ctx, `DELETE FROM entities WHERE id=?`, entMerge.ID); err != nil {
-			return fmt.Errorf("deleting from entities table: %v", err)
+			return fmt.Errorf("deleting from entities table: %w", err)
 		}
 		if oldPictureFile != nil {
 			if err := os.Remove(filepath.Join(tl.repoDir, *oldPictureFile)); err != nil {
@@ -916,7 +927,7 @@ func (l *latentID) identifyingAttributeID(ctx context.Context, tx *sql.Tx) (int6
 		return l.attributeID, nil
 	}
 	if l.entityID == 0 {
-		return 0, fmt.Errorf("no attribute ID or entity ID set")
+		return 0, errors.New("no attribute ID or entity ID set")
 	}
 
 	attrID, err := storeLinkBetweenEntityAndNonIDAttribute(ctx, tx, l.entityID, Attribute{
@@ -938,6 +949,7 @@ var multiSpaceRegex = regexp.MustCompile(`\s{2,}`)
 // a specific entity by its row ID and no other features (attributes) in particular.
 const passThruAttribute = "_entity"
 
+// Canonical attribute names.
 const (
 	AttributeEmail       = "email_address"
 	AttributePhoneNumber = "phone_number"

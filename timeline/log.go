@@ -19,7 +19,6 @@
 package timeline
 
 import (
-	"context"
 	"errors"
 	"os"
 	"sync"
@@ -59,7 +58,8 @@ func newLogger() *zap.Logger {
 	)
 
 	// avoid a firehose of logs (TODO: maybe only sample for certain logs named something...?)
-	core = zapcore.NewSamplerWithOptions(core, time.Second, 1, 100)
+	const firstNMsgs, everyNthMsg = 1, 100
+	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
 
 	return zap.New(core)
 }
@@ -75,7 +75,7 @@ func newLogger() *zap.Logger {
 // specifically closed connections will result in that connection
 // being removed from the pool.
 type multiConnWriter struct {
-	appCtx  context.Context // must be a Wails application context
+	// appCtx  context.Context // must be a Wails application context
 	conns   []*websocket.Conn
 	connsMu sync.RWMutex // also protects appCtx
 }
@@ -117,11 +117,11 @@ func (mw *multiConnWriter) RemoveConn(conn *websocket.Conn) {
 	mw.connsMu.Unlock()
 }
 
-func SetWailsAppContext(ctx context.Context) {
-	websocketLogOutputs.connsMu.Lock()
-	websocketLogOutputs.appCtx = ctx
-	websocketLogOutputs.connsMu.Unlock()
-}
+// func SetWailsAppContext(ctx context.Context) {
+// 	websocketLogOutputs.connsMu.Lock()
+// 	websocketLogOutputs.appCtx = ctx
+// 	websocketLogOutputs.connsMu.Unlock()
+// }
 
 // websocketLogOutputs mediates the list of active
 // websocket connections that are receiving process

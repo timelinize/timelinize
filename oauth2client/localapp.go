@@ -20,6 +20,7 @@ package oauth2client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"golang.org/x/oauth2"
@@ -53,7 +54,7 @@ type LocalAppSource struct {
 // is for a client credentials / "two-legged" flow).
 func (s LocalAppSource) InitialToken(ctx context.Context) (*oauth2.Token, error) {
 	if s.OAuth2Config == nil {
-		return nil, fmt.Errorf("missing OAuth2Config")
+		return nil, errors.New("missing OAuth2Config")
 	}
 
 	// if this is a two-legged config ("client credentials" flow,
@@ -70,12 +71,12 @@ func (s LocalAppSource) InitialToken(ctx context.Context) (*oauth2.Token, error)
 
 	info, err := AuthCodeExchangeInfo(s.OAuth2Config)
 	if err != nil {
-		return nil, fmt.Errorf("making auth code exchange info: %v", err)
+		return nil, fmt.Errorf("making auth code exchange info: %w", err)
 	}
 
 	code, err := s.AuthCodeGetter.Get(ctx, info.State, info.AuthCodeURL)
 	if err != nil {
-		return nil, fmt.Errorf("getting code via browser: %v", err)
+		return nil, fmt.Errorf("getting code via browser: %w", err)
 	}
 
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)

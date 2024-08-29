@@ -26,9 +26,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-
-	// register the sqlite3 driver
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // register the sqlite3 driver
 )
 
 //go:embed schema.sql
@@ -109,7 +107,8 @@ func saveAllDataSources(db *sql.DB) error {
 	}
 
 	query := `INSERT OR IGNORE INTO "data_sources" ("name") VALUES`
-	var vals []any
+
+	vals := make([]any, 0, len(dataSources))
 	var count int
 
 	for _, ds := range dataSources {
@@ -123,7 +122,7 @@ func saveAllDataSources(db *sql.DB) error {
 
 	_, err := db.Exec(query, vals...)
 	if err != nil {
-		return fmt.Errorf("writing data sources to DB: %v", err)
+		return fmt.Errorf("writing data sources to DB: %w", err)
 	}
 
 	return nil
@@ -141,7 +140,8 @@ func saveAllStandardEntityTypes(db *sql.DB) error {
 	}
 
 	query := `INSERT INTO entity_types ("name") VALUES`
-	var vals []any
+
+	vals := make([]any, 0, len(entityTypes))
 	var count int
 
 	for _, et := range entityTypes {
@@ -156,7 +156,7 @@ func saveAllStandardEntityTypes(db *sql.DB) error {
 
 	_, err := db.Exec(query, vals...)
 	if err != nil {
-		return fmt.Errorf("writing standard entity types to DB: %v", err)
+		return fmt.Errorf("writing standard entity types to DB: %w", err)
 	}
 
 	return nil
@@ -164,7 +164,8 @@ func saveAllStandardEntityTypes(db *sql.DB) error {
 
 func saveAllStandardClassifications(db *sql.DB) error {
 	query := `INSERT INTO "classifications" ("standard", "name", "labels", "description") VALUES`
-	var vals []any
+
+	vals := make([]any, 0, len(classifications)*4) //nolint:mnd
 	var count int
 
 	for _, cl := range classifications {
@@ -180,7 +181,7 @@ func saveAllStandardClassifications(db *sql.DB) error {
 
 	_, err := db.Exec(query, vals...)
 	if err != nil {
-		return fmt.Errorf("writing standard classifications to DB: %v", err)
+		return fmt.Errorf("writing standard classifications to DB: %w", err)
 	}
 
 	return nil

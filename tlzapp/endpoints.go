@@ -219,6 +219,7 @@ func (e Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 		r = r.WithContext(context.WithValue(r.Context(), ctxKeyPayload, payload))
+	case Form, None:
 	}
 
 	return e.Handler(w, r)
@@ -230,7 +231,7 @@ func (a *App) CommandLineHelp() string {
 		command  string
 		endpoint Endpoint
 	}
-	var commands []commandEndpoint
+	commands := make([]commandEndpoint, 0, len(a.commands))
 	for command, endpoint := range a.commands {
 		commands = append(commands, commandEndpoint{command, endpoint})
 	}
@@ -265,7 +266,7 @@ Available Commands:`)
 			val := reflect.ValueOf(pair.endpoint.Payload)
 			kind := val.Kind()
 
-			switch kind {
+			switch kind { //nolint:exhaustive
 			case reflect.Slice:
 				sb.WriteString(" <")
 				sb.WriteString(val.Type().Elem().String())
@@ -319,7 +320,7 @@ func nestedFields(thing any) []reflect.StructField {
 
 	var fields []reflect.StructField
 
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		typf := typ.Field(i)
 		valf := val.Field(i)
 

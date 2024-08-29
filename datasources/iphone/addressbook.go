@@ -39,7 +39,7 @@ func (fimp *FileImporter) addressBook(ctx context.Context) error {
 
 	db, err := sql.Open("sqlite3", fimp.fileIDToPath(addressBookFileID)+"?mode=ro")
 	if err != nil {
-		return fmt.Errorf("opening address book: %v", err)
+		return fmt.Errorf("opening address book: %w", err)
 	}
 	defer db.Close()
 
@@ -118,7 +118,7 @@ func (fimp *FileImporter) addressBook(ctx context.Context) error {
 
 		err := rows.Scan(&rowID, &first, &last, &middle, &org, &note, &birthday, &nick, &prefix, &suffix, &creationDateAppleSec, &mvProperty, &mvLabel, &mvValue, &fieldName, &fieldValue)
 		if err != nil {
-			return fmt.Errorf("scanning row: %v", err)
+			return fmt.Errorf("scanning row: %w", err)
 		}
 
 		// I haven't seen this, but just to avoid a panic
@@ -128,7 +128,7 @@ func (fimp *FileImporter) addressBook(ctx context.Context) error {
 
 		// convert timestamps
 		if creationDateAppleSec != nil && *creationDateAppleSec != 0 {
-			creationDate = imessage.AppleSecondsToUnix(*creationDateAppleSec)
+			creationDate = imessage.AppleSecondsToTime(*creationDateAppleSec)
 		}
 
 		// start of new contact
@@ -233,7 +233,7 @@ func (fimp *FileImporter) addressBook(ctx context.Context) error {
 		}
 	}
 	if err = rows.Err(); err != nil {
-		return fmt.Errorf("scanning rows: %v", err)
+		return fmt.Errorf("scanning rows: %w", err)
 	}
 
 	// don't forget to process the last one too!

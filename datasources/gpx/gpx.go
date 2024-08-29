@@ -22,6 +22,7 @@ package gpx
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -50,6 +51,7 @@ func init() {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	// The ID of the owner entity. REQUIRED for linking entity in DB.
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
@@ -61,6 +63,7 @@ type Options struct {
 // FileImporter implements the timeline.FileImporter interface.
 type FileImporter struct{}
 
+// Recognize returns whether the file is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	var totalCount, matchCount int
 
@@ -87,9 +90,8 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 
 			totalCount++
@@ -114,6 +116,7 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	return timeline.Recognition{Confidence: confidence}, nil
 }
 
+// FileImport imports data from a file or folder.
 func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 
@@ -138,9 +141,8 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil // traverse into subdirectories
@@ -192,6 +194,7 @@ type Processor struct {
 	owner   timeline.Entity
 }
 
+// NewProcessor returns a new GPX processor.
 func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ListingOptions, simplification float64) (*Processor, error) {
 	// create XML decoder (wrapped to track some state as it decodes)
 	xmlDec := &decoder{Decoder: xml.NewDecoder(file)}
@@ -210,6 +213,7 @@ func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ListingOpt
 	}, nil
 }
 
+// NextGPXItem returns the next GPX item.
 func (p *Processor) NextGPXItem(ctx context.Context) (*timeline.Item, error) {
 	for {
 		if err := ctx.Err(); err != nil {
@@ -265,11 +269,11 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 		}
 
 		tkn, err := d.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("decoding next XML token: %v", err)
+			return nil, fmt.Errorf("decoding next XML token: %w", err)
 		}
 
 		// TODO: grab this from the top in <metadata>? (we grab <time> already)
@@ -309,11 +313,11 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 				var meta metadata
 				if err := d.DecodeElement(&meta, &elem); err != nil {
 					// TODO: maybe skip and go to next?
-					return nil, fmt.Errorf("decoding XML element as metadata: %v", err)
+					return nil, fmt.Errorf("decoding XML element as metadata: %w", err)
 				}
 				ts, err := time.Parse(time.RFC3339, meta.Time)
 				if err != nil {
-					return nil, fmt.Errorf("parsing timestamp in metadata->time element: %v", err)
+					return nil, fmt.Errorf("parsing timestamp in metadata->time element: %w", err)
 				}
 				d.metadataTime = ts
 				continue
@@ -322,7 +326,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 				var point trkpt
 				if err := d.DecodeElement(&point, &elem); err != nil {
 					// TODO: maybe skip and go to next?
-					return nil, fmt.Errorf("decoding XML element as track point: %v", err)
+					return nil, fmt.Errorf("decoding XML element as track point: %w", err)
 				}
 
 				timestamp := point.Time
@@ -332,8 +336,8 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 
 				return &googlelocation.Location{
 					Original:    point,
-					LatitudeE7:  int64(point.Lat * 1e7),
-					LongitudeE7: int64(point.Lon * 1e7),
+					LatitudeE7:  int64(point.Lat * placesMult),
+					LongitudeE7: int64(point.Lon * placesMult),
 					Altitude:    point.Ele,
 					Timestamp:   timestamp,
 				}, nil
@@ -347,7 +351,6 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 			}
 			d.stack = d.stack[:len(d.stack)-1]
 		}
-
 	}
 
 	return nil, nil
@@ -384,3 +387,5 @@ type trkpt struct {
 	Speed   float64   `xml:"speed"` // velocity
 	Sat     int       `xml:"sat"`   // number of satellites
 }
+
+const placesMult = 1e7

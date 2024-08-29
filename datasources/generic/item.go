@@ -40,7 +40,7 @@ func (fi fileItem) location() timeline.Location {
 func (fi fileItem) locationFromExif() (timeline.Location, error) {
 	file, err := fi.fsys.Open(fi.path)
 	if err != nil {
-		return timeline.Location{}, fmt.Errorf("unable to open file to attempt reading EXIF: %s", err)
+		return timeline.Location{}, fmt.Errorf("unable to open file to attempt reading EXIF: %w", err)
 	}
 	defer file.Close()
 

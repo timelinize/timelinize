@@ -27,7 +27,7 @@ import (
 )
 
 // makeForm parses args and encodes the data as urlencoded-data.
-func makeForm(args []string) (string, error) {
+func makeForm(args []string) string {
 	formVals := url.Values{}
 
 	keyVals := flagValPairs(args)
@@ -36,14 +36,14 @@ func makeForm(args []string) (string, error) {
 		formVals.Add(sanitizeFlag(pair.flag), fmt.Sprintf("%v", pair.val))
 	}
 
-	return formVals.Encode(), nil
+	return formVals.Encode()
 }
 
 // sanitizeFlag turns a flag string like "--foo-bar"
 // into "foo_bar"; i.e. it strips the flag prefix
 // and standardizes its format.
 func sanitizeFlag(s string) string {
-	return strings.Replace(s[2:], "-", "_", -1)
+	return strings.ReplaceAll(s[2:], "-", "_")
 }
 
 // makeJSON parses args and encodes the data as JSON.

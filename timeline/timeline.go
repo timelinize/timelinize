@@ -37,7 +37,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	cuckoo "github.com/seiflotfy/cuckoofilter"
 	"go.uber.org/zap"
 )
 
@@ -73,9 +72,9 @@ type Timeline struct {
 	dbMu sync.RWMutex
 }
 
-func (t *Timeline) String() string { return fmt.Sprintf("%s:%s", t.id, t.repoDir) }
-func (t *Timeline) Dir() string    { return t.repoDir }
-func (t *Timeline) ID() uuid.UUID  { return t.id }
+func (tl *Timeline) String() string { return fmt.Sprintf("%s:%s", tl.id, tl.repoDir) }
+func (tl *Timeline) Dir() string    { return tl.repoDir }
+func (tl *Timeline) ID() uuid.UUID  { return tl.id }
 
 // TODO: refactor Create() and Open() to use AssessFolder() instead of duplicating logic
 
@@ -157,7 +156,7 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 
 	// no need to read whole listing; all we need to do is find one non-intentional file
 	// (reading 2 allows for 1 pointless file)
-	fileList, err := dir.Readdirnames(2)
+	fileList, err := dir.Readdirnames(2) //nolint:mnd
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, "", fmt.Errorf("reading folder contents: %w", err)
 	}
@@ -168,7 +167,7 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 			if deletePointlessFiles {
 				err := os.Remove(filepath.Join(dirPath, f))
 				if err != nil && !errors.Is(err, fs.ErrNotExist) {
-					return false, f, fmt.Errorf("unable to delete pointless file: %v", err)
+					return false, f, fmt.Errorf("unable to delete pointless file: %w", err)
 				}
 			}
 			continue
@@ -179,6 +178,10 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 	return true, "", nil
 }
 
+// FolderAssessment returns the analysis of a folder related to
+// the existence or possibility of a timeline repository.
+//
+//nolint:errname
 type FolderAssessment struct {
 	HasTimeline          bool   `json:"has_timeline"`
 	TimelineCanBeCreated bool   `json:"timeline_can_be_created"`
@@ -327,7 +330,7 @@ func openTimeline(repo, cache string, db *sql.DB) (*Timeline, error) {
 	// create marker file; for informational purposes only
 	if !FileExists(repoMarkerFile) {
 		timelineMarkerFileContents := strings.ReplaceAll(timelineMarkerContents, "{{repo_id}}", id.String())
-		err = os.WriteFile(repoMarkerFile, []byte(timelineMarkerFileContents), 0644)
+		err = os.WriteFile(repoMarkerFile, []byte(timelineMarkerFileContents), 0600)
 		if err != nil {
 			return nil, fmt.Errorf("writing marker file: %w", err)
 		}
@@ -336,26 +339,26 @@ func openTimeline(repo, cache string, db *sql.DB) (*Timeline, error) {
 	// load data source IDs, item classification IDs, and entity type IDs into map by name; we use these often
 	dbDataSources, err := mapNamesToIDs(db, "data_sources")
 	if err != nil {
-		return nil, fmt.Errorf("mapping entity types names to IDs: %v", err)
+		return nil, fmt.Errorf("mapping entity types names to IDs: %w", err)
 	}
 	classes, err := mapNamesToIDs(db, "classifications")
 	if err != nil {
-		return nil, fmt.Errorf("mapping classification names to IDs: %v", err)
+		return nil, fmt.Errorf("mapping classification names to IDs: %w", err)
 	}
 	entityTypes, err := mapNamesToIDs(db, "entity_types")
 	if err != nil {
-		return nil, fmt.Errorf("mapping entity types names to IDs: %v", err)
+		return nil, fmt.Errorf("mapping entity types names to IDs: %w", err)
 	}
 	relations, err := mapNamesToIDs(db, "relations")
 	if err != nil {
-		return nil, fmt.Errorf("mapping entity types names to IDs: %v", err)
+		return nil, fmt.Errorf("mapping entity types names to IDs: %w", err)
 	}
 
 	// in case of unclean shutdown last time, set all imports that are on "started" status to "aborted"
 	// (no imports can be running currently since we haven't finished opening the timeline yet)
 	_, err = db.Exec(`UPDATE imports SET status='abort' WHERE status='started'`)
 	if err != nil {
-		return nil, fmt.Errorf("resetting all uncleanly-stopped imports to 'abort' status: %v", err)
+		return nil, fmt.Errorf("resetting all uncleanly-stopped imports to 'abort' status: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -398,9 +401,9 @@ func mapNamesToIDs(db *sql.DB, table string) (map[string]int64, error) {
 	if table == "relations" {
 		nameCol = "label" // TODO: this is annoying... right?
 	}
-	rows, err := db.Query(`SELECT id, ` + nameCol + ` FROM ` + table)
+	rows, err := db.Query(`SELECT id, ` + nameCol + ` FROM ` + table) //nolint:gosec
 	if err != nil {
-		return nil, fmt.Errorf("querying %s table: %v", table, err)
+		return nil, fmt.Errorf("querying %s table: %w", table, err)
 	}
 	defer rows.Close()
 
@@ -410,40 +413,40 @@ func mapNamesToIDs(db *sql.DB, table string) (map[string]int64, error) {
 		var name string
 		err := rows.Scan(&rowID, &name)
 		if err != nil {
-			return nil, fmt.Errorf("scanning: %v", err)
+			return nil, fmt.Errorf("scanning: %w", err)
 		}
 		namesToIDs[name] = rowID
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating rows: %v", err)
+		return nil, fmt.Errorf("iterating rows: %w", err)
 	}
 
 	return namesToIDs, nil
 }
 
 // Close frees up resources allocated from Open.
-func (t *Timeline) Close() error {
-	for key, rl := range t.rateLimiters {
+func (tl *Timeline) Close() error {
+	for key, rl := range tl.rateLimiters {
 		if rl.ticker != nil {
 			rl.ticker.Stop()
 			rl.ticker = nil
 		}
-		delete(t.rateLimiters, key) // TODO: maybe racey?
+		delete(tl.rateLimiters, key) // TODO: maybe racey?
 	}
-	t.cancel() // cancel this timeline's context, so anything waiting on it knows we're closing
-	if t.db != nil {
-		t.dbMu.Lock()
-		defer t.dbMu.Unlock()
-		return t.db.Close()
+	tl.cancel() // cancel this timeline's context, so anything waiting on it knows we're closing
+	if tl.db != nil {
+		tl.dbMu.Lock()
+		defer tl.dbMu.Unlock()
+		return tl.db.Close()
 	}
 	return nil
 }
 
 // Empty returns true if there are no entities in the timeline. (TODO: Can we remember once it's not empty, to avoid repeated queries?)
-func (t *Timeline) Empty() bool {
-	t.dbMu.RLock()
-	defer t.dbMu.RUnlock()
-	err := t.db.QueryRow("SELECT id FROM entities LIMIT 1").Scan()
+func (tl *Timeline) Empty() bool {
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
+	err := tl.db.QueryRow("SELECT id FROM entities LIMIT 1").Scan()
 	return err == sql.ErrNoRows
 }
 
@@ -451,14 +454,14 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO relations (label, directed, subordinating) VALUES (?, ?, ?)`,
 		rel.Label, rel.Directed, rel.Subordinating)
 	if err != nil {
-		return fmt.Errorf("inserting relation: %v (rawRelationship=%s)", err, rel)
+		return fmt.Errorf("inserting relation: %w (rawRelationship=%s)", err, rel)
 	}
 
 	// we don't use "RETURNING id" because I think that doesn't return anything if the OR IGNORE clause is invoked
 	var relID int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM relations WHERE label=? LIMIT 1`, rel.Label).Scan(&relID)
 	if err != nil {
-		return fmt.Errorf("loading relation ID: %v (rawRelationship=%s)", err, rel)
+		return fmt.Errorf("loading relation ID: %w (rawRelationship=%s)", err, rel)
 	}
 
 	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO relationships
@@ -472,7 +475,7 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 		rel.start, rel.end, rel.metadata,
 	)
 	if err != nil {
-		return fmt.Errorf("inserting relationship: %v (relationID=%d rawRelationship=%s)", err, relID, rel)
+		return fmt.Errorf("inserting relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
 	}
 
 	return nil
@@ -530,7 +533,7 @@ func (tl *Timeline) ItemClassifications() ([]Classification, error) {
 
 	rows, err := tl.db.Query("SELECT id, standard, name, labels, description FROM classifications")
 	if err != nil {
-		return nil, fmt.Errorf("querying classifications: %v", err)
+		return nil, fmt.Errorf("querying classifications: %w", err)
 	}
 	defer rows.Close()
 
@@ -540,20 +543,22 @@ func (tl *Timeline) ItemClassifications() ([]Classification, error) {
 		var labels string
 		err := rows.Scan(&c.id, &c.Standard, &c.Name, &labels, &c.Description)
 		if err != nil {
-			return nil, fmt.Errorf("scanning: %v", err)
+			return nil, fmt.Errorf("scanning: %w", err)
 		}
 		c.Labels = strings.Split(labels, ",")
 		results = append(results, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating rows: %v", err)
+		return nil, fmt.Errorf("iterating rows: %w", err)
 	}
 
 	return results, nil
 }
 
 func (tl *Timeline) StoreEntity(ctx context.Context, entity Entity) error {
-	tl.normalizeEntity(&entity)
+	if err := tl.normalizeEntity(&entity); err != nil {
+		return err
+	}
 
 	metaStr, err := entity.metadataString()
 	if err != nil {
@@ -572,7 +577,7 @@ func (tl *Timeline) StoreEntity(ctx context.Context, entity Entity) error {
 	err = tx.QueryRow(`INSERT INTO entities (type_id, name, metadata) VALUES (?, ?, ?) RETURNING id`,
 		entity.typeID, entity.Name, metaStr).Scan(&entity.ID)
 	if err != nil {
-		return fmt.Errorf("inserting entity: %v", err)
+		return fmt.Errorf("inserting entity: %w", err)
 	}
 
 	for _, attr := range entity.Attributes {
@@ -603,14 +608,14 @@ func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, en
 	err = tx.QueryRow(`SELECT count() FROM entity_attributes WHERE entity_id=? AND attribute_id=? LIMIT 1`,
 		entityID, attrID).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("querying to see if entity_attribute row already exists: %v", err)
+		return 0, fmt.Errorf("querying to see if entity_attribute row already exists: %w", err)
 	}
 
 	if count == 0 {
 		_, err = tx.Exec(`INSERT INTO entity_attributes (entity_id, attribute_id) VALUES (?, ?)`,
 			entityID, attrID)
 		if err != nil {
-			return attrID, fmt.Errorf("linking attribute %d to entity %d: %v", entityID, attrID, err)
+			return attrID, fmt.Errorf("linking attribute %d to entity %d: %w", entityID, attrID, err)
 		}
 	}
 
@@ -646,7 +651,7 @@ func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
 		WHERE entity_attributes.entity_id=?
 			AND attributes.id = entity_attributes.attribute_id`, id)
 	if err != nil {
-		return p, fmt.Errorf("querying attributes: %v", err)
+		return p, fmt.Errorf("querying attributes: %w", err)
 	}
 	defer rows.Close()
 
@@ -661,7 +666,7 @@ func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
 			attr.Identifying = true
 		}
 		if err != nil {
-			return p, fmt.Errorf("scanning: %v", err)
+			return p, fmt.Errorf("scanning: %w", err)
 		}
 
 		if altValue != nil {
@@ -670,14 +675,14 @@ func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
 		if meta != nil {
 			err := json.Unmarshal([]byte(*meta), &attr.Metadata)
 			if err != nil {
-				return p, fmt.Errorf("loading metadata: %v", err)
+				return p, fmt.Errorf("loading metadata: %w", err)
 			}
 		}
 
 		p.Attributes = append(p.Attributes, attr)
 	}
 	if err := rows.Err(); err != nil {
-		return p, fmt.Errorf("iterating attribute rows: %v", err)
+		return p, fmt.Errorf("iterating attribute rows: %w", err)
 	}
 
 	// TODO: why would we need to commit a read-only tx?
@@ -701,7 +706,8 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 
 	if options.Retain == nil {
 		// TODO: get globally-configured default retention period; for now just hard-coded here
-		defaultRetention := time.Hour * 24 * 90
+		const hoursPerDay, days = 24, 90
+		defaultRetention := time.Hour * hoursPerDay * days
 		options.Retain = &defaultRetention
 	}
 	retention := *options.Retain
@@ -714,7 +720,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 
 	tx, err := tl.db.Begin()
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %v", err)
+		return fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -722,7 +728,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 	if options.Subtrees {
 		itemRowIDs, err = tl.followItemSubtrees(ctx, tx, itemRowIDs)
 		if err != nil {
-			return fmt.Errorf("recursively expanding item subtree: %v", err)
+			return fmt.Errorf("recursively expanding item subtree: %w", err)
 		}
 	}
 
@@ -737,14 +743,14 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 			// get the item
 			ir, err := tl.loadItemRow(ctx, tx, rowID, nil, nil, nil, false)
 			if err != nil {
-				return fmt.Errorf("could not load item to delete: %v", err)
+				return fmt.Errorf("could not load item to delete: %w", err)
 			}
 
 			// if not remembering, clear its row hashes
 			if !options.Remember {
 				_, err = tx.ExecContext(ctx, "UPDATE items SET original_id_hash=NULL AND initial_content_hash=NULL WHERE id=?", rowID) // TODO: Limit 1?
 				if err != nil {
-					return fmt.Errorf("unable to clear hashes to forget item deletion: %v", err)
+					return fmt.Errorf("unable to clear hashes to forget item deletion: %w", err)
 				}
 			}
 
@@ -754,7 +760,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 				err := tx.QueryRow(`SELECT count() FROM items WHERE id NOT IN `+rowIDArray+` AND data_file=? LIMIT 1`,
 					append(rowIDArgs, *ir.DataFile)...).Scan(&count)
 				if err != nil {
-					return fmt.Errorf("counting rows that share data file: %v", err)
+					return fmt.Errorf("counting rows that share data file: %w", err)
 				}
 				if count == 0 {
 					dataFilesToDelete = append(dataFilesToDelete, *ir.DataFile)
@@ -768,13 +774,13 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 		// zero-out the item rows
 		err := tl.deleteDataInItemRows(tl.ctx, tx, itemRowIDs, false)
 		if err != nil {
-			return fmt.Errorf("erasing deleted items (before deleting data files): %v", err)
+			return fmt.Errorf("erasing deleted items (before deleting data files): %w", err)
 		}
 
 		// commit transaction which deletes each item info first (so the DB is the source
 		// of truth), then we'll delete all their data files that aren't referenced anymore
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("commiting transaction (no data files have been deleted yet): %v", err)
+			return fmt.Errorf("committing transaction (no data files have been deleted yet): %w", err)
 		}
 
 		// delete data files only if they are no longer referenced by any items
@@ -810,14 +816,14 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 
 	deleteAt := time.Now().Add(retention)
 
-	_, err = tx.ExecContext(ctx, "UPDATE items SET deleted=? WHERE id IN "+rowIDArray,
+	_, err = tx.ExecContext(ctx, "UPDATE items SET deleted=? WHERE id IN "+rowIDArray, //nolint:gosec
 		append([]any{deleteAt.Unix()}, rowIDArgs...)...)
 	if err != nil {
-		return fmt.Errorf("marking items as deleted: %v", err)
+		return fmt.Errorf("marking items as deleted: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction: %v", err)
+		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	Log.Info("marked item(s) for deletion",
@@ -835,6 +841,7 @@ func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs [
 
 	// this query filters duplicates so we don't potentially go in circles forever
 	rowIDArgs = append(rowIDArgs, rowIDArgs...)
+	//nolint:gosec
 	rows, err := tx.QueryContext(ctx, `SELECT to_item_id FROM relationships, relations
 		WHERE relations.id = relationships.relation_id
 			AND relations.directed=true
@@ -842,21 +849,21 @@ func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs [
 			AND to_item_id NOT IN `+rowIDArray,
 		rowIDArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("querying for subtree item IDs: %v", err)
+		return nil, fmt.Errorf("querying for subtree item IDs: %w", err)
 	}
 
 	for rows.Next() {
 		var id int64
 		err := rows.Scan(&id)
 		if err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scanning subtree item ID: %v", err)
+			defer rows.Close()
+			return nil, fmt.Errorf("scanning subtree item ID: %w", err)
 		}
 		rowIDs = append(rowIDs, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating subtree item rows: %v", err)
+		return nil, fmt.Errorf("iterating subtree item rows: %w", err)
 	}
 
 	// recursively add row IDs by following item relationships;
@@ -864,7 +871,7 @@ func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs [
 	if len(rowIDs) > startingLen {
 		rowIDs, err = tl.followItemSubtrees(ctx, tx, rowIDs)
 		if err != nil {
-			return nil, fmt.Errorf("recursively gathering subtree row IDs: %v", err)
+			return nil, fmt.Errorf("recursively gathering subtree row IDs: %w", err)
 		}
 	}
 
@@ -912,11 +919,6 @@ func Valid(repo string) (bool, error) {
 	return true, nil
 }
 
-type concurrentCuckoo struct {
-	*cuckoo.Filter
-	*sync.Mutex
-}
-
 // FileExists returns true if file exists.
 func FileExists(file string) bool {
 	_, err := os.Stat(file)
@@ -944,7 +946,7 @@ func ByteData(data []byte) func(_ context.Context) (io.ReadCloser, error) {
 }
 
 // DownloadData returns a function that opens the response body for the given url.
-func DownloadData(ctx context.Context, url string) DataFunc {
+func DownloadData(url string) DataFunc {
 	return func(ctx context.Context) (io.ReadCloser, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
@@ -981,14 +983,14 @@ var processorCtxKey ctxKey = "processor"
 
 // 	chkpt, err := MarshalGob(Checkpoint{proc.commandParams, checkpoint})
 // 	if err != nil {
-// 		log.Printf("[ERROR] Encoding checkpoint wrapper: %v", err)
+// 		log.Printf("[ERROR] Encoding checkpoint wrapper: %w", err)
 // 		return
 // 	}
 
 // 	_, err = proc.tl.db.Exec(`UPDATE imports SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
 // 		chkpt, proc.imp.ID)
 // 	if err != nil {
-// 		log.Printf("[ERROR] Checkpoint: %v", err)
+// 		log.Printf("[ERROR] Checkpoint: %w", err)
 // 		return
 // 	}
 // }

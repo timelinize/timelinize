@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/timelinize/timelinize/timeline"
@@ -178,6 +179,8 @@ func ConnectMotionPhoto(logger *zap.Logger, fsys fs.FS, pictureFile string, ig *
 func ExtractVideoFromMotionPic(fsys fs.FS, filename string) ([]byte, error) {
 	// TODO: Older "MVIMG*" files also had "Micro Video Offset" EXIF data that gave the offset from the *END* of the file (https://medium.com/android-news/working-with-motion-photos-da0aa49b50c)
 
+	filename = filepath.Clean(filename)
+
 	// since our naive implementation reads the whole file into memory, skip if large
 	const maxFileSize = 1024 * 1024 * 128
 
@@ -211,16 +214,17 @@ func ExtractVideoFromMotionPic(fsys fs.FS, filename string) ([]byte, error) {
 
 	// for *.MP.jpg files (and I think older MVIMG_ files too)
 	idx := bytes.Index(pictureFileBytes, []byte("ftypisom")) // current standard for Google photos as of Jan 2023
-	if idx < 4 {
+	const vidStartOffset = 4                                 // video file will start this many bytes before the part of the header we locate
+	if idx < vidStartOffset {
 		// this value appears to be non-standard (see https://www.ftyps.com)
 		// but Google cameras used this for quite some time
 		idx = bytes.Index(pictureFileBytes, []byte("ftypmp4"))
 	}
-	if idx < 4 {
+	if idx < vidStartOffset {
 		// no video found
 		return nil, nil
 	}
 
 	// video file (or "box") starts 4 bytes before the part of the header we identified
-	return pictureFileBytes[idx-4:], nil
+	return pictureFileBytes[idx-vidStartOffset:], nil
 }

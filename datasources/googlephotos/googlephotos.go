@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -86,11 +87,13 @@ func init() {
 // 	checkpoint checkpointInfo
 // }
 
+// FileImporter imports data from a file or folder.
 type FileImporter struct {
 	filename       string
 	truncatedNames map[string]int
 }
 
+// Recognize returns whether this file or folder is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	for _, filename := range filenames {
 		// prefer a Google Takeout archive with Google Photos data inside it
@@ -132,9 +135,9 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 		// 	}
 		// }
 
-		if afs, ok := fsys.(archiver.ArchiveFS); ok {
-			afs.Context = ctx
-		}
+		// if afs, ok := fsys.(archiver.ArchiveFS); ok {
+		// 	afs.Context = ctx
+		// }
 
 		// TODO: this is too slow, even with context timeout for some reason.
 		// // alternatively, if the input is a single directory that contains only
@@ -175,8 +178,8 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	return timeline.Recognition{}, nil
 }
 
+// FileImport imports data from a file/folder.
 func (fimp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-
 	for _, filename := range filenames {
 		fimp.filename = filename
 
@@ -197,6 +200,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, filenames []string, it
 	return nil
 }
 
+// APIImporter imports data from the remote service with its API.
 type APIImporter struct {
 	itemChan   chan<- *timeline.Graph
 	httpClient *http.Client
@@ -205,10 +209,12 @@ type APIImporter struct {
 	dsOpt      Options
 }
 
-func (APIImporter) Authenticate(ctx context.Context, acc timeline.Account, dsOpt any) error {
+// Authenticate authenticates with the remote service.
+func (APIImporter) Authenticate(ctx context.Context, acc timeline.Account, _ any) error {
 	return acc.AuthorizeOAuth2(ctx, oauth2)
 }
 
+// APIImport imports data from the API.
 func (aimp *APIImporter) APIImport(ctx context.Context, acc timeline.Account, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	var err error
 	aimp.httpClient, err = acc.NewHTTPClient(ctx, oauth2, rateLimit)
@@ -241,7 +247,7 @@ func (aimp *APIImporter) APIImport(ctx context.Context, acc timeline.Account, it
 	// read exactly chanCount error (or nil) values to ensure we
 	// block precisely until the two listers are done
 	var errs []string
-	for i := 0; i < chanCount; i++ {
+	for range chanCount {
 		err := <-errChan
 		if err != nil {
 			// TODO: use actual logger
@@ -267,9 +273,9 @@ func (aimp *APIImporter) listItems(ctx context.Context) error {
 			return nil
 		default:
 			var err error
-			pageToken, err = aimp.getItemsNextPage(pageToken)
+			pageToken, err = aimp.getItemsNextPage(ctx, pageToken)
 			if err != nil {
-				return fmt.Errorf("getting items on next page: %v", err)
+				return fmt.Errorf("getting items on next page: %w", err)
 			}
 			if pageToken == "" {
 				return nil
@@ -286,7 +292,7 @@ func (aimp *APIImporter) listItems(ctx context.Context) error {
 	}
 }
 
-func (aimp *APIImporter) getItemsNextPage(pageToken string) (string, error) {
+func (aimp *APIImporter) getItemsNextPage(ctx context.Context, pageToken string) (string, error) {
 	reqBody := listMediaItemsRequest{
 		PageSize:  100,
 		PageToken: pageToken,
@@ -300,9 +306,9 @@ func (aimp *APIImporter) getItemsNextPage(pageToken string) (string, error) {
 		}
 	}
 
-	page, err := aimp.pageOfMediaItems(reqBody)
+	page, err := aimp.pageOfMediaItems(ctx, reqBody)
 	if err != nil {
-		return "", fmt.Errorf("requesting next page: %v", err)
+		return "", fmt.Errorf("requesting next page: %w", err)
 	}
 
 	for _, m := range page.MediaItems {
@@ -332,7 +338,7 @@ func (aimp *APIImporter) listCollections(ctx context.Context) error {
 			aimp.listOpt.Log.Debug("listing albums: next page", zap.String("page_token", albumPageToken))
 
 			var err error
-			albumPageToken, err = aimp.getAlbumsAndTheirItemsNextPage(albumPageToken)
+			albumPageToken, err = aimp.getAlbumsAndTheirItemsNextPage(ctx, albumPageToken)
 			if err != nil {
 				return err
 			}
@@ -350,14 +356,14 @@ func (aimp *APIImporter) listCollections(ctx context.Context) error {
 	}
 }
 
-func (aimp *APIImporter) getAlbumsAndTheirItemsNextPage(pageToken string) (string, error) {
+func (aimp *APIImporter) getAlbumsAndTheirItemsNextPage(ctx context.Context, pageToken string) (string, error) {
 	vals := url.Values{
 		"pageToken": {pageToken},
 		"pageSize":  {"50"},
 	}
 
 	var respBody listAlbums
-	err := aimp.apiRequestWithRetry("GET", "/albums?"+vals.Encode(), nil, &respBody)
+	err := aimp.apiRequestWithRetry(ctx, http.MethodGet, "/albums?"+vals.Encode(), nil, &respBody)
 	if err != nil {
 		return pageToken, err
 	}
@@ -368,7 +374,7 @@ func (aimp *APIImporter) getAlbumsAndTheirItemsNextPage(pageToken string) (strin
 			zap.String("album_id", album.ID),
 			zap.String("item_count", album.MediaItemsCount))
 
-		err = aimp.getAlbumItems(album)
+		err = aimp.getAlbumItems(ctx, album)
 		if err != nil {
 			return "", err
 		}
@@ -377,7 +383,7 @@ func (aimp *APIImporter) getAlbumsAndTheirItemsNextPage(pageToken string) (strin
 	return respBody.NextPageToken, nil
 }
 
-func (aimp *APIImporter) getAlbumItems(album gpAlbum) error {
+func (aimp *APIImporter) getAlbumItems(ctx context.Context, album gpAlbum) error {
 	var albumItemsNextPage string
 	var counter int
 
@@ -405,9 +411,9 @@ func (aimp *APIImporter) getAlbumItems(album gpAlbum) error {
 			zap.String("page_token", albumItemsNextPage),
 		)
 
-		page, err := aimp.pageOfMediaItems(reqBody)
+		page, err := aimp.pageOfMediaItems(ctx, reqBody)
 		if err != nil {
-			return fmt.Errorf("listing album contents: %v", err)
+			return fmt.Errorf("listing album contents: %w", err)
 		}
 
 		// iterate each media item on this page of the album listing
@@ -435,30 +441,35 @@ func (aimp *APIImporter) getAlbumItems(album gpAlbum) error {
 	}
 }
 
-func (aimp *APIImporter) pageOfMediaItems(reqBody listMediaItemsRequest) (listMediaItems, error) {
+func (aimp *APIImporter) pageOfMediaItems(ctx context.Context, reqBody listMediaItemsRequest) (listMediaItems, error) {
 	var respBody listMediaItems
-	err := aimp.apiRequestWithRetry("POST", "/mediaItems:search", reqBody, &respBody)
+	err := aimp.apiRequestWithRetry(ctx, http.MethodPost, "/mediaItems:search", reqBody, &respBody)
 	return respBody, err
 }
 
-func (aimp *APIImporter) apiRequestWithRetry(method, endpoint string, reqBodyData, respInto any) error {
+func (aimp *APIImporter) apiRequestWithRetry(ctx context.Context, method, endpoint string, reqBodyData, respInto any) error {
 	// do the request in a loop for controlled retries on error
 	var err error
+	const wait = 10 * time.Second
 	const maxTries = 10
-	for i := 0; i < maxTries; i++ {
+	for i := range maxTries {
 		var resp *http.Response
-		resp, err = aimp.apiRequest(method, endpoint, reqBodyData)
+		resp, err = aimp.apiRequest(ctx, method, endpoint, reqBodyData)
 		if err != nil {
 			// TODO: Proper logger
 			// log.Printf("[ERROR] %s/%s: doing API request: >>> %v <<< - retrying... (attempt %d/%d)",
 			// 	DataSourceID, aimp.userID, err, i+1, maxTries)
-			// TODO: honor context cancellation
-			time.Sleep(10 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+				continue
+			}
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			bodyText, err2 := io.ReadAll(io.LimitReader(resp.Body, 1024*256))
+			const maxSize = 1024 * 256
+			bodyText, err2 := io.ReadAll(io.LimitReader(resp.Body, maxSize))
 			resp.Body.Close()
 
 			if err2 == nil {
@@ -470,33 +481,43 @@ func (aimp *APIImporter) apiRequestWithRetry(method, endpoint string, reqBodyDat
 			// extra-long pause for rate limiting errors
 			if resp.StatusCode == http.StatusTooManyRequests {
 				// TODO: proper logger
-				// log.Printf("[ERROR] %s/%s: rate limited: HTTP %d: %s: %s - retrying in 35 seconds... (attempt %d/%d)",
-				// 	DataSourceID, aimp.userID, resp.StatusCode, resp.Status, bodyText, i+1, maxTries)
+				log.Printf("[ERROR] %s: rate limited: HTTP %d: %s: %s - retrying in 35 seconds... (attempt %d/%d)",
+					dataSourceName, resp.StatusCode, resp.Status, bodyText, i+1, maxTries)
 				// TODO: honor context cancellation
-				time.Sleep(35 * time.Second)
-				continue
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(wait):
+					continue
+				}
 			}
 
 			// for any other error, wait a couple seconds and retry
 			// TODO: proper logger
 			// log.Printf("[ERROR] %s/%s: bad API response: %v - retrying... (attempt %d/%d)",
 			// 	DataSourceID, aimp.userID, err, i+1, maxTries)
-			// TODO: honor context cancellation
-			time.Sleep(10 * time.Second)
-			continue
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+				continue
+			}
 		}
 
 		// successful request; read the response body
 		err = json.NewDecoder(resp.Body).Decode(&respInto)
 		if err != nil {
 			resp.Body.Close()
-			err = fmt.Errorf("decoding JSON: %v", err)
+			err = fmt.Errorf("decoding JSON: %w", err)
 			// TODO: proper logger
-			// log.Printf("[ERROR] %s/%s: reading API response: %v - retrying... (attempt %d/%d)",
-			// 	DataSourceID, aimp.userID, err, i+1, maxTries)
-			// TODO: honor context cancellation
-			time.Sleep(10 * time.Second)
-			continue
+			log.Printf("[ERROR] %s: reading API response: %v - retrying... (attempt %d/%d)",
+				dataSourceName, err, i+1, maxTries)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+				continue
+			}
 		}
 
 		// successful read; we're done here
@@ -507,7 +528,7 @@ func (aimp *APIImporter) apiRequestWithRetry(method, endpoint string, reqBodyDat
 	return err
 }
 
-func (aimp *APIImporter) apiRequest(method, endpoint string, reqBodyData any) (*http.Response, error) {
+func (aimp *APIImporter) apiRequest(ctx context.Context, method, endpoint string, reqBodyData any) (*http.Response, error) {
 	var reqBody io.Reader
 	if reqBodyData != nil {
 		reqBodyBytes, err := json.Marshal(reqBodyData)
@@ -517,7 +538,7 @@ func (aimp *APIImporter) apiRequest(method, endpoint string, reqBodyData any) (*
 		reqBody = bytes.NewReader(reqBodyBytes)
 	}
 
-	req, err := http.NewRequest(method, apiBase+endpoint, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, apiBase+endpoint, reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -529,6 +550,7 @@ func (aimp *APIImporter) apiRequest(method, endpoint string, reqBodyData any) (*
 }
 
 func dateRange(timeframe timeline.Timeframe) listMediaItemsFilterRange {
+	const day = 24 * time.Hour
 	var start, end filterDate
 	if timeframe.Since == nil {
 		start = filterDate{
@@ -537,7 +559,7 @@ func dateRange(timeframe timeline.Timeframe) listMediaItemsFilterRange {
 			Year:  1,
 		}
 	} else {
-		since := timeframe.Since.Add(24 * time.Hour) // to account for day precision
+		since := timeframe.Since.Add(day) // to account for day precision
 		start = filterDate{
 			Day:   since.Day(),
 			Month: int(since.Month()),
@@ -551,7 +573,7 @@ func dateRange(timeframe timeline.Timeframe) listMediaItemsFilterRange {
 			Year:  9999,
 		}
 	} else {
-		until := timeframe.Until.Add(-24 * time.Hour) // to account for day precision
+		until := timeframe.Until.Add(-day) // to account for day precision
 		end = filterDate{
 			Day:   until.Day(),
 			Month: int(until.Month()),
@@ -564,6 +586,7 @@ func dateRange(timeframe timeline.Timeframe) listMediaItemsFilterRange {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	// Get albums. This can add significant time to an import.
 	Albums bool `json:"albums"`

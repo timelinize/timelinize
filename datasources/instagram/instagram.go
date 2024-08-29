@@ -50,6 +50,7 @@ func init() {
 // Client implements the timeline.Client interface.
 type Client struct{}
 
+// Recognize returns whether the file or folder is recognized.
 func (Client) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	for _, filename := range filenames {
 		fsys, err := archiver.FileSystem(ctx, filename)
@@ -64,6 +65,7 @@ func (Client) Recognize(ctx context.Context, filenames []string) (timeline.Recog
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
+// FileImport imports data from the file or folder.
 func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	for _, filename := range filenames {
 		fsys, err := archiver.FileSystem(ctx, filename)
@@ -74,10 +76,10 @@ func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan ch
 		// first, load the profile information
 		pi, err := c.getPersonalInfo(fsys)
 		if err != nil {
-			return fmt.Errorf("loading profile: %v", err)
+			return fmt.Errorf("loading profile: %w", err)
 		}
 		if len(pi.ProfileUser) == 0 {
-			return fmt.Errorf("no profile information found: missing profile user")
+			return errors.New("no profile information found: missing profile user")
 		}
 		personalInfo := pi.ProfileUser[0].StringMapData
 
@@ -114,7 +116,7 @@ func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan ch
 			},
 		}
 		if picFilename := pi.ProfileUser[0].MediaMapData.ProfilePhoto.URI; picFilename != "" {
-			owner.NewPicture = func(ctx context.Context) (io.ReadCloser, error) {
+			owner.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
 				return fsys.Open(picFilename)
 			}
 		}
@@ -131,7 +133,7 @@ func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan ch
 		// then, load the posts index
 		postIdx, err := c.getPostsIndex(fsys)
 		if err != nil {
-			return fmt.Errorf("loading index: %v", err)
+			return fmt.Errorf("loading index: %w", err)
 		}
 		for _, post := range postIdx {
 			// a post may have multiple media items, we'll treat them as attachments
@@ -212,7 +214,7 @@ func (c *Client) getPersonalInfo(fsys fs.FS) (instaPersonalInformation, error) {
 
 	err = json.NewDecoder(file).Decode(&pi)
 	if err != nil {
-		return pi, fmt.Errorf("decoding personal information file: %v", err)
+		return pi, fmt.Errorf("decoding personal information file: %w", err)
 	}
 	return pi, nil
 }
@@ -235,11 +237,11 @@ func (c *Client) getPostsIndex(fsys fs.FS) (instaPostsIndex, error) {
 		err = json.NewDecoder(file).Decode(&idx)
 		file.Close()
 		if err != nil {
-			return nil, fmt.Errorf("decoding posts index file %s: %v", postsFilename, err)
+			return nil, fmt.Errorf("decoding posts index file %s: %w", postsFilename, err)
 		}
 
-		for _, p := range idx {
-			p.filename = postsFilename
+		for i := range len(idx) {
+			idx[i].filename = postsFilename
 		}
 
 		all = append(all, idx...)
@@ -258,7 +260,7 @@ func (c *Client) getStoryIndex(fsys fs.FS) (instaStories, error) {
 	var idx instaStories
 	err = json.NewDecoder(file).Decode(&idx)
 	if err != nil {
-		return idx, fmt.Errorf("decoding stories index file: %v", err)
+		return idx, fmt.Errorf("decoding stories index file: %w", err)
 	}
 
 	return idx, nil

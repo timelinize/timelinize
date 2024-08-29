@@ -42,6 +42,7 @@ const (
 	DataSourceID   = "generic"
 )
 
+// Options configures the data source.
 type Options struct {
 	ExpandArchives bool `json:"expand_archives"`
 }
@@ -64,10 +65,12 @@ func init() {
 // Client interacts with the file system to get items.
 type Client struct{}
 
-func (Client) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
+// Recognize returns whether the input file is recognized.
+func (Client) Recognize(_ context.Context, _ []string) (timeline.Recognition, error) {
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
+// FileImport conducts an import of the data using this data source.
 func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	for _, filename := range filenames {
 		if err := c.walk(ctx, filename, ".", itemChan, opt); err != nil {
@@ -99,7 +102,7 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 		// if enabled, traverse into archives, but not archives within archives
 		if filesOpt.ExpandArchives && !isArchiveFS {
 			fullPath := filepath.Join(root, pathInRoot, fpath)
-			file, err := os.Open(fullPath)
+			file, err := os.Open(filepath.Clean(fullPath))
 			if err != nil {
 				return err
 			}
@@ -114,7 +117,7 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 				if !isZip || path.Ext(fullPath) == zip.Name() {
 					err = c.walk(ctx, root, fpath, itemChan, opt)
 					if err != nil {
-						return fmt.Errorf("traversing into archive file: %v", err)
+						return fmt.Errorf("traversing into archive file: %w", err)
 					}
 					return nil
 				}
@@ -141,7 +144,7 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("walking dir: %v", err)
+		return fmt.Errorf("walking dir: %w", err)
 	}
 
 	return nil

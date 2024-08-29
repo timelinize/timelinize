@@ -35,17 +35,16 @@ import (
 
 	"github.com/davidbyttow/govips/v2/vips"
 	"github.com/galdor/go-thumbhash"
+	_ "github.com/strukturag/libheif/go/heif" // register AVIF image decoder
 	"go.uber.org/zap"
-
-	// register AVIF image decoder
-	_ "github.com/strukturag/libheif/go/heif"
 )
 
 func init() {
 	vips.LoggingSettings(nil, vips.LogLevelError)
 	vips.Startup(nil) // Shutdown() is called in a sigtrap for clean shutdowns
 
-	numThreads := runtime.NumCPU() / 3
+	const cpuFraction = 3
+	numThreads := runtime.NumCPU() / cpuFraction
 	if numThreads == 0 {
 		numThreads = 1
 	}
@@ -158,7 +157,7 @@ func generateThumbnail(task thumbnailTask) {
 
 	// make sure the parent directory for the output file exists
 	if err := os.MkdirAll(filepath.Dir(outputFilename), 0700); err != nil {
-		task.err <- fmt.Errorf("item %d: making thumbnail directory tree for %s: %v", task.itemID, outputFilename, err)
+		task.err <- fmt.Errorf("item %d: making thumbnail directory tree for %s: %w", task.itemID, outputFilename, err)
 		return
 	}
 
@@ -166,21 +165,21 @@ func generateThumbnail(task thumbnailTask) {
 	case strings.HasPrefix(task.dataType, "image/"):
 		inputImage, err := loadImageFromFile(inputFilename)
 		if err != nil {
-			task.err <- fmt.Errorf("opening source file from item %d: %s: %v", task.itemID, inputFilename, err)
+			task.err <- fmt.Errorf("opening source file from item %d: %s: %w", task.itemID, inputFilename, err)
 			return
 		}
 		defer inputImage.Close()
 
 		// scale down to a thumbnail size
 		if err := resizeImage(inputImage, maxThumbnailDimension); err != nil {
-			task.err <- fmt.Errorf("item %d: image %s: %v", task.itemID, inputFilename, err)
+			task.err <- fmt.Errorf("item %d: image %s: %w", task.itemID, inputFilename, err)
 			return
 		}
 
 		// encode the resized image as the proper output format
 		var imageBytes []byte
 		switch strings.ToLower(thumbnailImgExt) {
-		case ".jpg", ".jpe", ".jpeg":
+		case extJpg, ".jpe", extJpeg:
 			ep := vips.NewJpegExportParams()
 			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
 			ep.Quality = 40
@@ -189,7 +188,7 @@ func generateThumbnail(task thumbnailTask) {
 			ep.TrellisQuant = true
 			ep.QuantTable = 3
 			imageBytes, _, err = inputImage.ExportJpeg(ep)
-		case ".avif":
+		case extAvif:
 			// fun fact: AVIF supports animation, but I can't get ffmpeg to generate it faster than 0.0016x speed
 			// (vips is fast enough for stills though, as long as we tune down the parameters sufficiently)
 			ep := vips.NewAvifExportParams()
@@ -202,13 +201,13 @@ func generateThumbnail(task thumbnailTask) {
 			panic("unsupported thumbnail image type: " + thumbnailImgExt)
 		}
 		if err != nil {
-			task.err <- fmt.Errorf("item %d: encoding thumbnail image of %s: %v", task.itemID, inputFilename, err)
+			task.err <- fmt.Errorf("item %d: encoding thumbnail image of %s: %w", task.itemID, inputFilename, err)
 			return
 		}
 
 		err = os.WriteFile(outputFilename, imageBytes, 0600)
 		if err != nil {
-			task.err <- fmt.Errorf("item %d: writing thumbnail image to %s: %v", task.itemID, outputFilename, err)
+			task.err <- fmt.Errorf("item %d: writing thumbnail image to %s: %w", task.itemID, outputFilename, err)
 			return
 		}
 
@@ -250,7 +249,7 @@ func generateThumbnail(task thumbnailTask) {
 		cmd.Stderr = os.Stderr
 
 		if err := cmd.Run(); err != nil {
-			task.err <- fmt.Errorf("generating video thumbnail: %v", err)
+			task.err <- fmt.Errorf("generating video thumbnail: %w", err)
 		}
 
 	default:
@@ -297,7 +296,7 @@ func qualifiesForThumbnail(mimeType *string) bool {
 		// these next two are mostly because I don't know how to convert
 		// icons and animated gifs to thumbnails, or if it's even helpful
 		*mimeType != "image/x-icon" &&
-		*mimeType != "image/gif"
+		*mimeType != imageGif
 }
 
 // GenerateThumbnail generates a thumbnail for the given item. If the data file path is known, pass it in
@@ -361,7 +360,7 @@ func (tl *Timeline) generateThumbnail(ctx context.Context, itemID int64, dataFil
 // returned instead.
 func (tl *Timeline) GeneratePreviewImage(itemRow ItemRow, ext string) ([]byte, error) {
 	ext = strings.ToLower(ext)
-	if ext != ".jpeg" && ext != ".jpg" && ext != ".png" && ext != ".webp" && ext != ".avif" {
+	if ext != extJpeg && ext != extJpg && ext != extPng && ext != extWebp && ext != extAvif {
 		return nil, fmt.Errorf("unsupported file extension/type: %s", ext)
 	}
 
@@ -369,17 +368,17 @@ func (tl *Timeline) GeneratePreviewImage(itemRow ItemRow, ext string) ([]byte, e
 
 	inputImage, err := loadImageFromFile(inputFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("opening source file from item %d: %s: %v", itemRow.ID, inputFilePath, err)
+		return nil, fmt.Errorf("opening source file from item %d: %s: %w", itemRow.ID, inputFilePath, err)
 	}
 	defer inputImage.Close()
 
 	if err := resizeImage(inputImage, maxPreviewImageDimension); err != nil {
-		return nil, fmt.Errorf("item %d: image %s: %v", itemRow.ID, inputFilePath, err)
+		return nil, fmt.Errorf("item %d: image %s: %w", itemRow.ID, inputFilePath, err)
 	}
 
 	var imageBytes []byte
 	switch ext {
-	case ".jpg", ".jpeg":
+	case extJpg, extJpeg:
 		ep := vips.NewJpegExportParams()
 		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
 		ep.Quality = 50
@@ -388,18 +387,18 @@ func (tl *Timeline) GeneratePreviewImage(itemRow ItemRow, ext string) ([]byte, e
 		ep.TrellisQuant = true
 		ep.QuantTable = 3
 		imageBytes, _, err = inputImage.ExportJpeg(ep)
-	case ".png":
+	case extPng:
 		ep := vips.NewPngExportParams()
 		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
 		ep.Quality = 50
 		ep.Interlace = true
 		imageBytes, _, err = inputImage.ExportPng(ep)
-	case ".webp":
+	case extWebp:
 		ep := vips.NewWebpExportParams()
 		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
 		ep.Quality = 50
 		imageBytes, _, err = inputImage.ExportWebp(ep)
-	case ".avif":
+	case extAvif:
 		ep := vips.NewAvifExportParams()
 		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
 		ep.Quality = 40
@@ -429,7 +428,7 @@ func (tl *Timeline) regenerateAllThumbnails() error {
 	tl.dbMu.RLock()
 	rows, err := tl.db.QueryContext(tl.ctx, `SELECT id, data_type, data_file FROM items WHERE data_file IS NOT NULL`)
 	if err != nil {
-		return fmt.Errorf("querying items: %v", err)
+		return fmt.Errorf("querying items: %w", err)
 	}
 
 	type thumbInfo struct {
@@ -444,9 +443,9 @@ func (tl *Timeline) regenerateAllThumbnails() error {
 
 		err := rows.Scan(&rowID, &dataType, &dataFile)
 		if err != nil {
-			rows.Close()
-			tl.dbMu.RUnlock()
-			return fmt.Errorf("scanning item row for thumbnails: %v", err)
+			defer tl.dbMu.RUnlock()
+			defer rows.Close()
+			return fmt.Errorf("scanning item row for thumbnails: %w", err)
 		}
 		if dataFile != nil && dataType != nil && qualifiesForThumbnail(dataType) {
 			thumbnailsNeeded[*dataFile] = thumbInfo{rowID, *dataType}
@@ -455,7 +454,7 @@ func (tl *Timeline) regenerateAllThumbnails() error {
 	rows.Close()
 	tl.dbMu.RUnlock()
 	if err = rows.Err(); err != nil {
-		return fmt.Errorf("iterating rows: %v", err)
+		return fmt.Errorf("iterating rows: %w", err)
 	}
 
 	ctx := context.Background()
@@ -495,11 +494,11 @@ func (p *processor) generateThumbnailsForImportedItems() {
 
 		err := rows.Scan(&rowID, &dataType, &dataFile)
 		if err != nil {
-			rows.Close()
-			p.tl.dbMu.RUnlock()
 			p.log.Error("unable to scan row to generate thumbnails from this import",
 				zap.Int64("import_id", p.impRow.id),
 				zap.Error(err))
+			defer p.tl.dbMu.RUnlock()
+			defer rows.Close()
 			return
 		}
 		if dataFile != nil && dataType != nil && qualifiesForThumbnail(dataType) {
@@ -568,15 +567,15 @@ func (p *processor) generateThumbhashesForItemsThatNeedOne() {
 		var dataType *string
 		err := rows.Scan(&rowID, &dataType)
 		if err != nil {
-			rows.Close()
-			p.tl.dbMu.RUnlock()
 			p.log.Error("unable to scan row to generate thumbhashes from this import",
 				zap.Int64("import_id", p.impRow.id),
 				zap.Error(err))
+			defer p.tl.dbMu.RUnlock()
+			defer rows.Close()
 			return
 		}
 		// TODO: we can probably generate thumbhashes for videos (and even PDFs; whatever we generate thumbnails for) but we need to use ffmpeg to get a single frame of a video, or a screenshot of a PDF, etc.
-		if dataType != nil && !strings.HasPrefix(*dataType, "image/") && *dataType != "image/gif" {
+		if dataType != nil && !strings.HasPrefix(*dataType, "image/") && *dataType != imageGif {
 			continue
 		}
 		thumbhashesNeeded = append(thumbhashesNeeded, rowID)
@@ -636,7 +635,8 @@ func (p *processor) generateThumbhashesForItemsThatNeedOne() {
 				batch[rowID] = append(aspectRatioPre, thumbhash.EncodeImage(img)...)
 
 				// if batch is full, store into DB
-				if len(batch) >= 100 {
+				const batchSize = 100
+				if len(batch) >= batchSize {
 					err := p.thumbhashBatch(batch)
 					if err != nil {
 						p.log.Error("storing thumbhashes failed",
@@ -680,7 +680,7 @@ func (p *processor) thumbhashBatch(batch map[int64][]byte) error {
 
 	tx, err := p.tl.db.Begin()
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %v", err)
+		return fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -692,7 +692,7 @@ func (p *processor) thumbhashBatch(batch map[int64][]byte) error {
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction: %v", err)
+		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	return nil
@@ -725,7 +725,7 @@ func resizeImage(inputImage *vips.ImageRef, maxDimension int) error {
 
 	err := inputImage.Resize(scale, vips.KernelAuto) // Nearest is fast, but Auto looks slightly better
 	if err != nil {
-		return fmt.Errorf("scaling image: %v", err)
+		return fmt.Errorf("scaling image: %w", err)
 	}
 
 	// if AutoRotate was not set when loading the image, you could call AutoRotate
@@ -739,7 +739,7 @@ func resizeImage(inputImage *vips.ImageRef, maxDimension int) error {
 
 // The file extensions designate the type (encoding) of the thumbnails.
 const (
-	thumbnailImgExt = ".avif"
+	thumbnailImgExt = extAvif
 	thumbnailVidExt = ".webm"
 )
 

@@ -24,6 +24,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -70,6 +71,7 @@ func (g *Graph) Size() int {
 	return g.ItemCount()
 }
 
+// ItemCount returns the number of items by traversing the graph.
 func (g *Graph) ItemCount() int {
 	return g.recursiveItemCount(make(map[*Graph]struct{}))
 }
@@ -117,6 +119,7 @@ func (g *Graph) FromEntity(entity *Entity, rel Relation) {
 	g.FromEntityWithValue(entity, rel, "")
 }
 
+// ToItemWithValue connects g to item with a relation that has the given value.
 func (g *Graph) ToItemWithValue(rel Relation, item *Item, value any) {
 	g.Edges = append(g.Edges, Relationship{
 		Relation: rel,
@@ -125,6 +128,7 @@ func (g *Graph) ToItemWithValue(rel Relation, item *Item, value any) {
 	})
 }
 
+// ToEntityWithValue connects g to entity with a relation that has the given value.
 func (g *Graph) ToEntityWithValue(rel Relation, entity *Entity, value any) {
 	g.Edges = append(g.Edges, Relationship{
 		Relation: rel,
@@ -133,6 +137,7 @@ func (g *Graph) ToEntityWithValue(rel Relation, entity *Entity, value any) {
 	})
 }
 
+// FromItemWithValue connects item to g with a relation that has the given value.
 func (g *Graph) FromItemWithValue(item *Item, rel Relation, value any) {
 	g.Edges = append(g.Edges, Relationship{
 		Relation: rel,
@@ -141,6 +146,7 @@ func (g *Graph) FromItemWithValue(item *Item, rel Relation, value any) {
 	})
 }
 
+// FromEntityWithValue connects entity to g with a relation that has the given value.
 func (g *Graph) FromEntityWithValue(entity *Entity, rel Relation, value any) {
 	g.Edges = append(g.Edges, Relationship{
 		Relation: rel,
@@ -151,10 +157,10 @@ func (g *Graph) FromEntityWithValue(entity *Entity, rel Relation, value any) {
 
 func (g *Graph) String() string {
 	if g.Item != nil {
-		return fmt.Sprintf("item:%s", g.Item.String())
+		return "item:" + g.Item.String()
 	}
 	if g.Entity != nil {
-		return fmt.Sprintf("entity:%s", g.Entity.String())
+		return "entity:" + g.Entity.String()
 	}
 	return "[graph]"
 }
@@ -312,21 +318,22 @@ func (it *Item) makeContentHash() {
 	}
 	h := newHash()
 	if !it.Timestamp.IsZero() {
-		binary.Write(h, binary.LittleEndian, it.Timestamp.UnixMilli())
+		_ = binary.Write(h, binary.LittleEndian, it.Timestamp.UnixMilli())
 	}
-	if it.dataText != nil && len(*it.dataText) > 0 {
+	switch {
+	case it.dataText != nil && len(*it.dataText) > 0:
 		h.Write([]byte(*it.dataText))
-	} else if len(it.dataFileHash) > 0 {
+	case len(it.dataFileHash) > 0:
 		h.Write(it.dataFileHash)
-	} else if !it.Location.IsEmpty() {
+	case !it.Location.IsEmpty():
 		if it.Location.Latitude != nil {
-			binary.Write(h, binary.LittleEndian, *it.Location.Latitude)
+			_ = binary.Write(h, binary.LittleEndian, *it.Location.Latitude)
 		}
 		if it.Location.Longitude != nil {
-			binary.Write(h, binary.LittleEndian, *it.Location.Longitude)
+			_ = binary.Write(h, binary.LittleEndian, *it.Location.Longitude)
 		}
 		if it.Location.Altitude != nil {
-			binary.Write(h, binary.LittleEndian, *it.Location.Altitude)
+			_ = binary.Write(h, binary.LittleEndian, *it.Location.Altitude)
 		}
 	}
 	it.contentHash = h.Sum(nil)
@@ -342,6 +349,7 @@ func (it *Item) HasContent() bool {
 	return it.Content.Data != nil || !it.Location.IsEmpty()
 }
 
+// AddMetadata adds meta to the item's metadata with the given merge policy.
 func (it *Item) AddMetadata(meta Metadata, policy MetadataMergePolicy) {
 	if it.Metadata == nil {
 		it.Metadata = meta
@@ -374,20 +382,23 @@ func (it *Item) SetTimeframe() {
 
 	const emptyDate, emptyClock = 1, 0
 
-	if year != emptyDate && month == emptyDate && day == emptyDate &&
-		hour == emptyClock && min == emptyClock && sec == emptyClock {
+	switch {
+	case year != emptyDate && month == emptyDate && day == emptyDate &&
+		hour == emptyClock && min == emptyClock && sec == emptyClock:
 		it.Timeframe = it.Timestamp.AddDate(1, 0, 0)
-	} else if year != emptyDate && month != emptyDate && day == emptyDate &&
-		hour == emptyClock && min == emptyClock && sec == emptyClock {
+
+	case year != emptyDate && month != emptyDate && day == emptyDate &&
+		hour == emptyClock && min == emptyClock && sec == emptyClock:
 		it.Timeframe = it.Timestamp.AddDate(0, 1, 0)
-	} else if year != emptyDate && month != emptyDate && day != emptyDate &&
-		hour == emptyClock && min == emptyClock && sec == emptyClock {
+
+	case year != emptyDate && month != emptyDate && day != emptyDate &&
+		hour == emptyClock && min == emptyClock && sec == emptyClock:
 		it.Timeframe = it.Timestamp.AddDate(0, 0, 1)
-	} else if year != emptyDate && month != emptyDate && day != emptyDate &&
-		hour != emptyClock && min == emptyClock && sec == emptyClock {
+
+	case year != emptyDate && month != emptyDate && day != emptyDate &&
+		hour != emptyClock && min == emptyClock && sec == emptyClock:
 		it.Timeframe = it.Timestamp.Add(1 * time.Hour)
 	}
-
 }
 
 // timestampUnix returns the timestamp as Unix timestamp, if non-zero.
@@ -759,10 +770,10 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 		&ir.ThumbHash, &ir.OriginalIDHash, &ir.InitialContentHash,
 		&ir.Hidden, &deleted,
 		&ir.DataSourceName, &className}
-	targets := append(itemTargets, targetsAfterItemCols...)
+	allTargets := append(itemTargets, targetsAfterItemCols...) //nolint:gocritic // I am explicitly self-documenting how the first batch of targets are for the item, then there's the rest
 
-	err := row.Scan(targets...)
-	if err == sql.ErrNoRows {
+	err := row.Scan(allTargets...)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ir, nil
 	}
 	if err != nil {
@@ -833,6 +844,7 @@ type Location struct {
 	CoordinateUncertainty *float64 `json:"coordinate_uncertainty,omitempty"`
 }
 
+// IsEmpty returns true if there is no x, y, or z coordinate.
 func (l Location) IsEmpty() bool {
 	return l.Latitude == nil && l.Longitude == nil && l.Altitude == nil
 }
@@ -914,7 +926,8 @@ type rawRelationship struct {
 }
 
 func (rr rawRelationship) String() string {
-	fromItemID, fromAttributeID, toItemID, toAttributeID := "nil", "nil", "nil", "nil"
+	const n = "nil"
+	fromItemID, fromAttributeID, toItemID, toAttributeID := n, n, n, n
 	if rr.fromItemID != nil {
 		fromItemID = strconv.FormatInt(*rr.fromItemID, 10)
 	}
@@ -947,12 +960,16 @@ type Relation struct {
 	Subordinating bool `json:"subordinating"`
 }
 
+// Annotation is a note or something that needs attention.
 // TODO: still figuring these out
 type Annotation struct {
 	ReviewReasonID int64
 	Freeform       string
 	Metadata       any
 }
+
+// ReviewReason describes a reason a review might be needed.
+// TODO: very experimental
 type ReviewReason string
 
 // Classification represents item classes. Classifying items is used to
@@ -1022,6 +1039,7 @@ var classifications = []Classification{
 	},
 }
 
+// Item classifications!
 var (
 	ClassMessage  = getClassification("message")
 	ClassEmail    = getClassification("email")
@@ -1030,8 +1048,8 @@ var (
 	ClassMedia    = getClassification("media")
 	// ClassScreen = getClassification("screen") // TODO: screenshot...?
 	ClassCollection = getClassification("collection")
-	ClassNote = getClassification("note")
-	ClassDocument = getClassification("document")
+	ClassNote       = getClassification("note")
+	ClassDocument   = getClassification("document")
 )
 
 func getClassification(name string) Classification {

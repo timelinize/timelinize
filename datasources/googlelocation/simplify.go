@@ -50,7 +50,8 @@ import (
 // clusters, which I feel are too important to drop for the purposes of
 // simplification. Clusters provide a valuable condensation of information.
 func simplifyPath(points []*Location, ep float64) []*Location {
-	if len(points) <= 2 {
+	const dimensions = 2
+	if len(points) <= dimensions {
 		return points
 	}
 

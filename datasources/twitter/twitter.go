@@ -23,31 +23,28 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"net/http"
-	"net/url"
 	"path"
-	"regexp"
 	"time"
 
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
 
-var (
-	oauth2 = timeline.OAuth2{
-		ProviderID: "twitter",
-		Scopes:     []string{"tweet.read", "users.read", "offline.access"},
-	}
+// var (
+// 	oauth2 = timeline.OAuth2{
+// 		ProviderID: "twitter",
+// 		Scopes:     []string{"tweet.read", "users.read", "offline.access"},
+// 	}
 
-	rateLimit = timeline.RateLimit{
-		// TODO: from v1...
-		// // from https://developer.twitter.com/en/docs/basics/rate-limits
-		// // with some leeway since it's actually a pretty generous limit
-		// RequestsPerHour: 5900,
-		// as of December 2020, project caps allow pulling 500,000 tweets / mo.: https://developer.twitter.com/en/docs/projects/overview
-		RequestsPerHour: 1800, // https://developer.twitter.com/en/docs/twitter-api/tweets/search/api-reference/get-tweets-search-recent
-	}
-)
+// 	rateLimit = timeline.RateLimit{
+// 		// TODO: from v1...
+// 		// // from https://developer.twitter.com/en/docs/basics/rate-limits
+// 		// // with some leeway since it's actually a pretty generous limit
+// 		// RequestsPerHour: 5900,
+// 		// as of December 2020, project caps allow pulling 500,000 tweets / mo.: https://developer.twitter.com/en/docs/projects/overview
+// 		RequestsPerHour: 1800, // https://developer.twitter.com/en/docs/twitter-api/tweets/search/api-reference/get-tweets-search-recent
+// 	}
+// )
 
 func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
@@ -56,56 +53,58 @@ func init() {
 		Icon:            "twitter.svg",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(Client) },
-		NewAPIImporter:  func() timeline.APIImporter { return new(Client) },
+		// NewAPIImporter:  func() timeline.APIImporter { return new(Client) },
 	})
 	if err != nil {
 		timeline.Log.Fatal("registering data source", zap.Error(err))
 	}
 }
 
+// Client is a type that can process/import data from Twitter via API or file archive.
 type Client struct {
-	fsys          fs.FS // if reading from an archive
-	httpClient    *http.Client
-	checkpoint    checkpoint
-	acc           timeline.Account
-	owner         timeline.Entity
-	otherAccounts map[string]twitterAccount // keyed by user/account ID
+	fsys fs.FS // if reading from an archive
+	// httpClient    *http.Client
+	//nolint:dupword
+	// checkpoint    checkpoint
+	// acc           timeline.Account
+	owner timeline.Entity
+	// otherAccounts map[string]twitterAccount // keyed by user/account ID
 }
 
-func (c *Client) prepareTweet(ctx context.Context, t *tweet, source string, opt Options) (skip bool, err error) {
+func (c *Client) prepareTweet(_ context.Context, t *tweet, source string, opt Options) (skip bool, err error) {
 	// mark whether this tweet came from the API or an export file
 	t.source = source
 
 	// set the owner account information; this has to be done differently
 	// depending on the source (it's not embedded in the archive's tweets...)
 	switch t.source {
-	case "archive":
+	case srcArchive:
 		t.owner = c.owner
-	case "api":
-		if t.User != nil {
-			if t.User.UserIDStr == c.owner.AttributeValue(identityAttribute) {
-				// tweet author is the owner of the account - awesome
-				t.owner = c.owner
-			} else {
-				// look up author's account info
-				acc, ok := c.otherAccounts[t.User.UserIDStr]
-				if !ok {
-					acc, err = c.getAccountFromAPI("", t.User.UserIDStr)
-					if err != nil {
-						return false, fmt.Errorf("looking up tweet author's account information: %v", err)
-					}
-					// cache this for later
-					if len(c.otherAccounts) > 2000 {
-						for id := range c.otherAccounts {
-							delete(c.otherAccounts, id)
-							break
-						}
-					}
-					c.otherAccounts[acc.id()] = acc
-				}
-				t.owner = acc.entity(ctx, c.fsys)
-			}
-		}
+	// case "api":
+	// 	if t.User != nil {
+	// 		if t.User.UserIDStr == c.owner.AttributeValue(identityAttribute) {
+	// 			// tweet author is the owner of the account - awesome
+	// 			t.owner = c.owner
+	// 		} else {
+	// 			// look up author's account info
+	// 			acc, ok := c.otherAccounts[t.User.UserIDStr]
+	// 			if !ok {
+	// 				acc, err = c.getAccountFromAPI("", t.User.UserIDStr)
+	// 				if err != nil {
+	// 					return false, fmt.Errorf("looking up tweet author's account information: %v", err)
+	// 				}
+	// 				// cache this for later
+	// 				if len(c.otherAccounts) > 2000 {
+	// 					for id := range c.otherAccounts {
+	// 						delete(c.otherAccounts, id)
+	// 						break
+	// 					}
+	// 				}
+	// 				c.otherAccounts[acc.id()] = acc
+	// 			}
+	// 			t.owner = acc.entity(ctx, c.fsys)
+	// 		}
+	// 	}
 	default:
 		return false, fmt.Errorf("unrecognized source: %s", t.source)
 	}
@@ -128,13 +127,13 @@ func (c *Client) prepareTweet(ctx context.Context, t *tweet, source string, opt 
 	// parse Twitter's time string into an actual time value
 	t.createdAtParsed, err = time.Parse("Mon Jan 2 15:04:05 -0700 2006", t.CreatedAt)
 	if err != nil {
-		return false, fmt.Errorf("parsing created_at time: %v", err)
+		return false, fmt.Errorf("parsing created_at time: %w", err)
 	}
 
 	return false, nil
 }
 
-func (c *Client) makeItemGraphFromTweet(ctx context.Context, t tweet, fsys fs.FS, opt Options) (*timeline.Graph, error) {
+func (c *Client) makeItemGraphFromTweet(_ context.Context, t tweet, fsys fs.FS, _ Options) (*timeline.Graph, error) {
 	// oneMediaItem := t.hasExactlyOneMediaItem()
 
 	item := &timeline.Item{
@@ -167,39 +166,37 @@ func (c *Client) makeItemGraphFromTweet(ctx context.Context, t tweet, fsys fs.FS
 
 			m.parent = &t
 
-			var dataFileName string
-			if dfn := m.fileName(); dfn == "" {
+			dataFileName := m.fileName()
+			if dataFileName == "" {
 				// TODO: proper logging
 				// log.Printf("[ERROR][%s/%s] Tweet media has no data file name: %+v",
 				// 	DataSourceID, c.acc.User.UserID, m)
 				continue
-			} else {
-				dataFileName = dfn
 			}
 
 			switch t.source {
-			case "archive":
+			case srcArchive:
 				targetFileInArchive := path.Join("data", "tweets_media", dataFileName)
 
 				file, err := fsys.Open(targetFileInArchive)
 				if err != nil {
-					return nil, fmt.Errorf("opening data file in archive: %s: %v", targetFileInArchive, err)
+					return nil, fmt.Errorf("opening data file in archive: %s: %w", targetFileInArchive, err)
 				}
 				m.readCloser = file
 
-			case "api":
-				mediaURL := m.getURL()
-				if m.Type == "photo" {
-					mediaURL += ":orig" // get original file, with metadata
-				}
-				resp, err := http.Get(mediaURL)
-				if err != nil {
-					return nil, fmt.Errorf("getting media resource %s: %v", m.MediaURLHTTPS, err)
-				}
-				if resp.StatusCode != http.StatusOK {
-					return nil, fmt.Errorf("media resource returned HTTP status %s: %s", resp.Status, m.MediaURLHTTPS)
-				}
-				m.readCloser = resp.Body
+			// case "api":
+			// 	mediaURL := m.getURL()
+			// 	if m.Type == "photo" {
+			// 		mediaURL += ":orig" // get original file, with metadata
+			// 	}
+			// 	resp, err := http.Get(mediaURL)
+			// 	if err != nil {
+			// 		return nil, fmt.Errorf("getting media resource %s: %v", m.MediaURLHTTPS, err)
+			// 	}
+			// 	if resp.StatusCode != http.StatusOK {
+			// 		return nil, fmt.Errorf("media resource returned HTTP status %s: %s", resp.Status, m.MediaURLHTTPS)
+			// 	}
+			// 	m.readCloser = resp.Body
 
 			default:
 				return nil, fmt.Errorf("unrecognized source value: must be api or archive: %s", t.source)
@@ -230,62 +227,62 @@ func (c *Client) makeItemGraphFromTweet(ctx context.Context, t tweet, fsys fs.FS
 		// }
 	}
 
-	// if we're using the API, go ahead and get the
-	// 'parent' tweet to which this tweet is a reply
-	if t.source == "api" && t.InReplyToStatusIDStr != "" {
-		inReplyToTweet, err := c.getTweetFromAPI(t.InReplyToStatusIDStr)
-		if err != nil {
-			return nil, fmt.Errorf("getting tweet that this tweet (%s) is in reply to (%s): %v",
-				t.id(), t.InReplyToStatusIDStr, err)
-		}
-		skip, err := c.prepareTweet(ctx, &inReplyToTweet, "api", opt)
-		if err != nil {
-			return nil, fmt.Errorf("preparing reply-parent tweet: %v", err)
-		}
-		if !skip {
-			repIG, err := c.makeItemGraphFromTweet(ctx, inReplyToTweet, fsys, opt)
-			if err != nil {
-				return nil, fmt.Errorf("making item from tweet that this tweet (%s) is in reply to (%s): %v",
-					t.id(), inReplyToTweet.id(), err)
-			}
-			// TODO: is this relation backwards?
-			ig.Edges = append(ig.Edges, timeline.Relationship{
-				Relation: timeline.RelReply,
-				To:       repIG,
-			})
-		}
-	}
+	// // if we're using the API, go ahead and get the
+	// // 'parent' tweet to which this tweet is a reply
+	// if t.source == "api" && t.InReplyToStatusIDStr != "" {
+	// 	inReplyToTweet, err := c.getTweetFromAPI(t.InReplyToStatusIDStr)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("getting tweet that this tweet (%s) is in reply to (%s): %v",
+	// 			t.id(), t.InReplyToStatusIDStr, err)
+	// 	}
+	// 	skip, err := c.prepareTweet(ctx, &inReplyToTweet, "api", opt)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("preparing reply-parent tweet: %v", err)
+	// 	}
+	// 	if !skip {
+	// 		repIG, err := c.makeItemGraphFromTweet(ctx, inReplyToTweet, fsys, opt)
+	// 		if err != nil {
+	// 			return nil, fmt.Errorf("making item from tweet that this tweet (%s) is in reply to (%s): %v",
+	// 				t.id(), inReplyToTweet.id(), err)
+	// 		}
+	// 		// TODO: is this relation backwards?
+	// 		ig.Edges = append(ig.Edges, timeline.Relationship{
+	// 			Relation: timeline.RelReply,
+	// 			To:       repIG,
+	// 		})
+	// 	}
+	// }
 
-	// if this tweet embeds/quotes/links to other tweets,
-	// we should establish those relationships as well
-	if t.source == "api" && t.Entities != nil {
-		for _, urlEnt := range t.Entities.URLs {
-			embeddedTweetID := getLinkedTweetID(urlEnt.ExpandedURL)
-			if embeddedTweetID == "" {
-				continue
-			}
-			embeddedTweet, err := c.getTweetFromAPI(embeddedTweetID)
-			if err != nil {
-				return nil, fmt.Errorf("getting tweet that this tweet (%s) embeds (%s): %v",
-					t.id(), t.InReplyToStatusIDStr, err)
-			}
-			skip, err := c.prepareTweet(ctx, &embeddedTweet, "api", opt)
-			if err != nil {
-				return nil, fmt.Errorf("preparing embedded tweet: %v", err)
-			}
-			if !skip {
-				embIG, err := c.makeItemGraphFromTweet(ctx, embeddedTweet, fsys, opt)
-				if err != nil {
-					return nil, fmt.Errorf("making item from tweet that this tweet (%s) embeds (%s): %v",
-						t.id(), embeddedTweet.id(), err)
-				}
-				ig.Edges = append(ig.Edges, timeline.Relationship{
-					Relation: timeline.RelQuotes,
-					To:       embIG,
-				})
-			}
-		}
-	}
+	// // if this tweet embeds/quotes/links to other tweets,
+	// // we should establish those relationships as well
+	// if t.source == "api" && t.Entities != nil {
+	// 	for _, urlEnt := range t.Entities.URLs {
+	// 		embeddedTweetID := getLinkedTweetID(urlEnt.ExpandedURL)
+	// 		if embeddedTweetID == "" {
+	// 			continue
+	// 		}
+	// 		embeddedTweet, err := c.getTweetFromAPI(embeddedTweetID)
+	// 		if err != nil {
+	// 			return nil, fmt.Errorf("getting tweet that this tweet (%s) embeds (%s): %v",
+	// 				t.id(), t.InReplyToStatusIDStr, err)
+	// 		}
+	// 		skip, err := c.prepareTweet(ctx, &embeddedTweet, "api", opt)
+	// 		if err != nil {
+	// 			return nil, fmt.Errorf("preparing embedded tweet: %v", err)
+	// 		}
+	// 		if !skip {
+	// 			embIG, err := c.makeItemGraphFromTweet(ctx, embeddedTweet, fsys, opt)
+	// 			if err != nil {
+	// 				return nil, fmt.Errorf("making item from tweet that this tweet (%s) embeds (%s): %v",
+	// 					t.id(), embeddedTweet.id(), err)
+	// 			}
+	// 			ig.Edges = append(ig.Edges, timeline.Relationship{
+	// 				Relation: timeline.RelQuotes,
+	// 				To:       embIG,
+	// 			})
+	// 		}
+	// 	}
+	// }
 
 	return ig, nil
 }
@@ -296,9 +293,9 @@ type Options struct {
 	Replies  bool `json:"replies"`  // whether to include replies to tweets that are not our own; i.e. are not a continuation of thought
 }
 
-type checkpoint struct {
-	NextToken string
-}
+// type checkpoint struct {
+// 	NextToken string
+// }
 
 // // save records the checkpoint.
 // func (ch *checkpoint) save(ctx context.Context) {
@@ -343,21 +340,21 @@ type checkpoint struct {
 // 	return id2
 // }
 
-// getLinkedTweetID returns the ID of the tweet in
-// a link to a tweet, for example:
-// "https://twitter.com/foo/status/12345"
-// returns "12345". If the tweet ID cannot be found
-// or the URL does not match the right format,
-// an empty string is returned.
-func getLinkedTweetID(urlToTweet string) string {
-	if !linkToTweetRE.MatchString(urlToTweet) {
-		return ""
-	}
-	u, err := url.Parse(urlToTweet)
-	if err != nil {
-		return ""
-	}
-	return path.Base(u.Path)
-}
+// // getLinkedTweetID returns the ID of the tweet in
+// // a link to a tweet, for example:
+// // "https://twitter.com/foo/status/12345"
+// // returns "12345". If the tweet ID cannot be found
+// // or the URL does not match the right format,
+// // an empty string is returned.
+// func getLinkedTweetID(urlToTweet string) string {
+// 	if !linkToTweetRE.MatchString(urlToTweet) {
+// 		return ""
+// 	}
+// 	u, err := url.Parse(urlToTweet)
+// 	if err != nil {
+// 		return ""
+// 	}
+// 	return path.Base(u.Path)
+// }
 
-var linkToTweetRE = regexp.MustCompile(`https?://twitter\.com/.*/status/[0-9]+`)
+// var linkToTweetRE = regexp.MustCompile(`https?://twitter\.com/.*/status/[0-9]+`)

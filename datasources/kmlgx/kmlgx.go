@@ -22,7 +22,7 @@ package kmlgx
 import (
 	"context"
 	"encoding/xml"
-	"fmt"
+	"errors"
 	"io/fs"
 	"path"
 	"path/filepath"
@@ -56,6 +56,7 @@ func init() {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	// The ID of the owner entity. REQUIRED for linking entity in DB.
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
@@ -67,6 +68,7 @@ type Options struct {
 // FileImporter implements the timeline.FileImporter interface.
 type FileImporter struct{}
 
+// Recognize returns whether the file or folder is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	var totalCount, matchCount int
 
@@ -93,9 +95,8 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 
 			totalCount++
@@ -120,6 +121,7 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	return timeline.Recognition{Confidence: confidence}, nil
 }
 
+// FileImport imports data from a folder or file.
 func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 
@@ -140,9 +142,8 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil // traverse into subdirectories
@@ -169,10 +170,10 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 
 			if doc.XMLNSGX != "http://www.google.com/kml/ext/2.2" {
 				// actually, we may not need this version specifically; other versions might work just as well
-				return fmt.Errorf("KML document does not support Google extension 'gx' namespace")
+				return errors.New("KML document does not support Google extension 'gx' namespace")
 			}
 			if len(doc.Document.Placemark.Track.When) != len(doc.Document.Placemark.Track.Coord) {
-				return fmt.Errorf("corrupt gx:Track data in Placemark: number of timestamps does not match number of coordinates")
+				return errors.New("corrupt gx:Track data in Placemark: number of timestamps does not match number of coordinates")
 			}
 
 			// create location processor to clean up any noisy raw data
@@ -230,8 +231,9 @@ func (d *document) NextLocation(ctx context.Context) (*googlelocation.Location, 
 			return nil, nil
 		}
 
+		const requiredFields = 3
 		coordFields := strings.Fields(d.Document.Placemark.Track.Coord[d.i])
-		if len(coordFields) < 3 {
+		if len(coordFields) < requiredFields {
 			continue
 		}
 		lon, lat, alt := coordFields[0], coordFields[1], coordFields[2]

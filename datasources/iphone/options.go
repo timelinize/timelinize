@@ -18,6 +18,7 @@
 
 package iphone
 
+// Options configures the data source.
 type Options struct {
 	SkipSpam bool `json:"skip_spam"` // TODO: not implemented (haven't seen is_spam=1 in a DB yet)
 }

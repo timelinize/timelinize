@@ -51,6 +51,7 @@ func init() {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	// The ID of the owner entity. REQUIRED for linking entity in DB.
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
@@ -68,6 +69,7 @@ type Options struct {
 // FileImporter implements the timeline.FileImporter interface.
 type FileImporter struct{}
 
+// Recognize returns whether the input is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	var totalCount, matchCount int
 
@@ -94,9 +96,8 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 
 			totalCount++
@@ -121,6 +122,7 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	return timeline.Recognition{Confidence: confidence}, nil
 }
 
+// FileImport imports data from the data source.
 func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 
@@ -145,9 +147,8 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil // traverse into subdirectories
@@ -200,6 +201,7 @@ type Processor struct {
 	refYear int
 }
 
+// NewProcessor returns a new file processor.
 func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ListingOptions, simplification float64, refYear int) (*Processor, error) {
 	if refYear >= 0 {
 		refYear = time.Now().UTC().Year()
@@ -222,6 +224,7 @@ func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ListingOpt
 	}, nil
 }
 
+// NextNMEAItem gets the next item from the next NMEA sentence(s).
 func (p *Processor) NextNMEAItem(ctx context.Context) (*timeline.Item, error) {
 	for {
 		if err := ctx.Err(); err != nil {
@@ -278,7 +281,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 
 		sentence, err := nmea.Parse(d.scanner.Text())
 		if err != nil {
-			return nil, fmt.Errorf("parsing next line: %v", err)
+			return nil, fmt.Errorf("parsing next line: %w", err)
 		}
 
 		loc := &googlelocation.Location{Original: sentence, Metadata: make(timeline.Metadata)}
@@ -287,8 +290,8 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 		// TODO: the alternating RMC and GGA messages have the same points, or rather, IF they do, then combine them here otherwise they get filtered as duplicate by the location processor, but they have different metadata
 		switch s := sentence.(type) {
 		case nmea.RMC:
-			loc.LatitudeE7 = int64(s.Latitude * 1e7)
-			loc.LongitudeE7 = int64(s.Longitude * 1e7)
+			loc.LatitudeE7 = int64(s.Latitude * placesMult)
+			loc.LongitudeE7 = int64(s.Longitude * placesMult)
 			loc.Timestamp = nmea.DateTime(d.refYear, s.Date, s.Time)
 			d.lastDate = s.Date // remember this since GGA sentences don't include date...
 
@@ -296,8 +299,8 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 			loc.Metadata["Heading"] = s.Course
 
 		case nmea.GGA:
-			loc.LatitudeE7 = int64(s.Latitude * 1e7)
-			loc.LongitudeE7 = int64(s.Longitude * 1e7)
+			loc.LatitudeE7 = int64(s.Latitude * placesMult)
+			loc.LongitudeE7 = int64(s.Longitude * placesMult)
 			loc.Altitude = s.Altitude
 			loc.Timestamp = nmea.DateTime(d.refYear, d.lastDate, s.Time)
 
@@ -311,8 +314,10 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 		return loc, nil
 	}
 	if err := d.scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanner error: %v", err)
+		return nil, fmt.Errorf("scanner error: %w", err)
 	}
 
 	return nil, nil
 }
+
+const placesMult = 1e7

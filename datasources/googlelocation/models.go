@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 package googlelocation
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -47,7 +48,7 @@ type onDeviceLocation struct {
 	} `json:"timelinePath"`
 }
 
-func (l *onDeviceLocation) toItem(result *Location, opt *Options) (*timeline.Item, error) {
+func (l *onDeviceLocation) toItem(result *Location, opt *Options) *timeline.Item {
 	entity := timeline.Entity{ID: opt.OwnerEntityID}
 
 	if opt.Device != "" {
@@ -84,7 +85,7 @@ func (l *onDeviceLocation) toItem(result *Location, opt *Options) (*timeline.Ite
 		Location:       result.Location(),
 		Owner:          entity,
 		Metadata:       meta,
-	}, nil
+	}
 }
 
 type topCandidate struct {
@@ -100,19 +101,19 @@ type geoString string // EXAMPLE: "geo:30.123456,-105.987654"
 func (g geoString) parse() (timeline.Location, error) {
 	const prefix = "geo:"
 	if !strings.HasPrefix(string(g), prefix) {
-		return timeline.Location{}, fmt.Errorf("not a valid geo string: missing prefix")
+		return timeline.Location{}, errors.New("not a valid geo string: missing prefix")
 	}
 	latStr, lonStr, ok := strings.Cut(string(g[len(prefix):]), ",")
 	if !ok {
-		return timeline.Location{}, fmt.Errorf("not a valid geo string: missing comma separator")
+		return timeline.Location{}, errors.New("not a valid geo string: missing comma separator")
 	}
 	lat, err := strconv.ParseFloat(latStr, 64)
 	if err != nil {
-		return timeline.Location{}, fmt.Errorf("not a valid geo string: bad latitude: %s: %v", latStr, err)
+		return timeline.Location{}, fmt.Errorf("not a valid geo string: bad latitude: %s: %w", latStr, err)
 	}
 	lon, err := strconv.ParseFloat(lonStr, 64)
 	if err != nil {
-		return timeline.Location{}, fmt.Errorf("not a valid geo string: bad longitude: %s: %v", lonStr, err)
+		return timeline.Location{}, fmt.Errorf("not a valid geo string: bad longitude: %s: %w", lonStr, err)
 	}
 	return timeline.Location{
 		Latitude:  &lat,
@@ -205,8 +206,8 @@ func (l location) toItem(opt *Options) *timeline.Item {
 }
 
 func (l location) location() timeline.Location {
-	lat := float64(l.LatitudeE7) / 1e7
-	lon := float64(l.LongitudeE7) / 1e7
+	lat := float64(l.LatitudeE7) / placesMult
+	lon := float64(l.LongitudeE7) / placesMult
 	alt := float64(l.Altitude)
 	unc := metersToApproxDegrees(float64(l.Accuracy))
 

@@ -30,6 +30,7 @@ import (
 	"github.com/zeebo/blake3"
 )
 
+// ImportParameters describe an import.
 type ImportParameters struct {
 	ResumeImportID int64 `json:"resume_import_id"`
 
@@ -43,6 +44,7 @@ type ImportParameters struct {
 	JobID string `json:"job_id"` // assigned by application frontend
 }
 
+// Hash makes a hash of the import params.
 func (params ImportParameters) Hash(repoID string) string {
 	accountIDOrFilename := "files:" + strings.Join(params.Filenames, ",")
 	if params.AccountID > 0 {
@@ -68,11 +70,11 @@ type importRow struct {
 	checkpoint *checkpoint // the decoded checkpointBytes
 }
 
-func (t *Timeline) loadImport(ctx context.Context, importID int64) (importRow, error) {
+func (tl *Timeline) loadImport(ctx context.Context, importID int64) (importRow, error) {
 	var imp importRow
-	var snapshotTs *int64
-	t.dbMu.RLock()
-	err := t.db.QueryRowContext(ctx,
+	var snapshotTS *int64
+	tl.dbMu.RLock()
+	err := tl.db.QueryRowContext(ctx,
 		`SELECT
 			imports.id, imports.mode, imports.snapshot_date, imports.account_id,
 			imports.started, imports.ended, imports.status, imports.checkpoint,
@@ -82,40 +84,40 @@ func (t *Timeline) loadImport(ctx context.Context, importID int64) (importRow, e
 			AND data_sources.id = accounts.data_source_id
 		LIMIT 1`,
 		// TODO: I'm pretty sure these won't all scan correctly, currently
-		importID).Scan(&imp.id, &imp.mode, &snapshotTs, &imp.accountID, &imp.started, &imp.ended,
+		importID).Scan(&imp.id, &imp.mode, &snapshotTS, &imp.accountID, &imp.started, &imp.ended,
 		&imp.status, &imp.checkpointBytes, &imp.dataSourceName)
-	t.dbMu.RUnlock()
+	tl.dbMu.RUnlock()
 	if err != nil {
-		return imp, fmt.Errorf("querying import %d from DB: %v", importID, err)
+		return imp, fmt.Errorf("querying import %d from DB: %w", importID, err)
 	}
 	if len(imp.checkpointBytes) > 0 {
 		err = unmarshalGob(imp.checkpointBytes, imp.checkpoint)
 		if err != nil {
-			return imp, fmt.Errorf("decoding checkpoint: %v", err)
+			return imp, fmt.Errorf("decoding checkpoint: %w", err)
 		}
 	}
-	if snapshotTs != nil {
-		ts := time.Unix(*snapshotTs, 0)
+	if snapshotTS != nil {
+		ts := time.Unix(*snapshotTS, 0)
 		imp.snapshotDate = &ts
 	}
 	return imp, nil
 }
 
-func (t *Timeline) newImport(ctx context.Context, dataSourceID string, mode importMode, procOpt ProcessingOptions, accountID int64) (importRow, error) {
+func (tl *Timeline) newImport(ctx context.Context, dataSourceID string, mode importMode, procOpt ProcessingOptions, accountID int64) (importRow, error) {
 	// ensure data source of the import and data source of the account are the same
 	// (this should always be the case, but sanity check here to prevent confusion)
 	if accountID > 0 {
 		var accountDataSourceID string
-		t.dbMu.RLock()
-		err := t.db.QueryRowContext(ctx,
+		tl.dbMu.RLock()
+		err := tl.db.QueryRowContext(ctx,
 			`SELECT data_sources.name
 		FROM data_sources, accounts
 		WHERE accounts.id = ? AND data_source.id = accounts.data_source_id
 		LIMIT 1`,
 			accountID).Scan(&accountDataSourceID)
-		t.dbMu.RUnlock()
+		tl.dbMu.RUnlock()
 		if err != nil {
-			return importRow{}, fmt.Errorf("querying DB to verify data source IDs: %v", err)
+			return importRow{}, fmt.Errorf("querying DB to verify data source IDs: %w", err)
 		}
 		if accountDataSourceID != dataSourceID {
 			return importRow{}, fmt.Errorf("data source ID and account's data source ID do not match: %s vs. %s",
@@ -125,12 +127,12 @@ func (t *Timeline) newImport(ctx context.Context, dataSourceID string, mode impo
 
 	// TODO: Maybe this (getting a data source's row ID) should be a separate function
 	var dataSourceRowID int64
-	t.dbMu.RLock()
-	err := t.db.QueryRowContext(ctx, `SELECT id FROM data_sources WHERE name=? LIMIT 1`,
+	tl.dbMu.RLock()
+	err := tl.db.QueryRowContext(ctx, `SELECT id FROM data_sources WHERE name=? LIMIT 1`,
 		dataSourceID).Scan(&dataSourceRowID)
-	t.dbMu.RUnlock()
+	tl.dbMu.RUnlock()
 	if err != nil {
-		return importRow{}, fmt.Errorf("querying data source's row ID: %s: %v", dataSourceID, err)
+		return importRow{}, fmt.Errorf("querying data source's row ID: %s: %w", dataSourceID, err)
 	}
 
 	imp := importRow{
@@ -146,19 +148,19 @@ func (t *Timeline) newImport(ctx context.Context, dataSourceID string, mode impo
 	if !imp.processingOptions.IsEmpty() {
 		procOptJSON, err = json.Marshal(imp.processingOptions)
 		if err != nil {
-			return importRow{}, fmt.Errorf("marshaling processing options: %v", err)
+			return importRow{}, fmt.Errorf("marshaling processing options: %w", err)
 		}
 	}
 
 	var started int64
-	t.dbMu.Lock()
-	err = t.db.QueryRow(`INSERT INTO imports (data_source_id, mode, account_id, processing_options)
+	tl.dbMu.Lock()
+	err = tl.db.QueryRow(`INSERT INTO imports (data_source_id, mode, account_id, processing_options)
 		VALUES (?, ?, ?, ?)
 		RETURNING id, started, status`,
 		dataSourceRowID, imp.mode, imp.accountID, string(procOptJSON)).Scan(&imp.id, &started, &imp.status)
-	t.dbMu.Unlock()
+	tl.dbMu.Unlock()
 	if err != nil {
-		return importRow{}, fmt.Errorf("inserting import row into DB: %v", err)
+		return importRow{}, fmt.Errorf("inserting import row into DB: %w", err)
 	}
 	imp.started = time.Unix(started, 0)
 	return imp, nil

@@ -128,5 +128,5 @@ func (e exact) MatchString(s string) bool {
 var noise = regexp.MustCompile(`\(.*\)|\W|_|\s{2,}`)
 
 type stringMatcher interface {
-	MatchString(string) bool
+	MatchString(input string) bool
 }

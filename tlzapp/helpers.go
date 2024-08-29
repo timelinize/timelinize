@@ -20,10 +20,10 @@ package tlzapp
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"time"
 )
 
@@ -134,7 +134,7 @@ func jsonResponse(w http.ResponseWriter, v any, err error) error {
 		return jsonEncodeErr(err)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBytes)))
-	w.Write(respBytes)
-	return nil
+	w.Header().Set("Content-Length", strconv.Itoa(len(respBytes)))
+	_, err = w.Write(respBytes)
+	return err
 }

@@ -71,7 +71,7 @@ func Main(embeddedWebsite fs.FS) {
 
 	// check for registered endpoint (API command)
 	if remaining := flag.Args(); len(remaining) > 0 {
-		if err := app.RunCommand(remaining); err != nil {
+		if err := app.RunCommand(ctx, remaining); err != nil {
 			timeline.Log.Fatal("subcommand failed", zap.Error(err))
 		}
 		return
@@ -121,10 +121,10 @@ func openWebBrowser(loc string) error {
 
 	if runtime.GOOS == "windows" {
 		// escape characters not allowed by cmd
-		loc = strings.Replace(loc, "&", `^&`, -1)
+		loc = strings.ReplaceAll(loc, "&", `^&`)
 	}
 
-	all := append(osCommand[runtime.GOOS], loc)
+	all := append(osCommand[runtime.GOOS], loc) //nolint:gocritic
 	exe := all[0]
 	args := all[1:]
 
@@ -164,7 +164,7 @@ func getStandardSubcommand() (string, func() error) {
 // API) is present.
 func checkFlagParsing() error {
 	if len(os.Args) > 2 && flag.NFlag() == 0 {
-		return fmt.Errorf("it looks like you intended to specify flags, but none were parsed; make sure flags go before positional arguments")
+		return errors.New("it looks like you intended to specify flags, but none were parsed; make sure flags go before positional arguments")
 	}
 	return nil
 }
@@ -178,7 +178,7 @@ var standardCommands = map[string]func() error{
 		}
 		select {}
 	},
-	"help": func() error {
+	"help": func() error { //nolint:unparam // bug filed: https://github.com/mvdan/unparam/issues/82
 		fmt.Println(app.CommandLineHelp())
 		return nil
 	},

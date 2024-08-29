@@ -53,39 +53,39 @@ type Config struct {
 	log *zap.Logger
 }
 
-func (c *Config) fillDefaults() {
-	c.Lock()
-	defer c.Unlock()
-	// if c.Listen == "" {
-	// 	c.Listen = defaultConfig.Listen
+func (cfg *Config) fillDefaults() {
+	cfg.Lock()
+	defer cfg.Unlock()
+	// if cfg.Listen == "" {
+	// 	cfg.Listen = defaultConfig.Listen
 	// }
-	if c.log == nil {
-		c.log = timeline.Log.Named("config").With(zap.Time("loaded", time.Now()))
+	if cfg.log == nil {
+		cfg.log = timeline.Log.Named("config").With(zap.Time("loaded", time.Now()))
 	}
 }
 
 // save persists the config to disk. It locks the config, so is safe for concurrent use.
-func (c *Config) save() error {
-	c.Lock()
-	defer c.Unlock()
+func (cfg *Config) save() error {
+	cfg.Lock()
+	defer cfg.Unlock()
 
 	filename := DefaultConfigFilePath()
 	err := os.MkdirAll(filepath.Dir(filename), 0755)
 	if err != nil {
-		return fmt.Errorf("creating config directory: %v", err)
+		return fmt.Errorf("creating config directory: %w", err)
 	}
 	cfgFile, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("saving config file: %v", err)
+		return fmt.Errorf("saving config file: %w", err)
 	}
 	defer cfgFile.Close()
 	enc := json.NewEncoder(cfgFile)
 	enc.SetIndent("", "\t")
-	if err = enc.Encode(c); err != nil {
-		return fmt.Errorf("encoding config: %v", err)
+	if err = enc.Encode(cfg); err != nil {
+		return fmt.Errorf("encoding config: %w", err)
 	}
-	if c.log != nil {
-		c.log.Info("autosaved config file", zap.String("path", filename))
+	if cfg.log != nil {
+		cfg.log.Info("autosaved config file", zap.String("path", filename))
 	}
 	return nil
 }
@@ -94,22 +94,22 @@ func (cfg *Config) syncOpenRepos() error {
 	// assemble the list of open timelines into a sorted slice
 	// so we can update the stored config and reopen these
 	// timelines automatically at next start
-	openTLs := make([]string, len(openTimelines))
+	open := make([]string, len(openTimelines))
 	i := 0
 	for _, otl := range openTimelines {
-		openTLs[i] = otl.RepoDir
+		open[i] = otl.RepoDir
 		i++
 	}
-	sort.StringSlice(openTLs).Sort()
+	sort.StringSlice(open).Sort()
 
 	// only update the config if list of open repos changed;
 	// I guess doing so wouldn't hurt but it's not necessary
 	cfg.Lock()
-	sameOpenTLs := slicesEqual(openTLs, cfg.Repositories)
-	cfg.Repositories = openTLs
+	sameOpenTimelines := slicesEqual(open, cfg.Repositories)
+	cfg.Repositories = open
 	cfg.Unlock()
 
-	if !sameOpenTLs {
+	if !sameOpenTimelines {
 		if err := cfg.save(); err != nil {
 			return err
 		}

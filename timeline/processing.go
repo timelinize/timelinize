@@ -61,7 +61,7 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions) (
 	wg := new(sync.WaitGroup)
 	ch := make(chan *Graph)
 
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		wg.Add(1)
 		go func(workerNum int) {
 			defer wg.Done()
@@ -133,10 +133,10 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph, rs *recursiveS
 	// an extra parameter or return value. Phases 2 and 3 do make some allocations even if
 	// there aren't any data files, but I'd want to dig deeper (likely with a profile) to
 	// determine if avoiding these phases entirely is worth the effort.
-	if err := p.phase2(ctx, rs, batch); err != nil {
+	if err := p.phase2(ctx, batch); err != nil {
 		return err
 	}
-	if err := p.phase3(ctx, rs, batch); err != nil {
+	if err := p.phase3(ctx, batch); err != nil {
 		return err
 	}
 	return nil
@@ -149,7 +149,7 @@ func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Gra
 
 	tx, err := p.tl.db.Begin()
 	if err != nil {
-		return fmt.Errorf("beginning transaction for batch: %v", err)
+		return fmt.Errorf("beginning transaction for batch: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -161,14 +161,14 @@ func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Gra
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction for batch: %v", err)
+		return fmt.Errorf("committing transaction for batch: %w", err)
 	}
 
 	return nil
 }
 
 // phase2 downloads data files.
-func (p *processor) phase2(ctx context.Context, rs *recursiveState, batch []*Graph) error {
+func (p *processor) phase2(ctx context.Context, batch []*Graph) error {
 	var wg sync.WaitGroup
 	for _, g := range batch {
 		if g.err != nil {
@@ -192,13 +192,13 @@ func (p *processor) phase2(ctx context.Context, rs *recursiveState, batch []*Gra
 }
 
 // phase3 updates the DB with info about the data files that were downloaded in phase 2.
-func (p *processor) phase3(ctx context.Context, rs *recursiveState, batch []*Graph) error {
+func (p *processor) phase3(ctx context.Context, batch []*Graph) error {
 	p.tl.dbMu.Lock()
 	defer p.tl.dbMu.Unlock()
 
 	tx, err := p.tl.db.Begin()
 	if err != nil {
-		return fmt.Errorf("beginning transaction for batch phase 3: %v", err)
+		return fmt.Errorf("beginning transaction for batch phase 3: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -213,7 +213,7 @@ func (p *processor) phase3(ctx context.Context, rs *recursiveState, batch []*Gra
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction for batch phase 3: %v", err)
+		return fmt.Errorf("committing transaction for batch phase 3: %w", err)
 	}
 
 	return nil
@@ -305,13 +305,13 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 		var err error
 		rowID, err = p.processEntity(ctx, tx, *ig.Entity)
 		if err != nil {
-			return latentID{}, fmt.Errorf("processing entity node: %v", err)
+			return latentID{}, fmt.Errorf("processing entity node: %w", err)
 		}
 	case ig.Item != nil:
 		var err error
 		rowID, err = p.processItem(ctx, tx, ig.Item, state)
 		if err != nil {
-			return latentID{}, fmt.Errorf("processing item node: %v", err)
+			return latentID{}, fmt.Errorf("processing item node: %w", err)
 		}
 	}
 
@@ -356,7 +356,7 @@ func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state
 				zap.Timep("tf_until", state.procOpt.Timeframe.Until),
 				zap.Time("item_timestamp", it.Timestamp),
 			)
-			return latentID{}, fmt.Errorf("item is outside of designated timeframe")
+			return latentID{}, errors.New("item is outside of designated timeframe")
 		}
 
 		// end time must come after start time
@@ -386,7 +386,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	if it.Content.Data != nil {
 		rc, err := it.Content.Data(ctx)
 		if err != nil {
-			return 0, fmt.Errorf("getting item's data stream: %v (item_id=%s)", err, it.ID)
+			return 0, fmt.Errorf("getting item's data stream: %w (item_id=%s)", err, it.ID)
 		}
 		if rc != nil {
 			it.dataFileIn = rc
@@ -405,7 +405,8 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 
 				// not really concerned with errors here; we don't need the max number of bytes
 				// and if it fails to read later, we'll deal with the error then
-				peekedBytes, _ := fileReader.Peek(512)
+				const bytesNeededToSniff = 512
+				peekedBytes, _ := fileReader.Peek(bytesNeededToSniff)
 
 				detectContentType(peekedBytes, it)
 
@@ -449,7 +450,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 
 				n, err := io.ReadFull(it.dataFileIn, buf)
 				if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-					return 0, fmt.Errorf("buffering item's data stream to peek size: %v", err)
+					return 0, fmt.Errorf("buffering item's data stream to peek size: %w", err)
 				}
 				if n == len(buf) {
 					// content is at least as large as our buffer, so it probably belongs on disk;
@@ -493,7 +494,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// if the item is already in our DB, load it
 	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.params.ProcessingOptions.ItemUniqueConstraints, true)
 	if err != nil {
-		return 0, fmt.Errorf("looking up item in database: %v", err)
+		return 0, fmt.Errorf("looking up item in database: %w", err)
 	}
 	if ir.ID > 0 {
 		// found it in our DB; skip it?
@@ -522,7 +523,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 			bakFile := p.tl.FullPath(*ir.DataFile + ".bak")
 			err = os.Rename(origFile, bakFile)
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return 0, fmt.Errorf("temporarily moving data file: %v", err)
+				return 0, fmt.Errorf("temporarily moving data file: %w", err)
 			}
 
 			// if this function returns with an error,
@@ -554,7 +555,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	if processDataFile {
 		it.dataFileOut, it.dataFileName, err = p.tl.openUniqueCanonicalItemDataFile(tx, p.log, it, p.ds.Name)
 		if err != nil {
-			return 0, fmt.Errorf("opening output data file: %v", err)
+			return 0, fmt.Errorf("opening output data file: %w", err)
 		}
 	}
 
@@ -563,7 +564,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 
 	err = p.fillItemRow(ctx, tx, &ir, it)
 	if err != nil {
-		return 0, fmt.Errorf("assembling item for storage: %v", err)
+		return 0, fmt.Errorf("assembling item for storage: %w", err)
 	}
 
 	// run the database query to insert or update the item (and clean up data file if it was changed to NULL),
@@ -573,7 +574,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// to merely link the item by ID (or create a placeholder item), not zero it out!
 	ir.ID, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), updateOverrides)
 	if err != nil {
-		return 0, fmt.Errorf("storing item in database: %v (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
+		return 0, fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
 	}
 
 	it.row = ir
@@ -612,7 +613,7 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 	if len(r.Metadata) > 0 {
 		metaJSON, err := json.Marshal(r.Metadata)
 		if err != nil {
-			return tx, fmt.Errorf("encoding relationship metadata: %v", err)
+			return tx, fmt.Errorf("encoding relationship metadata: %w", err)
 		}
 		rawRel.metadata = metaJSON
 	}
@@ -622,27 +623,28 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 	if r.From != nil {
 		connectedRowID, err := p.processGraph(ctx, tx, state, r.From)
 		if err != nil {
-			return tx, fmt.Errorf("from node: %v", err)
+			return tx, fmt.Errorf("from node: %w", err)
 		}
 		if r.From.Item != nil {
 			rawRel.fromItemID = &connectedRowID.itemID
 		} else if r.From.Entity != nil {
 			attrID, err := connectedRowID.identifyingAttributeID(ctx, tx)
 			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for connected entity (on From side): %v", err)
+				return tx, fmt.Errorf("getting identifying attribute ID for connected entity (on From side): %w", err)
 			}
 			rawRel.fromAttributeID = &attrID
 		}
 	} else {
-		if ig.Item != nil {
+		switch {
+		case ig.Item != nil:
 			rawRel.fromItemID = &rowID.itemID
-		} else if ig.Entity != nil {
+		case ig.Entity != nil:
 			attrID, err := rowID.identifyingAttributeID(ctx, tx)
 			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for graph entity (on From side): %v", err)
+				return tx, fmt.Errorf("getting identifying attribute ID for graph entity (on From side): %w", err)
 			}
 			rawRel.fromAttributeID = &attrID
-		} else {
+		default:
 			return tx, fmt.Errorf("incomplete relationship: no 'from' node available: %+v (item_graph=%p %+v)", r, ig, ig)
 		}
 	}
@@ -651,34 +653,35 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 	if r.To != nil {
 		connectedRowID, err := p.processGraph(ctx, tx, state, r.To)
 		if err != nil {
-			return tx, fmt.Errorf("to node: %v", err)
+			return tx, fmt.Errorf("to node: %w", err)
 		}
 		if r.To.Item != nil {
 			rawRel.toItemID = &connectedRowID.itemID
 		} else if r.To.Entity != nil {
 			attrID, err := connectedRowID.identifyingAttributeID(ctx, tx)
 			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for connected entity (on To side): %v", err)
+				return tx, fmt.Errorf("getting identifying attribute ID for connected entity (on To side): %w", err)
 			}
 			rawRel.toAttributeID = &attrID
 		}
 	} else {
-		if ig.Item != nil {
+		switch {
+		case ig.Item != nil:
 			rawRel.toItemID = &rowID.itemID
-		} else if ig.Entity != nil {
+		case ig.Entity != nil:
 			attrID, err := rowID.identifyingAttributeID(ctx, tx)
 			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for graph entity (on To side): %v", err)
+				return tx, fmt.Errorf("getting identifying attribute ID for graph entity (on To side): %w", err)
 			}
 			rawRel.toAttributeID = &attrID
-		} else {
+		default:
 			return tx, fmt.Errorf("incomplete relationship: no 'to' node available: %+v (item_graph=%p %+v)", r, ig, ig)
 		}
 	}
 
 	err := p.tl.storeRelationship(ctx, tx, rawRel)
 	if err != nil {
-		return tx, fmt.Errorf("storing relationship: %v", err)
+		return tx, fmt.Errorf("storing relationship: %w", err)
 	}
 
 	return tx, nil
@@ -688,13 +691,13 @@ func (tl *Timeline) cleanDataFile(tx *sql.Tx, dataFilePath string) error {
 	var count int
 	err := tx.QueryRow(`SELECT count() FROM items WHERE data_file=? LIMIT 1`, dataFilePath).Scan(&count)
 	if err != nil {
-		return fmt.Errorf("querying to check if data file is unused: %v", err)
+		return fmt.Errorf("querying to check if data file is unused: %w", err)
 	}
 	if count > 0 {
 		return nil
 	}
 	if err := os.Remove(tl.FullPath(dataFilePath)); err != nil {
-		return fmt.Errorf("deleting unused data file: %v", err)
+		return fmt.Errorf("deleting unused data file: %w", err)
 	}
 	return nil
 }
@@ -706,7 +709,7 @@ func (p *processor) integrityCheck(dbItem ItemRow) error {
 
 	// expected hash must be set; if missing, data file was not completely downloaded last time
 	if dbItem.DataHash == nil {
-		return fmt.Errorf("checksum missing")
+		return errors.New("checksum missing")
 	}
 
 	// file must open successfully
@@ -934,7 +937,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	// insert and/or retrieve owner information
 	rowID, err := p.processEntity(ctx, tx, it.Owner)
 	if err != nil {
-		return fmt.Errorf("getting person associated with item: %v", err)
+		return fmt.Errorf("getting person associated with item: %w", err)
 	}
 
 	// remove unnecessary entries first
@@ -945,7 +948,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	if len(it.Metadata) > 0 {
 		metadata, err = json.Marshal(it.Metadata)
 		if err != nil {
-			return fmt.Errorf("encoding metadata as JSON: %v", err)
+			return fmt.Errorf("encoding metadata as JSON: %w", err)
 		}
 	}
 
@@ -954,7 +957,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	if it.Classification.Name != "" {
 		clID, err = p.tl.classificationNameToID(it.Classification.Name)
 		if err != nil {
-			return fmt.Errorf("unable to get classification ID: %v (classification=%+v)", err, it.Classification)
+			return fmt.Errorf("unable to get classification ID: %w (classification=%+v)", err, it.Classification)
 		}
 	}
 
@@ -963,7 +966,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	if rowID.entityID > 0 {
 		attrID, err = rowID.identifyingAttributeID(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("getting identifying attribute row ID: %v", err)
+			return fmt.Errorf("getting identifying attribute row ID: %w", err)
 		}
 	}
 
@@ -1002,9 +1005,10 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 		ir.Timeframe = &it.Timeframe
 	}
 	if it.TimeUncertainty > 0 {
-		uncert := int64(it.TimeUncertainty * time.Millisecond)
+		uncert := int64(it.TimeUncertainty / time.Millisecond)
 		ir.TimeUncertainty = &uncert
 	} else if it.TimeUncertainty == -1 {
+		// TODO: I forgot what this was all about... it's not even used? why would we set it to -1 and what is "General uncertainty" -- just that we have no clue?
 		generalUncert := int64(it.TimeUncertainty)
 		ir.TimeUncertainty = &generalUncert
 	}
@@ -1015,7 +1019,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	if it.dataFileName != "" {
 		// BIG TIME bug fix :)
 		// When deduplicating data files, if this is not a copy of the dataFileName, then we end up not
-		// updating values in the DB with the exsiting filename later on, because we end up changing
+		// updating values in the DB with the existing filename later on, because we end up changing
 		// the value of it.dataFileName if it's a duplicate... but if ir.DataFile points to it, that also
 		// ends up changing even though we expect that to remain the originally-planned filename so that
 		// we can use it in a DB query to update the rows to point to the existing filename...
@@ -1091,7 +1095,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it
 		} else if len(uniqueConstraints) == 0 {
 			// if no fields were specified (by mistake?), this could be problematic
 			// as it would match any item with the same data source, I think
-			return ItemRow{}, fmt.Errorf("missing unique constraints; at least 1 required when no original ID specified")
+			return ItemRow{}, errors.New("missing unique constraints; at least 1 required when no original ID specified")
 		}
 
 		// check for identical item that may have been deleted; there are two "row hashes" we check:
@@ -1208,7 +1212,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it
 					it.dataText, it.dataText,
 					it.dataFileHash, it.dataFileHash)
 			case "data_type", "data_text", "data_hash":
-				return ItemRow{}, fmt.Errorf("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
+				return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
 			case "location":
 				args = append(args,
 					it.Location.Longitude, it.Location.Longitude,
@@ -1217,7 +1221,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it
 					it.Location.CoordinateSystem, it.Location.CoordinateSystem)
 			case "longitude", "latitude", "altitude", "coordinate_system", "coordinate_uncertainty":
 				// unlike the data fields, there's no good reason for this other than "the other way doesn't make sense and may be error-prone"
-				return ItemRow{}, fmt.Errorf("cannot select on specific components of item location such as latitude or longitude: specify 'location' instead")
+				return ItemRow{}, errors.New("cannot select on specific components of item location such as latitude or longitude: specify 'location' instead")
 			default:
 				return ItemRow{}, fmt.Errorf("item unique constraints configure unsupported/unrecognized field: %s", field)
 			}
@@ -1372,7 +1376,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			args = append(args, ir.DataFile)
 			args = append(args, ir.DataHash)
 		case "data_type", "data_text", "data_file", "data_hash":
-			return fmt.Errorf("data components cannot be individually configured for updates; use 'data' as field name instead")
+			return errors.New("data components cannot be individually configured for updates; use 'data' as field name instead")
 		case "metadata":
 			args = append(args, string(ir.Metadata))
 		case "location":
@@ -1383,7 +1387,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			args = append(args, ir.CoordinateUncertainty)
 		case "longitude", "latitude", "altitude", "coordinate_system", "coordinate_uncertainty":
 			// unlike the data fields, there's no good reason for this other than "individually doesn't make sense and may be tedious"
-			return fmt.Errorf("location components cannot be individually configured for updates; use 'location' as field name instead")
+			return errors.New("location components cannot be individually configured for updates; use 'location' as field name instead")
 		case "note":
 			args = append(args, ir.Note)
 		case "starred":
@@ -1528,14 +1532,13 @@ var commonFileTypes = map[string]string{
 func typeByExtension(ext string) string {
 	if ctByExt := mime.TypeByExtension(ext); ctByExt != "" {
 		return ctByExt
-	} else {
-		// Ugh, still not recognized. I was surprised that DNG and HEIC files don't
-		// have a match even on modern Macs (but they are recognized by Linux... go
-		// figure) -- so let's at least maintain our own list of common file types
-		// as a final fallback.
-		if hardcodedType, ok := commonFileTypes[strings.ToLower(ext)]; ok {
-			return hardcodedType
-		}
+	}
+	// Ugh, still not recognized. I was surprised that DNG and HEIC files don't
+	// have a match even on modern Macs (but they are recognized by Linux... go
+	// figure) -- so let's at least maintain our own list of common file types
+	// as a final fallback.
+	if hardcodedType, ok := commonFileTypes[strings.ToLower(ext)]; ok {
+		return hardcodedType
 	}
 	return ""
 }

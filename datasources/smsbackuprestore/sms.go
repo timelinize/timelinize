@@ -142,12 +142,12 @@ func (s SMS) metadata() timeline.Metadata {
 	}
 
 	sc := s.ServiceCenter
-	if sc == "null" {
+	if sc == null {
 		sc = ""
 	}
 
 	subj := s.Subject
-	if subj == "null" {
+	if subj == null {
 		subj = ""
 	}
 

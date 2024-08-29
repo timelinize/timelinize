@@ -22,6 +22,7 @@ package geojson
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -54,6 +55,7 @@ func init() {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	// The ID of the owner entity. REQUIRED for linking entity in DB.
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
@@ -74,6 +76,7 @@ type Options struct {
 // FileImporter implements the timeline.FileImporter interface.
 type FileImporter struct{}
 
+// Recognize returns whether the file is supported.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	var totalCount, matchCount int
 
@@ -100,9 +103,8 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 
 			totalCount++
@@ -127,6 +129,7 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	return timeline.Recognition{Confidence: confidence}, nil
 }
 
+// FileImport conducts an import of the data from a file.
 func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 
@@ -147,9 +150,8 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 				// skip hidden files
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil // traverse into subdirectories
@@ -255,7 +257,7 @@ func (dec *decoder) NextLocation(ctx context.Context) (*googlelocation.Location,
 		// if we haven't gotten to the 'features' part of the structure yet, keep going
 		if !dec.foundFeatures {
 			t, err := dec.Token()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {
@@ -282,30 +284,30 @@ func (dec *decoder) NextLocation(ctx context.Context) (*googlelocation.Location,
 
 		dec.current = feature{} // reset it since I'm not sure if Decode writes the fields in-place or if it swaps out everything
 		if err := dec.Decode(&dec.current); err != nil {
-			return nil, fmt.Errorf("invalid GeoJSON feature: %v", err)
+			return nil, fmt.Errorf("invalid GeoJSON feature: %w", err)
 		}
 
 		// feature properties are basically arbitrary key-value pairs, but a few common
 		// ones exist, such as time, altitude, etc; we extract what we can
 		if err := dec.current.extractKnownProperties(); err != nil {
-			return nil, fmt.Errorf("reading well-known properties of geojson feature: %v", err)
+			return nil, fmt.Errorf("reading well-known properties of geojson feature: %w", err)
 		}
 
 		switch dec.current.Geometry.Type {
 		case "Point":
 			var coord position
 			if err := json.Unmarshal(dec.current.Geometry.Coordinates, &coord); err != nil {
-				return nil, fmt.Errorf("invalid Point coordinates: %v", err)
+				return nil, fmt.Errorf("invalid Point coordinates: %w", err)
 			}
 			return coord.location(dec.current, dec.lenient)
 		case "LineString", "MultiPoint":
 			if err := json.Unmarshal(dec.current.Geometry.Coordinates, &dec.positions); err != nil {
-				return nil, fmt.Errorf("invalid %s coordinates: %v", dec.current.Geometry.Type, err)
+				return nil, fmt.Errorf("invalid %s coordinates: %w", dec.current.Geometry.Type, err)
 			}
 		case "MultiLineString":
 			var manyPositions [][]position
 			if err := json.Unmarshal(dec.current.Geometry.Coordinates, &manyPositions); err != nil {
-				return nil, fmt.Errorf("invalid MultiLineString coordinates: %v", err)
+				return nil, fmt.Errorf("invalid MultiLineString coordinates: %w", err)
 			}
 			dec.positions = []position{}
 			for _, positions := range manyPositions {
@@ -500,7 +502,8 @@ func (f *feature) extractKnownProperties() error {
 type position []float64
 
 func (p position) location(feature feature, lenient bool) (*googlelocation.Location, error) {
-	if count := len(p); count < 2 {
+	const minDimensions = 2
+	if count := len(p); count < minDimensions {
 		return nil, fmt.Errorf("expected at least two values for coordinate, got %d: %+v", count, p)
 	}
 	latE7, err := googlelocation.FloatToIntE7(p[1])
@@ -518,7 +521,7 @@ func (p position) location(feature feature, lenient bool) (*googlelocation.Locat
 	// third element is timestamp and even a fourth element is altitude sometimes (!!)...
 	// that blatantly violates the spec, but we can maybe do some basic sanity checks to see
 	// if we can assume those values
-	if len(p) > 2 {
+	if len(p) > minDimensions {
 		if lenient {
 			// non-spec-compliant
 			var inferredAltitude float64
@@ -543,11 +546,9 @@ func (p position) location(feature feature, lenient bool) (*googlelocation.Locat
 			if ts.IsZero() && !inferredTimestamp.IsZero() {
 				ts = inferredTimestamp
 			}
-		} else {
+		} else if altitude == 0 {
 			// spec compliant; third element is optional but must be altitude in meters if present
-			if altitude == 0 {
-				altitude = p[2]
-			}
+			altitude = p[2]
 		}
 	}
 	return &googlelocation.Location{

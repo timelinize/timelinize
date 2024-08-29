@@ -38,17 +38,17 @@ type Account struct {
 	DataSource DataSource `json:"data_source"`
 
 	authorization []byte
-	t             *Timeline
+	tl            *Timeline
 }
 
-func (acc *Account) fill(t *Timeline) error {
+func (acc *Account) fill(tl *Timeline) error {
 	ds, ok := dataSources[acc.DataSource.Name]
 	if !ok {
 		return fmt.Errorf("inconsistent DB: unrecognized data source ID: %s", acc.DataSource.Name)
 	}
 	acc.DataSource = ds
 
-	acc.t = t
+	acc.tl = tl
 
 	return nil
 }
@@ -72,7 +72,7 @@ func (acc Account) NewHTTPClient(ctx context.Context, oauth2 OAuth2, rl RateLimi
 	if rl.RequestsPerHour > 0 {
 		httpClient.Transport = acc.NewRateLimitedRoundTripper(httpClient.Transport, rl)
 	}
-	httpClient.Timeout = 60 * time.Second
+	httpClient.Timeout = 60 * time.Second //nolint:mnd
 	return httpClient, nil
 }
 
@@ -80,11 +80,11 @@ func (acc Account) NewHTTPClient(ctx context.Context, oauth2 OAuth2, rl RateLimi
 // 	return acc.DataSource.ID + "/" + acc.User.UserID
 // }
 
-// TODO: update godoc
 // AddAccount adds a new account to the database. The account is with the
 // given data source and owner. The account must not yet exist. This method
 // does not attempt to authenticate with any API / hosted service.
-func (t *Timeline) AddAccount(ctx context.Context, dataSourceID string, dsOptJSON json.RawMessage) (Account, error) {
+// TODO: update godoc -- third arg is data source options as JSON
+func (tl *Timeline) AddAccount(ctx context.Context, dataSourceID string, _ json.RawMessage) (Account, error) {
 	// ds, ok := dataSources[dataSourceID]
 	// if !ok {
 	// 	return Account{}, fmt.Errorf("data source not registered: %s", dataSourceID)
@@ -104,32 +104,33 @@ func (t *Timeline) AddAccount(ctx context.Context, dataSourceID string, dsOptJSO
 	// 	}
 	// }
 
-	// // add person if doesn't already exist
-	// person, err := t.getOrMakePerson(ds.ID, owner)
+	// // add person if doesn'tl already exist
+	// person, err := tl.getOrMakePerson(ds.ID, owner)
 	// if err != nil {
 	// 	return Account{}, err
 	// }
 
 	// store the account
 	var accountID int64
-	t.dbMu.Lock()
-	err := t.db.QueryRow(`INSERT INTO accounts (data_source_id) VALUES (?) RETURNING id`,
+	tl.dbMu.Lock()
+	err := tl.db.QueryRow(`INSERT INTO accounts (data_source_id) VALUES (?) RETURNING id`,
 		dataSourceID).Scan(&accountID)
-	t.dbMu.Unlock()
+	tl.dbMu.Unlock()
 	if err != nil {
-		return Account{}, fmt.Errorf("inserting into DB: %v", err)
+		return Account{}, fmt.Errorf("inserting into DB: %w", err)
 	}
 
 	// load the new account so caller can get its info (like ID)
 	// TODO: should we just use context.Background() here? or pass in an actual context
-	acct, err := t.LoadAccount(ctx, accountID)
+	acct, err := tl.LoadAccount(ctx, accountID)
 	if err != nil {
-		return Account{}, fmt.Errorf("loading new account: %v", err)
+		return Account{}, fmt.Errorf("loading new account: %w", err)
 	}
 
 	return acct, nil
 }
 
+// AuthorizeOAuth2 performs OAuth2 authorization for the account and saves it to the DB.
 func (acc *Account) AuthorizeOAuth2(ctx context.Context, oauth2 OAuth2) error {
 	creds, err := authorizeWithOAuth2(ctx, oauth2)
 	if err != nil {
@@ -138,22 +139,23 @@ func (acc *Account) AuthorizeOAuth2(ctx context.Context, oauth2 OAuth2) error {
 	return acc.SaveAuthorization(ctx, creds)
 }
 
+// SaveAuthorization saves the credentials to the DB for this account.
 func (acc *Account) SaveAuthorization(ctx context.Context, credentials []byte) error {
-	acc.t.dbMu.Lock()
-	_, err := acc.t.db.ExecContext(ctx, `UPDATE accounts SET authorization=? WHERE id=?`, // TODO: LIMIT would be nice here
+	acc.tl.dbMu.Lock()
+	_, err := acc.tl.db.ExecContext(ctx, `UPDATE accounts SET authorization=? WHERE id=?`, // TODO: LIMIT would be nice here
 		credentials, acc.ID)
-	acc.t.dbMu.Unlock()
+	acc.tl.dbMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("updating credentials in account row: %v", err)
+		return fmt.Errorf("updating credentials in account row: %w", err)
 	}
 	return nil
 }
 
 // LoadAccount loads the account with the given ID from the database.
-func (t *Timeline) LoadAccount(ctx context.Context, id int64) (Account, error) {
+func (tl *Timeline) LoadAccount(ctx context.Context, id int64) (Account, error) {
 	var acc Account
-	t.dbMu.RLock()
-	err := t.db.QueryRowContext(ctx,
+	tl.dbMu.RLock()
+	err := tl.db.QueryRowContext(ctx,
 		`SELECT 
 			accounts.id, accounts.authorization,
 			data_sources.name
@@ -162,19 +164,19 @@ func (t *Timeline) LoadAccount(ctx context.Context, id int64) (Account, error) {
 			AND data_sources.id = accounts.data_source_id
 		LIMIT 1`,
 		id).Scan(&acc.ID, &acc.authorization, &acc.DataSource.Name)
-	t.dbMu.RUnlock()
+	tl.dbMu.RUnlock()
 	if err != nil {
-		return acc, fmt.Errorf("querying account %d from DB: %v", id, err)
+		return acc, fmt.Errorf("querying account %d from DB: %w", id, err)
 	}
-	if err := acc.fill(t); err != nil {
-		return acc, fmt.Errorf("filling account: %v", err)
+	if err := acc.fill(tl); err != nil {
+		return acc, fmt.Errorf("filling account: %w", err)
 	}
 	return acc, nil
 }
 
 // LoadAccounts loads all the accounts with the given IDs and/or data source(s). If the
 // slices are nil, all accounts will be loaded. If the slices are empty, no accounts will be.
-func (t *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account, error) {
+func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account, error) {
 	if (ids != nil && len(ids) == 0) ||
 		(dataSourceIDs != nil && len(dataSourceIDs) == 0) {
 		return []Account{}, nil
@@ -186,13 +188,13 @@ func (t *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account,
 		data_sources.name
 	FROM accounts, data_sources
 	WHERE data_sources.id = accounts.data_source_id`
-	var args []any
+	args := make([]any, 0, len(ids)+len(dataSourceIDs))
 	if len(ids) > 0 || len(dataSourceIDs) > 0 {
-		q += " AND ("
+		q += " AND (" //nolint:goconst
 	}
 	for i, id := range ids {
 		if i > 0 {
-			q += " OR "
+			q += " OR " //nolint:goconst
 		}
 		q += "accounts.id=?"
 		args = append(args, id)
@@ -211,13 +213,13 @@ func (t *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account,
 		q += ")"
 	}
 
-	t.dbMu.RLock()
-	defer t.dbMu.RUnlock()
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
 
 	accounts := []Account{}
-	rows, err := t.db.Query(q, args...)
+	rows, err := tl.db.Query(q, args...)
 	if err != nil {
-		return accounts, fmt.Errorf("querying accounts from DB: %v", err)
+		return accounts, fmt.Errorf("querying accounts from DB: %w", err)
 	}
 	defer rows.Close()
 
@@ -225,15 +227,15 @@ func (t *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account,
 		var acc Account
 		err := rows.Scan(&acc.ID, &acc.authorization, &acc.DataSource.Name)
 		if err != nil {
-			return accounts, fmt.Errorf("scanning row: %v", err)
+			return accounts, fmt.Errorf("scanning row: %w", err)
 		}
-		if err := acc.fill(t); err != nil {
+		if err := acc.fill(tl); err != nil {
 			return accounts, err
 		}
 		accounts = append(accounts, acc)
 	}
 	if err = rows.Err(); err != nil {
-		return accounts, fmt.Errorf("scanning account rows: %v", err)
+		return accounts, fmt.Errorf("scanning account rows: %w", err)
 	}
 
 	return accounts, nil

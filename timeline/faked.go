@@ -33,6 +33,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// PopulateWithFakeData adds a bunch of fake data to the timeline.
 func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 	// if timeline is new, generate person ID 1 (as simulated timeline owner)
 	if tl.Empty() {
@@ -62,51 +63,53 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("storing person ID 1: %v", err)
+			return fmt.Errorf("storing person ID 1: %w", err)
 		}
 	}
 
 	// generate corpus of people in this pretend person's life circle
 	numPeople := gofakeit.Number(10, 500)
 	people := make([]Entity, 0, numPeople)
-	for i := 0; i < numPeople; i++ {
+	for range numPeople {
 		ent := Entity{
 			Name: gofakeit.Name(),
 		}
 
 		// add data to entity based on randomness
-		rnd := weakrand.Int()
+		rnd := weakrand.Int() //nolint:gosec
 
-		if rnd%10 > 2 {
+		const (
+			emailProbability       = 2
+			phoneProbability       = 5
+			pictureProbability     = 7
+			secondPhoneProbability = 3
+			secondEmailProbability = 10
+		)
+
+		if rnd%10 > emailProbability {
 			ent.Attributes = append(ent.Attributes, Attribute{
 				Name:  AttributeEmail,
 				Value: gofakeit.Email(),
 			})
 		}
-		if rnd%10 > 5 {
+		if rnd%10 > phoneProbability {
 			ent.Attributes = append(ent.Attributes, Attribute{
 				Name:  AttributePhoneNumber,
 				Value: gofakeit.Phone(),
 			})
 		}
-		if rnd%10 > 7 {
-			ent.Attributes = append(ent.Attributes, Attribute{
-				Name:  AttributePhoneNumber,
-				Value: gofakeit.Phone(),
-			})
-		}
-		if rnd&10 > 7 {
+		if rnd&10 > pictureProbability {
 			ent.NewPicture = ByteData(gofakeit.ImageJpeg(512, 512))
 		}
 
 		// less often, add a second email or phone number (TODO: useful?)
-		if rnd%100 < 10 {
+		if rnd%100 > secondEmailProbability {
 			ent.Attributes = append(ent.Attributes, Attribute{
 				Name:  AttributeEmail,
 				Value: gofakeit.Email(),
 			})
 		}
-		if rnd%100 < 3 {
+		if rnd%100 > secondPhoneProbability {
 			ent.Attributes = append(ent.Attributes, Attribute{
 				Name:  AttributePhoneNumber,
 				Value: gofakeit.Phone(),
@@ -144,7 +147,7 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 		}
 		impRow, err := tl.newImport(ctx, importParams.DataSourceName, mode, ProcessingOptions{}, importParams.AccountID)
 		if err != nil {
-			return fmt.Errorf("creating new import row: %v", err)
+			return fmt.Errorf("creating new import row: %w", err)
 		}
 
 		logger := Log.Named("faker").With(zap.String("data_source", ds.Name))
@@ -167,7 +170,7 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 		}
 
 		if err = proc.doImport(ctx); err != nil {
-			return fmt.Errorf("processor of fake data failed: %v", err)
+			return fmt.Errorf("processor of fake data failed: %w", err)
 		}
 	}
 
@@ -183,7 +186,7 @@ func (fakeDataSource) Recognize(_ context.Context, _ []string) (Recognition, err
 	return Recognition{}, nil
 }
 
-func (fake *fakeDataSource) FileImport(ctx context.Context, _ []string, itemChan chan<- *Graph, opt ListingOptions) error {
+func (fake *fakeDataSource) FileImport(_ context.Context, _ []string, itemChan chan<- *Graph, _ ListingOptions) error {
 	var class Classification
 	switch fake.realDS.Name {
 	case "smsbackuprestore":
@@ -198,12 +201,12 @@ func (fake *fakeDataSource) FileImport(ctx context.Context, _ []string, itemChan
 
 	switch fake.realDS.Name {
 	case "contactlist", "vcard":
-		for i := 0; i < len(fake.peopleCorpus); i++ {
+		for i := range len(fake.peopleCorpus) {
 			itemChan <- &Graph{Entity: &fake.peopleCorpus[i]}
 		}
 
 	case "google_photos":
-		for i := 0; i < gofakeit.Number(100, 10000); i++ {
+		for range gofakeit.Number(100, 10000) {
 			filename := gofakeit.Numerify("IMG_####_#####.jpg")
 			itemChan <- &Graph{
 				Item: &Item{
@@ -216,7 +219,7 @@ func (fake *fakeDataSource) FileImport(ctx context.Context, _ []string, itemChan
 					Owner: Entity{ID: 1},
 					Content: ItemData{
 						Filename:  filename,
-						MediaType: "image/jpeg",
+						MediaType: imageJpeg,
 						Data:      ByteData(gofakeit.ImageJpeg(1024, 1024)),
 					},
 					// TODO: metadata, location...
@@ -226,13 +229,12 @@ func (fake *fakeDataSource) FileImport(ctx context.Context, _ []string, itemChan
 		}
 
 	case "smsbackuprestore":
-		for i := 0; i < gofakeit.Number(100, 10000); i++ {
-
-			owner := fake.peopleCorpus[weakrand.Intn(len(fake.peopleCorpus))]
+		for range gofakeit.Number(100, 10000) {
+			owner := fake.peopleCorpus[weakrand.Intn(len(fake.peopleCorpus))] //nolint:gosec
 			owner = onlyKeepAttribute(owner, AttributePhoneNumber)
 
-			numSentences := weakrand.Intn(5)
-			sentLen := weakrand.Intn(10) + 2
+			numSentences := weakrand.Intn(5) //nolint:gosec
+			sentLen := weakrand.Intn(10) + 2 //nolint:gosec
 
 			// TODO: MMS, attachments, sent to...
 			itemChan <- &Graph{
@@ -280,19 +282,21 @@ func onlyKeepAttribute(ent Entity, keepAttrName string) Entity {
 	return ent
 }
 
+// Anonymize obfuscates the results.
 func (sr *SearchResults) Anonymize(opts ObfuscationOptions) {
 	for _, item := range sr.Items {
 		item.Anonymize(opts)
 	}
 }
 
-func (re *relatedEntity) Anonymize(opts ObfuscationOptions) {
+// Anonymize obfuscates the entity.
+func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
 	if re == nil || re.ID == nil {
 		return
 	}
 
 	// using the entity's ID as seed ensures consistency of faked data for this entity
-	src := weakrand.New(weakrand.NewSource(*re.ID))
+	src := weakrand.New(weakrand.NewSource(*re.ID)) //nolint:gosec
 	faker := gofakeit.NewCustom(src)
 
 	if re.Name != nil {
@@ -316,6 +320,7 @@ func (re *relatedEntity) Anonymize(opts ObfuscationOptions) {
 	}
 }
 
+// Anonymize obfuscates the result.
 func (sr *SearchResult) Anonymize(opts ObfuscationOptions) {
 	if sr == nil {
 		return
@@ -332,13 +337,14 @@ func (sr *SearchResult) Anonymize(opts ObfuscationOptions) {
 	}
 }
 
+// Anonymize obfuscates the entity.
 func (e *Entity) Anonymize() {
 	if e == nil {
 		return
 	}
 
 	// using the entity's ID as seed ensures consistency of faked data for this entity
-	src := weakrand.New(weakrand.NewSource(e.ID))
+	src := weakrand.New(weakrand.NewSource(e.ID)) //nolint:gosec
 	faker := gofakeit.NewCustom(src)
 
 	if e.Name != "" {
@@ -377,6 +383,7 @@ func (e *Entity) Anonymize() {
 	}
 }
 
+// Anonymize obfuscates the item.
 func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 	if ir == nil {
 		return
@@ -448,7 +455,7 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 					meta[key] = faker.Bool()
 				}
 			}
-			ir.Metadata, _ = json.Marshal(meta)
+			ir.Metadata, _ = json.Marshal(meta) //nolint:errchkjson
 		}
 	}
 }
@@ -458,27 +465,29 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 // For non-ASCII, it's just randomly shifted.
 func randRune(ch rune) rune {
 	if ch >= '0' && ch <= '9' {
-		return rune(weakrand.Intn('9'-'0') + '0')
+		return rune(weakrand.Intn('9'-'0') + '0') //nolint:gosec
 	}
 	if ch >= 'a' && ch <= 'z' {
-		return rune(weakrand.Intn('z'-'a') + 'a')
+		return rune(weakrand.Intn('z'-'a') + 'a') //nolint:gosec
 	}
 	if ch >= 'A' && ch <= 'Z' {
-		return rune(weakrand.Intn('Z'-'A') + 'A')
+		return rune(weakrand.Intn('Z'-'A') + 'A') //nolint:gosec
 	}
 	if ch > 127 {
 		// ¯\_(ツ)_/¯
-		ch += rune(weakrand.Intn(20) - 10)
+		ch += rune(weakrand.Intn(20) - 10) //nolint:gosec
 	}
 	return ch
 }
 
+// ObfuscationOptions controls how obfuscation is performed.
 // TODO: Finish implementing these
 type ObfuscationOptions struct {
 	Locations []LocationObfuscation
 	Logger    *zap.Logger
 }
 
+// LocationObfuscation describes how to obfuscate a coordinate.
 type LocationObfuscation struct {
 	Latitude, Longitude float64
 	RadiusMeters        int

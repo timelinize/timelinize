@@ -42,7 +42,7 @@ func parseAccept(accept string) (acceptHeader, error) {
 		if cut {
 			weight, err := strconv.ParseFloat(qPart, 32)
 			if err != nil {
-				return nil, fmt.Errorf("bad q value '%s': %v", qPart, err)
+				return nil, fmt.Errorf("bad q value '%s': %w", qPart, err)
 			}
 			pair.weight = float32(weight)
 		}

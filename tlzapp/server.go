@@ -166,7 +166,7 @@ func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var err error
 	defer func() {
 		logFn := s.log.Info
-		if err != nil || rec.Status() >= 400 {
+		if err != nil || rec.Status() >= lowestErrorStatus {
 			logFn = s.log.Error
 		}
 
@@ -205,13 +205,14 @@ func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) fillAllowedHosts(listenAddr string) {
-	var allowed []string
-	_, port, _ := net.SplitHostPort(listenAddr)
-	for _, host := range []string{
+	loopbacks := []string{
 		"localhost",
 		"127.0.0.1",
 		"::1",
-	} {
+	}
+	allowed := make([]string, 0, len(loopbacks))
+	_, port, _ := net.SplitHostPort(listenAddr)
+	for _, host := range loopbacks {
 		// clients generally omit port if standard, so only expect port if non-standard
 		if port != "80" && port != "443" {
 			host = net.JoinHostPort(host, port)
@@ -222,13 +223,14 @@ func (s *server) fillAllowedHosts(listenAddr string) {
 }
 
 func (s *server) fillAllowedOrigins(listenAddr string) {
-	var allowed []string
-	_, port, _ := net.SplitHostPort(listenAddr)
-	for _, origin := range []string{
+	loopbacks := []string{
 		"http://localhost",
 		"http://127.0.0.1",
 		"http://[::1]",
-	} {
+	}
+	allowed := make([]string, 0, len(loopbacks))
+	_, port, _ := net.SplitHostPort(listenAddr)
+	for _, origin := range loopbacks {
 		// clients generally omit port if standard, so only expect port if non-standard
 		if port != "80" && port != "443" {
 			origin += ":" + port

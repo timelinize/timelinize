@@ -22,6 +22,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -225,7 +226,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 			}
 			err := rows.Scan(targets...)
 			if err != nil {
-				rows.Close()
+				defer rows.Close()
 				return SearchResults{}, err
 			}
 
@@ -327,14 +328,15 @@ func (tl *Timeline) convertNamesToIDs(params *ItemSearchParams) {
 
 func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, error) {
 	if (params.Latitude == nil && params.Longitude != nil) || (params.Latitude != nil && params.Longitude == nil) {
-		return "", nil, fmt.Errorf("location proximity search must include both lat and lon coordinates")
+		return "", nil, errors.New("location proximity search must include both lat and lon coordinates")
 	}
 	if params.Timestamp != nil && (params.Latitude != nil || params.Longitude != nil) {
-		return "", nil, fmt.Errorf("time proximity and location proximity are mutually exclusive")
+		return "", nil, errors.New("time proximity and location proximity are mutually exclusive")
 	}
-	if params.Related > 2 {
+	const maxDegreesOfSeparation = 2
+	if params.Related > maxDegreesOfSeparation {
 		// arbitrary, but I suspect it's a good idea to limit this for performance reasons
-		return "", nil, fmt.Errorf("max degrees of separation for relationships is 2")
+		return "", nil, errors.New("max degrees of separation for relationships is 2")
 	}
 
 	tl.convertNamesToIDs(&params)
@@ -627,21 +629,25 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		}
 		// location proximity search is only an approximation for simplicity
 		// see https://stackoverflow.com/a/39298241/1048862
-		if params.Latitude != nil && params.Longitude != nil {
+		switch {
+		case params.Latitude != nil && params.Longitude != nil:
 			// nearest to location; account for shortened distances at poles
 			// math.Cos() takes radians, hence the conversion to radians inside the cosine
-			cosLat2 := math.Pow(math.Cos(*params.Latitude*math.Pi/180.0), 2)
-			sortDir = string(SortAsc) // always sort ascending for nearest
+			cosLat2 := math.Pow(math.Cos(*params.Latitude*math.Pi/180.0), 2) //nolint:mnd
+			sortDir = string(SortAsc)                                        // always sort ascending for nearest
 			q += "((?-items.latitude) * (?-items.latitude)) + ((?-items.longitude) * (?-items.longitude) * ?), items.id " + sortDir
 			args = append(args, params.Latitude, params.Latitude, params.Longitude, params.Longitude, cosLat2)
-		} else if params.Timestamp != nil {
+
+		case params.Timestamp != nil:
 			// nearest to timestamp
 			sortDir = string(SortAsc) // always sort ascending for nearest
 			q += "abs(?-items.timestamp), items.id " + sortDir
 			args = append(args, params.Timestamp.UnixMilli())
-		} else if params.OrderBy == "stored" {
+
+		case params.OrderBy == "stored":
 			q += "items.stored " + sortDir
-		} else {
+
+		default:
 			// generic sort, which is timestamp and row ID
 			// q += fmt.Sprintf(" ORDER BY items.timestamp %s, items.id %s", sortDir, sortDir)
 			q += fmt.Sprintf("items.timestamp %s, items.id %s", sortDir, sortDir)

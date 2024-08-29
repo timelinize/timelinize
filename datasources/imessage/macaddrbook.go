@@ -71,13 +71,13 @@ func (fimp *FileImporter) processContacts(ctx context.Context, itemChan chan<- *
 	return nil
 }
 
-func (*FileImporter) processAddressBook(ctx context.Context, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions, bookPath string) error {
+func (*FileImporter) processAddressBook(ctx context.Context, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions, bookPath string) error {
 	db, err := sql.Open("sqlite3", bookPath+"?mode=ro")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("opening AddressBook DB at %s: %v", bookPath, err)
+		return fmt.Errorf("opening AddressBook DB at %s: %w", bookPath, err)
 	}
 	defer db.Close()
 
@@ -111,7 +111,7 @@ func (*FileImporter) processAddressBook(ctx context.Context, itemChan chan<- *ti
 			&phone, &email, &webpage,
 			&addr.street, &addr.city, &addr.sublocal, &addr.state, &addr.country, &addr.countryCode, &addr.zip)
 		if err != nil {
-			return fmt.Errorf("scanning contact row: %v", err)
+			return fmt.Errorf("scanning contact row: %w", err)
 		}
 
 		// if this row is a new record (contact), process the previous one we filled in and replace current
@@ -136,7 +136,7 @@ func (*FileImporter) processAddressBook(ctx context.Context, itemChan chan<- *ti
 		}
 	}
 	if err = rows.Err(); err != nil {
-		return fmt.Errorf("scanning rows: %v", err)
+		return fmt.Errorf("scanning rows: %w", err)
 	}
 
 	// make sure to save the last contact we were filling in

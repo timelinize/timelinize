@@ -49,6 +49,7 @@ func init() {
 	}
 }
 
+// Options configures the data source.
 type Options struct {
 	// We will attempt to extract timestamps for each media item in this order:
 	// embedded (EXIF/XMP), filepath (if enabled), and as a last resort, file
@@ -82,6 +83,7 @@ type Options struct {
 // FileImporter can import the data from a file.
 type FileImporter struct{}
 
+// Recognize returns whether the file or folder is recognized.
 func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
 	var totalCount, matchCount int
 
@@ -134,9 +136,8 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 				// skip hidden files; they are cruft
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil // traverse into subdirectories
@@ -194,9 +195,9 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 	// }
 	// return true, nil
 	// // }
-
 }
 
+// FileImport imports data from the file or folder.
 func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 
@@ -213,7 +214,8 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 
 		// processing files in parallel can greatly speed up imports,
 		// but use a throttle to avoid unbounded goroutines
-		throttle := make(chan struct{}, 100)
+		const maxGoroutines = 100
+		throttle := make(chan struct{}, maxGoroutines)
 		var wg sync.WaitGroup
 
 		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
@@ -224,9 +226,8 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 				// skip hidden files; they are cruft
 				if d.IsDir() {
 					return fs.SkipDir
-				} else {
-					return nil
 				}
+				return nil
 			}
 			if d.IsDir() {
 				return nil
@@ -437,7 +438,6 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 		wg.Wait()
 
 		// TODO: process the collections too (we still need to upgrade this logic after the schema rewrite)
-
 	}
 
 	return nil
@@ -537,9 +537,11 @@ var (
 )
 
 var (
+	// RelMotionPhoto describes a motion photo (live photo/picture, moving picture, etc.) relation.
 	// "<to> is a motion photo (aka 'live photo' or video) of <from>"
 	RelMotionPhoto = timeline.Relation{Label: "motion", Directed: true, Subordinating: true}
 
+	// RelCoverArt describes a relation for cover art.
 	// "<to> is the album art for <from>"
 	RelCoverArt = timeline.Relation{Label: "cover_art", Directed: true}
 )

@@ -58,7 +58,7 @@ func (s server) serveFrontend(w http.ResponseWriter, r *http.Request) error {
 
 	// shouldBuf determines whether to execute templates on this response,
 	// since generally we will not want to execute for images or CSS, etc.
-	shouldBuf := func(status int, header http.Header) bool {
+	shouldBuf := func(_ int, header http.Header) bool {
 		ct := header.Get("Content-Type")
 		for _, mt := range []string{
 			"text/html",
@@ -103,8 +103,9 @@ func (s server) serveFrontend(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error {
-	parts := strings.SplitN(r.URL.Path, "/", 6)
-	if len(parts) < 5 {
+	const minParts, maxParts = 5, 6
+	parts := strings.SplitN(r.URL.Path, "/", maxParts)
+	if len(parts) < minParts {
 		return Error{
 			Err:        errors.New("insufficient path"),
 			HTTPStatus: http.StatusBadRequest,
@@ -308,7 +309,7 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 				thumbPath = tl.FullPath(r.FormValue("data_file"))
 			} else {
 				// TODO: if the file is small enough, try just serving it directly as a last resort
-				return fmt.Errorf("could not generate thumbnail: %v", err)
+				return fmt.Errorf("could not generate thumbnail: %w", err)
 			}
 		}
 
@@ -321,7 +322,7 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 		// may never be generated; we need to be able to generate them on-the-fly if they are missing
 	}
 	if err != nil {
-		return fmt.Errorf("opening thumbnail file: %v", err)
+		return fmt.Errorf("opening thumbnail file: %w", err)
 	}
 	if obfuscate() && thumbType == timeline.VideoThumbnail {
 		f.Close()
@@ -420,7 +421,7 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 		// requiring seeking :( so we create a temporary file instead
 		tempInput, err := os.CreateTemp("", "timelinize_vidconvert_input_*.mp4")
 		if err != nil {
-			return fmt.Errorf("creating temporary input file: %v", err)
+			return fmt.Errorf("creating temporary input file: %w", err)
 		}
 		inputFile = tempInput.Name()
 		defer os.Remove(inputFile)
@@ -429,7 +430,7 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 		_, err = tempInput.Write(videoBytes)
 		tempInput.Close()
 		if err != nil {
-			return fmt.Errorf("writing to temporary input file: %v", err)
+			return fmt.Errorf("writing to temporary input file: %w", err)
 		}
 	}
 
@@ -518,16 +519,19 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 	}
 
 	var content io.ReadSeeker
-	if itemRow.DataText != nil {
+	switch {
+	case itemRow.DataText != nil:
 		content = bytes.NewReader([]byte(*itemRow.DataText))
-	} else if itemRow.DataFile != nil {
+
+	case itemRow.DataFile != nil:
 		f, err := os.Open(tl.FullPath(*itemRow.DataFile))
 		if err != nil {
 			return err
 		}
 		defer f.Close()
 		content = f
-	} else if itemRow.Latitude != nil || itemRow.Longitude != nil || itemRow.Altitude != nil {
+
+	case itemRow.Latitude != nil || itemRow.Longitude != nil || itemRow.Altitude != nil:
 		type geometry struct {
 			Type        string     `json:"type"`
 			Coordinates []*float64 `json:"coordinates"`
@@ -600,7 +604,7 @@ func (s server) transcodeVideo(w http.ResponseWriter, inputVideoFilePath string)
 	w.Header().Set("Content-Type", format)
 
 	if err := s.app.Transcode(inputVideoFilePath, nil, format, w, obfuscate()); err != nil {
-		return fmt.Errorf("video transcode error: %#v", err)
+		return fmt.Errorf("video transcode error: %#w", err)
 	}
 
 	return nil
@@ -660,7 +664,7 @@ func tplFuncIntIter(n int) []struct{} {
 // and renders it in place. Note that included files are NOT escaped, so you
 // should only include trusted files. If it is not trusted, be sure to use
 // escaping functions in your template.
-func tplFuncInclude(filename string, args ...any) (string, error) {
+func tplFuncInclude(filename string) (string, error) {
 	bodyBuf := bufPool.Get().(*bytes.Buffer)
 	bodyBuf.Reset()
 	defer bufPool.Put(bodyBuf)
@@ -680,7 +684,7 @@ func tplFuncInclude(filename string, args ...any) (string, error) {
 
 func readFileToBuffer(root http.FileSystem, filename string, bodyBuf *bytes.Buffer) error {
 	if root == nil {
-		return fmt.Errorf("root file system not specified")
+		return errors.New("root file system not specified")
 	}
 
 	file, err := root.Open(filename)

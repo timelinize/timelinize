@@ -60,6 +60,7 @@ type DataSource struct {
 	// NewIdentity func(input Person, dataSourceOptions any) (Person, error) `json:"-"`
 }
 
+// UnmarshalOptions unmarshals the data source options into the data source's options type.
 func (ds DataSource) UnmarshalOptions(jsonOpt json.RawMessage) (any, error) {
 	if ds.NewOptions == nil {
 		return nil, nil
@@ -92,10 +93,10 @@ func (ds DataSource) UnmarshalOptions(jsonOpt json.RawMessage) (any, error) {
 // RegisterDataSource registers ds as a data source.
 func RegisterDataSource(ds DataSource) error {
 	if ds.Name == "" {
-		return fmt.Errorf("missing ID")
+		return errors.New("missing ID")
 	}
 	if ds.Title == "" {
-		return fmt.Errorf("missing title")
+		return errors.New("missing title")
 	}
 
 	// register the data source
@@ -144,12 +145,13 @@ func DataSourcesRecognize(ctx context.Context, filenames []string, timeout time.
 	}
 
 	var results []RecognizeResult
-	for _, ds := range dataSources {
+
+	tryDataSource := func(ds DataSource) error {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
 		if ds.NewFileImporter == nil {
-			continue
+			return nil
 		}
 		if timeout > 0 {
 			var cancel context.CancelFunc
@@ -159,13 +161,20 @@ func DataSourcesRecognize(ctx context.Context, filenames []string, timeout time.
 		result, err := ds.NewFileImporter().Recognize(ctx, filenames)
 		if errors.Is(err, context.DeadlineExceeded) {
 			// if this one data source took too long, don't skip remaining...
-			continue
+			return nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", ds.Name, err)
+			return fmt.Errorf("%s: %w", ds.Name, err)
 		}
 		if result.Confidence > 0 {
 			results = append(results, RecognizeResult{ds, result})
+		}
+		return nil
+	}
+
+	for _, ds := range dataSources {
+		if err := tryDataSource(ds); err != nil {
+			return nil, err
 		}
 	}
 
@@ -283,6 +292,7 @@ type Timeframe struct {
 	UntilItemID *string `json:"until_item_id,omitempty"`
 }
 
+// IsEmpty returns true if the timeframe is not set in any way.
 func (tf Timeframe) IsEmpty() bool {
 	return tf.Since == nil && tf.Until == nil && tf.SinceItemID == nil && tf.UntilItemID == nil
 }
@@ -339,14 +349,16 @@ func (tf Timeframe) ContainsItem(it *Item, strict bool) bool {
 	return afterSince && beforeUntil
 }
 
+// FileImporter is a type that can import data from files or folders.
 type FileImporter interface {
 	Recognize(ctx context.Context, filenames []string) (Recognition, error)
 	FileImport(ctx context.Context, filenames []string, itemChan chan<- *Graph, opt ListingOptions) error
 }
 
+// APIImporter is a type that can import data via a remote service API.
 type APIImporter interface {
 	Authenticate(ctx context.Context, acc Account, dsOpt any) error
-	APIImport(context.Context, Account, chan<- *Graph, ListingOptions) error
+	APIImport(ctx context.Context, acc Account, itemChan chan<- *Graph, opt ListingOptions) error
 }
 
 // Recognition is a type that indicates how well, if at all, an importer

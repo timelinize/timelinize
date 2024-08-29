@@ -20,6 +20,7 @@ package tlzapp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,11 +37,11 @@ import (
 // inputStream can only be used on video files that can be streamed (MP4, for example, requires seeking and cannot be streamed in).
 func (a *App) Transcode(inputPath string, inputStream io.Reader, contentType string, output io.Writer, blur bool) error {
 	if inputPath != "" && inputStream != nil {
-		return fmt.Errorf("cannot specify both an input path and an input stream")
+		return errors.New("cannot specify both an input path and an input stream")
 	}
 
-	if ffmpegCheck != nil {
-		return fmt.Errorf("transcoding unavailable: %v", ffmpegCheck)
+	if errFfmpegInstalled != nil {
+		return fmt.Errorf("transcoding unavailable: %w", errFfmpegInstalled)
 	}
 
 	// some Pixel/Google motion photos have multiple video streams where stream index 1 (second stream) is higher resolution,
@@ -119,13 +120,13 @@ func (a *App) Transcode(inputPath string, inputStream io.Reader, contentType str
 
 	n, err := io.Copy(output, stdout)
 	if err != nil {
-		return fmt.Errorf("copy error: %v", err)
+		return fmt.Errorf("copy error: %w", err)
 	}
 
 	a.log.Debug("finished streaming transcoded video", zap.Int64("bytes", n))
 
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("waiting: %v", err)
+		return fmt.Errorf("waiting: %w", err)
 	}
 
 	a.log.Debug("ffmpeg command completed", zap.Int("pid", cmd.Process.Pid))
@@ -157,7 +158,7 @@ func determineVideoStream(inputPath string) (string, error) {
 
 	var result ffprobeJSONOutput
 	if err := json.NewDecoder(stdout).Decode(&result); err != nil {
-		return "", fmt.Errorf("%s: failed to probe video input for transcoding: %v", inputPath, err)
+		return "", fmt.Errorf("%s: failed to probe video input for transcoding: %w", inputPath, err)
 	}
 
 	if err := probe.Wait(); err != nil {
@@ -217,7 +218,7 @@ type ffprobeJSONOutput struct {
 		TimeBase           string `json:"time_base"`
 		StartPts           int    `json:"start_pts"`
 		StartTime          string `json:"start_time"`
-		DurationTs         int    `json:"duration_ts"`
+		DurationTS         int    `json:"duration_ts"`
 		Duration           string `json:"duration"`
 		BitRate            string `json:"bit_rate"`
 		NbFrames           string `json:"nb_frames"` // number of frames
@@ -251,12 +252,12 @@ type ffprobeJSONOutput struct {
 	} `json:"streams"`
 }
 
-var ffmpegCheck = func() error {
+var errFfmpegInstalled = func() error {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		return fmt.Errorf("ffmpeg not found in PATH: %v", err)
+		return fmt.Errorf("ffmpeg not found in PATH: %w", err)
 	}
 	if _, err := exec.LookPath("ffprobe"); err != nil {
-		return fmt.Errorf("ffprobe not found in PATH: %v", err)
+		return fmt.Errorf("ffprobe not found in PATH: %w", err)
 	}
 	return nil
 }()

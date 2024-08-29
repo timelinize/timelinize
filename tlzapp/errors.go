@@ -77,8 +77,8 @@ func httpStatusfromOSErr(err error, defaultStatus int) int {
 }
 
 func handleError(w http.ResponseWriter, r *http.Request, err error) {
-	errVal, ok := err.(Error)
-	if !ok {
+	var errVal Error
+	if !errors.As(err, &errVal) {
 		errVal = Error{
 			Err: err,
 			Log: "error was not well-structured",
@@ -132,15 +132,16 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(jsonBytes)))
 	status := errVal.HTTPStatus
-	if status < 400 {
+	if status < lowestErrorStatus {
 		status = http.StatusInternalServerError
 	}
 	w.WriteHeader(status)
-	w.Write(jsonBytes)
+	_, _ = w.Write(jsonBytes)
 }
 
 func newErrorID() string {
-	return randString(8, true)
+	const idLen = 8
+	return randString(idLen, true)
 }
 
 // randString returns a string of n random characters.
@@ -158,7 +159,7 @@ func randString(n int, lowerCase bool) string {
 	}
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = dict[mathrand.Int63()%int64(len(dict))]
+		b[i] = dict[mathrand.Int63()%int64(len(dict))] //nolint:gosec
 	}
 	return string(b)
 }

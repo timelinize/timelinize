@@ -34,11 +34,12 @@ type RateLimit struct {
 
 // NewRateLimitedRoundTripper adds rate limiting to rt based on the rate limiting policy.
 func (acc Account) NewRateLimitedRoundTripper(rt http.RoundTripper, rl RateLimit) http.RoundTripper {
-	rl, ok := acc.t.rateLimiters[acc.ID]
+	rl, ok := acc.tl.rateLimiters[acc.ID]
 
 	if !ok && rl.RequestsPerHour > 0 {
-		secondsBetweenReqs := 60.0 / (float64(rl.RequestsPerHour) / 60.0)
-		millisBetweenReqs := secondsBetweenReqs * 1000.0
+		const minutesPerHour, secondsPerMinute, millisPerSec = 60.0, 60.0, 1000.0
+		secondsBetweenReqs := minutesPerHour / (float64(rl.RequestsPerHour) / secondsPerMinute)
+		millisBetweenReqs := secondsBetweenReqs * millisPerSec
 		reqInterval := time.Duration(millisBetweenReqs) * time.Millisecond
 		if reqInterval < minInterval {
 			reqInterval = minInterval
@@ -47,7 +48,7 @@ func (acc Account) NewRateLimitedRoundTripper(rt http.RoundTripper, rl RateLimit
 		rl.ticker = time.NewTicker(reqInterval)
 		rl.token = make(chan struct{}, rl.BurstSize)
 
-		for i := 0; i < cap(rl.token); i++ {
+		for range cap(rl.token) {
 			rl.token <- struct{}{}
 		}
 		go func() {
@@ -56,7 +57,7 @@ func (acc Account) NewRateLimitedRoundTripper(rt http.RoundTripper, rl RateLimit
 			}
 		}()
 
-		acc.t.rateLimiters[acc.ID] = rl
+		acc.tl.rateLimiters[acc.ID] = rl
 	}
 
 	return rateLimitedRoundTripper{

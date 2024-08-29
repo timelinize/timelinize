@@ -198,12 +198,12 @@ func (m MMS) metadata() timeline.Metadata {
 	}
 
 	sub := m.Sub
-	if sub == "null" || sub == "-1" {
+	if sub == null || sub == neg1 {
 		sub = ""
 	}
 
 	creator := m.Creator
-	if creator == "null" || creator == "-1" {
+	if creator == null || creator == neg1 {
 		creator = ""
 	}
 
@@ -214,6 +214,11 @@ func (m MMS) metadata() timeline.Metadata {
 		"Creator": creator,
 	}
 }
+
+const (
+	null = "null"
+	neg1 = "-1"
+)
 
 // Parts is the parts of an MMS.
 type Parts struct {
