@@ -117,12 +117,18 @@ func (a Archive) FileImport(ctx context.Context, filenames []string, itemChan ch
 		}
 
 		// uncategorized photos
-		if err := a.processUncategorizedPhotos(ctx, fsys, itemChan, opt); err != nil {
+		if err := a.processPhotosOrVideos(ctx, fsys, itemChan, opt, []string{
+			pre2024YourUncategorizedPhotosPath,
+			year2024YourUncategorizedPhotosPath,
+		}, fbYourUncategorizedPhotos{}); err != nil {
 			return fmt.Errorf("processing uncategorized photos: %w", err)
 		}
 
 		// (uncategorized) videos
-		if err := a.processVideos(ctx, fsys, itemChan, opt); err != nil {
+		if err := a.processPhotosOrVideos(ctx, fsys, itemChan, opt, []string{
+			pre2024YourVideosPath,
+			year2024YourVideosPath,
+		}, fbYourVideos{}); err != nil {
 			return fmt.Errorf("processing videos: %w", err)
 		}
 
@@ -136,58 +142,38 @@ func (a Archive) FileImport(ctx context.Context, filenames []string, itemChan ch
 	return nil
 }
 
-func (a Archive) processUncategorizedPhotos(ctx context.Context, fsys fs.FS,
-	itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	file, err := fsys.Open(pre2024YourUncategorizedPhotosPath)
+func (a Archive) processPhotosOrVideos(ctx context.Context, fsys fs.FS, itemChan chan<- *timeline.Graph,
+	opt timeline.ListingOptions, pathsToTry []string, unmarshalInto any) error {
+	const archiveVersionsSupported = 2
+
+	if len(pathsToTry) != archiveVersionsSupported {
+		return fmt.Errorf("should have %d paths to try, since we support %d archive versions; got %d",
+			archiveVersionsSupported, archiveVersionsSupported, len(pathsToTry))
+	}
+
+	file, err := fsys.Open(pathsToTry[0])
 	if errors.Is(err, fs.ErrNotExist) {
 		// try newer archive version
-		file, err = fsys.Open(year2024YourUncategorizedPhotosPath)
+		file, err = fsys.Open(pathsToTry[1])
 	}
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	var uncatMedia fbYourUncategorizedPhotos
-	if err := json.NewDecoder(file).Decode(&uncatMedia); err != nil {
+	if err := json.NewDecoder(file).Decode(&unmarshalInto); err != nil {
 		return err
 	}
 
-	for _, media := range uncatMedia.OtherPhotosV2 {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		item := &timeline.Item{
-			Owner: a.owner,
-		}
-
-		media.fillItem(item, fsys, "", opt.Log)
-
-		itemChan <- &timeline.Graph{Item: item}
+	var medias []fbArchiveMedia
+	switch v := unmarshalInto.(type) {
+	case fbYourUncategorizedPhotos:
+		medias = v.OtherPhotosV2
+	case fbYourVideos:
+		medias = v.VideosV2
 	}
 
-	return nil
-}
-
-func (a Archive) processVideos(ctx context.Context, fsys fs.FS,
-	itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	file, err := fsys.Open(pre2024YourVideosPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		// try newer archive version
-		file, err = fsys.Open(year2024YourVideosPath)
-	}
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	var uncatMedia fbYourVideos
-	if err := json.NewDecoder(file).Decode(&uncatMedia); err != nil {
-		return err
-	}
-
-	for _, media := range uncatMedia.VideosV2 {
+	for _, media := range medias {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

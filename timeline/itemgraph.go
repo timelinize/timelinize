@@ -378,25 +378,25 @@ func (it *Item) SetTimeframe() {
 	}
 
 	year, month, day := it.Timestamp.Date()
-	hour, min, sec := it.Timestamp.Clock()
+	hour, minute, sec := it.Timestamp.Clock()
 
 	const emptyDate, emptyClock = 1, 0
 
 	switch {
 	case year != emptyDate && month == emptyDate && day == emptyDate &&
-		hour == emptyClock && min == emptyClock && sec == emptyClock:
+		hour == emptyClock && minute == emptyClock && sec == emptyClock:
 		it.Timeframe = it.Timestamp.AddDate(1, 0, 0)
 
 	case year != emptyDate && month != emptyDate && day == emptyDate &&
-		hour == emptyClock && min == emptyClock && sec == emptyClock:
+		hour == emptyClock && minute == emptyClock && sec == emptyClock:
 		it.Timeframe = it.Timestamp.AddDate(0, 1, 0)
 
 	case year != emptyDate && month != emptyDate && day != emptyDate &&
-		hour == emptyClock && min == emptyClock && sec == emptyClock:
+		hour == emptyClock && minute == emptyClock && sec == emptyClock:
 		it.Timeframe = it.Timestamp.AddDate(0, 0, 1)
 
 	case year != emptyDate && month != emptyDate && day != emptyDate &&
-		hour != emptyClock && min == emptyClock && sec == emptyClock:
+		hour != emptyClock && minute == emptyClock && sec == emptyClock:
 		it.Timeframe = it.Timestamp.Add(1 * time.Hour)
 	}
 }

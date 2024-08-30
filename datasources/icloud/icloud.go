@@ -260,7 +260,7 @@ func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName st
 		if entry.Name() == "RAW.csv" {
 			continue
 		}
-		err := fi.importAlbumOrMemory(ctx, fsysName, fsys, path.Join(fsysName, "Albums", entry.Name()), "imgName", itemChan, opt)
+		err := fi.importAlbumOrMemory(ctx, fsysName, fsys, path.Join(fsysName, "Albums", entry.Name()), itemChan, opt)
 		if err != nil {
 			return err
 		}
@@ -272,7 +272,7 @@ func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName st
 		return err
 	}
 	for _, entry := range entries {
-		err := fi.importAlbumOrMemory(ctx, fsysName, fsys, path.Join(fsysName, "Memories", entry.Name()), "imageName", itemChan, opt)
+		err := fi.importAlbumOrMemory(ctx, fsysName, fsys, path.Join(fsysName, "Memories", entry.Name()), itemChan, opt)
 		if err != nil {
 			return err
 		}
@@ -281,7 +281,7 @@ func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName st
 	return nil
 }
 
-func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string, fsys fs.FS, albumPath string, columnName string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string, fsys fs.FS, albumPath string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 	owner := timeline.Entity{ID: dsOpt.OwnerEntityID}
 

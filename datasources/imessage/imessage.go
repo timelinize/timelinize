@@ -358,7 +358,7 @@ func (m message) sender() timeline.Entity {
 func (m message) sentTo() []*timeline.Entity {
 	senderID := m.senderID()
 
-	var ents []*timeline.Entity
+	var ents []*timeline.Entity //nolint:prealloc // bug filed: https://github.com/alexkohler/prealloc/issues/30
 
 	// if device is not the sender, it is at least a recipient!
 	if !m.fromMe() {
@@ -380,7 +380,7 @@ func (m message) sentTo() []*timeline.Entity {
 }
 
 func (m message) attachments(ctx context.Context, im Importer, sender timeline.Entity) []*timeline.Item {
-	var items []*timeline.Item
+	var items []*timeline.Item //nolint:prealloc // bug filed: https://github.com/alexkohler/prealloc/issues/30
 	for _, a := range m.attached {
 		if a.filename == nil {
 			continue
