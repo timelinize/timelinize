@@ -24,7 +24,6 @@ package tlzapp
 import (
 	"bytes"
 	"context"
-	_ "embed" // enable go:embed directive
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -227,7 +226,9 @@ func (a *App) serve(adminAddr string) error {
 
 	go func() {
 		server := &http.Server{
+			Handler:           a.server,
 			ReadHeaderTimeout: 10 * time.Second,
+			MaxHeaderBytes:    1024 * 512,
 		}
 		if err := server.Serve(ln); err != nil {
 			if errors.Is(err, net.ErrClosed) {
@@ -284,7 +285,7 @@ func (a *App) serverRunning() bool {
 	if err != nil {
 		return false
 	}
-	client := &http.Client{Timeout: 1 * time.Second}
+	client := &http.Client{Timeout: time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false

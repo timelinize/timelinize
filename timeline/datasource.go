@@ -146,9 +146,9 @@ func DataSourcesRecognize(ctx context.Context, filenames []string, timeout time.
 
 	var results []RecognizeResult
 
-	tryDataSource := func(ds DataSource) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	tryDataSource := func(ctx context.Context, ds DataSource) error {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if ds.NewFileImporter == nil {
 			return nil
@@ -173,7 +173,7 @@ func DataSourcesRecognize(ctx context.Context, filenames []string, timeout time.
 	}
 
 	for _, ds := range dataSources {
-		if err := tryDataSource(ds); err != nil {
+		if err := tryDataSource(ctx, ds); err != nil {
 			return nil, err
 		}
 	}
