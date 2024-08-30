@@ -408,13 +408,18 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 }
 
 // DeleteItemRows deletes the item rows specified by their row IDs. If remember is true, the item rows will
-// be hashed, and the hash will be stored with the row, (TODO: Finish godoc)
+// be hashed, and the hash will be stored with the row; if retention is non-zero, the items will be marked
+// for deletion and then only deleted later after the retention period.
+// TODO: WIP: remember and retention are not yet implemented
 func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember bool, retention *time.Duration) error {
 	if len(rowIDs) == 0 {
 		return nil
 	}
 
-	Log.Info("deleting item rows", zap.Int64s("item_ids", rowIDs))
+	Log.Info("deleting item rows",
+		zap.Int64s("item_ids", rowIDs),
+		zap.Bool("remember", remember),
+		zap.Durationp("retention", retention))
 
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()

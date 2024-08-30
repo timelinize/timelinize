@@ -1147,11 +1147,11 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it
 			// and allow any value in that range to be a match?
 
 			switch field {
-			case "data":
+			case "data": //nolint:goconst
 				sb.WriteString("(data_text=? OR (data_text IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (data_hash=? OR ? IS NULL)")
-			case "location":
+			case "location": //nolint:goconst
 				sb.WriteString("(longitude=? OR (longitude IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (latitude=? OR (latitude IS NULL ")

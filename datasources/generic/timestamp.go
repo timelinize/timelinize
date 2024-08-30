@@ -182,28 +182,27 @@ func TimestampFromFilePath(fpath string) (time.Time, error) {
 	// assured they are part of the same timestamp; then between those,
 	// keep the more specific one
 candidates:
-	for i := 0; i < len(tsFound); i++ {
-		// iTs is our candidate timestamp, we'll compare it to every other
+	for i := range len(tsFound) {
+		// tsI is our candidate timestamp, we'll compare it to every other
 		// timestamp and see if we need to weed it out
-		iTs := tsFound[i]
+		tsI := tsFound[i]
 
-		for j := 0; j < len(tsFound); j++ {
+		for j := range len(tsFound) {
 			if j == i {
 				continue
 			}
-			jTs := tsFound[j] // jTs is the competitor
+			tsJ := tsFound[j] // tsJ is the competitor
 
 			// we're looking for joint overlap where start or end are equal
 			// or if one is entirely contained within the other;
 			// disjoint overlap exists if start OR end of one is between start AND end of other;
 			// hard to say which one is right, but likely at least one is wrong...
 			// for example:  "4 January 2022/3:59PM" has "2022/3" crossing into both, but is wrong
-			if iTs.start == jTs.start || iTs.end == jTs.end || // same start or same end
-				(iTs.start > jTs.start && iTs.end < jTs.end) || // jTs contains iTs
-				(iTs.start < jTs.start && iTs.end > jTs.end) || // iTs contains jTs
-				(iTs.start > jTs.start && iTs.start < jTs.end) || // iTs starts inside jTs (disjoint overlap)
-				(iTs.end > jTs.start && iTs.end < jTs.end) { // iTs ends inside jTs (disjoint overlap)
-
+			if tsI.start == tsJ.start || tsI.end == tsJ.end || // same start or same end
+				(tsI.start > tsJ.start && tsI.end < tsJ.end) || // tsJ contains tsI
+				(tsI.start < tsJ.start && tsI.end > tsJ.end) || // tsI contains tsJ
+				(tsI.start > tsJ.start && tsI.start < tsJ.end) || // tsI starts inside tsJ (disjoint overlap)
+				(tsI.end > tsJ.start && tsI.end < tsJ.end) { // tsI ends inside tsJ (disjoint overlap)
 				// if it was joint overlap, we can presume they are the same timestamp,
 				// but likely have different components specified in them; keep the more
 				// specific one, which SHOULD be the "later" or "higher" time value,
@@ -212,8 +211,8 @@ candidates:
 				// 2019 ("10-09-19"), where the higher date is clearly wrong here, so I've
 				// settled on always going with the longest substring match
 
-				// if jTs is more specific let iTs drop
-				if (jTs.end - jTs.start) > (iTs.end - iTs.start) {
+				// if tsJ is more specific let tsI drop
+				if (tsJ.end - tsJ.start) > (tsI.end - tsI.start) {
 					continue candidates
 				}
 			}
@@ -221,7 +220,7 @@ candidates:
 
 		// if we got here, the inner loop didn't skip this candidate,
 		// so we can presumably use it for next phase
-		candidateTimestamp = append(candidateTimestamp, iTs)
+		candidateTimestamp = append(candidateTimestamp, tsI)
 	}
 
 	// if we ended up skipping all timestamps because they were

@@ -174,9 +174,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemCh
 					if err != nil {
 						return err
 					}
-					dec = json.NewDecoder(f)
 					nesting = jsonPath{}
-					scope = ""
 				}
 
 				// TODO: hrm, any way we can do without this? maybe wrap Decode() or something?

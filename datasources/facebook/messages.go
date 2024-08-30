@@ -150,7 +150,8 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 				msgText = strings.TrimSpace(msgText)
 
 				var item *timeline.Item
-				if msgText != "" {
+				switch {
+				case msgText != "":
 					item = &timeline.Item{
 						Classification: timeline.ClassMessage,
 						Timestamp:      msgTimestamp,
@@ -159,9 +160,9 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 							Data: timeline.StringData(msgText),
 						},
 					}
-				} else if len(attachments) > 0 {
+				case len(attachments) > 0:
 					item, attachments = attachments[0], attachments[1:]
-				} else {
+				default:
 					// found an empty message; I've seen this happen rarely,
 					// like if a message IsUnsent; no content, so skip
 					continue
@@ -194,7 +195,7 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 			return nil
 		})
 		if err != nil {
-			return fmt.Errorf("walking messages: %v", err)
+			return fmt.Errorf("walking messages: %w", err)
 		}
 	}
 

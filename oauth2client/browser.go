@@ -128,7 +128,7 @@ func openBrowser(url string) error {
 
 	buf := new(bytes.Buffer)
 
-	cmd := exec.Command(exe, append(args, url)...) //nolint:gosec // Command is hard-coded above... bug filed: https://github.com/securego/gosec/issues/1199
+	cmd := exec.Command(exe, append(args, url)...)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err := cmd.Run()
