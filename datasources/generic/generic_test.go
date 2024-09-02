@@ -18,7 +18,7 @@ func TestClientWalk(t *testing.T) {
 
 		client.walk(ctx, "testdata/fixtures/file.txt", ".", itemChan, opts)
 		fname := (<-itemChan).Item.Content.Filename
-		if fname != "file.txt" {
+		if fname != "file.txt" { //nolint:goconst
 			t.Errorf("Expected filepath to be file.txt, got %s", fname)
 		}
 	})
