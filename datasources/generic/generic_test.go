@@ -17,10 +17,9 @@ func TestClientWalk(t *testing.T) {
 		defer close(itemChan)
 
 		client.walk(ctx, "testdata/fixtures/file.txt", ".", itemChan, opts)
-		graph := <-itemChan
-		item := graph.Item
-		if item.Content.Filename != "file.txt" {
-			t.Errorf("Expected filepath to be file.txt, got %s", item.Content.Filename)
+		fname := (<-itemChan).Item.Content.Filename
+		if fname != "file.txt" {
+			t.Errorf("Expected filepath to be file.txt, got %s", fname)
 		}
 	})
 
@@ -29,10 +28,9 @@ func TestClientWalk(t *testing.T) {
 		defer close(itemChan)
 
 		client.walk(ctx, "testdata/fixtures/file.zip", ".", itemChan, opts)
-		graph := <-itemChan
-		item := graph.Item
-		if item.Content.Filename != "file.txt" {
-			t.Errorf("Expected filepath to be file.txt, got %s", item.Content.Filename)
+		fname := (<-itemChan).Item.Content.Filename
+		if fname != "file.txt" {
+			t.Errorf("Expected filepath to be file.txt, got %s", fname)
 		}
 	})
 
@@ -41,10 +39,9 @@ func TestClientWalk(t *testing.T) {
 		defer close(itemChan)
 
 		client.walk(ctx, "testdata/fixtures/dir-single-file", ".", itemChan, opts)
-		graph := <-itemChan
-		item := graph.Item
-		if item.Content.Filename != "file.txt" {
-			t.Errorf("Expected filepath to be file.txt, got %s", item.Content.Filename)
+		fname := (<-itemChan).Item.Content.Filename
+		if fname != "file.txt" {
+			t.Errorf("Expected filepath to be file.txt, got %s", fname)
 		}
 	})
 
@@ -53,14 +50,12 @@ func TestClientWalk(t *testing.T) {
 		defer close(itemChan)
 		client.walk(ctx, "testdata/fixtures/dir-multiple-files", ".", itemChan, opts)
 
-		graph := <-itemChan
-		fname := graph.Item.Content.Filename
+		fname := (<-itemChan).Item.Content.Filename
 		if fname != "file1" {
 			t.Errorf("Expected filepath to be file1, got %s", fname)
 		}
 
-		graph = <-itemChan
-		fname = graph.Item.Content.Filename
+		fname = (<-itemChan).Item.Content.Filename
 		if fname != "file2" {
 			t.Errorf("Expected filepath to be file2, got %s", fname)
 		}
