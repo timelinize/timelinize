@@ -38,6 +38,11 @@ func TestCouldBeMarkdown(t *testing.T) {
 			input:    "```\ncode block\n```",
 			expected: true,
 		},
+		{
+			name:	 "HTML",
+			input:	 `<!DOCTYPE html><html lang="en"></html>`,
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
