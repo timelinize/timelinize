@@ -60,4 +60,16 @@ func TestClientWalk(t *testing.T) {
 			t.Errorf("Expected filepath to be file2, got %s", fname)
 		}
 	})
+
+	t.Run("Zip file with a zip file", func(t *testing.T) {
+		itemChan := make(chan *timeline.Graph, 10)
+		defer close(itemChan)
+		// zip-in-archive.zip contains file2.zip
+		client.walk(ctx, "testdata/fixtures/zip-in-archive.zip", ".", itemChan, opts)
+
+		fname := (<-itemChan).Item.Content.Filename
+		if fname != "file2.zip" {
+			t.Errorf("Expected filepath to be file2.zip, got %s", fname)
+		}
+	})
 }
