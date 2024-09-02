@@ -61,7 +61,7 @@ func TestClientWalk(t *testing.T) {
 		}
 	})
 
-	t.Run("Zip file with a zip file", func(t *testing.T) {
+	t.Run("Zip file within a zip file", func(t *testing.T) {
 		itemChan := make(chan *timeline.Graph, 10)
 		defer close(itemChan)
 		// zip-in-archive.zip contains file2.zip
