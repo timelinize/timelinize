@@ -1556,4 +1556,4 @@ var sizePeekBufPool = sync.Pool{
 // it's not comfortable to store huge text files in the DB,
 // they belong in files; we just want to avoid lots of little
 // text files on disk.
-const maxTextSizeForDB = 1024 * 1024
+const maxTextSizeForDB = 1024 * 1024 * 50 // 50 KiB
