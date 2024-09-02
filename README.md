@@ -65,9 +65,6 @@ I recommend running from the command line even if you can double-click to run, s
 
 ### Using Docker images
 
-> [!NOTE]
-> Docker images are not yet available. This section will be updated when they are.
-
 ```
 docker run -p12002:12002 \
            -v /path/to/repo:/repo \
