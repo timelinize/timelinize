@@ -16,7 +16,7 @@ func TestClientWalk(t *testing.T) {
 		itemChan := make(chan *timeline.Graph, 10)
 		defer close(itemChan)
 
-		client.walk(ctx, "testdata/fixtures/file.txt", ".", itemChan, opts)
+		client.FileImport(ctx, []string{"testdata/fixtures/file.txt"}, itemChan, opts)
 		fname := (<-itemChan).Item.Content.Filename
 		if fname != "file.txt" { //nolint:goconst
 			t.Errorf("Expected filepath to be file.txt, got %s", fname)
@@ -27,7 +27,7 @@ func TestClientWalk(t *testing.T) {
 		itemChan := make(chan *timeline.Graph, 10)
 		defer close(itemChan)
 
-		client.walk(ctx, "testdata/fixtures/file.zip", ".", itemChan, opts)
+		client.FileImport(ctx, []string{"testdata/fixtures/file.zip"}, itemChan, opts)
 		fname := (<-itemChan).Item.Content.Filename
 		if fname != "file.txt" {
 			t.Errorf("Expected filepath to be file.txt, got %s", fname)
@@ -38,7 +38,7 @@ func TestClientWalk(t *testing.T) {
 		itemChan := make(chan *timeline.Graph, 10)
 		defer close(itemChan)
 
-		client.walk(ctx, "testdata/fixtures/dir-single-file", ".", itemChan, opts)
+		client.FileImport(ctx, []string{"testdata/fixtures/dir-single-file"}, itemChan, opts)
 		fname := (<-itemChan).Item.Content.Filename
 		if fname != "file.txt" {
 			t.Errorf("Expected filepath to be file.txt, got %s", fname)
@@ -48,7 +48,7 @@ func TestClientWalk(t *testing.T) {
 	t.Run("Directory with multiple files", func(t *testing.T) {
 		itemChan := make(chan *timeline.Graph, 10)
 		defer close(itemChan)
-		client.walk(ctx, "testdata/fixtures/dir-multiple-files", ".", itemChan, opts)
+		client.FileImport(ctx, []string{"testdata/fixtures/dir-multiple-files"}, itemChan, opts)
 
 		fname := (<-itemChan).Item.Content.Filename
 		if fname != "file1" {
@@ -65,7 +65,7 @@ func TestClientWalk(t *testing.T) {
 		itemChan := make(chan *timeline.Graph, 10)
 		defer close(itemChan)
 		// zip-in-archive.zip contains file2.zip
-		client.walk(ctx, "testdata/fixtures/zip-in-archive.zip", ".", itemChan, opts)
+		client.FileImport(ctx, []string{"testdata/fixtures/zip-in-archive.zip"}, itemChan, opts)
 
 		fname := (<-itemChan).Item.Content.Filename
 		if fname != "file2.zip" {
