@@ -45,21 +45,20 @@ type Options struct {
 }
 
 type Repository struct {
-	ID              int       `json:"id" db:"id"`
-	Name            string    `json:"name" db:"name"`
-	HTMLURL         string    `json:"html_url" db:"html_url"`
-	Description     string    `json:"description" db:"description"`
-	CreatedAt       time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at" db:"updated_at"`
-	PushedAt        time.Time `json:"pushed_at" db:"pushed_at"`
-	StargazersCount int       `json:"stargazers_count" db:"stargazers_count"`
-	Language        string    `json:"language" db:"language"`
-	FullName        string    `json:"full_name" db:"full_name"`
-	TopicList       []string  `json:"topics"`
-	IsTemplate      bool      `json:"is_template" db:"is_template"`
-	Topics          string    `db:"topics"`
-	Private         bool      `json:"private" db:"private"`
-	StarredAt       time.Time `json:"starred_at" db:"starred_at"`
+	ID              int       `json:"id"`
+	Name            string    `json:"name"`
+	HTMLURL         string    `json:"html_url"`
+	Description     string    `json:"description"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	PushedAt        time.Time `json:"pushed_at"`
+	StargazersCount int       `json:"stargazers_count"`
+	Language        string    `json:"language"`
+	FullName        string    `json:"full_name"`
+	Topics          string    `json:"topics"`
+	IsTemplate      bool      `json:"is_template"`
+	Private         bool      `json:"private"`
+	StarredAt       time.Time `json:"starred_at"`
 }
 
 func init() {
@@ -92,9 +91,9 @@ func (GHStars) Recognize(_ context.Context, filenames []string) (timeline.Recogn
 }
 
 // FileImport conducts an import of the data using this data source.
-func (c *GHStars) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (c *GHStars) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
 	for _, filename := range filenames {
-		err := c.process(ctx, filename, itemChan, opt)
+		err := c.process(ctx, filename, itemChan)
 		if err != nil {
 			return fmt.Errorf("processing %s: %w", filename, err)
 		}
@@ -104,7 +103,7 @@ func (c *GHStars) FileImport(ctx context.Context, filenames []string, itemChan c
 
 // walk processes the item at root, or the items within root, joined to pathInRoot, which is
 // a relative path to root and must use the slash as separator.
-func (c *GHStars) process(ctx context.Context, path string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (c *GHStars) process(_ context.Context, path string, itemChan chan<- *timeline.Graph) error {
 	var repos []*Repository
 
 	j, err := os.ReadFile(path)
@@ -139,7 +138,7 @@ func (c *GHStars) process(ctx context.Context, path string, itemChan chan<- *tim
 				"Description": repo.Description,
 				"Created At":  repo.CreatedAt,
 				"Stargazers":  repo.StargazersCount,
-				"Topics":      repo.TopicList,
+				"Topics":      repo.Topics,
 				"Language":    repo.Language,
 				"Private":     repo.Private,
 				"Starred At":  repo.StarredAt,
