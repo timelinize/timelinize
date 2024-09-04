@@ -518,7 +518,7 @@ func couldBeMarkdown(input []byte) bool {
 		{'`'},
 	} {
 		// this isn't perfect, because the matching "end token" could have been truncated
-		if bytes.Count(input, pair)%2 == 0 {
+		if count := bytes.Count(input, pair); count > 0 && count%2 == 0 {
 			return true
 		}
 	}
