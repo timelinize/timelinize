@@ -124,6 +124,9 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 			}
 		}
 
+		// When importing a single file, fpath will be '.', and root will
+		// be the full path to the file. Make sure we use that getting
+		// the base name.
 		filename := fpath
 		if fpath == "." {
 			filename = path.Base(root)
