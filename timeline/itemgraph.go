@@ -1039,7 +1039,7 @@ var classifications = []Classification{
 	},
 	{
 		Name:        "bookmark",
-		Labels:      []string{"Bookmark", "Web"},
+		Labels:      []string{"Bookmark", "Web", "URL"},
 		Description: "A bookmark to a web page",
 	},
 }
