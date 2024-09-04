@@ -39,8 +39,8 @@ func TestCouldBeMarkdown(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:	 "HTML",
-			input:	 `<!DOCTYPE html><html lang="en"></html>`,
+			name:     "HTML",
+			input:    `<!DOCTYPE html><html lang="en"></html>`,
 			expected: false,
 		},
 	}
