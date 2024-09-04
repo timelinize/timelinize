@@ -51,7 +51,7 @@ type Repository struct {
 	StargazersCount int       `json:"stargazers_count"`
 	Language        string    `json:"language"`
 	FullName        string    `json:"full_name"`
-	Topics          []string    `json:"topics"`
+	Topics          []string  `json:"topics"`
 	IsTemplate      bool      `json:"is_template"`
 	Private         bool      `json:"private"`
 	StarredAt       time.Time `json:"starred_at"`
@@ -112,18 +112,14 @@ func (c *GHStars) process(_ context.Context, path string, itemChan chan<- *timel
 	}
 
 	for _, repo := range repos {
-		itemData, err := json.MarshalIndent(repo, "", " ")
-		if err != nil {
-			return err
-		}
 		item := &timeline.Item{
 			Classification:       timeline.ClassBookmark,
 			Timestamp:            repo.StarredAt,
 			IntermediateLocation: path,
 			Content: timeline.ItemData{
 				Filename:  filepath.Base(path),
-				Data:      timeline.ByteData(itemData),
-				MediaType: "application/json",
+				Data:      timeline.StringData(repo.HTMLURL),
+				MediaType: "text/plain",
 			},
 			Metadata: timeline.Metadata{
 				"ID":          repo.ID,
