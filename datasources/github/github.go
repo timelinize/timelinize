@@ -90,14 +90,6 @@ func (GitHub) Recognize(_ context.Context, filenames []string) (timeline.Recogni
 
 // FileImport conducts an import of the data using this data source.
 func (c *GitHub) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
-	// If we are testing, close the channel to signal the end of the import, so we can
-	// count the total items sent.
-	defer func() {
-		if b, ok := ctx.Value(TLZTest).(bool); ok && b {
-			close(itemChan)
-		}
-	}()
-
 	for _, filename := range filenames {
 		err := c.process(ctx, filename, itemChan)
 		if err != nil {
