@@ -36,8 +36,8 @@ import (
 
 // Data source name and ID.
 const (
-	DataSourceName = "GitHub Stars"
-	DataSourceID   = "ghstars"
+	DataSourceName = "GitHub"
+	DataSourceID   = "github"
 )
 
 type Repository struct {
