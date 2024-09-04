@@ -55,6 +55,40 @@ func TestClientWalk(t *testing.T) {
 			t.Fatalf("expected a different error than: %s", err)
 		}
 	})
+
+	t.Run("ghstars.json missing starred_at", func(t *testing.T) {
+		itemChan := make(chan *timeline.Graph, 10)
+
+		err := client.FileImport(ctx, []string{"testdata/fixtures/ghstars-missing-starred-at.json"}, itemChan, opts)
+		mustCount(t, itemChan, 0)
+		mustError(
+			t,
+			err,
+			"processing testdata/fixtures/ghstars-missing-starred-at.json: missing starred_at field for repo mojombo/grit",
+		)
+	})
+
+	t.Run("ghstars.json missing HTML URL", func(t *testing.T) {
+		itemChan := make(chan *timeline.Graph, 10)
+
+		err := client.FileImport(ctx, []string{"testdata/fixtures/ghstars-missing-htmlurl.json"}, itemChan, opts)
+		mustCount(t, itemChan, 0)
+		mustError(
+			t,
+			err,
+			"processing testdata/fixtures/ghstars-missing-htmlurl.json: missing HTMLURL field for repo mojombo/grit",
+		)
+	})
+}
+
+func mustError(t *testing.T, got error, expected string) {
+	if got == nil {
+		t.Fatal("expected error")
+	}
+
+	if got.Error() != expected {
+		t.Fatalf("expected a different error than: %s", got)
+	}
 }
 
 func mustCount(t *testing.T, itemChan chan *timeline.Graph, count int) {

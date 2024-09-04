@@ -118,6 +118,16 @@ func (c *GitHub) process(ctx context.Context, path string, itemChan chan<- *time
 	}
 
 	for _, repo := range repos {
+		// StarredAt is a required field.
+		if repo.StarredAt.IsZero() {
+			return fmt.Errorf("missing starred_at field for repo %s", repo.FullName)
+		}
+
+		// HTMLURL is a required field.
+		if repo.HTMLURL == "" {
+			return fmt.Errorf("missing HTMLURL field for repo %s", repo.FullName)
+		}
+
 		select {
 		// Callers can cancel the import.
 		case <-ctx.Done():
