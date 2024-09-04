@@ -8,6 +8,7 @@ require (
 	github.com/adrianmo/go-nmea v1.10.0
 	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/caddyserver/caddy/v2 v2.8.4
+	github.com/dave/jennifer v1.7.0
 	github.com/davidbyttow/govips/v2 v2.15.0
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/galdor/go-thumbhash v1.0.1-0.20240227061205-5f40e920ff45

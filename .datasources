@@ -1,0 +1,49 @@
+// This file configures which data sources a binary will be built with.
+//
+// Each uncommented line should contain a single data source package.
+// Line comments starting with // (like this one) are ignored by the generator.
+//
+// An example of an external data source can be found at:
+//
+//    https://github.com/rubiojr/tlz-demo-ds
+//
+// To extend Timelinize and include that data source in your build, add a new line at the
+// bottom of this file.
+//
+// It's also possible to copy this file to a .localds and that data source
+// definition file will take precedence.
+//
+// Then run `go generate && go mod tidy` to regenerate the sources.
+//
+// Default data sources:
+//
+
+contactlist
+email
+facebook
+generic
+geojson
+gmail
+googlelocation
+googlephotos
+gpx
+icloud
+imessage
+instagram
+iphone
+kmlgx
+media
+nmea
+smsbackuprestore
+strava
+telegram
+twitter
+vcard
+
+//
+// Extra data sources, feel free to add them:
+//
+// (comments at the begining of the line should be removed)
+//
+// github.com/rubiojr/tlz-demo-ds
+//
