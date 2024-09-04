@@ -19,7 +19,7 @@
 // Package ghstars implements a data source that imports GitHub starred repositories
 // exported from the GitHub API. The format, and a tool to export them to JSON is documented
 // at https://github.com/rubiojr/gh-stars-exporter.
-package ghstars
+package github
 
 import (
 	"context"
@@ -62,18 +62,18 @@ func init() {
 		Name:            DataSourceID,
 		Title:           DataSourceName,
 		Icon:            "github.svg",
-		NewFileImporter: func() timeline.FileImporter { return new(GHStars) },
+		NewFileImporter: func() timeline.FileImporter { return new(GitHub) },
 	})
 	if err != nil {
 		timeline.Log.Fatal("registering data source", zap.Error(err))
 	}
 }
 
-// GHStars interacts with the file system to get items.
-type GHStars struct{}
+// GitHub interacts with the file system to get items.
+type GitHub struct{}
 
 // Recognize returns whether the input file is recognized.
-func (GHStars) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
+func (GitHub) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
 	isoDateRegexp := regexp.MustCompile(`^ghstars(-(\d{4}-\d{2}-\d{2}|[0-9]{10}))?.json$`)
 	for _, filename := range filenames {
 		// ghstars.json or ghstars-YYYY-MM-DD.json or ghstars-UNIX_TIMESTAMP.json
@@ -86,7 +86,7 @@ func (GHStars) Recognize(_ context.Context, filenames []string) (timeline.Recogn
 }
 
 // FileImport conducts an import of the data using this data source.
-func (c *GHStars) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
+func (c *GitHub) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
 	for _, filename := range filenames {
 		err := c.process(ctx, filename, itemChan)
 		if err != nil {
@@ -98,7 +98,7 @@ func (c *GHStars) FileImport(ctx context.Context, filenames []string, itemChan c
 
 // walk processes the item at root, or the items within root, joined to pathInRoot, which is
 // a relative path to root and must use the slash as separator.
-func (c *GHStars) process(_ context.Context, path string, itemChan chan<- *timeline.Graph) error {
+func (c *GitHub) process(_ context.Context, path string, itemChan chan<- *timeline.Graph) error {
 	var repos []*Repository
 
 	j, err := os.ReadFile(path)
