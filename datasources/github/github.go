@@ -19,7 +19,14 @@
 // Package github implements a data source that imports GitHub starred repositories
 // exported from the GitHub API.
 //
-// The format:
+// It expects a JSON file with an array of objects, each object representing a bookmark.
+//
+// The file should be named as follows:
+// - ghstars.json
+// - ghstars-<unix-timestamp>.json
+// - ghstars-<yyyy-mm-dd>.json
+//
+// The file format:
 //
 //	[
 //	{
