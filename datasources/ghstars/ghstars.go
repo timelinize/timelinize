@@ -40,10 +40,6 @@ const (
 	DataSourceID   = "ghstars"
 )
 
-// Options configures the data source.
-type Options struct {
-}
-
 type Repository struct {
 	ID              int       `json:"id"`
 	Name            string    `json:"name"`
@@ -55,7 +51,7 @@ type Repository struct {
 	StargazersCount int       `json:"stargazers_count"`
 	Language        string    `json:"language"`
 	FullName        string    `json:"full_name"`
-	Topics          string    `json:"topics"`
+	Topics          []string    `json:"topics"`
 	IsTemplate      bool      `json:"is_template"`
 	Private         bool      `json:"private"`
 	StarredAt       time.Time `json:"starred_at"`
@@ -66,7 +62,6 @@ func init() {
 		Name:            DataSourceID,
 		Title:           DataSourceName,
 		Icon:            "github.svg",
-		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(GHStars) },
 	})
 	if err != nil {
