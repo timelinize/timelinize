@@ -16,9 +16,37 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-// Package ghstars implements a data source that imports GitHub starred repositories
-// exported from the GitHub API. The format, and a tool to export them to JSON is documented
-// at https://github.com/rubiojr/gh-stars-exporter.
+// Package github implements a data source that imports GitHub starred repositories
+// exported from the GitHub API.
+//
+// The format:
+//
+//	[
+//	{
+//	  "id": 841044067,
+//	  "name": "timelinize",
+//	  "html_url": "https://github.com/timelinize/timelinize",
+//	  "description": "Store your data from all your accounts and devices in a single cohesive timeline on your own computer",
+//	  "created_at": "2024-08-11T13:27:39Z",
+//	  "updated_at": "2024-09-03T07:17:29Z",
+//	  "pushed_at": "2024-09-02T15:31:59Z",
+//	  "stargazers_count": 504,
+//	  "language": "Go",
+//	  "full_name": "timelinize/timelinize",
+//	  "is_template": false,
+//	  "topics": [
+//	      "archival",
+//	      "data-archiving",
+//	      "data-import",
+//	      "timeline"
+//	  ],
+//	  "private": false,
+//	  "starred_at": "2024-08-12T17:55:48Z"
+//	}
+//	]
+//
+// A tool to export starred repos to JSON and the exported format documentation
+// can be found at https://github.com/rubiojr/gh-stars-exporter.
 package github
 
 import (
