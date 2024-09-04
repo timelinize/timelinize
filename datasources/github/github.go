@@ -87,6 +87,14 @@ func (GitHub) Recognize(_ context.Context, filenames []string) (timeline.Recogni
 
 // FileImport conducts an import of the data using this data source.
 func (c *GitHub) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
+	// If we are testing, close the channel to signal the end of the import, so we can
+	// count the total items sent.
+	defer func() {
+		if b, ok := ctx.Value("TLZ_TEST").(bool); ok && b {
+			close(itemChan)
+		}
+	}()
+
 	for _, filename := range filenames {
 		err := c.process(ctx, filename, itemChan)
 		if err != nil {
@@ -96,47 +104,51 @@ func (c *GitHub) FileImport(ctx context.Context, filenames []string, itemChan ch
 	return nil
 }
 
-// walk processes the item at root, or the items within root, joined to pathInRoot, which is
-// a relative path to root and must use the slash as separator.
-func (c *GitHub) process(_ context.Context, path string, itemChan chan<- *timeline.Graph) error {
-	var repos []*Repository
-
+// process reads the JSON file and sends the items to the channel.
+func (c *GitHub) process(ctx context.Context, path string, itemChan chan<- *timeline.Graph) error {
 	j, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
+	var repos []*Repository
 	err = json.Unmarshal(j, &repos)
 	if err != nil {
-		return err
+		return fmt.Errorf("malformed JSON: %w", err)
 	}
 
 	for _, repo := range repos {
-		item := &timeline.Item{
-			Classification:       timeline.ClassBookmark,
-			Timestamp:            repo.StarredAt,
-			IntermediateLocation: path,
-			Content: timeline.ItemData{
-				Filename:  filepath.Base(path),
-				Data:      timeline.StringData(repo.HTMLURL),
-				MediaType: "text/plain",
-			},
-			Metadata: timeline.Metadata{
-				"ID":          repo.ID,
-				"Name":        repo.Name,
-				"Full Name":   repo.FullName,
-				"URL":         repo.HTMLURL,
-				"Description": repo.Description,
-				"Created At":  repo.CreatedAt,
-				"Stargazers":  repo.StargazersCount,
-				"Topics":      repo.Topics,
-				"Language":    repo.Language,
-				"Private":     repo.Private,
-				"Starred At":  repo.StarredAt,
-			},
-		}
+		select {
+		// Callers can cancel the import.
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			item := &timeline.Item{
+				Classification:       timeline.ClassBookmark,
+				Timestamp:            repo.StarredAt,
+				IntermediateLocation: path,
+				Content: timeline.ItemData{
+					Filename:  filepath.Base(path),
+					Data:      timeline.StringData(repo.HTMLURL),
+					MediaType: "text/plain",
+				},
+				Metadata: timeline.Metadata{
+					"ID":          repo.ID,
+					"Name":        repo.Name,
+					"Full Name":   repo.FullName,
+					"URL":         repo.HTMLURL,
+					"Description": repo.Description,
+					"Created At":  repo.CreatedAt,
+					"Stargazers":  repo.StargazersCount,
+					"Topics":      repo.Topics,
+					"Language":    repo.Language,
+					"Private":     repo.Private,
+					"Starred At":  repo.StarredAt,
+				},
+			}
 
-		itemChan <- &timeline.Graph{Item: item}
+			itemChan <- &timeline.Graph{Item: item}
+		}
 	}
 
 	return nil
