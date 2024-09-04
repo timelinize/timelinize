@@ -426,7 +426,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 				}
 			}
 
-			if it.Content.hasPlainTextMediaType() {
+			if it.Content.isPlainTextOrMarkdown() {
 				// store plain text in database unless it's too big to fit comfortably;
 				// read as much as we would feel good about storing in the DB, and if we
 				// fill that buffer, then it's probably big enough to go on disk
@@ -1556,4 +1556,4 @@ var sizePeekBufPool = sync.Pool{
 // it's not comfortable to store huge text files in the DB,
 // they belong in files; we just want to avoid lots of little
 // text files on disk.
-const maxTextSizeForDB = 1024 * 1024
+const maxTextSizeForDB = 1024 * 1024 * 50 // 50 KiB
