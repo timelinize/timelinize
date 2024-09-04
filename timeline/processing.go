@@ -426,7 +426,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 				}
 			}
 
-			if it.Content.hasPlainTextMediaType() {
+			if it.Content.isPlainTextOrMarkdown() {
 				// store plain text in database unless it's too big to fit comfortably;
 				// read as much as we would feel good about storing in the DB, and if we
 				// fill that buffer, then it's probably big enough to go on disk
