@@ -70,56 +70,9 @@ func (Client) Recognize(_ context.Context, _ []string) (timeline.Recognition, er
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
-func (c *Client) processFile(ctx context.Context, path string, itemChan chan<- *timeline.Graph) (bool, error) {
-	fsys, err := archiver.FileSystem(ctx, path)
-	if err != nil {
-		return false, err
-	}
-
-	if _, isFileFS := fsys.(archiver.FileFS); !isFileFS {
-		return false, nil
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return false, fmt.Errorf("failed to stat file %s: %w", path, err)
-	}
-
-	itemChan <- &timeline.Graph{Item: c.fileToItem(path, fsys, fs.FileInfoToDirEntry(info))}
-
-	return true, nil
-}
-
-func (Client) fileToItem(path string, fsys fs.FS, info fs.DirEntry) *timeline.Item {
-	fitem := fileItem{fsys: fsys, path: path, dirEntry: info}
-	item := &timeline.Item{
-		Timestamp:            fitem.timestamp(),
-		Location:             fitem.location(),
-		IntermediateLocation: path,
-		Content: timeline.ItemData{
-			Filename: filepath.Base(path),
-			Data: func(_ context.Context) (io.ReadCloser, error) {
-				return fsys.Open(path)
-			},
-		},
-		// TODO: surely there is some metadata...?
-	}
-
-	return item
-}
-
 // FileImport conducts an import of the data using this data source.
 func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
 	for _, filename := range filenames {
-		processed, err := c.processFile(ctx, filename, itemChan)
-		if err != nil {
-			return err
-		}
-
-		if processed {
-			continue
-		}
-
 		if err := c.walk(ctx, filename, ".", itemChan, opt); err != nil {
 			return err
 		}
@@ -171,7 +124,27 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 			}
 		}
 
-		itemChan <- &timeline.Graph{Item: c.fileToItem(fpath, fsys, d)}
+		filename := fpath
+		if fpath == "." {
+			filename = path.Base(root)
+		}
+
+		fitem := fileItem{fsys: fsys, path: fpath, dirEntry: d}
+
+		item := &timeline.Item{
+			Timestamp:            fitem.timestamp(),
+			Location:             fitem.location(),
+			IntermediateLocation: fpath,
+			Content: timeline.ItemData{
+				Filename: filename,
+				Data: func(_ context.Context) (io.ReadCloser, error) {
+					return fsys.Open(fpath)
+				},
+			},
+			// TODO: surely there is some metadata...?
+		}
+
+		itemChan <- &timeline.Graph{Item: item}
 
 		return nil
 	})
