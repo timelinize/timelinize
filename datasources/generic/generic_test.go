@@ -9,7 +9,7 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-func TestClientWalk(t *testing.T) {
+func TestFileImport(t *testing.T) {
 	client := &Client{}
 	ctx := context.Background()
 	opts := timeline.ListingOptions{DataSourceOptions: new(Options)}
