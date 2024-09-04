@@ -35,9 +35,12 @@ import (
 )
 
 // Data source name and ID.
+type tlzTestKey int
+
 const (
-	DataSourceName = "GitHub"
-	DataSourceID   = "github"
+	DataSourceName            = "GitHub"
+	DataSourceID              = "github"
+	TLZTest        tlzTestKey = iota
 )
 
 type Repository struct {
@@ -90,7 +93,7 @@ func (c *GitHub) FileImport(ctx context.Context, filenames []string, itemChan ch
 	// If we are testing, close the channel to signal the end of the import, so we can
 	// count the total items sent.
 	defer func() {
-		if b, ok := ctx.Value("TLZ_TEST").(bool); ok && b {
+		if b, ok := ctx.Value(TLZTest).(bool); ok && b {
 			close(itemChan)
 		}
 	}()
