@@ -183,7 +183,7 @@ func (c *GitHub) process(ctx context.Context, path string, itemChan chan<- *time
 					"Topics":      repo.Topics,
 					"Language":    repo.Language,
 					"Private":     repo.Private,
-					"Starred At":  repo.StarredAt,
+					"Starred at":  repo.StarredAt,
 				},
 			}
 
