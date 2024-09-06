@@ -178,7 +178,7 @@ func (c *GitHub) process(ctx context.Context, path string, itemChan chan<- *time
 					"Full Name":   repo.FullName,
 					"URL":         repo.HTMLURL,
 					"Description": repo.Description,
-					"Created At":  repo.CreatedAt,
+					"Created at":  repo.CreatedAt,
 					"Stargazers":  repo.StargazersCount,
 					"Topics":      repo.Topics,
 					"Language":    repo.Language,
