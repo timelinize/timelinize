@@ -1040,6 +1040,11 @@ var classifications = []Classification{
 		Labels:      []string{"Document", "Excel", "Word", "PDF", "PowerPoint"},
 		Description: "A file that contains text, images, or other data",
 	},
+	{
+		Name:        "bookmark",
+		Labels:      []string{"Bookmark", "Web", "URL"},
+		Description: "A bookmark to a web page",
+	},
 }
 
 // Item classifications!
@@ -1053,6 +1058,7 @@ var (
 	ClassCollection = getClassification("collection")
 	ClassNote       = getClassification("note")
 	ClassDocument   = getClassification("document")
+	ClassBookmark   = getClassification("bookmark")
 )
 
 func getClassification(name string) Classification {
