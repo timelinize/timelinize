@@ -175,7 +175,7 @@ func (c *GitHub) process(ctx context.Context, path string, itemChan chan<- *time
 				Metadata: timeline.Metadata{
 					"ID":          repo.ID,
 					"Name":        repo.Name,
-					"Full Name":   repo.FullName,
+					"Full name":   repo.FullName,
 					"URL":         repo.HTMLURL,
 					"Description": repo.Description,
 					"Created at":  repo.CreatedAt,
