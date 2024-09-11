@@ -73,9 +73,8 @@ import (
 type tlzTestKey int
 
 const (
-	DataSourceName            = "GitHub"
-	DataSourceID              = "github"
-	TLZTest        tlzTestKey = iota
+	DataSourceName = "GitHub"
+	DataSourceID   = "github"
 )
 
 type Repository struct {
