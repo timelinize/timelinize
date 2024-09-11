@@ -9,7 +9,7 @@ import (
 
 func TestClientWalk(t *testing.T) {
 	client := &GitHub{}
-	ctx := context.WithValue(context.Background(), TLZTest, true)
+	ctx := context.Background()
 	opts := timeline.ListingOptions{}
 
 	t.Run("ghstars.json with one starred repo", func(t *testing.T) {

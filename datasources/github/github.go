@@ -69,13 +69,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// Data source name and ID.
-type tlzTestKey int
-
 const (
-	DataSourceName            = "GitHub"
-	DataSourceID              = "github"
-	TLZTest        tlzTestKey = iota
+	DataSourceName = "GitHub"
+	DataSourceID   = "github"
 )
 
 type Repository struct {
