@@ -29,7 +29,6 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -58,8 +57,6 @@ type Firefox struct{}
 // Recognize returns whether the input file is recognized.
 func (Firefox) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
 	for _, filename := range filenames {
-		fmt.Println("foo")
-		fmt.Println(filepath.Base(filename))
 		if filepath.Base(filename) == "places.sqlite" {
 			return timeline.Recognition{Confidence: 1}, nil
 		}
@@ -147,7 +144,7 @@ func (f *Firefox) process(ctx context.Context, path string, itemChan chan<- *tim
 			return fmt.Errorf("scanning row: %w", err)
 		}
 
-		timestamp := time.Unix(0, visitDate*1000) // Convert microseconds to nanoseconds
+		timestamp := time.Unix(0, visitDate*1000) //nolint:mnd // Convert microseconds to nanoseconds
 
 		select {
 		case <-ctx.Done():
