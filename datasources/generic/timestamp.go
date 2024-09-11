@@ -182,12 +182,12 @@ func TimestampFromFilePath(fpath string) (time.Time, error) {
 	// assured they are part of the same timestamp; then between those,
 	// keep the more specific one
 candidates:
-	for i := range len(tsFound) {
+	for i := range tsFound {
 		// tsI is our candidate timestamp, we'll compare it to every other
 		// timestamp and see if we need to weed it out
 		tsI := tsFound[i]
 
-		for j := range len(tsFound) {
+		for j := range tsFound {
 			if j == i {
 				continue
 			}

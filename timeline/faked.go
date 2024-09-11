@@ -201,7 +201,7 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ []string, itemChan c
 
 	switch fake.realDS.Name {
 	case "contactlist", "vcard":
-		for i := range len(fake.peopleCorpus) {
+		for i := range fake.peopleCorpus {
 			itemChan <- &Graph{Entity: &fake.peopleCorpus[i]}
 		}
 
