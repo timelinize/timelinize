@@ -295,7 +295,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 			loc.Timestamp = nmea.DateTime(d.refYear, s.Date, s.Time)
 			d.lastDate = s.Date // remember this since GGA sentences don't include date...
 
-			loc.Metadata["Velocity"] = s.Speed
+			loc.Metadata["Velocity"] = s.Speed * metersPerSecondPerKnot
 			loc.Metadata["Heading"] = s.Course
 
 		case nmea.GGA:
@@ -306,6 +306,13 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 
 			loc.Metadata["Satellites"] = s.NumSatellites
 			loc.Metadata["GPS Quality"] = s.FixQuality
+
+		case nmea.VTG, nmea.GSA:
+			// make these sentences no-ops for now, until we decide to use them
+			// TODO: VTG seems to be redundant with RMC? and probably should use last known location and timestamp data, I guess?
+			// case nmea.VTG:
+			// 	loc.Metadata["Velocity"] = s.GroundSpeedKnots * metersPerSecondPerKnot
+			// 	loc.Metadata["Heading"] = s.MagneticTrack
 
 		default:
 			return nil, fmt.Errorf("unsupported NMEA sentence type: %#v", s)
@@ -319,5 +326,8 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 
 	return nil, nil
 }
+
+// 1 knot is this many m/s
+const metersPerSecondPerKnot = 0.514444
 
 const placesMult = 1e7
