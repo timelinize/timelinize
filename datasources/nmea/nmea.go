@@ -21,6 +21,7 @@ package nmea0183
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -209,6 +210,10 @@ func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ListingOpt
 
 	dec := &decoder{scanner: bufio.NewScanner(file), refYear: refYear}
 
+	// some radios (like my Yaesu) produce \r-delimited (carriage-return ONLY) newlines,
+	// which the default scanner does not support. Use custom split function.
+	dec.scanner.Split(scanLines)
+
 	// create location processor to clean up any noisy raw data
 	locProc, err := googlelocation.NewLocationProcessor(dec, simplification)
 	if err != nil {
@@ -325,6 +330,35 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 	}
 
 	return nil, nil
+}
+
+// scanLines is a bufio.SplitFunc for Scanners that tolerates variable newlines,
+// including carriage-return-only. https://stackoverflow.com/a/74962607/1048862
+func scanLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		if data[i] == '\n' {
+			// We have a line terminated by single newline.
+			return i + 1, data[0:i], nil
+		}
+		// We have a line terminated by carriage return at the end of the buffer.
+		if !atEOF && len(data) == i+1 {
+			return 0, nil, nil
+		}
+		advance = i + 1
+		if len(data) > i+1 && data[i+1] == '\n' {
+			advance++
+		}
+		return advance, data[0:i], nil
+	}
+	// If we're at EOF, we have a final, non-terminated line. Return it.
+	if atEOF {
+		return len(data), data, nil
+	}
+	// Request more data.
+	return 0, nil, nil
 }
 
 // 1 knot is this many m/s
