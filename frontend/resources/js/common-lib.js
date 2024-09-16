@@ -1474,12 +1474,17 @@ function miniDisplayBookmark(items) {
 }
 
 function renderBookmarkItem(item) {
-	const el = document.createElement('div');
-	el.classList.add('bookmark', 'bookmark-fold');
-	el.append(itemContentElement(item, {
+	const container = document.createElement('div');
+	container.classList.add('card');
+	const cardBody = document.createElement('div');
+	cardBody.classList.add('card-body', 'margin-for-ribbon-top-left');
+	cardBody.append(itemContentElement(item, {
 		maxLength: 1024, // we don't want to show an entire big file on a mini-display
 	}));
-	return el;
+	const ribbonEl = document.createElement('div');
+	ribbonEl.classList.add('ribbon', 'ribbon-top', 'ribbon-start', 'ribbon-bookmark');
+	container.append(cardBody, ribbonEl);
+	return container;
 }
 
 

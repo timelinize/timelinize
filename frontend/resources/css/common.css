@@ -732,6 +732,12 @@ iframe {
 
 
 
+/* a ribbon on the top-left of a card can cover some of the
+   card-body, so this class adds a slight margin to avoid that */
+.margin-for-ribbon-top-left {
+	margin-left: 40px;
+}
+
 
 
 

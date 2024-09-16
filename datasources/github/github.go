@@ -169,12 +169,13 @@ func (c *GitHub) process(ctx context.Context, path string, itemChan chan<- *time
 					"Full name":   repo.FullName,
 					"URL":         repo.HTMLURL,
 					"Description": repo.Description,
-					"Created at":  repo.CreatedAt,
+					"Created":     repo.CreatedAt,
+					"Updated":     repo.UpdatedAt,
+					"Pushed":      repo.PushedAt,
 					"Stargazers":  repo.StargazersCount,
 					"Topics":      repo.Topics,
 					"Language":    repo.Language,
 					"Private":     repo.Private,
-					"Starred at":  repo.StarredAt,
 				},
 			}
 
