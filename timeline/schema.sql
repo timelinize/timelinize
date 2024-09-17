@@ -372,12 +372,10 @@ CREATE TABLE IF NOT EXISTS "settings" (
 	"item_id" INTEGER,
 	"attribute_id" INTEGER,
 	"data_source_id" INTEGER,
-	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE
-) STRICT;
+);
 
 -- TODO: this is convenient -- will probably keep this, because the db-based enums like data sources and classifications
 -- don't get translated earlier; maybe we could, but I still need to think on that... if we do keep this,
