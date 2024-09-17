@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS "repo" (
 CREATE TABLE IF NOT EXISTS "data_sources" (
 	"id" INTEGER PRIMARY KEY, -- row ID, used only for DB consistency
 	"name" TEXT NOT NULL UNIQUE   -- programming ID, e.g. "google_photos" as used in the application code
+	"options" TEXT, -- configurable defaults to use when importing (to override their hard-coded defaults) (TODO: Not sure if they'll go here or in the settings table)
 ) STRICT;
 
 -- An account contains credentials necessary for accessing a remote data source.
@@ -359,6 +360,23 @@ CREATE TABLE IF NOT EXISTS "notes" (
 CREATE TABLE IF NOT EXISTS "review_codes" (
 	"id" INTEGER PRIMARY KEY,
 	"reason" TEXT NOT NULL
+) STRICT;
+
+-- TODO: Still WIP / might not use this...
+CREATE TABLE IF NOT EXISTS "settings" (
+	"key" TEXT PRIMARY KEY,
+	"title" TEXT,
+	"description" TEXT,
+	"type" TEXT,
+	"value",
+	"item_id" INTEGER,
+	"attribute_id" INTEGER,
+	"data_source_id" INTEGER,
+	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE CASCADE,
+	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
+	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
+	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
+	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
 -- TODO: this is convenient -- will probably keep this, because the db-based enums like data sources and classifications
