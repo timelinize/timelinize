@@ -362,16 +362,20 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 
 	// we actually keep rows with no content if they are in a relationship, or if
 	// they have a retrieval key, which implies that they will be completed later
+	// (bookmark items are also a special case: they may be empty, to later be populated
+	// by a snapshot, as long as they have metadata)
 	p.tl.dbMu.RLock()
-	rows, err := p.tl.db.Query(`SELECT id FROM items
+	rows, err := p.tl.db.Query(`SELECT id FROM extended_items
 		WHERE import_id=?
 		AND (data_text IS NULL OR data_text='')
+			AND (classification_name != ? OR metadata IS NULL)
 			AND data_file IS NULL
 			AND longitude IS NULL
 			AND latitude IS NULL
 			AND altitude IS NULL
 			AND retrieval_key IS NULL
-			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL)`, importID) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
+			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL)`,
+		importID, ClassBookmark.Name) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
 	if err != nil {
 		p.tl.dbMu.RUnlock()
 		return fmt.Errorf("querying empty items: %w", err)
@@ -518,7 +522,7 @@ func couldBeMarkdown(input []byte) bool {
 		{'`'},
 	} {
 		// this isn't perfect, because the matching "end token" could have been truncated
-		if bytes.Count(input, pair)%2 == 0 {
+		if count := bytes.Count(input, pair); count > 0 && count%2 == 0 {
 			return true
 		}
 	}

@@ -181,7 +181,16 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 					Name: strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
 				}
 				if p.Name == "" {
-					p.Name = strings.Trim(card.PreferredValue(vcard.FieldName), nameCutset)
+					if name := card.Name(); name != nil {
+						formattedName := join(" ", []string{
+							name.GivenName,
+							name.AdditionalName,
+							name.FamilyName,
+						})
+						p.Name = strings.Trim(formattedName, nameCutset)
+						p.Metadata["Honorific prefix"] = name.HonorificPrefix
+						p.Metadata["Honorific suffix"] = name.HonorificSuffix
+					}
 				}
 
 				if rawBday := card.PreferredValue(vcard.FieldBirthday); rawBday != "" {
@@ -234,10 +243,19 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 					})
 				}
 
-				for _, address := range card.Values(vcard.FieldAddress) {
+				for _, addr := range card.Addresses() {
+					// TODO: store components in metadata? or maybe use address parsing service later if needed
 					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "address",
-						Value: address,
+						Name: "address",
+						Value: join(" ", []string{
+							addr.PostOfficeBox,
+							addr.StreetAddress,
+							addr.ExtendedAddress,
+							addr.Locality,
+							addr.Region,
+							addr.PostalCode,
+							addr.Country,
+						}),
 					})
 				}
 
@@ -310,6 +328,22 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 	}
 
 	return nil
+}
+
+// join is like strings.Join, but only joins non-empty elements,
+// and trims spaces around individual elements.
+func join(sep string, elems []string) string {
+	var sb strings.Builder
+	for _, elem := range elems {
+		if strings.TrimSpace(elem) == "" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString(sep)
+		}
+		sb.WriteString(elem)
+	}
+	return sb.String()
 }
 
 const nameCutset = "<\"“”'>"

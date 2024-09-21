@@ -240,7 +240,7 @@ func (c *Client) getPostsIndex(fsys fs.FS) (instaPostsIndex, error) {
 			return nil, fmt.Errorf("decoding posts index file %s: %w", postsFilename, err)
 		}
 
-		for i := range len(idx) {
+		for i := range idx {
 			idx[i].filename = postsFilename
 		}
 

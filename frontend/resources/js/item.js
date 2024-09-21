@@ -44,7 +44,8 @@ async function itemPageMain() {
 			// TODO: consider viewport size too (if approx. text space is length * fontSize, maybe a ratio to screen width * height?)
 			// TODO: then re-compute on window resize
 			itemContentEl.classList.add('item-content-text');
-			const fontSize = Math.min(3500 * (1/item.data_text.length) + 20, 100);
+			const size = item.size || item.data_text?.length;
+			const fontSize = Math.min(3500 * (1/size) + 20, 100);
 			itemContentEl.style.fontSize = `${fontSize}px`;
 
 			const card = document.createElement('div');

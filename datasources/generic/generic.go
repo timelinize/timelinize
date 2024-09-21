@@ -124,6 +124,14 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 			}
 		}
 
+		// When importing a single file, fpath will be '.', and root will
+		// be the full path to the file. Make sure we use that getting
+		// the base name.
+		filename := fpath
+		if fpath == "." {
+			filename = path.Base(root)
+		}
+
 		fitem := fileItem{fsys: fsys, path: fpath, dirEntry: d}
 
 		item := &timeline.Item{
@@ -131,7 +139,7 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 			Location:             fitem.location(),
 			IntermediateLocation: fpath,
 			Content: timeline.ItemData{
-				Filename: filepath.Base(fpath),
+				Filename: filename,
 				Data: func(_ context.Context) (io.ReadCloser, error) {
 					return fsys.Open(fpath)
 				},

@@ -468,18 +468,21 @@ type ItemData struct {
 	Data DataFunc
 }
 
-// hasPlainTextMediaType returns true fi the item is declared as having
-// a plaintext media type, or in other words, a type which may qualify
-// for being stored directly in the DB (if this function returns false,
-// do not store the item content in the database; use a file instead).
-// If no media type is specified, we default to assuming plaintext (true).
-func (id ItemData) hasPlainTextMediaType() bool {
+// isPlainTextOrMarkdown returns true if the item is declared as having
+// a plaintext or markdown media type, or in other words, a type which
+// may qualify for being stored directly in the DB (if this function
+// returns false, do not store the item content in the database; use a
+// file instead). If no media type is specified, we default to assuming
+// plaintext (true).
+//
+// We allow Markdown because it's "plain-enough" text.
+func (id ItemData) isPlainTextOrMarkdown() bool {
 	mediaType, _, err := mime.ParseMediaType(id.MediaType)
 	if err != nil {
 		return true // assume plaintext
 	}
 	switch mediaType {
-	case "", "text", "text/plain":
+	case "", "text", "text/plain", "text/markdown":
 		return true
 	}
 	return false
@@ -1037,6 +1040,11 @@ var classifications = []Classification{
 		Labels:      []string{"Document", "Excel", "Word", "PDF", "PowerPoint"},
 		Description: "A file that contains text, images, or other data",
 	},
+	{
+		Name:        "bookmark",
+		Labels:      []string{"Bookmark", "Web", "URL"},
+		Description: "A bookmark to a web page",
+	},
 }
 
 // Item classifications!
@@ -1050,6 +1058,7 @@ var (
 	ClassCollection = getClassification("collection")
 	ClassNote       = getClassification("note")
 	ClassDocument   = getClassification("document")
+	ClassBookmark   = getClassification("bookmark")
 )
 
 func getClassification(name string) Classification {

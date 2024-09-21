@@ -16,7 +16,7 @@ jobs:
           - ubuntu-latest
           - windows-latest
           - macos-latest
-          - macos-14-large
+          - macos-13
         go-version: [1.23.x]
     runs-on: ${{ matrix.os }}
     steps:
@@ -63,7 +63,7 @@ jobs:
           sudo ldconfig
 
       - name: Install libraries (macOS)
-        if: ${{ ( matrix.os == 'macos-latest' ) || ( matrix.os == 'macos-14-large' ) }}
+        if: ${{ ( matrix.os == 'macos-latest' ) || ( matrix.os == 'macos-13' ) }}
         run: |
           brew install python || true # Problem in macOS Intel images https://github.com/actions/runner-images/issues/8500
           brew install libheif vips
@@ -79,20 +79,20 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Switch to Windows only build
+      - name: Switch to Windows-only build
         if: matrix.os == 'windows-latest'
         run: |
           sed -i 's/_GOOS_/windows/g' .goreleaser.yml
 
-      - name: Switch to Mac OS X only build
+      - name: Switch to macOS-only build
         if: matrix.os == 'macos-latest'
         run: |
           sed -i.tmp -e 's/_GOOS_/darwin/g' .goreleaser.yml
           # https://github.com/actions/runner-images?tab=readme-ov-file#available-images macos-14 is arm unless large.
           sed -i.tmp -e 's/amd64/arm64/g' .goreleaser.yml
 
-      - name: Switch to Mac OS X only build (x64)
-        if: matrix.os == 'macos-14-large'
+      - name: Switch to macOS-only build (x64)
+        if: matrix.os == 'macos-13'
         run: |
           sed -i.tmp -e 's/_GOOS_/darwin/g' .goreleaser.yml
 
