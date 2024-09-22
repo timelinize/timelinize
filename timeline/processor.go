@@ -369,13 +369,14 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 		WHERE import_id=?
 		AND (data_text IS NULL OR data_text='')
 			AND (classification_name != ? OR metadata IS NULL)
+			AND (classification_name != ? OR metadata IS NULL)
 			AND data_file IS NULL
 			AND longitude IS NULL
 			AND latitude IS NULL
 			AND altitude IS NULL
 			AND retrieval_key IS NULL
 			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL)`,
-		importID, ClassBookmark.Name) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
+		importID, ClassBookmark.Name, ClassPageView.Name) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
 	if err != nil {
 		p.tl.dbMu.RUnlock()
 		return fmt.Errorf("querying empty items: %w", err)
