@@ -82,6 +82,16 @@ When using Docker bind mounts like above, make sure the directories exist on you
 
 Timelinize compiles for Windows, Mac, and Linux.
 
+The Makefile installs all dependencies and cross compiles to a single binary in the .bin folder.
+
+```sh
+
+make all
+
+make run
+
+```
+
 Although Timelinize is written in Go, advanced media-related features such as video transcoding and thumbnail generation (and in the future, indexing with on-device machine learning) are best done with external dependencies. When building from source, you need to make sure the _development packages/versions of those dependencies_ are installed! Also, the latest version of Go is required.
 
 ### Dev dependencies
