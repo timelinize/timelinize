@@ -73,3 +73,12 @@ run-h:
 
 run:
 	$(BIN_NAME_NATIVE)
+
+### test
+
+test:
+	# Get your google data... Take abut 1 or 2 hours ...
+	# https://takeout.google.com/settings/takeout?pli=1
+
+	# get your apple data. says up to 7 days ... 
+	https://privacy.apple.com
