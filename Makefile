@@ -10,10 +10,10 @@ VIPS_WHICH=$(shell command -v $(VIPS_DEP))
 
 BIN_ROOT=$(PWD)/.bin
 BIN_NAME=timeline
-ifeq ($(OS_NAME),windows)
-	BIN_NAME=timeline.exe
-endif
 BIN_NAME_NATIVE=$(BIN_NAME)_$(OS_NAME)_$(OS_ARCH)
+ifeq ($(OS_NAME),windows)
+	BIN_NAME_NATIVE=$(BIN_NAME)_$(OS_NAME)_$(OS_ARCH).exe
+endif
 
 export PATH:=$(BIN_ROOT):$(PATH)
 
@@ -47,17 +47,25 @@ dep-libvps:
 ### bin
 
 bin: dep
-	go build -o $(BIN_ROOT)/$(BIN_NAME)_$(OS_NAME)_$(OS_ARCH)
+	# darwin amd64
+	#CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o $(BIN_ROOT)/$(BIN_NAME)_darwin_amd64
+	# darwin arm64
+	go build -o $(BIN_ROOT)/$(BIN_NAME)_darwin_arm64
 bin-cross:
-	# linux amd64
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC="zig cc -target aarch64-linux" CXX="zig c++ -target aarch64-linux" go build -o $(BIN_ROOT)/$(BIN_NAME)_linux_arm64
-
 	# linux amd64
 	#CGO_ENABLED=1 GOOS=linux GOARCH=amd64 CC="zig cc -target x86_64-linux" CXX="zig c++ -target x86_64-linux" go build -o $(BIN_ROOT)/$(BIN_NAME)_linux_amd64
 	
-	# windows amd64
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows" go build -o $(BIN_ROOT)/$(BIN_NAME)_windows_amd64
+	# linux arm64
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC="zig cc -target aarch64-linux" CXX="zig c++ -target aarch64-linux" go build -o $(BIN_ROOT)/$(BIN_NAME)_linux_arm64
 
+	# windows amd64
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows" go build -o $(BIN_ROOT)/$(BIN_NAME)_windows_amd64.exe
+
+	# windows arm64
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows" go build -o $(BIN_ROOT)/$(BIN_NAME)_windows_arm64.exe
+
+	
+	
 ### run 
 
 run-h:
