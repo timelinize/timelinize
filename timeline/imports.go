@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +33,7 @@ import (
 
 // ImportParameters describe an import.
 type ImportParameters struct {
-	ResumeImportID int64 `json:"resume_import_id"`
+	ResumeJobID int64 `json:"resume_job_id"`
 
 	DataSourceName string `json:"data_source_name"`
 	// TODO: we might need a way to map filenames to the data source that will process them.
@@ -55,7 +56,8 @@ func (params ImportParameters) Hash(repoID string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-type importRow struct {
+// TODO: needs to be updated to use schema updates (job table instead of imports table)
+type jobRow struct {
 	id                int64
 	dataSourceName    string // the actual row uses the row ID, this line uses the text ID ("name")
 	mode              importMode
@@ -70,40 +72,40 @@ type importRow struct {
 	checkpoint *checkpoint // the decoded checkpointBytes
 }
 
-func (tl *Timeline) loadImport(ctx context.Context, importID int64) (importRow, error) {
-	var imp importRow
+func (tl *Timeline) loadJob(ctx context.Context, importID int64) (jobRow, error) {
+	var job jobRow
 	var snapshotTS *int64
 	tl.dbMu.RLock()
 	err := tl.db.QueryRowContext(ctx,
 		`SELECT
-			imports.id, imports.mode, imports.snapshot_date, imports.account_id,
-			imports.started, imports.ended, imports.status, imports.checkpoint,
+			jobs.id, jobs.mode, jobs.snapshot_date, jobs.account_id,
+			jobs.started, jobs.ended, jobs.status, jobs.checkpoint,
 			data_source.name
-		FROM imports, data_sources
-		WHERE imports.id=?
+		FROM jobs, data_sources
+		WHERE jobs.id=?
 			AND data_sources.id = accounts.data_source_id
 		LIMIT 1`,
 		// TODO: I'm pretty sure these won't all scan correctly, currently
-		importID).Scan(&imp.id, &imp.mode, &snapshotTS, &imp.accountID, &imp.started, &imp.ended,
-		&imp.status, &imp.checkpointBytes, &imp.dataSourceName)
+		importID).Scan(&job.id, &job.mode, &snapshotTS, &job.accountID, &job.started, &job.ended,
+		&job.status, &job.checkpointBytes, &job.dataSourceName)
 	tl.dbMu.RUnlock()
 	if err != nil {
-		return imp, fmt.Errorf("querying import %d from DB: %w", importID, err)
+		return job, fmt.Errorf("querying import %d from DB: %w", importID, err)
 	}
-	if len(imp.checkpointBytes) > 0 {
-		err = unmarshalGob(imp.checkpointBytes, imp.checkpoint)
+	if len(job.checkpointBytes) > 0 {
+		err = unmarshalGob(job.checkpointBytes, job.checkpoint)
 		if err != nil {
-			return imp, fmt.Errorf("decoding checkpoint: %w", err)
+			return job, fmt.Errorf("decoding checkpoint: %w", err)
 		}
 	}
 	if snapshotTS != nil {
 		ts := time.Unix(*snapshotTS, 0)
-		imp.snapshotDate = &ts
+		job.snapshotDate = &ts
 	}
-	return imp, nil
+	return job, nil
 }
 
-func (tl *Timeline) newImport(ctx context.Context, dataSourceID string, mode importMode, procOpt ProcessingOptions, accountID int64) (importRow, error) {
+func (tl *Timeline) newJob(ctx context.Context, dataSourceID string, mode importMode, procOpt ProcessingOptions, accountID int64) (jobRow, error) {
 	// ensure data source of the import and data source of the account are the same
 	// (this should always be the case, but sanity check here to prevent confusion)
 	if accountID > 0 {
@@ -117,10 +119,10 @@ func (tl *Timeline) newImport(ctx context.Context, dataSourceID string, mode imp
 			accountID).Scan(&accountDataSourceID)
 		tl.dbMu.RUnlock()
 		if err != nil {
-			return importRow{}, fmt.Errorf("querying DB to verify data source IDs: %w", err)
+			return jobRow{}, fmt.Errorf("querying DB to verify data source IDs: %w", err)
 		}
 		if accountDataSourceID != dataSourceID {
-			return importRow{}, fmt.Errorf("data source ID and account's data source ID do not match: %s vs. %s",
+			return jobRow{}, fmt.Errorf("data source ID and account's data source ID do not match: %s vs. %s",
 				dataSourceID, accountDataSourceID)
 		}
 	}
@@ -132,10 +134,10 @@ func (tl *Timeline) newImport(ctx context.Context, dataSourceID string, mode imp
 		dataSourceID).Scan(&dataSourceRowID)
 	tl.dbMu.RUnlock()
 	if err != nil {
-		return importRow{}, fmt.Errorf("querying data source's row ID: %s: %w", dataSourceID, err)
+		return jobRow{}, fmt.Errorf("querying data source's row ID: %s: %w", dataSourceID, err)
 	}
 
-	imp := importRow{
+	imp := jobRow{
 		dataSourceName:    dataSourceID,
 		mode:              mode,
 		processingOptions: procOpt,
@@ -148,19 +150,22 @@ func (tl *Timeline) newImport(ctx context.Context, dataSourceID string, mode imp
 	if !imp.processingOptions.IsEmpty() {
 		procOptJSON, err = json.Marshal(imp.processingOptions)
 		if err != nil {
-			return importRow{}, fmt.Errorf("marshaling processing options: %w", err)
+			return jobRow{}, fmt.Errorf("marshaling processing options: %w", err)
 		}
 	}
 
+	hostname, _ := os.Hostname()
+
 	var started int64
 	tl.dbMu.Lock()
-	err = tl.db.QueryRow(`INSERT INTO imports (data_source_id, mode, account_id, processing_options)
+	// TODO: update this when we are done figuring this out...
+	err = tl.db.QueryRow(`INSERT INTO jobs (action, configuration, status, hostname)
 		VALUES (?, ?, ?, ?)
-		RETURNING id, started, status`,
-		dataSourceRowID, imp.mode, imp.accountID, string(procOptJSON)).Scan(&imp.id, &started, &imp.status)
+		RETURNING id, start, status`,
+		"import", string(procOptJSON), "started", hostname).Scan(&imp.id, &started, &imp.status)
 	tl.dbMu.Unlock()
 	if err != nil {
-		return importRow{}, fmt.Errorf("inserting import row into DB: %w", err)
+		return jobRow{}, fmt.Errorf("inserting job row into DB: %w", err)
 	}
 	imp.started = time.Unix(started, 0)
 	return imp, nil

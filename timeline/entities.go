@@ -71,8 +71,8 @@ type Entity struct {
 	Attributes []Attribute `json:"attributes,omitempty"`
 
 	// Fields below are only for use with search or JSON serialization
-	ImportID *int64    `json:"import_id,omitempty"`
-	Stored   time.Time `json:"stored,omitempty"`
+	JobID  *int64    `json:"job_id,omitempty"`
+	Stored time.Time `json:"stored,omitempty"`
 }
 
 func (e Entity) String() string {
@@ -491,9 +491,9 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 
 		// if we could not find a person by any of those identities, add new person to DB
 		err = tx.QueryRowContext(ctx, `INSERT INTO entities
-				(type_id, import_id, name, metadata) VALUES (?, ?, ?, ?)
+				(type_id, job_id, name, metadata) VALUES (?, ?, ?, ?)
 				RETURNING id`,
-			in.typeID, p.impRow.id, in.dbName(), metadata).Scan(&in.ID)
+			in.typeID, p.jobRow.id, in.dbName(), metadata).Scan(&in.ID)
 		if err != nil {
 			return latentID{}, fmt.Errorf("adding new person %+v: %w", in, err)
 		}
@@ -613,7 +613,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 			var autolinkImportID, autolinkAttrIDPtr *int64
 			if autolinkAttrID, ok := entityAutolinkAttrs[entity.ID]; ok {
 				autolinkAttrIDPtr = &autolinkAttrID
-				autolinkImportID = &p.impRow.id
+				autolinkImportID = &p.jobRow.id
 			}
 
 			if noRows {
@@ -621,19 +621,19 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 
 				_, err = tx.ExecContext(ctx,
 					`INSERT INTO entity_attributes
-						(entity_id, attribute_id, data_source_id, import_id, autolink_import_id, autolink_attribute_id)
+						(entity_id, attribute_id, data_source_id, job_id, autolink_job_id, autolink_attribute_id)
 					VALUES (?, ?, ?, ?, ?, ?)`,
-					entity.ID, attrID, linkedDataSourceID, p.impRow.id, autolinkImportID, autolinkAttrIDPtr)
+					entity.ID, attrID, linkedDataSourceID, p.jobRow.id, autolinkImportID, autolinkAttrIDPtr)
 				if err != nil {
-					return latentID{}, fmt.Errorf("linking entity %d to attribute %d: %w (data_source_id=%#v import_id=%d autolink_import_id=%#v autolink_attribute_id=%#v)",
-						entity.ID, attrID, err, linkedDataSourceID, p.impRow.id, autolinkImportID, autolinkAttrIDPtr)
+					return latentID{}, fmt.Errorf("linking entity %d to attribute %d: %w (data_source_id=%#v job_id=%d autolink_job_id=%#v autolink_attribute_id=%#v)",
+						entity.ID, attrID, err, linkedDataSourceID, p.jobRow.id, autolinkImportID, autolinkAttrIDPtr)
 				}
 			} else if eaID > 0 && existingDataSourceID == nil {
 				// the entity and attribute are already related in the DB but not as an ID on any data source; update
 
 				_, err = tx.ExecContext(ctx,
-					`UPDATE entity_attributes SET data_source_id=?, import_id=?, autolink_import_id=?, autolink_attribute_id=? WHERE id=?`, // TODO: LIMIT 1 would be nice...
-					linkedDataSourceID, p.impRow.id, autolinkImportID, autolinkAttrIDPtr, eaID)
+					`UPDATE entity_attributes SET data_source_id=?, job_id=?, autolink_job_id=?, autolink_attribute_id=? WHERE id=?`, // TODO: LIMIT 1 would be nice...
+					linkedDataSourceID, p.jobRow.id, autolinkImportID, autolinkAttrIDPtr, eaID)
 				if err != nil {
 					return latentID{}, fmt.Errorf("updating entity %d link to attribute %d: %w", entity.ID, attrID, err)
 				}
