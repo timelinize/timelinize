@@ -31,7 +31,7 @@ type EntitySearchParams struct {
 
 	RowID      []int64     `json:"row_id,omitempty"`
 	Type       []string    `json:"type,omitempty"`
-	ImportID   []int64     `json:"import_id,omitempty"`
+	JobID      []int64     `json:"job_id,omitempty"`
 	Name       []string    `json:"name,omitempty"`
 	Attributes []Attribute `json:"attributes,omitempty"`
 
@@ -97,7 +97,7 @@ func (tl *Timeline) SearchEntities(ctx context.Context, params EntitySearchParam
 		var itemCount, stored int64
 
 		var dests = []any{
-			&ent.ID, &ent.typeID, &ent.Type, &ent.ImportID, &stored, &ent.name,
+			&ent.ID, &ent.typeID, &ent.Type, &ent.JobID, &stored, &ent.name,
 			&ent.Picture, &identDS, &autolinkImportID, &autolinkAttributeID,
 			&nattr.ID, &nattr.Name, &nattr.Value,
 		}
@@ -165,12 +165,12 @@ func (tl *Timeline) prepareEntitySearchQuery(params EntitySearchParams) (string,
 		entities.id,
 		entities.type_id,
 		entity_types.name,
-		entities.import_id,
+		entities.job_id,
 		entities.stored,
 		entities.name,
 		entities.picture_file,
 		all_entity_attributes.data_source_id,
-		all_entity_attributes.autolink_import_id,
+		all_entity_attributes.autolink_job_id,
 		all_entity_attributes.autolink_attribute_id,
 		attributes.id,
 		attributes.name,
@@ -240,8 +240,8 @@ func (tl *Timeline) prepareEntitySearchQuery(params EntitySearchParams) (string,
 		}
 	})
 	and(func() {
-		for _, v := range params.ImportID {
-			or("entities.import_id=?", v)
+		for _, v := range params.JobID {
+			or("entities.job_id=?", v)
 		}
 	})
 	and(func() {

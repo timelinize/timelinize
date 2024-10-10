@@ -46,7 +46,7 @@ type processor struct {
 	ds        DataSource
 	dsRowID   int64 // only used directly with DB to reduce DB queries; different for every DB
 	acc       Account
-	impRow    importRow
+	jobRow    jobRow
 	params    ImportParameters
 	filenames []string
 	log       *zap.Logger
@@ -75,24 +75,24 @@ func (tl *Timeline) Import(ctx context.Context, params ImportParameters) error {
 	}
 
 	// create or resume import operation
-	var impRow importRow
+	var impRow jobRow
 	var err error
-	if params.ResumeImportID == 0 {
+	if params.ResumeJobID == 0 {
 		mode := importModeAPI
 		if len(params.Filenames) > 0 {
 			mode = importModeFile
 		}
-		impRow, err = tl.newImport(ctx, params.DataSourceName, mode, params.ProcessingOptions, params.AccountID)
+		impRow, err = tl.newJob(ctx, params.DataSourceName, mode, params.ProcessingOptions, params.AccountID)
 		if err != nil {
-			return fmt.Errorf("creating new import row: %w", err)
+			return fmt.Errorf("creating new job row: %w", err)
 		}
 	} else {
-		impRow, err = tl.loadImport(ctx, params.ResumeImportID)
+		impRow, err = tl.loadJob(ctx, params.ResumeJobID)
 		if err != nil {
-			return fmt.Errorf("loading existing import row: %w", err)
+			return fmt.Errorf("loading existing job row: %w", err)
 		}
 		if impRow.checkpoint == nil {
-			return fmt.Errorf("import %d has no checkpoint to resume from", impRow.id)
+			return fmt.Errorf("job %d has no checkpoint to resume from", impRow.id)
 		}
 		if params.DataSourceName != "" || params.AccountID != 0 ||
 			len(params.Filenames) > 0 || !params.ProcessingOptions.IsEmpty() ||
@@ -119,7 +119,7 @@ func (tl *Timeline) Import(ctx context.Context, params ImportParameters) error {
 // Import adds items to the timeline. If filename is non-empty, the items will be imported
 // from the specified file. Any data-source-specific options should be passed in as dsOptJSON.
 // Processing will follow the rules specified in procOpt.
-func (tl *Timeline) doImport(ctx context.Context, ds DataSource, params ImportParameters, impRow importRow) error {
+func (tl *Timeline) doImport(ctx context.Context, ds DataSource, params ImportParameters, impRow jobRow) error {
 	var acc Account
 	if params.AccountID > 0 {
 		var err error
@@ -156,7 +156,7 @@ func (tl *Timeline) doImport(ctx context.Context, ds DataSource, params ImportPa
 		params:           params,
 		tl:               tl,
 		acc:              acc,
-		impRow:           impRow,
+		jobRow:           impRow,
 		log:              logger,
 		progress:         logger.Named("progress"),
 		batchMu:          new(sync.Mutex),
@@ -207,12 +207,11 @@ func (p *processor) doImport(ctx context.Context) error {
 		p.tl.dbMu.RLock()
 		err := p.tl.db.QueryRow(`
 			SELECT items.original_id, items.timestamp
-			FROM items, imports, data_sources
-			WHERE imports.status=?
-				AND imports.id = items.import_id
-				AND data_sources.id = imports.data_source_id
+			FROM items, jobs, data_sources
+			WHERE jobs.status=?
+				AND jobs.id = items.job_id
 				AND data_sources.name = ?
-			ORDER BY imports.started DESC
+			ORDER BY jobs.started DESC
 			LIMIT 1`, importStatusSuccess, p.params.DataSourceName).Scan(&mostRecentOriginalID, &mostRecentTimestamp)
 		p.tl.dbMu.RUnlock()
 		if err != nil && err != sql.ErrNoRows {
@@ -235,8 +234,8 @@ func (p *processor) doImport(ctx context.Context) error {
 	}
 
 	var checkpointData any
-	if p.impRow.checkpoint != nil {
-		checkpointData = p.impRow.checkpoint.Data
+	if p.jobRow.checkpoint != nil {
+		checkpointData = p.jobRow.checkpoint.Data
 	}
 
 	listOpt := ListingOptions{
@@ -265,12 +264,12 @@ func (p *processor) doImport(ctx context.Context) error {
 	importResult := "ok"
 	defer func() {
 		p.tl.dbMu.Lock()
-		_, err := p.tl.db.Exec(`UPDATE imports SET ended=?, status=? WHERE id=?`, // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
-			time.Now().Unix(), importResult, p.impRow.id)
+		_, err := p.tl.db.Exec(`UPDATE jobs SET end=?, status=? WHERE id=?`, // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
+			time.Now().Unix(), importResult, p.jobRow.id)
 		p.tl.dbMu.Unlock()
 		if err != nil {
 			p.log.Error("updating import status",
-				zap.Int64("import_id", p.impRow.id),
+				zap.Int64("job_id", p.jobRow.id),
 				zap.String("status", importResult),
 				zap.Error(err))
 		}
@@ -290,7 +289,7 @@ func (p *processor) doImport(ctx context.Context) error {
 	}
 
 	p.log.Info("all items received; waiting for processing to finish",
-		zap.Int64("import_id", p.impRow.id),
+		zap.Int64("job_id", p.jobRow.id),
 		zap.String("status", importResult),
 		zap.Error(err))
 
@@ -305,27 +304,32 @@ func (p *processor) doImport(ctx context.Context) error {
 		return fmt.Errorf("processing completed, but error cleaning up: %w", err)
 	}
 
-	go p.generateThumbnailsForImportedItems()
+	go p.postImportTasks()
 
 	return nil
 }
 
+func (p *processor) postImportTasks() {
+	p.generateThumbnailsForImportedItems()
+	p.generateEmbeddingsForImportedItems()
+}
+
 func (p *processor) successCleanup() error {
 	// delete empty items from this import (items with no content and no meaningful relationships)
-	if err := p.deleteEmptyItems(p.impRow.id); err != nil {
-		return fmt.Errorf("deleting empty items: %w (import_id=%d)", err, p.impRow.id)
+	if err := p.deleteEmptyItems(p.jobRow.id); err != nil {
+		return fmt.Errorf("deleting empty items: %w (job_id=%d)", err, p.jobRow.id)
 	}
 
 	// TODO: If no items were inserted or associated with this import, delete it from the DB?
 
 	// clear checkpoint
 	p.tl.dbMu.Lock()
-	_, err := p.tl.db.Exec(`UPDATE imports SET checkpoint=NULL WHERE id=?`, p.impRow.id) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
+	_, err := p.tl.db.Exec(`UPDATE jobs SET checkpoint=NULL WHERE id=?`, p.jobRow.id) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
 	p.tl.dbMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("clearing checkpoint: %w", err)
 	}
-	p.impRow.checkpoint = nil
+	p.jobRow.checkpoint = nil
 
 	// // TODO: ... we don't use this in the new schema
 	// // update the last item ID, to advance the window for future get-latest operations
@@ -350,7 +354,7 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 	// be done if they're only used by the one item -- maybe we could use `RETURNING data_file` to take care of this?
 	/*
 		DELETE FROM items WHERE id IN (SELECT id FROM items
-			WHERE import_id=?
+			WHERE job_id=?
 			AND (data_text IS NULL OR data_text='')
 				AND data_file IS NULL
 				AND longitude IS NULL
@@ -366,7 +370,7 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 	// by a snapshot, as long as they have metadata)
 	p.tl.dbMu.RLock()
 	rows, err := p.tl.db.Query(`SELECT id FROM extended_items
-		WHERE import_id=?
+		WHERE job_id=?
 		AND (data_text IS NULL OR data_text='')
 			AND (classification_name != ? OR metadata IS NULL)
 			AND data_file IS NULL
@@ -404,7 +408,7 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 	}
 
 	p.log.Info("deleting empty items from this import",
-		zap.Int64("import_id", importID),
+		zap.Int64("job_id", importID),
 		zap.Int("count", len(emptyItems)))
 
 	retention := time.Duration(0)

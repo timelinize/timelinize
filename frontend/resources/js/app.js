@@ -66,11 +66,6 @@ async function myFetch(signal, endpoint, data, method) {
 		body: data,
 		signal: signal
 	}).then(async (response) => {
-		// re-enable form inputs
-		if ($('#modal-preview')?.offsetParent === null) {
-			formFields.forEach((elem) => { elem.disabled = false; });
-		}
-
 		if (response.ok) {
 			if (response.headers.get('Content-Type') == 'application/json')
 				return response.json();
@@ -86,6 +81,11 @@ async function myFetch(signal, endpoint, data, method) {
 		}
 
 		throw {response: response};
+	}).finally(function() {
+		// re-enable form inputs
+		if ($('#modal-preview')?.offsetParent === null) {
+			formFields.forEach((elem) => { elem.disabled = false; });
+		}
 	});
 }
 

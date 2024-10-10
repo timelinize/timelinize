@@ -333,8 +333,8 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 			return latentID{}, err
 		}
 
-		_, err = tx.Exec(`UPDATE imports SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
-			chkpt, p.impRow.id)
+		_, err = tx.Exec(`UPDATE jobs SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
+			chkpt, p.jobRow.id)
 		if err != nil {
 			return latentID{}, err
 		}
@@ -762,7 +762,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// (Example: filename is IMG_1234.HEIC, but data_file ends in IMG_1234__abcd.HEIC. We could rename to IMG_1234.HEIC
 	// if that filename is available in the repo and update the DB row to match.)
 	// TODO: Try to figure this out to make it correct. We might need a process-wide map mutex or something to avoid hacky solutions?
-	if dbItem.ImportID != nil && *dbItem.ImportID == p.impRow.id &&
+	if dbItem.JobID != nil && *dbItem.JobID == p.jobRow.id &&
 		dbItem.DataHash == nil &&
 		dbItem.DataFile != nil && FileExists(p.tl.FullPath(*dbItem.DataFile)) {
 		p.log.Debug("processing existing item, but skipping data file because it is already being processed by this import",
@@ -778,7 +778,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// (like an ID), then later as it iterates it finds that related item and fills out the rest
 	// of the item's information -- so if our current item row is missing information, we can at
 	// least safely add new info I think
-	if dbItem.ImportID != nil && *dbItem.ImportID == p.impRow.id {
+	if dbItem.JobID != nil && *dbItem.JobID == p.jobRow.id {
 		updateOverrides = make(map[string]fieldUpdatePolicy)
 
 		// if there's an incoming data file and we don't have one, then update
@@ -972,7 +972,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 
 	ir.DataSourceID = &p.dsRowID
 	ir.DataSourceName = &p.ds.Name
-	ir.ImportID = &p.impRow.id
+	ir.JobID = &p.jobRow.id
 	if attrID != 0 {
 		ir.AttributeID = &attrID
 	}
@@ -1257,7 +1257,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 		err := tx.QueryRowContext(ctx,
 			`INSERT INTO items
-				(data_source_id, import_id, attribute_id, classification_id,
+				(data_source_id, job_id, attribute_id, classification_id,
 				original_id, original_location, intermediate_location, filename,
 				timestamp, timespan, timeframe, time_offset, time_uncertainty,
 				data_type, data_text, data_file, data_hash, metadata,
@@ -1265,7 +1265,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 				note, starred, original_id_hash, initial_content_hash, retrieval_key)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			RETURNING id`,
-			ir.DataSourceID, ir.ImportID, ir.AttributeID, ir.ClassificationID,
+			ir.DataSourceID, ir.JobID, ir.AttributeID, ir.ClassificationID,
 			ir.OriginalID, ir.OriginalLocation, ir.IntermediateLocation, ir.Filename,
 			ir.timestampUnix(), ir.timespanUnix(), ir.timeframeUnix(), ir.TimeOffset, ir.TimeUncertainty,
 			ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, string(ir.Metadata),
@@ -1292,11 +1292,11 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 	sb.WriteString(`UPDATE items SET `)
 
-	// set the modified_import_id (the ID of the import that most recently modified the item) only if
+	// set the modified_job_id (the ID of the import that most recently modified the item) only if
 	// it's not the original import, I think it makes sense to count the original import only once
-	if ir.ImportID != nil && *ir.ImportID != p.impRow.id {
-		sb.WriteString(`modified_import_id=?`)
-		args = append(args, p.impRow.id)
+	if ir.JobID != nil && *ir.JobID != p.jobRow.id {
+		sb.WriteString(`modified_job_id=?`)
+		args = append(args, p.jobRow.id)
 		needsComma = true
 	}
 

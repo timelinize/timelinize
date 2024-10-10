@@ -25,9 +25,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3" // register the sqlite3 driver
 )
+
+func init() {
+	sqlite_vec.Auto()
+}
 
 //go:embed schema.sql
 var createDB string

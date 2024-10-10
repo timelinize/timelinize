@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS "repo" (
 CREATE TABLE IF NOT EXISTS "data_sources" (
 	"id" INTEGER PRIMARY KEY, -- row ID, used only for DB consistency
 	"name" TEXT NOT NULL UNIQUE   -- programming ID, e.g. "google_photos" as used in the application code
-	"options" TEXT, -- configurable defaults to use when importing (to override their hard-coded defaults) (TODO: Not sure if they'll go here or in the settings table)
 ) STRICT;
 
 -- An account contains credentials necessary for accessing a remote data source.
@@ -58,6 +57,14 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 CREATE INDEX IF NOT EXISTS "idx_jobs_action" ON "jobs"("action");
 CREATE INDEX IF NOT EXISTS "idx_jobs_start" ON "jobs"("start");
 CREATE INDEX IF NOT EXISTS "idx_jobs_status" ON "jobs"("status");
+
+-- Embeddings enable "intelligent" search using ML models to derive semantics and meaning.
+-- By finding other embeddings that are close (dot product or euclidean distance),
+-- similarity searches are possible. This requires the sqlite-vec module.
+CREATE VIRTUAL TABLE IF NOT EXISTS embeddings USING vec0(
+	id INTEGER PRIMARY KEY,
+	embedding float[768]
+);
 
 -- Entity type names are hard-coded (but their IDs are not).
 CREATE TABLE IF NOT EXISTS "entity_types" (
@@ -166,6 +173,7 @@ CREATE TABLE IF NOT EXISTS "classifications" (
 -- An item is something imported from a specific data source.
 CREATE TABLE IF NOT EXISTS "items" (
 	"id" INTEGER PRIMARY KEY,
+	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model
 	"data_source_id" INTEGER,
 	"job_id" INTEGER,
 	"modified_job_id" INTEGER, -- the import that last modified this existing item
@@ -426,3 +434,12 @@ CREATE TRIGGER IF NOT EXISTS prevent_stray_attributes
 	BEGIN
 		DELETE FROM attributes WHERE id=OLD.attribute_id;
 	END;
+
+-- Foreign keys cannot reference virtual tables because, by definition, virtual
+-- tables are not under the control of sqlite, so they cannot be enforced:
+-- https://sqlite.org/forum/info/cefd5a904423239bc395039db18b7695769b72f5a15366f9ef286c638bdd8075
+-- The recommended workaround is a trigger: https://github.com/asg017/sqlite-vec/issues/86
+CREATE TRIGGER IF NOT EXISTS clean_up_embeddings
+	AFTER DELETE ON items BEGIN
+	DELETE FROM embeddings WHERE id = old.embedding_id;
+END;

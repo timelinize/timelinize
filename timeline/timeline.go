@@ -356,9 +356,9 @@ func openTimeline(repo, cache string, db *sql.DB) (*Timeline, error) {
 
 	// in case of unclean shutdown last time, set all imports that are on "started" status to "aborted"
 	// (no imports can be running currently since we haven't finished opening the timeline yet)
-	_, err = db.Exec(`UPDATE imports SET status='abort' WHERE status='started'`)
+	_, err = db.Exec(`UPDATE jobs SET status='abort' WHERE status='started'`)
 	if err != nil {
-		return nil, fmt.Errorf("resetting all uncleanly-stopped imports to 'abort' status: %w", err)
+		return nil, fmt.Errorf("resetting all uncleanly-stopped jobs to 'abort' status: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -987,7 +987,7 @@ var processorCtxKey ctxKey = "processor"
 // 		return
 // 	}
 
-// 	_, err = proc.tl.db.Exec(`UPDATE imports SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
+// 	_, err = proc.tl.db.Exec(`UPDATE jobs SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
 // 		chkpt, proc.imp.ID)
 // 	if err != nil {
 // 		log.Printf("[ERROR] Checkpoint: %w", err)

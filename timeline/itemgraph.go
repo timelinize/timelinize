@@ -685,9 +685,10 @@ var (
 // ItemRow has the structure of an item's row in our DB.
 type ItemRow struct {
 	ID                   int64           `json:"id"`
+	EmbeddingID          *int64          `json:"embedding_id,omitempty"`
 	DataSourceID         *int64          `json:"data_source_id,omitempty"` // row ID, used only for insertion into the DB
-	ImportID             *int64          `json:"import_id,omitempty"`
-	ModifiedImportID     *int64          `json:"modified_import_id,omitempty"`
+	JobID                *int64          `json:"job_id,omitempty"`
+	ModifiedImportID     *int64          `json:"modified_job_id,omitempty"`
 	AttributeID          *int64          `json:"attribute_id,omitempty"`
 	ClassificationID     *int64          `json:"classification_id,omitempty"` // row ID, used only internally
 	OriginalID           *string         `json:"original_id,omitempty"`
@@ -764,13 +765,13 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	var ts, tspan, tframe, modified, deleted *int64 // will convert from Unix milli timestamp
 	var stored int64                                // will convert from Unix milli timestamp
 
-	itemTargets := []any{&ir.ID, &ir.DataSourceID, &ir.ImportID, &ir.ModifiedImportID, &ir.AttributeID,
+	itemTargets := []any{&ir.ID, &ir.EmbeddingID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedImportID, &ir.AttributeID,
 		&ir.ClassificationID, &ir.OriginalID, &ir.OriginalLocation, &ir.IntermediateLocation, &ir.Filename,
 		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeUncertainty, &stored, &modified,
 		&ir.DataType, &ir.DataText, &ir.DataFile, &ir.DataHash,
 		&metadata, &ir.Location.Longitude, &ir.Location.Latitude, &ir.Location.Altitude,
 		&ir.Location.CoordinateSystem, &ir.Location.CoordinateUncertainty, &ir.Note, &ir.Starred,
-		&ir.ThumbHash, &ir.OriginalIDHash, &ir.InitialContentHash,
+		&ir.ThumbHash, &ir.OriginalIDHash, &ir.InitialContentHash, &ir.RetrievalKey,
 		&ir.Hidden, &deleted,
 		&ir.DataSourceName, &className}
 	allTargets := append(itemTargets, targetsAfterItemCols...) //nolint:gocritic // I am explicitly self-documenting how the first batch of targets are for the item, then there's the rest
@@ -813,13 +814,13 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 }
 
 // used for selecting from the extended_items view, but "AS items"
-const itemDBColumns = `items.id, items.data_source_id, items.import_id, items.modified_import_id, items.attribute_id, items.classification_id,
-items.original_id, items.original_location, items.intermediate_location, items.filename,
+const itemDBColumns = `items.id, items.embedding_id, items.data_source_id, items.job_id, items.modified_job_id, items.attribute_id,
+items.classification_id, items.original_id, items.original_location, items.intermediate_location, items.filename,
 items.timestamp, items.timespan, items.timeframe, items.time_offset, items.time_uncertainty, items.stored, items.modified,
 items.data_type, items.data_text, items.data_file, items.data_hash, items.metadata,
 items.longitude, items.latitude, items.altitude, items.coordinate_system, items.coordinate_uncertainty,
 items.note, items.starred, items.thumb_hash, items.original_id_hash, items.initial_content_hash,
-items.hidden, items.deleted, data_source_name, classification_name`
+items.retrieval_key, items.hidden, items.deleted, data_source_name, classification_name`
 
 // Location represents a precise coordinate on a planetary body.
 // By default, standard Earth GPS lon/lat coordinates are assumed.

@@ -145,7 +145,7 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 		if len(importParams.Filenames) > 0 {
 			mode = importModeFile
 		}
-		impRow, err := tl.newImport(ctx, importParams.DataSourceName, mode, ProcessingOptions{}, importParams.AccountID)
+		impRow, err := tl.newJob(ctx, importParams.DataSourceName, mode, ProcessingOptions{}, importParams.AccountID)
 		if err != nil {
 			return fmt.Errorf("creating new import row: %w", err)
 		}
@@ -164,7 +164,7 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 			params:           importParams,
 			tl:               tl,
 			// acc:              Account{},
-			impRow:   impRow,
+			jobRow:   impRow,
 			log:      logger,
 			progress: logger.Named("progress"),
 		}
