@@ -193,7 +193,7 @@ func generateThumbnail(task thumbnailTask) {
 			// (vips is fast enough for stills though, as long as we tune down the parameters sufficiently)
 			ep := vips.NewAvifExportParams()
 			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-			ep.Quality = 30
+			ep.Quality = 45
 			ep.Bitdepth = 10
 			ep.Effort = 1
 			imageBytes, _, err = inputImage.ExportAvif(ep)
@@ -401,7 +401,7 @@ func (tl *Timeline) GeneratePreviewImage(itemRow ItemRow, ext string) ([]byte, e
 	case extAvif:
 		ep := vips.NewAvifExportParams()
 		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-		ep.Quality = 40
+		ep.Quality = 65
 		ep.Effort = 1
 		ep.Bitdepth = 10
 		imageBytes, _, err = inputImage.ExportAvif(ep)
@@ -474,10 +474,10 @@ func (tl *Timeline) regenerateAllThumbnails() error {
 // run after the import completes.
 func (p *processor) generateThumbnailsForImportedItems() {
 	p.tl.dbMu.RLock()
-	rows, err := p.tl.db.QueryContext(p.tl.ctx, `SELECT id, data_type, data_file FROM items WHERE import_id=? AND data_file IS NOT NULL`, p.impRow.id)
+	rows, err := p.tl.db.QueryContext(p.tl.ctx, `SELECT id, data_type, data_file FROM items WHERE job_id=? AND data_file IS NOT NULL`, p.jobRow.id)
 	if err != nil {
 		p.log.Error("unable to generate thumbnails from this import",
-			zap.Int64("import_id", p.impRow.id),
+			zap.Int64("job_id", p.jobRow.id),
 			zap.Error(err))
 		return
 	}
@@ -486,7 +486,7 @@ func (p *processor) generateThumbnailsForImportedItems() {
 		rowID    int64
 		dataType string
 	}
-	thumbnailsNeeded := make(map[string]thumbInfo) // map key is item ID; useful for deduplicating if shared by other items
+	thumbnailsNeeded := make(map[string]thumbInfo) // map key is file path; useful for deduplicating if shared by other items
 
 	for rows.Next() {
 		var rowID int64
@@ -495,7 +495,7 @@ func (p *processor) generateThumbnailsForImportedItems() {
 		err := rows.Scan(&rowID, &dataType, &dataFile)
 		if err != nil {
 			p.log.Error("unable to scan row to generate thumbnails from this import",
-				zap.Int64("import_id", p.impRow.id),
+				zap.Int64("job_id", p.jobRow.id),
 				zap.Error(err))
 			defer p.tl.dbMu.RUnlock()
 			defer rows.Close()
@@ -509,7 +509,7 @@ func (p *processor) generateThumbnailsForImportedItems() {
 	p.tl.dbMu.RUnlock()
 	if err = rows.Err(); err != nil {
 		p.log.Error("iterating rows for generating thumbnails failed",
-			zap.Int64("import_id", p.impRow.id),
+			zap.Int64("job_id", p.jobRow.id),
 			zap.Error(err))
 		return
 	}
@@ -527,7 +527,7 @@ func (p *processor) generateThumbnailsForImportedItems() {
 			// unblock the parent goroutine
 			if err := <-errs; err != nil {
 				p.log.Error("unable to generate thumbnail",
-					zap.Int64("import_id", p.impRow.id),
+					zap.Int64("job_id", p.jobRow.id),
 					zap.Error(err))
 			}
 		}
@@ -547,16 +547,16 @@ func (p *processor) generateThumbnailsForImportedItems() {
 }
 
 func (p *processor) generateThumbhashesForItemsThatNeedOne() {
-	p.log.Info("generating thumbhashes for imported items", zap.Int64("import_id", p.impRow.id))
-	defer p.log.Info("finished thumbhash generation routine", zap.Int64("import_id", p.impRow.id))
+	p.log.Info("generating thumbhashes for imported items", zap.Int64("job_id", p.jobRow.id))
+	defer p.log.Info("finished thumbhash generation routine", zap.Int64("job_id", p.jobRow.id))
 
 	p.tl.dbMu.RLock()
 	rows, err := p.tl.db.QueryContext(p.tl.ctx,
-		`SELECT id, data_type FROM items WHERE import_id=? AND data_file IS NOT NULL AND thumb_hash IS NULL`,
-		p.impRow.id)
+		`SELECT id, data_type FROM items WHERE job_id=? AND data_file IS NOT NULL AND thumb_hash IS NULL`,
+		p.jobRow.id)
 	if err != nil {
 		p.log.Error("unable to generate thumbhashes for this import",
-			zap.Int64("import_id", p.impRow.id),
+			zap.Int64("job_id", p.jobRow.id),
 			zap.Error(err))
 		return
 	}
@@ -568,7 +568,7 @@ func (p *processor) generateThumbhashesForItemsThatNeedOne() {
 		err := rows.Scan(&rowID, &dataType)
 		if err != nil {
 			p.log.Error("unable to scan row to generate thumbhashes from this import",
-				zap.Int64("import_id", p.impRow.id),
+				zap.Int64("job_id", p.jobRow.id),
 				zap.Error(err))
 			defer p.tl.dbMu.RUnlock()
 			defer rows.Close()
@@ -584,7 +584,7 @@ func (p *processor) generateThumbhashesForItemsThatNeedOne() {
 	p.tl.dbMu.RUnlock()
 	if err = rows.Err(); err != nil {
 		p.log.Error("iterating rows for generating thumbhashes failed",
-			zap.Int64("import_id", p.impRow.id),
+			zap.Int64("job_id", p.jobRow.id),
 			zap.Error(err))
 		return
 	}
@@ -608,7 +608,7 @@ func (p *processor) generateThumbhashesForItemsThatNeedOne() {
 				file, err := os.Open(thumbnailPath)
 				if err != nil {
 					p.log.Error("opening thumbnail to compute thumbhash failed",
-						zap.Int64("import_id", p.impRow.id),
+						zap.Int64("job_id", p.jobRow.id),
 						zap.Int64("item_id", rowID),
 						zap.String("thumbnail_path", thumbnailPath),
 						zap.Error(err))
@@ -617,7 +617,7 @@ func (p *processor) generateThumbhashesForItemsThatNeedOne() {
 				img, _, err := image.Decode(file)
 				if err != nil {
 					p.log.Error("decoding thumbnail for thumbhash computation failed",
-						zap.Int64("import_id", p.impRow.id),
+						zap.Int64("job_id", p.jobRow.id),
 						zap.Int64("item_id", rowID),
 						zap.String("thumbnail_path", thumbnailPath),
 						zap.Error(err))
@@ -640,7 +640,7 @@ func (p *processor) generateThumbhashesForItemsThatNeedOne() {
 					err := p.thumbhashBatch(batch)
 					if err != nil {
 						p.log.Error("storing thumbhashes failed",
-							zap.Int64("import_id", p.impRow.id),
+							zap.Int64("job_id", p.jobRow.id),
 							zap.Error(err))
 						return
 					}
@@ -653,7 +653,7 @@ func (p *processor) generateThumbhashesForItemsThatNeedOne() {
 				err := p.thumbhashBatch(batch)
 				if err != nil {
 					p.log.Error("storing remaining thumbhashes failed",
-						zap.Int64("import_id", p.impRow.id),
+						zap.Int64("job_id", p.jobRow.id),
 						zap.Error(err))
 					return
 				}
@@ -672,7 +672,7 @@ func float32ToByte(f float32) []byte {
 
 func (p *processor) thumbhashBatch(batch map[int64][]byte) error {
 	p.log.Info("storing thumbhashes for batch of imported items",
-		zap.Int64("import_id", p.impRow.id),
+		zap.Int64("job_id", p.jobRow.id),
 		zap.Int("batch_size", len(batch)))
 
 	p.tl.dbMu.Lock()

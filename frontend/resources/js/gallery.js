@@ -94,6 +94,10 @@ async function galleryPageMain() {
 		$('.media-owner-avatar', elem).innerHTML = avatar(true, item.entity, "me-3");
 		$('.media-owner-name', elem).innerText = entityDisplayNameAndAttr(item.entity).name;
 		$('.media-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
+		
+		if (item.score) {
+			$('.media-similarity-score', elem).innerHTML = `<b>${(item.score * 100).toFixed(3)}%</b> match`;
+		}
 
 		$('.filter-results').append(elem);
 		pageItems[item.id] = item;
@@ -121,6 +125,7 @@ on('click', '.filter-results [data-bs-toggle=modal]', async e => {
 
 function galleryFilterParams(peekPrevOrNext, peekFromItem) {
 	const params = {
+		query_text: $('#text-search').value,
 		related: 1,
 		flat: $('#include-attachments').checked,
 		offset: galleryLimit * (currentPageNum()-1),

@@ -1,11 +1,14 @@
 module github.com/timelinize/timelinize
 
-go 1.22
+go 1.22.5
+
+toolchain go1.23.1
 
 require (
-	github.com/Masterminds/sprig/v3 v3.2.3
+	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/abema/go-mp4 v1.2.0
 	github.com/adrianmo/go-nmea v1.10.0
+	github.com/asg017/sqlite-vec-go-bindings v0.1.3
 	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/caddyserver/caddy/v2 v2.8.4
 	github.com/davidbyttow/govips/v2 v2.15.0
@@ -13,26 +16,27 @@ require (
 	github.com/galdor/go-thumbhash v1.0.1-0.20240227061205-5f40e920ff45
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/jhillyerd/enmime v1.2.0
+	github.com/jhillyerd/enmime v1.3.0
 	github.com/maruel/natural v1.1.1
-	github.com/mattn/go-sqlite3 v1.14.22
+	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/mholt/archiver/v4 v4.0.0-alpha.8
 	github.com/mholt/goexif2 v0.0.0-20230302025153-4d89d35092b2
 	github.com/signal-golang/go-vcard v0.1.2
 	github.com/strukturag/libheif v1.18.2
 	github.com/trimmer-io/go-xmp v1.0.0
 	github.com/ttacon/libphonenumber v1.2.1
-	github.com/zeebo/blake3 v0.2.3
+	github.com/zeebo/blake3 v0.2.4
 	go.uber.org/zap v1.27.0
 	golang.org/x/oauth2 v0.22.0
 	howett.net/plist v1.0.1
 )
 
 require (
+	dario.cat/mergo v1.0.1 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
-	github.com/Masterminds/semver/v3 v3.2.1 // indirect
+	github.com/Masterminds/semver/v3 v3.3.0 // indirect
 	github.com/Microsoft/go-winio v0.6.0 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
@@ -69,8 +73,7 @@ require (
 	github.com/google/pprof v0.0.0-20231212022811-ec68065c825e // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/huandu/xstrings v1.3.3 // indirect
-	github.com/imdario/mergo v0.3.12 // indirect
+	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
 	github.com/jackc/pgconn v1.14.3 // indirect
@@ -110,7 +113,7 @@ require (
 	github.com/rivo/uniseg v0.4.4 // indirect
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/shopspring/decimal v1.2.0 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/slackhq/nebula v1.6.1 // indirect
 	github.com/smallstep/certificates v0.26.1 // indirect
@@ -118,7 +121,7 @@ require (
 	github.com/smallstep/pkcs7 v0.0.0-20231024181729-3b98ecc1ca81 // indirect
 	github.com/smallstep/scep v0.0.0-20231024192529-aee96d7ad34d // indirect
 	github.com/smallstep/truststore v0.13.0 // indirect
-	github.com/spf13/cast v1.4.1 // indirect
+	github.com/spf13/cast v1.7.0 // indirect
 	github.com/spf13/cobra v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/ssor/bom v0.0.0-20170718123548-6386211fdfcf // indirect

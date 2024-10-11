@@ -189,7 +189,7 @@ func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs
 	// Keep id unchanged to preserve relationships. (TODO: This could be configurable in the future.)
 	// Keep the row hashes to remember the signature(s) of what was deleted.
 	sb.WriteString(`UPDATE items
-		SET data_source_id=NULL, import_id=NULL, modified_import_id=NULL, attribute_id=NULL,
+		SET data_source_id=NULL, job_id=NULL, modified_job_id=NULL, attribute_id=NULL,
 			classification_id=NULL, original_id=NULL, original_location=NULL, intermediate_location=NULL,
 			filename=NULL, timestamp=NULL, timespan=NULL, timeframe=NULL, time_offset=NULL, time_uncertainty=NULL,
 			stored=0, modified=NULL, data_type=NULL, data_text=NULL, data_file=NULL, data_hash=NULL,
