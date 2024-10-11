@@ -41,12 +41,10 @@ type ItemSearchParams struct {
 	// The UUID of the open timeline to search.
 	Repo string `json:"repo,omitempty"`
 
-	// Search text to match using ML model(s)
-	Query string `json:"query,omitempty"`
-
-	// Results that are similar to the centroid of the vectors of the specified items
-	// TODO: Not yet implemented
-	SimilarToItems []int64 `json:"similar_to_items,omitempty"`
+	// ML searches -- currently, only one of these can be set at a time
+	// TODO: add a QueryImage field for image search
+	QueryText string  `json:"query_text,omitempty"` // results
+	SimilarTo []int64 `json:"similar_to,omitempty"` // similar to the centroid of the vectors of the specified items
 
 	RowID []int64 `json:"row_id,omitempty"`
 	// AccountID  []int    `json:"account_id,omitempty"` // TODO: restore this, if useful
@@ -184,14 +182,14 @@ type SearchResults struct {
 }
 
 func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (SearchResults, error) {
+	// setting a natural language input has big implications, so make sure it's not just whitespace by accident
+	params.QueryText = strings.TrimSpace(params.QueryText)
+
 	// get the DB query string and associated arguments
 	q, args, err := tl.prepareSearchQuery(params)
 	if err != nil {
 		return SearchResults{}, err
 	}
-
-	// setting a natural language input has big implications, so make sure it's not just whitespace by accident
-	params.Query = strings.TrimSpace(params.Query)
 
 	// lock DB for entirety of this operation, as it may involve many queries
 	tl.dbMu.RLock()
@@ -276,7 +274,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		if params.WithTotal {
 			extraTargets = append(extraTargets, &totalCount)
 		}
-		if params.Query != "" {
+		if params.QueryText != "" || len(params.SimilarTo) > 0 {
 			extraTargets = append(extraTargets, &embedDist)
 		}
 		itemRow, err := scanItemRow(rows, extraTargets)
@@ -301,8 +299,8 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		return SearchResults{GeoJSON: sb.String(), Total: totalCount}, nil
 	}
 
-	// TODO:
-	if params.Query != "" {
+	// TODO: this needs tuning
+	if params.QueryText != "" {
 		// filter results for relevance by passing them through the classifier...
 		// this is kind of a hack, but it's a well-known difficult problem apparently,
 		// for any KNN search, to only show relevant results
@@ -317,7 +315,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 			itemFiles[result.ID] = tl.FullPath(*result.DataFile)
 		}
 
-		scores, err := classify(ctx, itemFiles, []string{params.Query})
+		scores, err := classify(ctx, itemFiles, []string{params.QueryText})
 		if err != nil {
 			return SearchResults{}, fmt.Errorf("classifying results: %w", err)
 		}
@@ -419,8 +417,9 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 
 	// If searching by embeddings, we have to SELECT from the embeddings
 	// virtual table, and join in the items table.
+	vectorSearch := params.QueryText != "" || len(params.SimilarTo) > 0
 	selectFromTable, selectFromAs := itemsTable, " AS items"
-	if params.Query != "" {
+	if vectorSearch {
 		selectFromTable, selectFromAs = "embeddings", ""
 	}
 
@@ -440,13 +439,13 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	if params.WithTotal {
 		q += ", count() over() AS total_count"
 	}
-	if params.Query != "" {
+	if vectorSearch {
 		q += ", embeddings.distance"
 	}
 	q += fmt.Sprintf(`
 		FROM %s%s`, selectFromTable, selectFromAs)
 
-	if params.Query != "" {
+	if vectorSearch {
 		q += fmt.Sprintf(`
 		LEFT JOIN %s AS items ON items.embedding_id = embeddings.id`, itemsTable)
 	}
@@ -650,18 +649,33 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		}
 	}
 
-	if params.Query != "" {
-		embedding, err := GenerateSerializedEmbedding(tl.ctx, "text/plain", []byte(params.Query))
-		if err != nil {
-			return "", nil, err
-		}
-		and(func() {
-			or("embeddings.embedding MATCH ?", embedding)
+	if vectorSearch {
+		if params.QueryText != "" {
+			// search relative to an arbitrary input (TODO: support image inputs too)
+			embedding, err := GenerateSerializedEmbedding(tl.ctx, "text/plain", []byte(params.QueryText))
+			if err != nil {
+				return "", nil, err
+			}
 			and(func() {
-				// TODO: pull up limit calculation so we can use it early here... sigh.
-				or("k=?", 50)
+				or("embeddings.embedding MATCH ?", embedding)
+				and(func() {
+					// TODO: pull up limit calculation so we can use it early here... sigh.
+					or("k=?", 50)
+				})
 			})
-		})
+		} else if len(params.SimilarTo) > 0 {
+			// search items similar to existing embeddings
+			// TODO: for multiple values in this slice, compute centroid instead of using 'or'/'and' in the sql statement...?
+			for _, similarItemID := range params.SimilarTo {
+				and(func() {
+					or("embeddings.embedding MATCH (SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)", similarItemID)
+					and(func() {
+						// TODO: pull up limit calculation so we can use it early here... sigh.
+						or("k=?", 50)
+					})
+				})
+			}
+		}
 	}
 
 	// skip deleted items unless we are explicitly supposed to include them
@@ -684,7 +698,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		})
 	}
 
-	if params.Query != "" {
+	if vectorSearch {
 		q += " ORDER BY embeddings.distance"
 	} else if params.Sort != SortNone {
 		q += " ORDER BY "

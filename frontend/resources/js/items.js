@@ -19,6 +19,11 @@ function itemsPageFilterParams() {
 	};
 	commonFilterSearchParams(params);
 
+	const similarTo = queryParam("similar_to");
+	if (similarTo) {
+		params.similar_to = [Number(similarTo)];
+	}
+
 	
 	
 	// TODO: to include only items that have coordinates, set these:
@@ -137,6 +142,14 @@ async function itemsMain() {
 				$('.entity-attribute', tpl).remove();
 			}
 			$('a.owner-entity', tpl).href = `/entities/${repo.instance_id}/${item.entity.id}`;
+		}
+
+		if (item.embedding_id) {
+			const a = document.createElement('a');
+			a.classList.add("btn", "btn-outline", "secondary");
+			a.innerText = "Similar items";
+			a.href = `?similar_to=${item.id}`;
+			$('.similar-to', tpl).append(a);
 		}
 
 		$('a.item-timestamp', tpl).href = itemLink;

@@ -143,8 +143,7 @@ func (p *processor) generateEmbeddingsForImportedItems() {
 			return
 		}
 
-		// TODO: Only images can have embeddings, for now...
-		if !strings.HasPrefix(*dataType, "image/") {
+		if !strings.HasPrefix(*dataType, "image/") && !strings.HasPrefix(*dataType, "text/") {
 			continue
 		}
 

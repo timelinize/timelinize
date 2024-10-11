@@ -125,7 +125,7 @@ on('click', '.filter-results [data-bs-toggle=modal]', async e => {
 
 function galleryFilterParams(peekPrevOrNext, peekFromItem) {
 	const params = {
-		query: $('#text-search').value,
+		query_text: $('#text-search').value,
 		related: 1,
 		flat: $('#include-attachments').checked,
 		offset: galleryLimit * (currentPageNum()-1),
