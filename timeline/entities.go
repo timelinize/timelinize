@@ -387,13 +387,13 @@ func (p *processor) processEntityPicture(ctx context.Context, e Entity) (string,
 	pictureFile := path.Join(AssetsFolderName, "profile_pictures", fmt.Sprintf("entity_%09d", e.ID))
 	disposition, _, _ := mime.ParseMediaType(contentType)
 	switch disposition {
-	case imagePng:
+	case imagePNG:
 		pictureFile += ".png"
-	case imageWebp:
+	case ImageWebP:
 		pictureFile += ".webp"
 	case imageGif:
 		pictureFile += ".gif"
-	case imageJpeg, "":
+	case ImageJPEG, "":
 		fallthrough
 	default:
 		pictureFile += extJpg
@@ -422,12 +422,15 @@ func (p *processor) processEntityPicture(ctx context.Context, e Entity) (string,
 	return pictureFile, nil
 }
 
+// Exported consts may be used for thumbnails.
 const (
-	imagePng, extPng           = "image/png", ".png"
-	imageWebp, extWebp         = "image/webp", ".webp"
+	ImageWebP, extWebp         = "image/webp", ".webp"
+	ImageJPEG, extJpg, extJpeg = "image/jpeg", ".jpg", ".jpeg"
+	ImageAVIF, extAvif         = "image/avif", ".avif"
+	imagePNG, extPng           = "image/png", ".png"
 	imageGif, extGif           = "image/gif", ".gif"
-	imageJpeg, extJpg, extJpeg = "image/jpeg", ".jpg", ".jpeg"
-	imageAvif, extAvif         = "image/avif", ".avif"
+
+	VideoWebM = "video/webm"
 )
 
 // TODO: update this godoc related to latentID; and note that an empty latentID and nil error is a possible and valid return value here.
@@ -493,7 +496,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 		err = tx.QueryRowContext(ctx, `INSERT INTO entities
 				(type_id, job_id, name, metadata) VALUES (?, ?, ?, ?)
 				RETURNING id`,
-			in.typeID, p.jobRow.id, in.dbName(), metadata).Scan(&in.ID)
+			in.typeID, p.ij.job.id, in.dbName(), metadata).Scan(&in.ID)
 		if err != nil {
 			return latentID{}, fmt.Errorf("adding new person %+v: %w", in, err)
 		}
@@ -516,7 +519,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 
 		entities = append(entities, in)
 
-		atomic.AddInt64(p.newEntityCount, 1)
+		atomic.AddInt64(p.ij.newEntityCount, 1)
 	} else if len(entities) == 1 {
 		// if the identity attribute(s) matched exactly 1 person, update their info in the DB
 		// (if it matched more than 1 person, we don't update multiple of them, because we only
@@ -613,7 +616,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 			var autolinkImportID, autolinkAttrIDPtr *int64
 			if autolinkAttrID, ok := entityAutolinkAttrs[entity.ID]; ok {
 				autolinkAttrIDPtr = &autolinkAttrID
-				autolinkImportID = &p.jobRow.id
+				autolinkImportID = &p.ij.job.id
 			}
 
 			if noRows {
@@ -623,17 +626,17 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 					`INSERT INTO entity_attributes
 						(entity_id, attribute_id, data_source_id, job_id, autolink_job_id, autolink_attribute_id)
 					VALUES (?, ?, ?, ?, ?, ?)`,
-					entity.ID, attrID, linkedDataSourceID, p.jobRow.id, autolinkImportID, autolinkAttrIDPtr)
+					entity.ID, attrID, linkedDataSourceID, p.ij.job.id, autolinkImportID, autolinkAttrIDPtr)
 				if err != nil {
 					return latentID{}, fmt.Errorf("linking entity %d to attribute %d: %w (data_source_id=%#v job_id=%d autolink_job_id=%#v autolink_attribute_id=%#v)",
-						entity.ID, attrID, err, linkedDataSourceID, p.jobRow.id, autolinkImportID, autolinkAttrIDPtr)
+						entity.ID, attrID, err, linkedDataSourceID, p.ij.job.id, autolinkImportID, autolinkAttrIDPtr)
 				}
 			} else if eaID > 0 && existingDataSourceID == nil {
 				// the entity and attribute are already related in the DB but not as an ID on any data source; update
 
 				_, err = tx.ExecContext(ctx,
 					`UPDATE entity_attributes SET data_source_id=?, job_id=?, autolink_job_id=?, autolink_attribute_id=? WHERE id=?`, // TODO: LIMIT 1 would be nice...
-					linkedDataSourceID, p.jobRow.id, autolinkImportID, autolinkAttrIDPtr, eaID)
+					linkedDataSourceID, p.ij.job.id, autolinkImportID, autolinkAttrIDPtr, eaID)
 				if err != nil {
 					return latentID{}, fmt.Errorf("updating entity %d link to attribute %d: %w", entity.ID, attrID, err)
 				}

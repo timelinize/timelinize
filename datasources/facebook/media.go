@@ -178,3 +178,48 @@ type fbImage struct {
 	Source string `json:"source,omitempty"`
 	Width  int    `json:"width,omitempty"`
 }
+
+type fbUser struct {
+	Feed fbUserFeed `json:"feed"`
+	ID   string     `json:"id"`
+}
+
+type fbUserFeed struct {
+	Data   []fbPost `json:"data"`
+	Paging fbPaging `json:"paging"`
+}
+
+type fbPaging struct {
+	Previous *string    `json:"previous"`
+	Next     *string    `json:"next"`
+	Cursors  *fbCursors `json:"cursors,omitempty"`
+}
+
+type fbCursors struct {
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+}
+
+type fbFrom struct {
+	Name string `json:"name,omitempty"`
+	ID   string `json:"id,omitempty"`
+}
+
+type fbPlace struct {
+	Name     string     `json:"name,omitempty"`
+	Location fbLocation `json:"location,omitempty"`
+	ID       string     `json:"id,omitempty"`
+}
+
+type fbLocation struct {
+	City      string  `json:"city,omitempty"`
+	Country   string  `json:"country,omitempty"`
+	Latitude  float64 `json:"latitude,omitempty"`
+	LocatedIn string  `json:"located_in,omitempty"`
+	Longitude float64 `json:"longitude,omitempty"`
+	Name      string  `json:"name,omitempty"`
+	Region    string  `json:"region,omitempty"`
+	State     string  `json:"state,omitempty"`
+	Street    string  `json:"street,omitempty"`
+	Zip       string  `json:"zip,omitempty"`
+}

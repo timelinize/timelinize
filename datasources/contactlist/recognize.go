@@ -21,32 +21,29 @@ package contactlist
 import (
 	"context"
 	"encoding/csv"
-	"os"
-	"path/filepath"
 
 	"github.com/timelinize/timelinize/timeline"
 )
 
 // Recognize returns true if the file is recognized as a contact list.
-func (fimp *FileImporter) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
-nextFile:
-	for _, filename := range filenames {
-		for _, delim := range []rune{',', '\t', ';'} {
-			result, err := recognizeCSV(filename, delim)
-			if err != nil {
-				return result, err
-			}
-			if result.Confidence > 0 {
-				continue nextFile
-			}
-		}
+func (fimp *FileImporter) Recognize(ctx context.Context, entry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+	if entry.IsDir() {
 		return timeline.Recognition{}, nil
 	}
-	return timeline.Recognition{Confidence: 1.0}, nil
+	for _, delim := range []rune{',', '\t', ';'} {
+		result, err := recognizeCSV(ctx, entry, opts, delim)
+		if err != nil {
+			return result, err
+		}
+		if result.Confidence > 0 {
+			return result, nil
+		}
+	}
+	return timeline.Recognition{}, nil
 }
 
-func recognizeCSV(filename string, delim rune) (timeline.Recognition, error) {
-	file, err := os.Open(filepath.Clean(filename))
+func recognizeCSV(_ context.Context, entry timeline.DirEntry, _ timeline.RecognizeParams, delim rune) (timeline.Recognition, error) {
+	file, err := entry.Open()
 	if err != nil {
 		return timeline.Recognition{}, err
 	}

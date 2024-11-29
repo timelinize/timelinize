@@ -41,22 +41,28 @@ CREATE TABLE IF NOT EXISTS "accounts" (
 
 CREATE TABLE IF NOT EXISTS "jobs" (
 	"id" INTEGER PRIMARY KEY,
-	"action" TEXT NOT NULL, -- import, thumbnails, ...
+	"name" TEXT NOT NULL, -- import, thumbnails, etc...
 	"configuration" TEXT, -- encoded as JSON
-	"start" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp in unix seconds UTC
-	"end" INTEGER, -- timestamp in unix seconds UTC (whether stopped successfully or not)
-	"status" TEXT NOT NULL, -- started, aborted, done, err (TODO: figure out the enum values)
-	"hostname" TEXT, -- hostname of the machine the job started on
-	"checkpoint" BLOB, -- state required for resuming an incomplete job
+	"hash" BLOB, -- for preventing duplicate jobs; opaque to everything except the code creating the job
+	"state" TEXT NOT NULL DEFAULT 'queued', -- queued, started, paused, aborted, succeeded, failed
+	"hostname" TEXT, -- hostname of the machine the job was created on
+	"created" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp job was stored/enqueued in unix seconds UTC
+	"start" INTEGER, -- timestamp job was actually started in unix seconds UTC
+	"end" INTEGER, -- timestamp in unix seconds UTC (TODO: only when finalized, or paused too?)
+	"message" TEXT, -- brief message describing current status to be shown to the user, changes less frequently than log emissions (TODO: rename to status?)
+	"total" INTEGER, -- total number of units to complete
+	"progress" INTEGER, -- number of units completed towards the total count
+	"checkpoint" BLOB, -- required state for resuming an incomplete job
 	-- if job is scheduled to run automatically at a certain interval, the following fields track that state
 	"repeat" INTEGER, -- when this job is started, next job should be scheduled (inserted for future start) this many seconds from start time (not to be started if previous still running)
 	"prev_job_id" INTEGER, -- the job before this one that scheduled this one, forming a chain
 	FOREIGN KEY ("prev_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS "idx_jobs_action" ON "jobs"("action");
-CREATE INDEX IF NOT EXISTS "idx_jobs_start" ON "jobs"("start");
-CREATE INDEX IF NOT EXISTS "idx_jobs_status" ON "jobs"("status");
+CREATE INDEX IF NOT EXISTS "idx_jobs_name" ON "jobs"("name");
+CREATE INDEX IF NOT EXISTS "idx_jobs_hash" ON "jobs"("hash");
+CREATE INDEX IF NOT EXISTS "idx_jobs_created" ON "jobs"("created");
+CREATE INDEX IF NOT EXISTS "idx_jobs_state" ON "jobs"("state");
 
 -- Embeddings enable "intelligent" search using ML models to derive semantics and meaning.
 -- By finding other embeddings that are close (dot product or euclidean distance),
@@ -170,13 +176,19 @@ CREATE TABLE IF NOT EXISTS "classifications" (
 	"description" TEXT NOT NULL
 ) STRICT;
 
+-- TODO: Not used currently (but is supported, and accessed in queries).
+CREATE TABLE IF NOT EXISTS "item_data" (
+	"id" INTEGER PRIMARY KEY,
+	"content" BLOB NOT NULL UNIQUE
+) STRICT;
+
 -- An item is something imported from a specific data source.
 CREATE TABLE IF NOT EXISTS "items" (
 	"id" INTEGER PRIMARY KEY,
-	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model
+	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model; TODO: we may need an item_embeddings table...
 	"data_source_id" INTEGER,
-	"job_id" INTEGER,
-	"modified_job_id" INTEGER, -- the import that last modified this existing item
+	"job_id" INTEGER, -- the import job that originally inserted this item
+	"modified_job_id" INTEGER, -- the import job that most recently modified this existing item
 	"attribute_id" INTEGER, -- owner, creator, or originator attributed to this item
 	"classification_id" INTEGER,
 	"original_id" TEXT, -- ID provided by the data source
@@ -190,8 +202,9 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"time_uncertainty" INTEGER, -- if nonzero, time columns may be inaccurate on the order of this number of milliseconds, essentially sliding the times in a fuzzy interval
 	"stored" INTEGER NOT NULL DEFAULT (unixepoch()), -- unix epoch second timestamp when row was created or last retrieved from source
 	"modified" INTEGER, -- unix epoch second timestamp when item was manually modified (not via an import); if not null, then item is "not clean"
+	"data_id" INTEGER, -- TODO: not used currently, but may be used to store binary data in the database directly
 	"data_type" TEXT,  -- the MIME type (aka "media type") of the data
-	"data_text" TEXT COLLATE NOCASE, -- item content, if text-encoded and not very long
+	"data_text" TEXT COLLATE NOCASE, -- item content, if text-encoded and (by default) not very long
 	"data_file" TEXT COLLATE NOCASE, -- item filename, if non-text or not suitable for storage in DB (usually media), relative to repo root
 	"data_hash" BLOB, -- BLAKE3 checksum of contents of the data file
 	"metadata" TEXT,  -- optional extra information, encoded as JSON for flexibility
@@ -214,6 +227,7 @@ CREATE TABLE IF NOT EXISTS "items" (
 	FOREIGN KEY ("modified_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL, -- deleting that import won't undo the changes, however
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("classification_id") REFERENCES "classifications"("id") ON UPDATE CASCADE,
+	FOREIGN KEY ("data_id") REFERENCES "item_data"("id") ON UPDATE CASCADE ON DELETE SET NULL,
 	-- TODO: UNIQUE("job_id", "intermediate_location") maybe? the only problem is I could see embedded items like album art violating this -- unless embedded items don't have an intermediate_location
 	UNIQUE ("data_source_id", "original_id"),
 	UNIQUE ("retrieval_key")
@@ -365,6 +379,7 @@ CREATE TABLE IF NOT EXISTS "notes" (
 	FOREIGN KEY ("review_code_id") REFERENCES "review_codes"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
+-- TODO: still WIP... may not use this...
 CREATE TABLE IF NOT EXISTS "review_codes" (
 	"id" INTEGER PRIMARY KEY,
 	"reason" TEXT NOT NULL
@@ -379,7 +394,7 @@ CREATE TABLE IF NOT EXISTS "settings" (
 	"value",
 	"item_id" INTEGER,
 	"attribute_id" INTEGER,
-	"data_source_id" INTEGER,
+	"data_source_id" INTEGER, -- setting this implies this is a data source option, not merely a general setting that refers a data source
 	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE
@@ -436,7 +451,7 @@ CREATE TRIGGER IF NOT EXISTS prevent_stray_attributes
 	END;
 
 -- Foreign keys cannot reference virtual tables because, by definition, virtual
--- tables are not under the control of sqlite, so they cannot be enforced:
+-- tables are not under the control of sqlite, so FKs cannot be enforced:
 -- https://sqlite.org/forum/info/cefd5a904423239bc395039db18b7695769b72f5a15366f9ef286c638bdd8075
 -- The recommended workaround is a trigger: https://github.com/asg017/sqlite-vec/issues/86
 CREATE TRIGGER IF NOT EXISTS clean_up_embeddings

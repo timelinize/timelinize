@@ -61,23 +61,13 @@ type Graph struct {
 	err error
 }
 
-// Size returns the number of nodes in the graph. If this is
-// an entity graph, the size is 1. If it's an item graph, the
-// size is counted recursively across relationship edges.
+// Size returns the number of nodes in the graph
 func (g *Graph) Size() int {
-	if g.Entity != nil {
-		return 1
-	}
-	return g.ItemCount()
+	return g.recursiveCount(make(map[*Graph]struct{}))
 }
 
-// ItemCount returns the number of items by traversing the graph.
-func (g *Graph) ItemCount() int {
-	return g.recursiveItemCount(make(map[*Graph]struct{}))
-}
-
-func (g *Graph) recursiveItemCount(visited map[*Graph]struct{}) int {
-	if g == nil || g.Item == nil {
+func (g *Graph) recursiveCount(visited map[*Graph]struct{}) int {
+	if g == nil || (g.Item == nil && g.Entity == nil) {
 		return 0
 	}
 
@@ -87,10 +77,10 @@ func (g *Graph) recursiveItemCount(visited map[*Graph]struct{}) int {
 	}
 	visited[g] = struct{}{}
 
-	count := 1 // g.Item
+	count := 1 // g.Item or g.Entity
 	for _, edge := range g.Edges {
-		count += edge.From.recursiveItemCount(visited)
-		count += edge.To.recursiveItemCount(visited)
+		count += edge.From.recursiveCount(visited)
+		count += edge.To.recursiveCount(visited)
 	}
 	return count
 }
@@ -688,7 +678,7 @@ type ItemRow struct {
 	EmbeddingID          *int64          `json:"embedding_id,omitempty"`
 	DataSourceID         *int64          `json:"data_source_id,omitempty"` // row ID, used only for insertion into the DB
 	JobID                *int64          `json:"job_id,omitempty"`
-	ModifiedImportID     *int64          `json:"modified_job_id,omitempty"`
+	ModifiedJobID        *int64          `json:"modified_job_id,omitempty"`
 	AttributeID          *int64          `json:"attribute_id,omitempty"`
 	ClassificationID     *int64          `json:"classification_id,omitempty"` // row ID, used only internally
 	OriginalID           *string         `json:"original_id,omitempty"`
@@ -702,6 +692,7 @@ type ItemRow struct {
 	TimeUncertainty      *int64          `json:"time_uncertainty,omitempty"`
 	Stored               time.Time       `json:"stored,omitempty"`
 	Modified             *time.Time      `json:"modified,omitempty"`
+	DataID               *int64          `json:"data_id"`
 	DataType             *string         `json:"data_type,omitempty"`
 	DataText             *string         `json:"data_text,omitempty"`
 	DataFile             *string         `json:"data_file,omitempty"` // must NOT be a pointer to an Item.dataFileName value (should be its own copy!)
@@ -723,7 +714,7 @@ type ItemRow struct {
 }
 
 func (ir ItemRow) hasContent() bool {
-	return ir.DataText != nil || ir.DataFile != nil || !ir.Location.IsEmpty()
+	return ir.DataID != nil || ir.DataText != nil || ir.DataFile != nil || !ir.Location.IsEmpty()
 }
 
 func (ir ItemRow) timestampUnix() *int64 {
@@ -765,10 +756,10 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	var ts, tspan, tframe, modified, deleted *int64 // will convert from Unix milli timestamp
 	var stored int64                                // will convert from Unix milli timestamp
 
-	itemTargets := []any{&ir.ID, &ir.EmbeddingID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedImportID, &ir.AttributeID,
+	itemTargets := []any{&ir.ID, &ir.EmbeddingID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedJobID, &ir.AttributeID,
 		&ir.ClassificationID, &ir.OriginalID, &ir.OriginalLocation, &ir.IntermediateLocation, &ir.Filename,
 		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeUncertainty, &stored, &modified,
-		&ir.DataType, &ir.DataText, &ir.DataFile, &ir.DataHash,
+		&ir.DataID, &ir.DataType, &ir.DataText, &ir.DataFile, &ir.DataHash,
 		&metadata, &ir.Location.Longitude, &ir.Location.Latitude, &ir.Location.Altitude,
 		&ir.Location.CoordinateSystem, &ir.Location.CoordinateUncertainty, &ir.Note, &ir.Starred,
 		&ir.ThumbHash, &ir.OriginalIDHash, &ir.InitialContentHash, &ir.RetrievalKey,
@@ -817,7 +808,7 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 const itemDBColumns = `items.id, items.embedding_id, items.data_source_id, items.job_id, items.modified_job_id, items.attribute_id,
 items.classification_id, items.original_id, items.original_location, items.intermediate_location, items.filename,
 items.timestamp, items.timespan, items.timeframe, items.time_offset, items.time_uncertainty, items.stored, items.modified,
-items.data_type, items.data_text, items.data_file, items.data_hash, items.metadata,
+items.data_id, items.data_type, items.data_text, items.data_file, items.data_hash, items.metadata,
 items.longitude, items.latitude, items.altitude, items.coordinate_system, items.coordinate_uncertainty,
 items.note, items.starred, items.thumb_hash, items.original_id_hash, items.initial_content_hash,
 items.retrieval_key, items.hidden, items.deleted, data_source_name, classification_name`

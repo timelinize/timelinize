@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -105,7 +106,7 @@ func (cfg *Config) syncOpenRepos() error {
 	// only update the config if list of open repos changed;
 	// I guess doing so wouldn't hurt but it's not necessary
 	cfg.Lock()
-	sameOpenTimelines := slicesEqual(open, cfg.Repositories)
+	sameOpenTimelines := slices.Equal(open, cfg.Repositories)
 	cfg.Repositories = open
 	cfg.Unlock()
 

@@ -21,36 +21,32 @@ package timeline
 import (
 	"bytes"
 	"context"
-	"database/sql"
-	"errors"
+	"encoding/json"
 	"fmt"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/mholt/archives"
 	"go.uber.org/zap"
 )
 
-// TODO: update godoc
-// processor wraps a Client instance with unexported
-// fields that contain necessary state for performing
-// data collection operations. Do not craft this type
-// manually; use Timeline.NewProcessor() to obtain one.
 type processor struct {
-	// accessed atomically (align on 64-bit word boundary, for 32-bit systems)
-	itemCount, newItemCount, updatedItemCount, skippedItemCount *int64
-	newEntityCount                                              *int64
+	// accessed atomically and 64-bit aligned; used by workers for estimating total size before running
+	estimatedCount *int64
 
-	tl        *Timeline
-	ds        DataSource
-	dsRowID   int64 // only used directly with DB to reduce DB queries; different for every DB
-	acc       Account
-	jobRow    jobRow
-	params    ImportParameters
-	filenames []string
-	log       *zap.Logger
-	progress  *zap.Logger
+	ij ImportJob
+
+	ds      DataSource
+	dsRowID int64
+	dsOpt   any
+
+	tl *Timeline
+
+	log      *zap.Logger
+	progress *zap.Logger
 
 	// batching inserts can greatly increase speed
 	batch     []*Graph
@@ -61,288 +57,96 @@ type processor struct {
 	downloadThrottle chan struct{}
 }
 
-func (tl *Timeline) Import(ctx context.Context, params ImportParameters) error {
-	// ensure data source is compatible with mode of import
-	ds, ok := dataSources[params.DataSourceName]
-	if !ok {
-		return fmt.Errorf("unknown data source: %s", params.DataSourceName)
-	}
-	if len(params.Filenames) > 0 && ds.NewFileImporter == nil {
-		return fmt.Errorf("data source %s does not support importing from files", ds.Name)
-	}
-	if len(params.Filenames) == 0 && ds.NewAPIImporter == nil {
-		return fmt.Errorf("data source %s does not support importing via API", ds.Name)
+func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint json.RawMessage) error {
+	fullPath := filepath.Join(dirEntry.FS.(*archives.DeepFS).Root, filepath.FromSlash(dirEntry.Filename))
+
+	params := ImportParams{
+		Log:               p.log.With(zap.String("filename", fullPath)),
+		Timeframe:         p.ij.ProcessingOptions.Timeframe,
+		Checkpoint:        dsCheckpoint,
+		DataSourceOptions: p.dsOpt,
 	}
 
-	// create or resume import operation
-	var impRow jobRow
-	var err error
-	if params.ResumeJobID == 0 {
-		mode := importModeAPI
-		if len(params.Filenames) > 0 {
-			mode = importModeFile
-		}
-		impRow, err = tl.newJob(ctx, params.DataSourceName, mode, params.ProcessingOptions, params.AccountID)
-		if err != nil {
-			return fmt.Errorf("creating new job row: %w", err)
-		}
-	} else {
-		impRow, err = tl.loadJob(ctx, params.ResumeJobID)
-		if err != nil {
-			return fmt.Errorf("loading existing job row: %w", err)
-		}
-		if impRow.checkpoint == nil {
-			return fmt.Errorf("job %d has no checkpoint to resume from", impRow.id)
-		}
-		if params.DataSourceName != "" || params.AccountID != 0 ||
-			len(params.Filenames) > 0 || !params.ProcessingOptions.IsEmpty() ||
-			params.DataSourceOptions != nil {
-			// no need to specify these; it only risks being different and thus in conflict
-			return errors.New("pointless to specify any other parameters when resuming import")
-		}
+	// if enabled, estimate the units of work to be completed before starting the actual import
+	if p.ij.EstimateTotal {
+		params.Log.Info("estimating size; this may take a bit")
 
-		// adjust parameters to set up resumption
-		params.Filenames = impRow.checkpoint.Filenames
-		params.DataSourceName = impRow.dataSourceName
-		if impRow.accountID != nil {
-			params.AccountID = *impRow.accountID
-		}
-		params.ProcessingOptions = impRow.checkpoint.ProcOpt
-	}
-
-	return tl.doImport(ctx, ds, params, impRow)
-}
-
-// TODO: detect a moved repo while processing, somehow...? weird edge case, but might be good to be resilient against...
-
-// TODO: update godoc
-// Import adds items to the timeline. If filename is non-empty, the items will be imported
-// from the specified file. Any data-source-specific options should be passed in as dsOptJSON.
-// Processing will follow the rules specified in procOpt.
-func (tl *Timeline) doImport(ctx context.Context, ds DataSource, params ImportParameters, impRow jobRow) error {
-	var acc Account
-	if params.AccountID > 0 {
-		var err error
-		acc, err = tl.LoadAccount(ctx, params.AccountID)
-		if err != nil {
-			return err
-		}
-	}
-
-	logger := Log.Named("processor").With(
-		zap.String("data_source", ds.Name),
-		zap.String("job_id", params.JobID),
-	)
-	if len(params.Filenames) > 0 {
-		logger = logger.With(zap.Strings("filenames", params.Filenames))
-	}
-
-	dsRowID, ok := tl.dataSources[ds.Name]
-	if !ok {
-		return fmt.Errorf("unknown data source: %s", ds.Name)
-	}
-
-	// batchSize is a minimum, so multiplier speeds up larger batches
-	const multiplier = 2
-
-	proc := processor{
-		itemCount:        new(int64),
-		newItemCount:     new(int64),
-		updatedItemCount: new(int64),
-		skippedItemCount: new(int64),
-		newEntityCount:   new(int64),
-		ds:               ds,
-		dsRowID:          dsRowID,
-		params:           params,
-		tl:               tl,
-		acc:              acc,
-		jobRow:           impRow,
-		log:              logger,
-		progress:         logger.Named("progress"),
-		batchMu:          new(sync.Mutex),
-		downloadThrottle: make(chan struct{}, batchSize*workers*multiplier),
-	}
-
-	return proc.doImport(ctx)
-}
-
-func (p *processor) doImport(ctx context.Context) error {
-	ctx = context.WithValue(ctx, processorCtxKey, p) // for checkpoints
-
-	timeframe := p.params.ProcessingOptions.Timeframe
-
-	// convert data source options to their concrete type (we know it
-	// only as interface{}, but actual data source can type-assert)
-	dsOpt, err := p.ds.UnmarshalOptions(p.params.DataSourceOptions)
-	if err != nil {
-		return err
-	}
-
-	// get latest should only get the latest items since the last pull, i.e. from the most recent item from this account
-	if p.params.ProcessingOptions.GetLatest {
-		if len(p.params.ProcessingOptions.ItemFieldUpdates) > 0 || p.params.ProcessingOptions.Prune ||
-			p.params.ProcessingOptions.Integrity || p.params.ProcessingOptions.Timeframe.Since != nil {
-			return errors.New("get latest does not support reprocessing, pruning, integrity checking, and timeframe since constraints")
-		}
-
-		// get date and original ID of the most recent item from the last successful run,
-		// which will be used to constrain this import to get only items newer than it;
-		// note that we use the last item from the last *successful* import from this data
-		// source, otherwise there could be a situation where the last import stopped part
-		// way through after getting only the newest items, and there could be a gap of
-		// time where data is missing, so we can't simply use the last item without
-		// ensuring it is the last item from the last successful import
-		// (note that )
-		// TODO: in the old schema, we just recorded the item ID, I am not sure if this new query is correct
-		var mostRecentTimestamp *int64
-		var mostRecentOriginalID *string
-		// if proc.acc.lastItemID != nil {
-		// 	proc.tl.dbMu.RLock()
-		// 	err := proc.tl.db.QueryRow(`SELECT timestamp, original_id FROM items WHERE id=? LIMIT 1`, *proc.acc.lastItemID).Scan(&mostRecentTimestamp, &mostRecentOriginalID)
-		// 	proc.tl.dbMu.RUnlock()
-		// 	if err != nil && err != sql.ErrNoRows {
-		// 		return fmt.Errorf("getting most recent item: %v", err)
-		// 	}
-		// }
-		p.tl.dbMu.RLock()
-		err := p.tl.db.QueryRow(`
-			SELECT items.original_id, items.timestamp
-			FROM items, jobs, data_sources
-			WHERE jobs.status=?
-				AND jobs.id = items.job_id
-				AND data_sources.name = ?
-			ORDER BY jobs.started DESC
-			LIMIT 1`, importStatusSuccess, p.params.DataSourceName).Scan(&mostRecentOriginalID, &mostRecentTimestamp)
-		p.tl.dbMu.RUnlock()
-		if err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("getting most recent item: %w", err)
-		}
-
-		// constrain the pull to the recent timeframe
-		timeframe.Until = p.params.ProcessingOptions.Timeframe.Until
-		if mostRecentTimestamp != nil {
-			ts := time.Unix(*mostRecentTimestamp, 0)
-			timeframe.Since = &ts
-			if timeframe.Until != nil && timeframe.Until.Before(ts) {
-				// most recent item is already after "until"/end date; nothing to do
-				return nil
+		fileImporter := p.ds.NewFileImporter()
+		if estimator, ok := fileImporter.(SizeEstimator); ok {
+			// faster (but probably still slow) path: data source supports optimized size estimation
+			totalSize, err := estimator.EstimateSize(ctx, dirEntry, params)
+			if err != nil {
+				params.Log.Error("could not estimate import size", zap.Error(err))
 			}
-		}
-		if mostRecentOriginalID != nil {
-			timeframe.SinceItemID = mostRecentOriginalID
-		}
-	}
+			newTotal := atomic.AddInt64(p.estimatedCount, int64(totalSize))
+			if err = p.ij.job.SetTotal(int(newTotal)); err != nil {
+				params.Log.Error("could not update total size", zap.Error(err))
+			}
+		} else {
+			wg, ch := p.beginProcessing(ctx, p.ij.ProcessingOptions, true)
+			params.Pipeline = ch
 
-	var checkpointData any
-	if p.jobRow.checkpoint != nil {
-		checkpointData = p.jobRow.checkpoint.Data
-	}
+			// slow path: data source does not have an optimized estimator implementation, but we can count
+			// the graph sizes that come in to do our own estimates
+			err := fileImporter.FileImport(ctx, dirEntry, params)
+			if err != nil {
+				params.Log.Error("could not estimate size before import", zap.Error(err))
+			}
+			// we are no longer sending to the pipeline channel; closing it signals to the workers to exit
+			close(ch)
+			// wait for all processing workers to complete so we have an accurate count
+			wg.Wait()
+		}
 
-	listOpt := ListingOptions{
-		Log:               p.log,
-		Timeframe:         timeframe,
-		Checkpoint:        checkpointData,
-		DataSourceOptions: dsOpt,
+		params.Log.Info("done with size estimation", zap.Int64("estimated_size", atomic.LoadInt64(p.estimatedCount)))
 	}
 
 	start := time.Now()
 
-	// TODO: for an interactive import, we'd want to use only 1 worker, to get 1 item at most
-	wg, ch := p.beginProcessing(ctx, p.params.ProcessingOptions)
+	wg, ch := p.beginProcessing(ctx, p.ij.ProcessingOptions, false)
+	params.Pipeline = ch
 
-	if len(p.params.Filenames) > 0 {
-		err = p.ds.NewFileImporter().FileImport(ctx, p.params.Filenames, ch, listOpt)
-	} else {
-		err = p.ds.NewAPIImporter().APIImport(ctx, p.acc, ch, listOpt)
-	}
+	// even if we estimated size above, use a fresh file importer to avoid any potentially reused state (TODO: necessary?)
+	err := p.ds.NewFileImporter().FileImport(ctx, dirEntry, params)
 	// handle error in a little bit (see below)
 
-	// we are no longer using this; closing the channel signals to the workers to exit
+	// we are no longer sending to the pipeline channel; closing it signals to the workers to exit
 	close(ch)
 
-	// when we return, update the import row in the DB with the results
-	importResult := "ok"
-	defer func() {
-		p.tl.dbMu.Lock()
-		_, err := p.tl.db.Exec(`UPDATE jobs SET end=?, status=? WHERE id=?`, // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
-			time.Now().Unix(), importResult, p.jobRow.id)
-		p.tl.dbMu.Unlock()
-		if err != nil {
-			p.log.Error("updating import status",
-				zap.Int64("job_id", p.jobRow.id),
-				zap.String("status", importResult),
-				zap.Error(err))
-		}
-	}()
-
-	// handle any error returned from import
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			p.log.Error("import aborted",
-				zap.Error(err),
-				zap.Duration("duration", time.Since(start)))
-			importResult = "abort"
-		} else {
-			importResult = "err"
-		}
-		return fmt.Errorf("import: %w", err)
-	}
-
-	p.log.Info("all items received; waiting for processing to finish",
-		zap.Int64("job_id", p.jobRow.id),
-		zap.String("status", importResult),
+	params.Log.Info("importer done sending items; waiting for processing to finish",
+		zap.Int64("job_id", p.ij.job.id),
 		zap.Error(err))
 
 	// wait for all processing workers to complete
 	wg.Wait()
 
-	p.log.Info("import complete", zap.Duration("duration", time.Since(start)))
+	params.Log.Info("importer done sending items; waiting for processing to finish",
+		zap.Int64("job_id", p.ij.job.id),
+		zap.Error(err))
 
-	// clear checkpoint and update last item ID for account
+	// handle any error returned from import
+	if err != nil {
+		return fmt.Errorf("import: %w", err)
+	}
+
+	p.log.Info("import complete; cleaning up", zap.Duration("duration", time.Since(start)))
+
 	err = p.successCleanup()
 	if err != nil {
 		return fmt.Errorf("processing completed, but error cleaning up: %w", err)
 	}
 
-	go p.postImportTasks()
+	p.generateThumbnailsForImportedItems()
+	p.generateEmbeddingsForImportedItems()
 
 	return nil
 }
 
-func (p *processor) postImportTasks() {
-	p.generateThumbnailsForImportedItems()
-	p.generateEmbeddingsForImportedItems()
-}
-
-func (p *processor) successCleanup() error {
+func (p processor) successCleanup() error {
 	// delete empty items from this import (items with no content and no meaningful relationships)
-	if err := p.deleteEmptyItems(p.jobRow.id); err != nil {
-		return fmt.Errorf("deleting empty items: %w (job_id=%d)", err, p.jobRow.id)
+	if err := p.deleteEmptyItems(p.ij.job.id); err != nil {
+		return fmt.Errorf("deleting empty items: %w (job_id=%d)", err, p.ij.job.id)
 	}
-
-	// TODO: If no items were inserted or associated with this import, delete it from the DB?
-
-	// clear checkpoint
-	p.tl.dbMu.Lock()
-	_, err := p.tl.db.Exec(`UPDATE jobs SET checkpoint=NULL WHERE id=?`, p.jobRow.id) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
-	p.tl.dbMu.Unlock()
-	if err != nil {
-		return fmt.Errorf("clearing checkpoint: %w", err)
-	}
-	p.jobRow.checkpoint = nil
-
-	// // TODO: ... we don't use this in the new schema
-	// // update the last item ID, to advance the window for future get-latest operations
-	// p.lastItemMu.Lock()
-	// lastItemID := p.lastItemRowID
-	// p.lastItemMu.Unlock()
-	// if lastItemID > 0 {
-	// 	_, err = p.tl.db.Exec(`UPDATE accounts SET last_item_id=? WHERE id=?`, lastItemID, p.acc.ID) // TODO: limit 1
-	// 	if err != nil {
-	// 		return fmt.Errorf("advancing most recent item ID: %v", err)
-	// 	}
-	// }
-
 	return nil
 }
 
@@ -415,78 +219,145 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 	return p.tl.deleteItemRows(p.tl.ctx, emptyItems, false, &retention)
 }
 
-// DeleteItemRows deletes the item rows specified by their row IDs. If remember is true, the item rows will
-// be hashed, and the hash will be stored with the row; if retention is non-zero, the items will be marked
-// for deletion and then only deleted later after the retention period.
-// TODO: WIP: remember and retention are not yet implemented
-func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember bool, retention *time.Duration) error {
-	if len(rowIDs) == 0 {
-		return nil
+// generateThumbnailsForImportedItems generates thumbnails for qualifying items
+// that were a part of the import associated with this processor. It should be
+// run after the import completes.
+// TODO: What about generating thumbnails for... just anything that needs one
+func (p processor) generateThumbnailsForImportedItems() {
+	job := thumbnailJob{
+		DataIDs:   make(map[int64]thumbnailTask),
+		DataFiles: make(map[string]thumbnailTask),
 	}
 
-	Log.Info("deleting item rows",
-		zap.Int64s("item_ids", rowIDs),
-		zap.Bool("remember", remember),
-		zap.Durationp("retention", retention))
-
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.Begin()
+	p.tl.dbMu.RLock()
+	rows, err := p.tl.db.QueryContext(p.tl.ctx,
+		`SELECT id, data_id, data_type, data_file
+		FROM items
+		WHERE job_id=? AND (data_file IS NOT NULL OR data_id IS NOT NULL)`, p.ij.job.id)
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		p.tl.dbMu.RUnlock()
+		p.log.Error("unable to generate thumbnails from this import",
+			zap.Int64("job_id", p.ij.job.id),
+			zap.Error(err))
+		return
 	}
-	defer tx.Rollback()
 
-	var dataFilesToDelete []string
-	for _, rowID := range rowIDs {
-		// before deleting the row, find out whether this item
-		// has a data file and is the only one referencing it
-		var count int
-		var dataFile *string
-		err = tx.QueryRow(`SELECT count(), data_file FROM items
-		WHERE data_file = (SELECT data_file FROM items
-							WHERE id=? AND data_file IS NOT NULL
-							AND data_file != "" LIMIT 1)`,
-			rowID).Scan(&count, &dataFile)
+	for rows.Next() {
+		var rowID int64
+		var dataID *int64
+		var dataType, dataFile *string
+
+		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
 		if err != nil {
-			return fmt.Errorf("querying count of rows sharing data file: %w", err)
+			p.log.Error("unable to scan row to generate thumbnails from this import",
+				zap.Int64("job_id", p.ij.job.id),
+				zap.Error(err))
+			rows.Close()
+			p.tl.dbMu.RUnlock()
+			return
 		}
-
-		_, err = tx.Exec(`DELETE FROM items WHERE id=?`, rowID) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
-		if err != nil {
-			return fmt.Errorf("deleting item %d from DB: %w", rowID, err)
-		}
-
-		// if this row is the only one that references the data file, we can delete it
-		if count == 1 && dataFile != nil {
-			dataFilesToDelete = append(dataFilesToDelete, *dataFile)
+		if qualifiesForThumbnail(dataType) {
+			if dataID != nil {
+				job.DataIDs[*dataID] = thumbnailTask{
+					tl:        p.tl,
+					DataID:    rowID,
+					DataType:  *dataType,
+					ThumbType: thumbnailType(*dataType, false),
+				}
+			}
+			if dataFile != nil {
+				job.DataFiles[*dataFile] = thumbnailTask{
+					tl:        p.tl,
+					DataFile:  *dataFile,
+					DataType:  *dataType,
+					ThumbType: thumbnailType(*dataType, false),
+				}
+			}
 		}
 	}
+	rows.Close()
+	p.tl.dbMu.RUnlock()
 
-	// commit to delete the item from the DB first; even if deleting the data file fails, stray
-	// data files can be cleaned up with a sweep later, whereas if we delete that file first and
-	// then fail to delete from DB, the DB being the ultimate source of truth is now missing data
-	// and we aren't sure whether we need to recover it or finish deleting it... by deleting the
-	// DB row first we can know that we just need to delete the file if there's no row using it
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing deletion transaction: %w", err)
+	if err = rows.Err(); err != nil {
+		p.log.Error("iterating rows for generating thumbnails failed",
+			zap.Int64("job_id", p.ij.job.id),
+			zap.Error(err))
+		return
 	}
 
-	_, err = tl.deleteDataFiles(ctx, Log, dataFilesToDelete)
-	if err != nil {
-		return fmt.Errorf("deleting data files (after deleting associated item rows from DB): %w", err)
-	}
+	total := len(job.DataFiles) + len(job.DataIDs)
 
-	return nil
+	p.log.Info("generating thumbnails for imported items", zap.Int("count", total))
+
+	if err = p.tl.CreateJob(job, total, 0); err != nil {
+		p.log.Error("creating thumbnail job", zap.Error(err))
+		return
+	}
 }
 
-func (p processor) String() string {
-	accountIDOrFilename := "files:" + strings.Join(p.filenames, ",")
-	if p.acc.ID > 0 {
-		accountIDOrFilename = "account:" + strconv.Itoa(int(p.acc.ID))
+func (p processor) generateEmbeddingsForImportedItems() {
+	p.tl.dbMu.RLock()
+	rows, err := p.tl.db.QueryContext(p.tl.ctx, `
+		SELECT id, data_id, data_type, data_text, data_file
+		FROM items
+		WHERE job_id=?
+			AND data_type IS NOT NULL
+			AND (data_id IS NOT NULL OR data_text IS NOT NULL OR data_file IS NOT NULL)
+		`, p.ij.job.id)
+	if err != nil {
+		p.tl.dbMu.RUnlock()
+		p.log.Error("unable to generate embeddings from this import",
+			zap.Int64("job_id", p.ij.job.id),
+			zap.Error(err))
+		return
 	}
-	return p.ds.Name + ":" + accountIDOrFilename
+
+	job := embeddingJob{
+		ItemIDs: make(map[int64]embeddingTask),
+	}
+
+	for rows.Next() {
+		var rowID int64
+		var dataID *int64
+		var dataType, dataText, dataFile *string
+
+		err := rows.Scan(&rowID, &dataID, &dataType, &dataText, &dataFile)
+		if err != nil {
+			p.log.Error("unable to scan row to generate embeddings from this import",
+				zap.Int64("job_id", p.ij.job.id),
+				zap.Error(err))
+			rows.Close()
+			p.tl.dbMu.RUnlock()
+			return
+		}
+
+		if !strings.HasPrefix(*dataType, "image/") && !strings.HasPrefix(*dataType, "text/") {
+			continue
+		}
+
+		// TODO: use thumbnails if available, maybe that should be used instead?
+		job.ItemIDs[rowID] = embeddingTask{p.tl, rowID, *dataType, dataID, dataText, dataFile}
+	}
+	rows.Close()
+	p.tl.dbMu.RUnlock()
+
+	if err = rows.Err(); err != nil {
+		p.log.Error("iterating rows for generating embeddings failed",
+			zap.Int64("job_id", p.ij.job.id),
+			zap.Error(err))
+		return
+	}
+
+	total := len(job.ItemIDs)
+
+	// now that our read lock on the DB is released, we can take our time generating embeddings in the background
+
+	p.log.Info("generating embeddings for imported items", zap.Int("count", total))
+
+	if err = p.tl.CreateJob(job, total, 0); err != nil {
+		p.log.Error("creating embedding job", zap.Error(err))
+		return
+	}
 }
 
 // couldBeMarkdown is a very naive Markdown detector. I'm trying to avoid regexp for performance,

@@ -31,7 +31,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions, fsys fs.FS) error {
+func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, opt timeline.ImportParams, fsys fs.FS) error {
 	albumName := filepath.Base(fimp.filename)
 
 	// process files in parallel for faster imports
@@ -93,7 +93,7 @@ func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, itemChan chan
 				},
 			})
 
-			itemChan <- ig
+			opt.Pipeline <- ig
 		}()
 
 		return nil

@@ -32,8 +32,9 @@ import (
 // fields require initialization from AddAccount() or LoadAccount().
 type Account struct {
 	ID int64 `json:"id"` // DB row ID
-	// DataSourceID string `json:"data_source_id"`
-	// User Person `json:"user"` // represents the account owner
+
+	// DataSourceID string `json:"data_source_id"` // TODO: useful?
+	Owner Entity `json:"owner"`
 
 	DataSource DataSource `json:"data_source"`
 
@@ -243,7 +244,7 @@ func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account
 
 // marshalGob is a convenient way to gob-encode v.
 func marshalGob(v any) ([]byte, error) {
-	b := new(bytes.Buffer)
+	b := new(bytes.Buffer) // TODO: could pool this to improve performance a little bit
 	err := gob.NewEncoder(b).Encode(v)
 	return b.Bytes(), err
 }

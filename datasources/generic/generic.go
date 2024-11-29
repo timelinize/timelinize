@@ -25,11 +25,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
-	"path"
-	"path/filepath"
+	"strings"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/mholt/goexif2/exif"
 	"github.com/mholt/goexif2/mknote"
 	"github.com/timelinize/timelinize/timeline"
@@ -43,9 +40,7 @@ const (
 )
 
 // Options configures the data source.
-type Options struct {
-	ExpandArchives bool `json:"expand_archives"`
-}
+type Options struct{}
 
 func init() {
 	exif.RegisterParsers(mknote.All...)
@@ -55,84 +50,40 @@ func init() {
 		Title:           DataSourceName,
 		Icon:            "folder.svg",
 		NewOptions:      func() any { return new(Options) },
-		NewFileImporter: func() timeline.FileImporter { return new(Client) },
+		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})
 	if err != nil {
 		timeline.Log.Fatal("registering data source", zap.Error(err))
 	}
 }
 
-// Client interacts with the file system to get items.
-type Client struct{}
+// FileImporter interacts with the file system to get items.
+type FileImporter struct{}
 
 // Recognize returns whether the input file is recognized.
-func (Client) Recognize(_ context.Context, _ []string) (timeline.Recognition, error) {
+func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
 // FileImport conducts an import of the data using this data source.
-func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	for _, filename := range filenames {
-		if err := c.walk(ctx, filename, ".", itemChan, opt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// walk processes the item at root, or the items within root, joined to pathInRoot, which is
-// a relative path to root and must use the slash as separator.
-func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	filesOpt := opt.DataSourceOptions.(*Options)
-
-	fsys, err := archiver.FileSystem(ctx, filepath.Join(root, pathInRoot))
-	if err != nil {
-		return err
-	}
-	_, isArchiveFS := fsys.(archiver.ArchiveFS)
-
-	err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
+func (c *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir // skip hidden files & folders
+		}
 		if d.IsDir() {
-			return nil
+			return nil // traverse into subdirectories
 		}
 
-		// if enabled, traverse into archives, but not archives within archives
-		if filesOpt.ExpandArchives && !isArchiveFS {
-			fullPath := filepath.Join(root, pathInRoot, fpath)
-			file, err := os.Open(filepath.Clean(fullPath))
-			if err != nil {
-				return err
-			}
-			format, _, err := archiver.Identify(fullPath, file)
-			file.Close()
-			if err == nil && format != nil {
-				// some files look like archives but aren't actually generic archives;
-				// for example, Microsoft Office files (.docx, etc.) are just .zip
-				// files with special contents; we don't want to traverse into those,
-				// so only traverse those if the filename has the .zip extension
-				zip, isZip := format.(archiver.Zip)
-				if !isZip || path.Ext(fullPath) == zip.Name() {
-					err = c.walk(ctx, root, fpath, itemChan, opt)
-					if err != nil {
-						return fmt.Errorf("traversing into archive file: %w", err)
-					}
-					return nil
-				}
-			}
-		}
+		filename := d.Name()
 
-		// When importing a single file, fpath will be '.', and root will
-		// be the full path to the file. Make sure we use that getting
-		// the base name.
-		filename := fpath
-		if fpath == "." {
-			filename = path.Base(root)
-		}
-
-		fitem := fileItem{fsys: fsys, path: fpath, dirEntry: d}
+		fitem := fileItem{fsys: dirEntry.FS, path: fpath, dirEntry: d}
 
 		item := &timeline.Item{
 			Timestamp:            fitem.timestamp(),
@@ -141,13 +92,13 @@ func (c *Client) walk(ctx context.Context, root, pathInRoot string, itemChan cha
 			Content: timeline.ItemData{
 				Filename: filename,
 				Data: func(_ context.Context) (io.ReadCloser, error) {
-					return fsys.Open(fpath)
+					return dirEntry.FS.Open(fpath)
 				},
 			},
 			// TODO: surely there is some metadata...?
 		}
 
-		itemChan <- &timeline.Graph{Item: item}
+		params.Pipeline <- &timeline.Graph{Item: item}
 
 		return nil
 	})

@@ -425,7 +425,7 @@ func (a *App) openRepos() error {
 	// TODO: use race detector to verify ^
 	lastOpenedRepos := a.cfg.Repositories
 	for i, repoDir := range lastOpenedRepos {
-		_, err := app.openRepository(repoDir, false)
+		_, err := app.openRepository(a.ctx, repoDir, false)
 		if err != nil {
 			app.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(a.cfg.Repositories)),
 				zap.Error(err),

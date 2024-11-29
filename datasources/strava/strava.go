@@ -27,7 +27,7 @@ import (
 	"io"
 	"io/fs"
 
-	"github.com/mholt/archiver/v4"
+	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/datasources/gpx"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -57,24 +57,13 @@ type FileImporter struct {
 }
 
 // Recognize returns whether the input is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	if len(filenames) != 1 {
-		return timeline.Recognition{}, errors.New("only one input is supported (an archive or directory)")
-	}
-
-	filename := filenames[0]
-
-	fsys, err := archiver.FileSystem(ctx, filename)
-	if err != nil {
-		return timeline.Recognition{}, err
-	}
-
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	for _, expectedFile := range []string{
 		"activities.csv",
 		"profile.csv",
 	} {
-		if !timeline.FileExistsFS(fsys, expectedFile) {
-			file, err := archiver.TopDirOpen(fsys, expectedFile)
+		if !timeline.FileExistsFS(dirEntry.FS, expectedFile) {
+			file, err := archives.TopDirOpen(dirEntry.FS, expectedFile)
 			if err == nil {
 				file.Close()
 				continue
@@ -87,17 +76,8 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 }
 
 // FileImport imports data from the input.
-func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	if len(filenames) != 1 {
-		return errors.New("only one input is supported (an archive or directory)")
-	}
-
-	fsys, err := archiver.FileSystem(ctx, filenames[0])
-	if err != nil {
-		return err
-	}
-
-	profile, err := fi.readProfile(ctx, fsys)
+func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	profile, err := fi.readProfile(ctx, dirEntry.FS)
 	if err != nil {
 		return fmt.Errorf("reading profile: %w", err)
 	}
@@ -136,7 +116,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 			},
 		},
 		NewPicture: func(context.Context) (io.ReadCloser, error) {
-			picFile, err := fsys.Open("profile.jpg")
+			picFile, err := dirEntry.FS.Open("profile.jpg")
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
 					return nil, nil // not an error, just no picture
@@ -147,7 +127,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 		},
 	}
 
-	activitiesFile, err := fsys.Open("activities.csv")
+	activitiesFile, err := dirEntry.FS.Open("activities.csv")
 	if err != nil {
 		return err
 	}
@@ -262,7 +242,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 		// lots of numbers in this metadata could be represented as numbers
 		coll.Metadata.StringsToSpecificType()
 
-		err = fi.processActivity(ctx, fsys, rec[fields["Filename"]], owner, coll, itemChan, opt)
+		err = fi.processActivity(ctx, dirEntry.FS, rec[fields["Filename"]], owner, coll, params)
 		if err != nil {
 			return err
 		}
@@ -271,7 +251,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 	return nil
 }
 
-func (FileImporter) processActivity(ctx context.Context, fsys fs.FS, filename string, owner timeline.Entity, coll *timeline.Item, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (FileImporter) processActivity(ctx context.Context, fsys fs.FS, filename string, owner timeline.Entity, coll *timeline.Item, opt timeline.ImportParams) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 
 	file, err := fsys.Open(filename)
@@ -299,7 +279,7 @@ func (FileImporter) processActivity(ctx context.Context, fsys fs.FS, filename st
 		ig := &timeline.Graph{Item: item}
 		ig.ToItemWithValue(timeline.RelInCollection, coll, position)
 
-		itemChan <- ig
+		opt.Pipeline <- ig
 
 		position++
 	}

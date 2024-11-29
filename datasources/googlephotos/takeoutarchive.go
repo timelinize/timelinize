@@ -33,7 +33,7 @@ import (
 	"time"
 
 	"github.com/maruel/natural"
-	"github.com/mholt/archiver/v4"
+	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -41,10 +41,10 @@ import (
 
 const googlePhotosPath = "Takeout/Google Photos"
 
-func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions, fsys fs.FS) error {
+func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeline.ImportParams, fsys fs.FS) error {
 	fimp.truncatedNames = make(map[string]int)
 
-	albumFolders, err := archiver.TopDirReadDir(fsys, googlePhotosPath)
+	albumFolders, err := archives.TopDirReadDir(fsys, googlePhotosPath)
 	if err != nil {
 		return fmt.Errorf("getting album list from %s: %w", googlePhotosPath, err)
 	}
@@ -79,7 +79,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan c
 
 		// read album folder contents, then sort in what I think is the same way
 		// Google does before truncating long filenames
-		albumItems, err := archiver.TopDirReadDir(fsys, thisAlbumFolderPath)
+		albumItems, err := archives.TopDirReadDir(fsys, thisAlbumFolderPath)
 		if err != nil {
 			return err
 		}
@@ -95,7 +95,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan c
 		})
 
 		for _, dirEntry := range albumItems {
-			if err := fimp.processAlbumItem(ctx, albumMeta, thisAlbumFolderPath, dirEntry, itemChan, opt, fsys); err != nil {
+			if err := fimp.processAlbumItem(ctx, albumMeta, thisAlbumFolderPath, dirEntry, opt, fsys); err != nil {
 				return fmt.Errorf("processing album item '%s': %w", path.Join(thisAlbumFolderPath, dirEntry.Name()), err)
 			}
 		}
@@ -104,7 +104,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan c
 	return nil
 }
 
-func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumArchiveMetadata, folderPath string, d fs.DirEntry, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions, fsys fs.FS) error {
+func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumArchiveMetadata, folderPath string, d fs.DirEntry, opt timeline.ImportParams, fsys fs.FS) error {
 	fpath := path.Join(folderPath, d.Name())
 	if err := ctx.Err(); err != nil {
 		return err
@@ -120,7 +120,7 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 		return nil
 	}
 
-	f, err := archiver.TopDirOpen(fsys, fpath)
+	f, err := archives.TopDirOpen(fsys, fpath)
 	if err != nil {
 		return err
 	}
@@ -183,12 +183,12 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 		ig.ToItem(timeline.RelEdit, edited.Item)
 	}
 
-	itemChan <- ig
+	opt.Pipeline <- ig
 
 	return nil
 }
 
-func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArchiveMetadata, albumMeta albumArchiveMetadata, opt timeline.ListingOptions) *timeline.Graph {
+func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArchiveMetadata, albumMeta albumArchiveMetadata, opt timeline.ImportParams) *timeline.Graph {
 	item := &timeline.Item{
 		Classification: timeline.ClassMedia,
 		// timestamp is not set here (we prefer timestamp embedded in file itself first, below)
@@ -217,7 +217,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 			item.Content.Filename = path.Base(mediaFilePath)
 		}
 		item.Content.Data = func(_ context.Context) (io.ReadCloser, error) {
-			return archiver.TopDirOpen(itemMeta.source, mediaFilePath)
+			return archives.TopDirOpen(itemMeta.source, mediaFilePath)
 		}
 
 		// add metadata contained in the image file itself; note that this overwrites any overlapping
@@ -302,7 +302,7 @@ func (fimp *FileImporter) archiveFilenameWithoutPositionPart() string {
 
 func (fimp *FileImporter) readAlbumMetadata(fsys fs.FS, albumFolderPath string) (albumArchiveMetadata, error) {
 	albumMetadataFilePath := path.Join(albumFolderPath, albumMetadataFilename)
-	albumMetadataFile, err := archiver.TopDirOpen(fsys, albumMetadataFilePath)
+	albumMetadataFile, err := archives.TopDirOpen(fsys, albumMetadataFilePath)
 	if err != nil {
 		return albumArchiveMetadata{}, fmt.Errorf("opening metadata file %s: %w", albumMetadataFilename, err)
 	}

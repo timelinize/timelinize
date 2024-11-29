@@ -95,13 +95,15 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) handleJobs(w http.ResponseWriter, _ *http.Request) error {
-	jobs, err := s.app.ActiveJobs()
-	return jsonResponse(w, jobs, err)
+	return errors.New("TODO: re-implement")
+	// jobs, err := s.app.ActiveJobs()
+	// return jsonResponse(w, jobs, err)
 }
 
 func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) error {
-	jobID := r.Context().Value(ctxKeyPayload).(*string)
-	return jsonResponse(w, nil, s.app.CancelJob(*jobID))
+	return errors.New("TODO: re-implement")
+	// jobID := r.Context().Value(ctxKeyPayload).(*string)
+	// return jsonResponse(w, nil, s.app.CancelJob(*jobID))
 }
 
 func (s *server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
@@ -188,7 +190,7 @@ func (s *server) handleOpenRepo(w http.ResponseWriter, r *http.Request) error {
 	payload := r.Context().Value(ctxKeyPayload).(*openRepoPayload)
 
 	// TODO: maybe have the app methods return structured errors
-	openedTL, err := s.app.openRepository(payload.RepoPath, payload.Create)
+	openedTL, err := s.app.openRepository(r.Context(), payload.RepoPath, payload.Create)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return Error{
@@ -273,78 +275,17 @@ func (s *server) handleCloseRepo(w http.ResponseWriter, r *http.Request) error {
 // 	return s.app.AuthAccount(payload.Repo, payload.AccountID, payload.DataSourceOptions)
 // }
 
-func (s *server) handleRecognize(w http.ResponseWriter, r *http.Request) error {
-	filenames := *r.Context().Value(ctxKeyPayload).(*[]string)
-	sources, err := s.app.Recognize(filenames)
-	return jsonResponse(w, sources, err)
-
-	// TODO: We no longer need to include accounts since accounts aren't required for importing files
-	// // just return plain data source info if no timeline specified
-	// if payload.Repo == "" {
-	// 	// put files data source last since it is the generic importer and usually the least desired
-	// 	sort.Slice(sources, func(i, j int) bool {
-	// 		return sources[i].ID != files.DataSourceID
-	// 	})
-	// 	return jsonResponse(w, sources)
-	// }
-
-	// // expand specific account info
-
-	// tl, err := getOpenTimeline(payload.Repo)
-	// if err != nil {
-	// 	return Error{
-	// 		Err:             err,
-	// 		HTTPStatus:      http.StatusBadRequest,
-	// 		Log:             "getting open timeline",
-	// 		Message:         "Unable to query accounts compatible with this file.",
-	// 		Recommendations: []string{"Make sure the repo field is properly set to an open timeline."},
-	// 	}
-	// }
-
-	// dataSourceIDs := make([]string, len(sources))
-	// for i, ds := range sources {
-	// 	dataSourceIDs[i] = ds.ID
-	// }
-
-	// accounts, err := tl.LoadAccounts(nil, dataSourceIDs)
-	// if err != nil {
-	// 	return Error{
-	// 		Err:        err,
-	// 		HTTPStatus: http.StatusInternalServerError,
-	// 		Log:        "loading relevant accounts",
-	// 		Message:    "Unable to query accounts compatible with this file.",
-	// 	}
-	// }
-
-	// expandedAccounts := make([]expandedAccount, len(accounts))
-	// for i, acc := range accounts {
-	// 	expandedAccounts[i], err = s.expandAccount(tl, acc, true, true)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	// // put files data source last since it is the generic importer and usually the least desired
-	// sort.Slice(expandedAccounts, func(i, j int) bool {
-	// 	return expandedAccounts[i].DataSourceID != files.DataSourceID
-	// })
-	// sort.Slice(sources, func(i, j int) bool {
-	// 	return sources[i].ID != files.DataSourceID
-	// })
-
-	// return jsonResponse(w, struct {
-	// 	DataSources []timeline.DataSource `json:"data_sources,omitempty"`
-	// 	Accounts    []expandedAccount     `json:"accounts,omitempty"`
-	// }{
-	// 	DataSources: sources,
-	// 	Accounts:    expandedAccounts,
-	// })
+func (s *server) handlePlanImport(w http.ResponseWriter, r *http.Request) error {
+	plannerOptions := *r.Context().Value(ctxKeyPayload).(*PlannerOptions)
+	importPlan, err := s.app.PlanImport(r.Context(), plannerOptions)
+	return jsonResponse(w, importPlan, err)
 }
 
 func (s *server) handleImport(w http.ResponseWriter, r *http.Request) error {
-	params := *r.Context().Value(ctxKeyPayload).(*ImportParameters)
-	job, err := s.app.Import(params)
-	return jsonResponse(w, map[string]any{"job": job}, err)
+	return errors.New("TODO: re-implement")
+	// params := *r.Context().Value(ctxKeyPayload).(*ImportParameters)
+	// job, err := s.app.Import(params)
+	// return jsonResponse(w, map[string]any{"job": job}, err)
 }
 
 func (s *server) handleSearchItems(w http.ResponseWriter, r *http.Request) error {

@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mholt/archiver/v4"
+	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -59,91 +59,77 @@ type Archive struct {
 }
 
 // Recognize returns whether the input file is recognized.
-func (a Archive) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-		if _, err = archiver.TopDirStat(fsys, pre2024ProfileInfoPath); err != nil {
-			if _, err = archiver.TopDirStat(fsys, year2024ProfileInfoPath); err != nil {
-				return timeline.Recognition{}, nil
-			}
+func (Archive) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+	if _, err := archives.TopDirStat(dirEntry.FS, pre2024ProfileInfoPath); err != nil {
+		if _, err = archives.TopDirStat(dirEntry.FS, year2024ProfileInfoPath); err != nil {
+			return timeline.Recognition{}, nil
 		}
 	}
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
 // FileImport imports the data in the file.
-func (a Archive) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	// dsOpt := opt.DataSourceOptions.(*Options)
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return fmt.Errorf("opening data archive: %w", err)
+	if err := a.setOwnerEntity(dirEntry); err != nil {
+		return err
+	}
+
+	// start with oldest supported archive version
+	postsFilePrefix := pre2024YourPostsPrefix
+
+	// posts
+	for i := 1; i < 10000; i++ {
+		postsFilename := fmt.Sprintf("%s%d.json", postsFilePrefix, i)
+
+		postsFile, err := dirEntry.FS.Open(postsFilename)
+		if errors.Is(err, fs.ErrNotExist) && postsFilePrefix == pre2024YourPostsPrefix {
+			// try newer version
+			postsFilePrefix = year2024YourPostsPrefix
+			postsFilename = fmt.Sprintf("%s%d.json", postsFilePrefix, i)
+			postsFile, err = dirEntry.FS.Open(postsFilename)
 		}
-
-		if err = a.setOwnerEntity(fsys); err != nil {
-			return err
+		if errors.Is(err, fs.ErrNotExist) {
+			break // no more posts files
 		}
-
-		// start with oldest supported archive version
-		postsFilePrefix := pre2024YourPostsPrefix
-
-		// posts
-		for i := 1; i < 10000; i++ {
-			postsFilename := fmt.Sprintf("%s%d.json", postsFilePrefix, i)
-
-			postsFile, err := fsys.Open(postsFilename)
-			if errors.Is(err, fs.ErrNotExist) && postsFilePrefix == pre2024YourPostsPrefix {
-				// try newer version
-				postsFilePrefix = year2024YourPostsPrefix
-				postsFilename = fmt.Sprintf("%s%d.json", postsFilePrefix, i)
-				postsFile, err = fsys.Open(postsFilename)
-			}
-			if errors.Is(err, fs.ErrNotExist) {
-				break // no more posts files
-			}
-			if err != nil {
-				return err
-			}
-
-			err = a.processPostsFile(ctx, fsys, postsFile, itemChan, opt)
-			postsFile.Close()
-			if err != nil {
-				return fmt.Errorf("processing %s: %w", postsFilename, err)
-			}
-		}
-
-		// uncategorized photos
-		if err := a.processPhotosOrVideos(ctx, fsys, itemChan, opt, []string{
-			pre2024YourUncategorizedPhotosPath,
-			year2024YourUncategorizedPhotosPath,
-		}, fbYourUncategorizedPhotos{}); err != nil {
-			return fmt.Errorf("processing uncategorized photos: %w", err)
-		}
-
-		// (uncategorized) videos
-		if err := a.processPhotosOrVideos(ctx, fsys, itemChan, opt, []string{
-			pre2024YourVideosPath,
-			year2024YourVideosPath,
-		}, fbYourVideos{}); err != nil {
-			return fmt.Errorf("processing videos: %w", err)
-		}
-
-		// messages
-		err = GetMessages(fsys, itemChan, "facebook", opt.Log)
 		if err != nil {
 			return err
 		}
+
+		err = a.processPostsFile(ctx, dirEntry, postsFile, params)
+		postsFile.Close()
+		if err != nil {
+			return fmt.Errorf("processing %s: %w", postsFilename, err)
+		}
+	}
+
+	// uncategorized photos
+	if err := a.processPhotosOrVideos(ctx, dirEntry, params, []string{
+		pre2024YourUncategorizedPhotosPath,
+		year2024YourUncategorizedPhotosPath,
+	}, fbYourUncategorizedPhotos{}); err != nil {
+		return fmt.Errorf("processing uncategorized photos: %w", err)
+	}
+
+	// (uncategorized) videos
+	if err := a.processPhotosOrVideos(ctx, dirEntry, params, []string{
+		pre2024YourVideosPath,
+		year2024YourVideosPath,
+	}, fbYourVideos{}); err != nil {
+		return fmt.Errorf("processing videos: %w", err)
+	}
+
+	// messages
+	err := GetMessages("facebook", dirEntry, params)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (a Archive) processPhotosOrVideos(ctx context.Context, fsys fs.FS, itemChan chan<- *timeline.Graph,
-	opt timeline.ListingOptions, pathsToTry []string, unmarshalInto any) error {
+func (a Archive) processPhotosOrVideos(ctx context.Context, d timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string, unmarshalInto any) error {
 	const archiveVersionsSupported = 2
 
 	if len(pathsToTry) != archiveVersionsSupported {
@@ -151,10 +137,10 @@ func (a Archive) processPhotosOrVideos(ctx context.Context, fsys fs.FS, itemChan
 			archiveVersionsSupported, archiveVersionsSupported, len(pathsToTry))
 	}
 
-	file, err := fsys.Open(pathsToTry[0])
+	file, err := d.FS.Open(pathsToTry[0])
 	if errors.Is(err, fs.ErrNotExist) {
 		// try newer archive version
-		file, err = fsys.Open(pathsToTry[1])
+		file, err = d.FS.Open(pathsToTry[1])
 	}
 	if err != nil {
 		return err
@@ -182,15 +168,15 @@ func (a Archive) processPhotosOrVideos(ctx context.Context, fsys fs.FS, itemChan
 			Owner: a.owner,
 		}
 
-		media.fillItem(item, fsys, "", opt.Log)
+		media.fillItem(item, d, "", opt.Log)
 
-		itemChan <- &timeline.Graph{Item: item}
+		opt.Pipeline <- &timeline.Graph{Item: item}
 	}
 
 	return nil
 }
 
-func (a Archive) processPostsFile(ctx context.Context, fsys fs.FS, file fs.File, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file fs.File, params timeline.ImportParams) error {
 	var posts yourPosts
 	if err := json.NewDecoder(file).Decode(&posts); err != nil {
 		return err
@@ -251,7 +237,7 @@ func (a Archive) processPostsFile(ctx context.Context, fsys fs.FS, file fs.File,
 					}
 				}
 				if attachData.Media.URI != "" {
-					attachData.Media.fillItem(attachedItem, fsys, postText, opt.Log)
+					attachData.Media.fillItem(attachedItem, d, postText, params.Log)
 				}
 				if attachData.ExternalContext.URL != "" {
 					attachedItem.Content.Data = timeline.StringData(attachData.ExternalContext.Name)
@@ -270,17 +256,17 @@ func (a Archive) processPostsFile(ctx context.Context, fsys fs.FS, file fs.File,
 			ig.ToItem(timeline.RelAttachment, attachedItem)
 		}
 
-		itemChan <- ig
+		params.Pipeline <- ig
 	}
 
 	return nil
 }
 
-func (Archive) loadProfileInfo(fsys fs.FS) (profileInfo, error) {
-	file, err := archiver.TopDirOpen(fsys, pre2024ProfileInfoPath)
+func (Archive) loadProfileInfo(d timeline.DirEntry) (profileInfo, error) {
+	file, err := archives.TopDirOpen(d.FS, pre2024ProfileInfoPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		// try another archive version
-		file, err = archiver.TopDirOpen(fsys, year2024ProfileInfoPath)
+		file, err = archives.TopDirOpen(d.FS, year2024ProfileInfoPath)
 	}
 	if err != nil {
 		return profileInfo{}, err
@@ -292,8 +278,8 @@ func (Archive) loadProfileInfo(fsys fs.FS) (profileInfo, error) {
 	return profileInfo, err
 }
 
-func (a *Archive) setOwnerEntity(fsys fs.FS) error {
-	profileInfo, err := a.loadProfileInfo(fsys)
+func (a *Archive) setOwnerEntity(d timeline.DirEntry) error {
+	profileInfo, err := a.loadProfileInfo(d)
 	if err != nil {
 		return err
 	}
@@ -522,7 +508,7 @@ type fbArchiveMedia struct {
 	Description string `json:"description"`
 }
 
-func (m fbArchiveMedia) fillItem(item *timeline.Item, fsys fs.FS, postText string, logger *zap.Logger) {
+func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postText string, logger *zap.Logger) {
 	if m.CreationTimestamp > 0 {
 		item.Timestamp = time.Unix(m.CreationTimestamp, 0)
 	}
@@ -531,7 +517,7 @@ func (m fbArchiveMedia) fillItem(item *timeline.Item, fsys fs.FS, postText strin
 		item.Content = timeline.ItemData{
 			Filename: path.Base(m.URI),
 			Data: func(_ context.Context) (io.ReadCloser, error) {
-				return fsys.Open(m.URI)
+				return d.FS.Open(m.URI)
 			},
 		}
 	}

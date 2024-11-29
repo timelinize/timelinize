@@ -149,7 +149,7 @@ const app = {
 		return get("/api/open-repositories");
 	},
 	Recognize(filename) {
-		return post("/api/recognize", filename);
+		return post("/api/recognize", { filename });
 	},
 	RepositoryIsEmpty(repoID) {
 		 return post("/api/repository-empty", repoID);

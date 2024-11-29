@@ -27,11 +27,9 @@ import (
 	"io"
 	"io/fs"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/datasources/googlelocation"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -64,138 +62,86 @@ type Options struct {
 type FileImporter struct{}
 
 // Recognize returns whether the file is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	var totalCount, matchCount int
+func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+	rec := timeline.Recognition{DirThreshold: .9}
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if fpath == "." {
-					return nil
-				}
-				return fs.SkipDir // don't walk subfolders; it's uncommon and slower
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-
-			totalCount++
-
-			ext := strings.ToLower(filepath.Ext(fpath))
-			if ext == ".gpx" {
-				matchCount++
-			}
-
-			return nil
-		})
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
+	// we can import directories, but let the import planner figure that out; only recognize files
+	if dirEntry.IsDir() {
+		return rec, nil
 	}
 
-	var confidence float64
-	if totalCount > 0 {
-		confidence = float64(matchCount) / float64(totalCount)
+	// recognize by file extension
+	switch strings.ToLower(path.Ext(dirEntry.Name())) {
+	case ".gpx":
+		rec.Confidence = 1
 	}
 
-	return timeline.Recognition{Confidence: confidence}, nil
+	return rec, nil
 }
 
 // FileImport imports data from a file or folder.
-func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	dsOpt := opt.DataSourceOptions.(*Options)
+func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	dsOpt := params.DataSourceOptions.(*Options)
 
 	owner := timeline.Entity{
 		ID: dsOpt.OwnerEntityID,
 	}
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
+	return fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir // skip hidden files & folders
+		}
+		if d.IsDir() {
+			return nil // traverse into subdirectories
+		}
 
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil // traverse into subdirectories
-			}
-
-			// skip unsupported file types
-			ext := path.Ext(strings.ToLower(fpath))
-			if ext != ".gpx" {
-				return nil
-			}
-
-			file, err := fsys.Open(fpath)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			proc, err := NewProcessor(file, owner, opt, dsOpt.Simplification)
-			if err != nil {
-				return err
-			}
-
-			for {
-				item, err := proc.NextGPXItem(ctx)
-				if err != nil {
-					return err
-				}
-				if item == nil {
-					break
-				}
-				itemChan <- &timeline.Graph{Item: item}
-			}
-
+		// skip unsupported file types
+		if ext := strings.ToLower(path.Ext(d.Name())); ext != ".gpx" {
 			return nil
-		})
+		}
+
+		file, err := dirEntry.FS.Open(fpath)
 		if err != nil {
 			return err
 		}
-	}
+		defer file.Close()
 
-	return nil
+		proc, err := NewProcessor(file, owner, params, dsOpt.Simplification)
+		if err != nil {
+			return err
+		}
+
+		for {
+			item, err := proc.NextGPXItem(ctx)
+			if err != nil {
+				return err
+			}
+			if item == nil {
+				break
+			}
+			params.Pipeline <- &timeline.Graph{Item: item}
+		}
+
+		return nil
+	})
 }
 
 // Processor can get the next GPX point. Call NewProcessor to make a valid instance.
 type Processor struct {
 	dec     *decoder
-	opt     timeline.ListingOptions
+	opt     timeline.ImportParams
 	locProc googlelocation.LocationSource
 	owner   timeline.Entity
 }
 
 // NewProcessor returns a new GPX processor.
-func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ListingOptions, simplification float64) (*Processor, error) {
+func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportParams, simplification float64) (*Processor, error) {
 	// create XML decoder (wrapped to track some state as it decodes)
 	xmlDec := &decoder{Decoder: xml.NewDecoder(file)}
 

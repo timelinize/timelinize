@@ -21,8 +21,9 @@ package tlzapp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,69 +31,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync/atomic"
-	"time"
 
-	"github.com/timelinize/timelinize/datasources/generic"
+	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
-
-// type dialogOptions struct {
-// 	DirectoryPicker            bool   `json:"directory_picker,omitempty"`
-// 	DefaultDirectory           string `json:"default_directory,omitempty"`
-// 	DefaultFilename            string `json:"default_filename,omitempty"`
-// 	Title                      string `json:"title,omitempty"`
-// 	Filters                    []wailsruntime.FileFilter
-// 	ShowHiddenFiles            bool `json:"show_hidden_files,omitempty"`
-// 	CanCreateDirectories       bool `json:"can_create_directories,omitempty"`
-// 	ResolvesAliases            bool `json:"resolve_aliases,omitempty"`
-// 	TreatPackagesAsDirectories bool `json:"treat_packages_as_directories,omitempty"`
-// }
-
-// func (a *App) OpenDialog(opts dialogOptions) string {
-// 	// the frontend probably won't know whether a path exists or is a directory
-// 	// or file; let's be smart about this on its behalf so we can avoid errors
-// 	if opts.DirectoryPicker {
-// 		opts.DefaultFilename = ""
-// 		if opts.DefaultDirectory != "" {
-// 			info, err := os.Stat(opts.DefaultDirectory)
-// 			if err != nil {
-// 				opts.DefaultDirectory = ""
-// 			} else if !info.IsDir() {
-// 				// tried to set a file for the directory picker; use its parent dir instead
-// 				opts.DefaultDirectory = filepath.Dir(opts.DefaultDirectory)
-// 			}
-// 		}
-// 	} else {
-// 		opts.DefaultDirectory = ""
-// 	}
-
-// 	dialogOptions := wailsruntime.OpenDialogOptions{
-// 		DefaultDirectory:           opts.DefaultDirectory,
-// 		DefaultFilename:            opts.DefaultFilename,
-// 		Title:                      opts.Title,
-// 		Filters:                    opts.Filters,
-// 		ShowHiddenFiles:            opts.ShowHiddenFiles,
-// 		CanCreateDirectories:       opts.CanCreateDirectories,
-// 		ResolvesAliases:            opts.ResolvesAliases,
-// 		TreatPackagesAsDirectories: opts.TreatPackagesAsDirectories,
-// 	}
-
-// 	var path string
-// 	var err error
-// 	if opts.DirectoryPicker {
-// 		path, err = wailsruntime.OpenDirectoryDialog(a.ctx, dialogOptions)
-// 	} else {
-// 		// TODO: use multiple file selection dialog -- importers will need to support multiple filenames as input
-// 		path, err = wailsruntime.OpenFileDialog(a.ctx, dialogOptions)
-// 	}
-// 	if err != nil {
-// 		a.log.Error("opening file/folder dialog", zap.Error(err))
-// 	}
-
-// 	return path
-// }
 
 func (a App) fileSelectorRoots() ([]fileSelectorRoot, error) {
 	return getFileSelectorRoots()
@@ -129,7 +74,7 @@ func (a App) getOpenRepositories() []openedTimeline {
 
 // openRepository opens the timeline at repoDir as long as it
 // is not already open.
-func (a *App) openRepository(repoDir string, create bool) (openedTimeline, error) {
+func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (openedTimeline, error) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
 		return openedTimeline{}, fmt.Errorf("forming absolute path to repo at '%s': %w", repoDir, err)
@@ -155,9 +100,9 @@ func (a *App) openRepository(repoDir string, create bool) (openedTimeline, error
 
 	var tl *timeline.Timeline
 	if create {
-		tl, err = timeline.Create(absRepo, DefaultCacheDir())
+		tl, err = timeline.Create(ctx, absRepo, DefaultCacheDir())
 	} else {
-		tl, err = timeline.Open(absRepo, DefaultCacheDir())
+		tl, err = timeline.Open(ctx, absRepo, DefaultCacheDir())
 	}
 	if err != nil {
 		return openedTimeline{}, err
@@ -206,19 +151,9 @@ func (a *App) openRepository(repoDir string, create bool) (openedTimeline, error
 		a.log.Error("unable to persist config", zap.Error(err))
 	}
 
-	return otl, nil
-}
+	// TODO: start jobs in queued or aborted (interrupted) states (maybe, at most... 3 jobs?)
 
-func slicesEqual(s1, s2 []string) bool {
-	if len(s1) != len(s2) {
-		return false
-	}
-	for i := range s1 {
-		if s1[i] != s2[i] {
-			return false
-		}
-	}
-	return true
+	return otl, nil
 }
 
 func (a *App) CloseRepository(repoID string) error {
@@ -389,159 +324,216 @@ func (a App) AuthAccount(repo string, accountID int64, dsOpt json.RawMessage) er
 	return nil
 }
 
-func (a *App) Recognize(filenames []string) ([]timeline.RecognizeResult, error) {
-	for _, fname := range filenames {
-		if _, err := os.Stat(fname); err != nil {
-			return nil, err
-		}
-	}
-	const dsTimeout = 2 * time.Second
-	results, err := timeline.DataSourcesRecognize(a.ctx, filenames, dsTimeout)
-	if err != nil {
-		return nil, err
-	}
-	sort.Slice(results, func(i, _ int) bool {
-		return results[i].Name != generic.DataSourceID
-	})
-	return results, nil
+type PlannerOptions struct {
+	Path             string `json:"path"` // file system path (with OS separators)
+	Recursive        bool   `json:"recursive"`
+	TraverseArchives bool   `json:"traverse_archives"`
+	timeline.RecognizeParams
 }
 
-func (a App) Import(params ImportParameters) (ActiveJob, error) {
+func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.ProposedImportPlan, error) {
+	var plan timeline.ProposedImportPlan
+
+	var fsys fs.FS
+	if options.TraverseArchives {
+		fsys = &archives.DeepFS{Root: options.Path, Context: ctx}
+	} else {
+		var err error
+		fsys, err = archives.FileSystem(ctx, options.Path, nil)
+		if err != nil {
+			return plan, err
+		}
+	}
+
+	var pairings []timeline.ProposedFileImport // the matches accumulated through the walk
+	var currentDir string                      // our current directory
+	var currentDirPairingsMarker int           // the index in pairings where the current dir started
+
+	// finalizeLastDirectory is called during a walk as we move into
+	// a new directory, or when a walk is finished. It counts the
+	// number of matches by data source and checks if any of them
+	// can "claim" the directory as a whole after having matched
+	// enough individual entries within it. If so, the individual
+	// matches are replaced with a single match for the whole
+	// directory. (More than 1 data source may match the dir.)
+	finalizeLastDirectory := func() {
+		// TODO: Make sure this effect bubbles up in the end, so
+		// that all parent directories that match the data source
+		// get folded into the top-most directory, so we can have
+		// just 1 plan for the whole folder tree
+
+		// start by iterating the pairings of matches from this
+		// directory only, and counting the number of entries that
+		// each data source matched; then sort by most matches
+		var counts dataSourceCounts
+		for _, p := range pairings[currentDirPairingsMarker:] {
+			for _, match := range p.RecognizeResults {
+				if match.DirThreshold > 0 {
+					counts.count(match)
+				}
+			}
+		}
+		sort.Slice(counts, func(i, j int) bool {
+			return counts[i].count > counts[j].count
+		})
+
+		// now find any data sources that met their threshold for folding all
+		// the matches in the directory into the directory itself; if none
+		// reached the threshold, then there's nothing to do (just keep the
+		// individual recognition matches as-is); otherwise, we will replace
+		// those with one for the whole dir
+		var consolidatedMatches []timeline.RecognizeResult
+		for _, c := range counts {
+			percentage := float64(c.count) / float64(len(currentDir))
+			if percentage > c.dirThreshold {
+				// this data source matched enough entries in the directory to
+				// meet its self-specified threshold, so consider the entire
+				// directory a match instead of each individual item
+				consolidatedMatches = append(consolidatedMatches, timeline.RecognizeResult{
+					DataSource: c.ds,
+					// TODO: we need to reduce all the recognition values down to one... what's the best way to do this?
+					Recognition: timeline.Recognition{
+						Confidence: percentage,
+					},
+				})
+			}
+		}
+
+		if len(consolidatedMatches) > 0 {
+			// this entire directory is being consolidated, since at least one
+			// data source reached the threshold for individual matches within
+			// the directory; delete the individual pairings from the walk and
+			// replace them all with our single new pairing representing the
+			// whole directory
+			pairings = pairings[:currentDirPairingsMarker]
+			pairings = append(pairings, timeline.ProposedFileImport{
+				Filename:         currentDir,
+				RecognizeResults: consolidatedMatches,
+			})
+		}
+	}
+
+	err := fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err != nil {
+			return err
+		}
+
+		// skip hidden files and folders
+		if strings.HasPrefix(path.Base(fpath), ".") {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		// check if we've entered a new directory, and if so,
+		// check if we need to fold all the individual matches
+		// into a single directory-wide match
+		dir := path.Dir(fpath)
+		if dir != currentDir {
+			finalizeLastDirectory()
+
+			// reset state for new directory
+			currentDir = dir
+			currentDirPairingsMarker = len(pairings)
+		}
+
+		log.Println("WALKING:", fpath, d.Name(), err)
+
+		// we make this DirEntry slightly different than we do when importing, due
+		// to the nature of the recognition process (we're doing the walk for the
+		// data source so they don't have to)
+		walkedFile := timeline.DirEntry{
+			DirEntry: d,
+			FS:       fsys,
+			FSRoot:   options.Path,
+			Filename: fpath,
+		}
+
+		results, err := timeline.DataSourcesRecognize(ctx, walkedFile, options.RecognizeParams)
+		if err != nil {
+			return fmt.Errorf("recognizing %s: %w", fpath, err)
+		}
+
+		// fast-path if no results
+		if len(results) == 0 {
+			if options.Recursive {
+				return nil // traverse into directory (if it is one)
+			}
+			if d.IsDir() {
+				return fs.SkipDir // skip directory
+			}
+			return nil
+		}
+
+		log.Println("RECOGNIZED:", fpath, results)
+
+		// TODO: This should be in order... do we need to use BinarySearch/Insert if not?
+		pairings = append(pairings, timeline.ProposedFileImport{Filename: filepath.Join(options.Path, filepath.FromSlash(fpath)), RecognizeResults: results})
+
+		// skip directory; since this filename was recognized, if it was a directory,
+		// we don't need to traverse into it even if recursion is enabled, as a data
+		// souce will be handling it
+		if d.IsDir() {
+			return fs.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return plan, fmt.Errorf("walking tree rooted at %s: %w (options=%+v)", options.Path, err, options)
+	}
+
+	finalizeLastDirectory()
+
+	return plan, nil
+}
+
+type dataSourceCount struct {
+	ds           timeline.DataSource
+	count        int
+	dirThreshold float64
+}
+
+type dataSourceCounts []dataSourceCount
+
+func (dsCounts *dataSourceCounts) count(match timeline.RecognizeResult) {
+	idx := -1
+	for i, c := range *dsCounts {
+		if c.ds.Name == match.DataSource.Name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		*dsCounts = append(*dsCounts, dataSourceCount{
+			ds:           match.DataSource,
+			count:        1,
+			dirThreshold: match.DirThreshold,
+		})
+		return
+	}
+	(*dsCounts)[idx].count++
+	(*dsCounts)[idx].dirThreshold = match.DirThreshold
+}
+
+type ImportParameters struct {
+	Repo string             `json:"repo"`
+	Job  timeline.ImportJob `json:"job"`
+
+	// For external data sources: (TODO: ... figure this out)
+	// DataSource timeline.DataSource // required: Name, Title, Icon, Description
+}
+
+func (a App) Import(params ImportParameters) error {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
-		return ActiveJob{}, err
+		return err
 	}
 
-	activeJobsMu.Lock()
-	defer activeJobsMu.Unlock()
-
-	params.JobID = params.Hash()
-
-	if _, ok := activeJobs[params.JobID]; ok {
-		return ActiveJob{}, errors.New("job is not unique; another similar job is already running")
-	}
-
-	ctx, cancel := context.WithCancel(a.ctx)
-	job := ActiveJob{
-		ID:               params.JobID,
-		Type:             "import",
-		Started:          time.Now(),
-		ImportParameters: &params,
-		ctx:              ctx,
-		cancel:           cancel,
-	}
-
-	go func() {
-		defer job.cleanUp()
-
-		logger := timeline.Log.Named("job_manager")
-
-		logger.Info("start",
-			zap.String("id", params.JobID),
-			zap.String("type", "import"),
-			zap.Any("parameters", params),
-		)
-
-		start := time.Now()
-
-		err := tl.Import(job.ctx, params.ImportParameters)
-
-		logFn := logger.Info
-		if err != nil {
-			logFn = logger.Error
-		}
-		logFn("end",
-			zap.String("id", params.JobID),
-			zap.String("type", "import"),
-			zap.Any("parameters", params),
-			zap.Duration("duration", time.Since(start)),
-			zap.Error(err),
-		)
-	}()
-
-	activeJobs[params.JobID] = job
-
-	return job, nil
-
-	//////////////////////////////////////////////
-
-	// // if resuming, load the import we're resuming and adjust the payload accordingly
-	// var imp timeline.Import
-	// if payload.ResumeImportID > 0 {
-	// 	imp, err = tl.LoadImport(r.Context(), payload.ResumeImportID)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if len(imp.Checkpoint) == 0 {
-	// 		return fmt.Errorf("import %d has no checkpoint to resume from", imp.ID)
-	// 	}
-	// 	if payload.DataSource != "" || payload.AccountID != 0 ||
-	// 		payload.Filename != "" || payload.ProcessingOptions != nil {
-	// 		// no need to specify these; it only risks being different and thus in conflict
-	// 		return fmt.Errorf("pointless to specify data source, account ID, filename, and/or processing options separately when resuming import")
-	// 	}
-
-	// 	// decode checkpoint and adjust job payload to set up resumption
-	// 	var chk timeline.Checkpoint
-	// 	err = timeline.UnmarshalGob(imp.Checkpoint, &chk)
-	// 	if err != nil {
-	// 		return fmt.Errorf("decoding checkpoint: %v", err)
-	// 	}
-	// 	payload.Filename = chk.Filename
-	// 	payload.DataSource = imp.DataSourceID
-	// 	if imp.AccountID != nil {
-	// 		payload.AccountID = *imp.AccountID
-	// 	}
-	// 	payload.ProcessingOptions = &chk.ProcOpt
-	// }
-
-	// var acc timeline.Account
-	// if payload.AccountID > 0 {
-	// 	acc, err = tl.LoadAccount(r.Context(), payload.AccountID)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	// // make sure this is the only active job to be running for this account
-	// activeJobsMu.Lock()
-	// defer activeJobsMu.Unlock()
-
-	// jobID := payload.jobID()
-
-	// if _, ok := activeJobs[jobID]; ok {
-	// 	return Error{
-	// 		Err:        fmt.Errorf("a job for that file or account is already running"),
-	// 		HTTPStatus: http.StatusTooManyRequests,
-	// 		Log:        "job is not unique",
-	// 		Message:    "A processing job for this file or account is already running. We only allow one operation per file/account at a time.",
-	// 	}
-	// }
-
-	// ctx, cancel := context.WithCancel(context.Background())
-	// job := ActiveJob{
-	// 	ID:         jobID,
-	// 	Started:    time.Now(),
-	// 	Parameters: payload,
-	// 	ctx:        ctx,
-	// 	cancel:     cancel,
-	// }
-
-	// go func() {
-	// 	defer job.cleanUp()
-
-	// 	err := tl.Import(job.ctx, payload.DataSource, payload.Filename, acc, imp, payload.ProcessingOptions, payload.DataSourceOptions)
-	// 	if err != nil {
-	// 		timeline.Log.Named(jobID).Error("import failed",
-	// 			zap.Error(err),
-	// 			zap.Any("parameters", payload),
-	// 		)
-	// 	}
-	// }()
-
-	// activeJobs[jobID] = job
-
-	// return jsonResponse(w, map[string]any{"job": job})
+	return tl.CreateJob(params.Job, 0, 0)
 }
 
 func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {
@@ -595,41 +587,6 @@ func (a *App) ItemClassifications(repo string) ([]timeline.Classification, error
 		return nil, err
 	}
 	return tl.ItemClassifications()
-}
-
-func (a *App) ActiveJobs() ([]ActiveJob, error) {
-	activeJobsMu.Lock()
-	jobs := make([]ActiveJob, 0, len(activeJobs))
-	for _, job := range activeJobs {
-		jobs = append(jobs, job)
-	}
-	activeJobsMu.Unlock()
-
-	sort.Slice(jobs, func(i, j int) bool {
-		return jobs[i].Started.Before(jobs[j].Started)
-	})
-
-	return jobs, nil
-}
-
-func (*App) CancelJob(jobID string) error {
-	activeJobsMu.Lock()
-	job, ok := activeJobs[jobID]
-	activeJobsMu.Unlock()
-	if !ok {
-		return fmt.Errorf("no job %s is running", jobID)
-	}
-	job.cleanUp()
-	return nil
-}
-
-type ImportParameters struct {
-	Repo string `json:"repo"`
-	timeline.ImportParameters
-}
-
-func (params ImportParameters) Hash() string {
-	return params.ImportParameters.Hash(params.Repo)
 }
 
 // TODO: Very WIP / experimental

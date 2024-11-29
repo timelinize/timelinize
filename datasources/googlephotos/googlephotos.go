@@ -21,71 +21,27 @@
 package googlephotos
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"net/url"
-	"strings"
-	"sync"
-	"time"
 
-	"github.com/mholt/archiver/v4"
+	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
-)
-
-var (
-	oauth2 = timeline.OAuth2{
-		ProviderID: "google",
-		Scopes:     []string{"https://www.googleapis.com/auth/photoslibrary.readonly"},
-	}
-	rateLimit = timeline.RateLimit{
-		RequestsPerHour: 10000 / 24, // https://developers.google.com/photos/library/guides/api-limits-quotas
-		BurstSize:       3,
-	}
 )
 
 const dataSourceName = "google_photos"
 
 func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
-		Name:  dataSourceName,
-		Title: "Google Photos",
-		Icon:  "googlephotos.svg",
-		// NewClient: func(ctx context.Context, acc timeline.Account, _ any) (timeline.Client, error) {
-		// 	httpClient, err := acc.NewHTTPClient(ctx)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// 	return &Client{
-		// 		HTTPClient: httpClient,
-		// 		userID:     acc.User.UserID,
-		// 		checkpoint: checkpointInfo{mu: new(sync.Mutex)},
-		// 	}, nil
-		// },
+		Name:            dataSourceName,
+		Title:           "Google Photos",
+		Icon:            "googlephotos.svg",
 		NewOptions:      func() any { return Options{} },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
-		NewAPIImporter:  func() timeline.APIImporter { return new(APIImporter) },
 	})
 	if err != nil {
 		timeline.Log.Fatal("registering data source", zap.Error(err))
 	}
 }
-
-// // Client interacts with the Google Photos
-// // API. It requires an OAuth2-authorized
-// // HTTP client in order to work properly.
-// type Client struct {
-// 	HTTPClient           *http.Client
-// 	IncludeArchivedMedia bool
-
-// 	userID     string
-// 	checkpoint checkpointInfo
-// }
 
 // FileImporter imports data from a file or folder.
 type FileImporter struct {
@@ -94,496 +50,27 @@ type FileImporter struct {
 }
 
 // Recognize returns whether this file or folder is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	for _, filename := range filenames {
-		// prefer a Google Takeout archive with Google Photos data inside it
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-		// TODO: this is also very slow
-		_, err = archiver.TopDirStat(fsys, googlePhotosPath)
-		if err == nil {
-			return timeline.Recognition{Confidence: 1}, nil
-		}
-
-		// TODO: using fs.WalkDir is too inefficient with the current implementation I have for archive files
-		// (consider type switching on fsys, and if a dir, then use WalkDir; for archives use Extract and just
-		// iterate the entries in an arbitrary order, since the order/structure doesn't matter to us)
-
-		// switch f := fsys.(type) {
-		// case archiver.DirFS:
-		// 	dir, err := os.Open(filename)
-		// 	if err != nil {
-		// 		return false, err
-		// 	}
-		// 	entries, err := dir.ReadDir(10000)
-		// 	if err != nil {
-		// 		return false, err
-		// 	}
-		// 	for _, entry := range entries {
-		// 		// album exports do not have subfolders AFAIK
-		// 		// (TODO: is there any harm in supporting subfolders, if we support all the file types?)
-		// 		if entry.IsDir() {
-		// 			return false, nil
-		// 		}
-
-		// 		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		// 		if _, ok := recognizedExts[ext]; !ok {
-		// 			return false, nil
-		// 		}
-		// 	}
-		// }
-
-		// if afs, ok := fsys.(archiver.ArchiveFS); ok {
-		// 	afs.Context = ctx
-		// }
-
-		// TODO: this is too slow, even with context timeout for some reason.
-		// // alternatively, if the input is a single directory that contains only
-		// // recognized media, then we might assume this is a Google Photos album export
-		// errNotSupported := fmt.Errorf("file type not supported")
-		// switch fsys.(type) {
-		// case archiver.DirFS, archiver.ArchiveFS:
-		// 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
-		// 		if err != nil {
-		// 			return err
-		// 		}
-		// 		// ignore the actual folder (or archive file), since we'd traverse only inside it
-		// 		if path == "." {
-		// 			return nil
-		// 		}
-		// 		// album exports do not have subfolders AFAIK
-		// 		// (TODO: is there any harm in supporting subfolders, if we support all the file types?)
-		// 		if d.IsDir() {
-		// 			return errNotSupported
-		// 		}
-		// 		// file type must be recognized (relying on extension is hopefully good enough)
-		// 		ext := strings.ToLower(filepath.Ext(path))
-		// 		if _, ok := recognizedExts[ext]; !ok {
-		// 			return fmt.Errorf("%s: %w", path, errNotSupported)
-		// 		}
-		// 		return nil
-		// 	})
-		// 	if errors.Is(err, errNotSupported) {
-		// 		return false, nil
-		// 	}
-		// 	if err != nil {
-		// 		return false, err
-		// 	}
-		// 	return true, nil
-		// }
+func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+	// prefer a Google Takeout archive with Google Photos data inside it
+	if _, err := archives.TopDirStat(dirEntry.FS, googlePhotosPath); err == nil {
+		return timeline.Recognition{Confidence: 1}, nil
 	}
-
 	return timeline.Recognition{}, nil
 }
 
 // FileImport imports data from a file/folder.
-func (fimp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	for _, filename := range filenames {
-		fimp.filename = filename
+func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	fimp.filename = dirEntry.Name()
 
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return err
-		}
-		_, err = archiver.TopDirStat(fsys, googlePhotosPath)
-		if err == nil {
-			return fimp.listFromTakeoutArchive(ctx, itemChan, opt, fsys)
-		}
-
-		err = fimp.listFromAlbumFolder(ctx, itemChan, opt, fsys)
-		if err != nil {
-			return err
-		}
+	if _, err := archives.TopDirStat(dirEntry.FS, googlePhotosPath); err == nil {
+		return fimp.listFromTakeoutArchive(ctx, params, dirEntry.FS)
 	}
-	return nil
-}
 
-// APIImporter imports data from the remote service with its API.
-type APIImporter struct {
-	itemChan   chan<- *timeline.Graph
-	httpClient *http.Client
-	checkpoint *checkpoint
-	listOpt    timeline.ListingOptions
-	dsOpt      Options
-}
-
-// Authenticate authenticates with the remote service.
-func (APIImporter) Authenticate(ctx context.Context, acc timeline.Account, _ any) error {
-	return acc.AuthorizeOAuth2(ctx, oauth2)
-}
-
-// APIImport imports data from the API.
-func (aimp *APIImporter) APIImport(ctx context.Context, acc timeline.Account, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	var err error
-	aimp.httpClient, err = acc.NewHTTPClient(ctx, oauth2, rateLimit)
-	if err != nil {
+	if err := fimp.listFromAlbumFolder(ctx, params, dirEntry.FS); err != nil {
 		return err
 	}
-	aimp.itemChan = itemChan
-	aimp.listOpt = opt
-	aimp.dsOpt = opt.DataSourceOptions.(Options)
-
-	// TODO:
-	// // load any previous checkpoint
-	// aimp.checkpoint.load(opt.Checkpoint)
-
-	// get items and collections
-	errChan := make(chan error)
-	chanCount := 1
-	go func() {
-		err := aimp.listItems(ctx)
-		errChan <- err
-	}()
-	if aimp.dsOpt.Albums {
-		chanCount++
-		go func() {
-			err := aimp.listCollections(ctx)
-			errChan <- err
-		}()
-	}
-
-	// read exactly chanCount error (or nil) values to ensure we
-	// block precisely until the two listers are done
-	var errs []string
-	for range chanCount {
-		err := <-errChan
-		if err != nil {
-			// TODO: use actual logger
-			// log.Printf("[ERROR] %s/%s: a listing goroutine errored: %v", DataSourceID, c.userID, err)
-			errs = append(errs, err.Error())
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("one or more errors: %s", strings.Join(errs, ", "))
-	}
 
 	return nil
-}
-
-func (aimp *APIImporter) listItems(ctx context.Context) error {
-	aimp.checkpoint.Lock()
-	pageToken := aimp.checkpoint.ItemsNextPage
-	aimp.checkpoint.Unlock()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-			var err error
-			pageToken, err = aimp.getItemsNextPage(ctx, pageToken)
-			if err != nil {
-				return fmt.Errorf("getting items on next page: %w", err)
-			}
-			if pageToken == "" {
-				return nil
-			}
-
-			// TODO: check this with the race detector... also below
-			aimp.checkpoint.Lock()
-			aimp.checkpoint.ItemsNextPage = pageToken
-			aimp.checkpoint.Unlock()
-			aimp.itemChan <- &timeline.Graph{
-				Checkpoint: aimp.checkpoint.checkpointInfo,
-			}
-		}
-	}
-}
-
-func (aimp *APIImporter) getItemsNextPage(ctx context.Context, pageToken string) (string, error) {
-	reqBody := listMediaItemsRequest{
-		PageSize:  100,
-		PageToken: pageToken,
-	}
-	if aimp.listOpt.Timeframe.Since != nil || aimp.listOpt.Timeframe.Until != nil {
-		reqBody.Filters = &listMediaItemsFilter{
-			DateFilter: listMediaItemsDateFilter{
-				Ranges: []listMediaItemsFilterRange{dateRange(aimp.listOpt.Timeframe)},
-			},
-			IncludeArchivedMedia: aimp.dsOpt.IncludeArchivedMedia,
-		}
-	}
-
-	page, err := aimp.pageOfMediaItems(ctx, reqBody)
-	if err != nil {
-		return "", fmt.Errorf("requesting next page: %w", err)
-	}
-
-	for _, m := range page.MediaItems {
-		aimp.itemChan <- &timeline.Graph{Item: m.timelinerItem()}
-	}
-
-	return page.NextPageToken, nil
-}
-
-// listCollections lists media items by iterating each album. As
-// of Jan. 2019, the Google Photos API does not allow searching
-// media items with both an album ID and filters. Because this
-// search is predicated on album ID, we cannot be constrained by
-// a timeframe in this search.
-//
-// See https://developers.google.com/photos/library/reference/rest/v1/mediaItems/search.
-func (aimp *APIImporter) listCollections(ctx context.Context) error {
-	aimp.checkpoint.Lock()
-	albumPageToken := aimp.checkpoint.AlbumsNextPage
-	aimp.checkpoint.Unlock()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-			aimp.listOpt.Log.Debug("listing albums: next page", zap.String("page_token", albumPageToken))
-
-			var err error
-			albumPageToken, err = aimp.getAlbumsAndTheirItemsNextPage(ctx, albumPageToken)
-			if err != nil {
-				return err
-			}
-			if albumPageToken == "" {
-				return nil
-			}
-
-			aimp.checkpoint.Lock()
-			aimp.checkpoint.AlbumsNextPage = albumPageToken
-			aimp.checkpoint.Unlock()
-			aimp.itemChan <- &timeline.Graph{
-				Checkpoint: aimp.checkpoint.checkpointInfo,
-			}
-		}
-	}
-}
-
-func (aimp *APIImporter) getAlbumsAndTheirItemsNextPage(ctx context.Context, pageToken string) (string, error) {
-	vals := url.Values{
-		"pageToken": {pageToken},
-		"pageSize":  {"50"},
-	}
-
-	var respBody listAlbums
-	err := aimp.apiRequestWithRetry(ctx, http.MethodGet, "/albums?"+vals.Encode(), nil, &respBody)
-	if err != nil {
-		return pageToken, err
-	}
-
-	for _, album := range respBody.Albums {
-		aimp.listOpt.Log.Debug("listing items in album",
-			zap.String("album_title", album.Title),
-			zap.String("album_id", album.ID),
-			zap.String("item_count", album.MediaItemsCount))
-
-		err = aimp.getAlbumItems(ctx, album)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	return respBody.NextPageToken, nil
-}
-
-func (aimp *APIImporter) getAlbumItems(ctx context.Context, album gpAlbum) error {
-	var albumItemsNextPage string
-	var counter int
-
-	coll := &timeline.Item{
-		ID:             album.ID,
-		Classification: timeline.ClassCollection,
-		Content: timeline.ItemData{
-			Data: timeline.StringData(album.Title),
-		},
-	}
-
-	const pageSize = 100
-
-	for {
-		reqBody := listMediaItemsRequest{
-			AlbumID:   album.ID,
-			PageToken: albumItemsNextPage,
-			PageSize:  pageSize,
-		}
-
-		aimp.listOpt.Log.Debug("getting next page of media items in album",
-			zap.String("album_title", album.Title),
-			zap.String("album_id", album.ID),
-			zap.Int("page_size", pageSize),
-			zap.String("page_token", albumItemsNextPage),
-		)
-
-		page, err := aimp.pageOfMediaItems(ctx, reqBody)
-		if err != nil {
-			return fmt.Errorf("listing album contents: %w", err)
-		}
-
-		// iterate each media item on this page of the album listing
-		for _, it := range page.MediaItems {
-			// since we cannot request items in an album and also filter
-			// by timestamp, be sure to filter here; it means we still
-			// have to iterate all items in all albums, but at least we
-			// can just skip items that fall outside the timeframe...
-			if !aimp.listOpt.Timeframe.Contains(it.MediaMetadata.CreationTime) {
-				continue
-			}
-
-			// otherwise, add this item to the album
-			ig := &timeline.Graph{Item: it.timelinerItem()}
-			ig.ToItemWithValue(timeline.RelInCollection, coll, counter)
-
-			counter++
-		}
-
-		if page.NextPageToken == "" {
-			return nil
-		}
-
-		albumItemsNextPage = page.NextPageToken
-	}
-}
-
-func (aimp *APIImporter) pageOfMediaItems(ctx context.Context, reqBody listMediaItemsRequest) (listMediaItems, error) {
-	var respBody listMediaItems
-	err := aimp.apiRequestWithRetry(ctx, http.MethodPost, "/mediaItems:search", reqBody, &respBody)
-	return respBody, err
-}
-
-func (aimp *APIImporter) apiRequestWithRetry(ctx context.Context, method, endpoint string, reqBodyData, respInto any) error {
-	// do the request in a loop for controlled retries on error
-	var err error
-	const wait = 10 * time.Second
-	const maxTries = 10
-	for i := range maxTries {
-		var resp *http.Response
-		resp, err = aimp.apiRequest(ctx, method, endpoint, reqBodyData)
-		if err != nil {
-			// TODO: Proper logger
-			// log.Printf("[ERROR] %s/%s: doing API request: >>> %v <<< - retrying... (attempt %d/%d)",
-			// 	DataSourceID, aimp.userID, err, i+1, maxTries)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(wait):
-				continue
-			}
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			const maxSize = 1024 * 256
-			bodyText, err2 := io.ReadAll(io.LimitReader(resp.Body, maxSize))
-			resp.Body.Close()
-
-			if err2 == nil {
-				err = fmt.Errorf("HTTP %d: %s: >>> %s <<<", resp.StatusCode, resp.Status, bodyText)
-			} else {
-				err = fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
-			}
-
-			// extra-long pause for rate limiting errors
-			if resp.StatusCode == http.StatusTooManyRequests {
-				// TODO: proper logger
-				log.Printf("[ERROR] %s: rate limited: HTTP %d: %s: %s - retrying in 35 seconds... (attempt %d/%d)",
-					dataSourceName, resp.StatusCode, resp.Status, bodyText, i+1, maxTries)
-				// TODO: honor context cancellation
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(wait):
-					continue
-				}
-			}
-
-			// for any other error, wait a couple seconds and retry
-			// TODO: proper logger
-			// log.Printf("[ERROR] %s/%s: bad API response: %v - retrying... (attempt %d/%d)",
-			// 	DataSourceID, aimp.userID, err, i+1, maxTries)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(wait):
-				continue
-			}
-		}
-
-		// successful request; read the response body
-		err = json.NewDecoder(resp.Body).Decode(&respInto)
-		if err != nil {
-			resp.Body.Close()
-			err = fmt.Errorf("decoding JSON: %w", err)
-			// TODO: proper logger
-			log.Printf("[ERROR] %s: reading API response: %v - retrying... (attempt %d/%d)",
-				dataSourceName, err, i+1, maxTries)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(wait):
-				continue
-			}
-		}
-
-		// successful read; we're done here
-		resp.Body.Close()
-		break
-	}
-
-	return err
-}
-
-func (aimp *APIImporter) apiRequest(ctx context.Context, method, endpoint string, reqBodyData any) (*http.Response, error) {
-	var reqBody io.Reader
-	if reqBodyData != nil {
-		reqBodyBytes, err := json.Marshal(reqBodyData)
-		if err != nil {
-			return nil, err
-		}
-		reqBody = bytes.NewReader(reqBodyBytes)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, apiBase+endpoint, reqBody)
-	if err != nil {
-		return nil, err
-	}
-	if reqBody != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	return aimp.httpClient.Do(req)
-}
-
-func dateRange(timeframe timeline.Timeframe) listMediaItemsFilterRange {
-	const day = 24 * time.Hour
-	var start, end filterDate
-	if timeframe.Since == nil {
-		start = filterDate{
-			Day:   1,
-			Month: 1,
-			Year:  1,
-		}
-	} else {
-		since := timeframe.Since.Add(day) // to account for day precision
-		start = filterDate{
-			Day:   since.Day(),
-			Month: int(since.Month()),
-			Year:  since.Year(),
-		}
-	}
-	if timeframe.Until == nil {
-		end = filterDate{
-			Day:   31,
-			Month: 12,
-			Year:  9999,
-		}
-	} else {
-		until := timeframe.Until.Add(-day) // to account for day precision
-		end = filterDate{
-			Day:   until.Day(),
-			Month: int(until.Month()),
-			Year:  until.Year(),
-		}
-	}
-	return listMediaItemsFilterRange{
-		StartDate: start,
-		EndDate:   end,
-	}
 }
 
 // Options configures the data source.
@@ -593,43 +80,6 @@ type Options struct {
 
 	IncludeArchivedMedia bool `json:"include_archived_media"`
 }
-
-// Assuming checkpoints are short-lived (i.e. are resumed
-// somewhat quickly, before the page tokens/cursors expire),
-// we can just store the page tokens.
-type checkpointInfo struct {
-	ItemsNextPage  string
-	AlbumsNextPage string
-}
-
-type checkpoint struct {
-	checkpointInfo
-	sync.Mutex
-}
-
-// // save records the checkpoint. It is NOT thread-safe,
-// // so calls to this must be protected by a mutex.
-// func (ch *checkpointInfo) save(ctx context.Context) {
-// 	gobBytes, err := timeline.MarshalGob(ch)
-// 	if err != nil {
-// 		// TODO: proper logger
-// 		// log.Printf("[ERROR] %s: encoding checkpoint: %v", DataSourceID, err)
-// 	}
-// 	timeline.Checkpoint(ctx, gobBytes)
-// }
-
-// // load decodes the checkpoint. It is NOT thread-safe,
-// // so calls to this must be protected by a mutex.
-// func (ch *checkpointInfo) load(checkpointGob []byte) {
-// 	if len(checkpointGob) == 0 {
-// 		return
-// 	}
-// 	err := timeline.UnmarshalGob(checkpointGob, ch)
-// 	if err != nil {
-// 		// TODO: proper logger
-// 		// log.Printf("[ERROR] %s: decoding checkpoint: %v", DataSourceID, err)
-// 	}
-// }
 
 // recognizedExts is only used for file recognition, as a fallback.
 var recognizedExts = map[string]struct{}{
@@ -659,5 +109,3 @@ var recognizedExts = map[string]struct{}{
 	".mkv":  {},
 	".asf":  {},
 }
-
-const apiBase = "https://photoslibrary.googleapis.com/v1"

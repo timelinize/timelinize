@@ -839,6 +839,7 @@ function itemImgSrc(item, thumbnail = false) {
 		return item.data_file;
 	}
 	const params = new URLSearchParams({
+		data_id: item.data_id,
 		data_file: item.data_file,
 		data_type: item.data_type
 	});

@@ -19,170 +19,278 @@
 package timeline
 
 import (
-	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
-	"time"
+	"io/fs"
+	"path/filepath"
+	"sync"
 
-	"github.com/zeebo/blake3"
+	"github.com/mholt/archives"
+	"go.uber.org/zap"
 )
 
-// ImportParameters describe an import.
-type ImportParameters struct {
-	ResumeJobID int64 `json:"resume_job_id"`
+type importJobCheckpoint struct {
+	OuterIndex           int             `json:"outer_index"`
+	InnerIndex           int             `json:"inner_index"`
+	DataSourceCheckpoint json.RawMessage `json:"data_source_checkpoint,omitempty"`
+}
 
-	DataSourceName string `json:"data_source_name"`
-	// TODO: we might need a way to map filenames to the data source that will process them.
-	Filenames         []string          `json:"filenames,omitempty"`  // file imports
-	AccountID         int64             `json:"account_id,omitempty"` // API imports
+type ImportJob struct {
+	// accessed atomically (placed first to align on 64-bit word boundary, for 32-bit systems)
+	// (reset each time the job is started)
+	itemCount, newItemCount, updatedItemCount, skippedItemCount *int64
+	newEntityCount                                              *int64
+
+	job *Job
+
+	Plan              ImportPlan        `json:"plan,omitempty"`
 	ProcessingOptions ProcessingOptions `json:"processing_options,omitempty"`
-	DataSourceOptions json.RawMessage   `json:"data_source_options,omitempty"`
-
-	JobID string `json:"job_id"` // assigned by application frontend
+	EstimateTotal     bool              `json:"estimate_total,omitempty"`
 }
 
-// Hash makes a hash of the import params.
-func (params ImportParameters) Hash(repoID string) string {
-	accountIDOrFilename := "files:" + strings.Join(params.Filenames, ",")
-	if params.AccountID > 0 {
-		accountIDOrFilename = "account:" + strconv.Itoa(int(params.AccountID))
-	}
-	str := fmt.Sprintf("%s:%s:%s", repoID, params.DataSourceName, accountIDOrFilename)
-	hash := blake3.Sum256([]byte(str))
-	return hex.EncodeToString(hash[:])
-}
-
-// TODO: needs to be updated to use schema updates (job table instead of imports table)
-type jobRow struct {
-	id                int64
-	dataSourceName    string // the actual row uses the row ID, this line uses the text ID ("name")
-	mode              importMode
-	processingOptions ProcessingOptions
-	snapshotDate      *time.Time
-	accountID         *int64
-	started           time.Time
-	ended             *time.Time
-	status            importStatus
-	checkpointBytes   []byte
-
-	checkpoint *checkpoint // the decoded checkpointBytes
-}
-
-func (tl *Timeline) loadJob(ctx context.Context, importID int64) (jobRow, error) {
-	var job jobRow
-	var snapshotTS *int64
-	tl.dbMu.RLock()
-	err := tl.db.QueryRowContext(ctx,
-		`SELECT
-			jobs.id, jobs.mode, jobs.snapshot_date, jobs.account_id,
-			jobs.started, jobs.ended, jobs.status, jobs.checkpoint,
-			data_source.name
-		FROM jobs, data_sources
-		WHERE jobs.id=?
-			AND data_sources.id = accounts.data_source_id
-		LIMIT 1`,
-		// TODO: I'm pretty sure these won't all scan correctly, currently
-		importID).Scan(&job.id, &job.mode, &snapshotTS, &job.accountID, &job.started, &job.ended,
-		&job.status, &job.checkpointBytes, &job.dataSourceName)
-	tl.dbMu.RUnlock()
+func (ij ImportJob) checkpoint(outer, inner int, ds any) error {
+	dsChkpt, err := json.Marshal(ds)
 	if err != nil {
-		return job, fmt.Errorf("querying import %d from DB: %w", importID, err)
+		return fmt.Errorf("marshaling data source checkpoint %#v: %w", ds, err)
 	}
-	if len(job.checkpointBytes) > 0 {
-		err = unmarshalGob(job.checkpointBytes, job.checkpoint)
-		if err != nil {
-			return job, fmt.Errorf("decoding checkpoint: %w", err)
-		}
-	}
-	if snapshotTS != nil {
-		ts := time.Unix(*snapshotTS, 0)
-		job.snapshotDate = &ts
-	}
-	return job, nil
+	return ij.job.Checkpoint(importJobCheckpoint{
+		OuterIndex:           outer,
+		InnerIndex:           inner,
+		DataSourceCheckpoint: dsChkpt,
+	})
 }
 
-func (tl *Timeline) newJob(ctx context.Context, dataSourceID string, mode importMode, procOpt ProcessingOptions, accountID int64) (jobRow, error) {
-	// ensure data source of the import and data source of the account are the same
-	// (this should always be the case, but sanity check here to prevent confusion)
-	if accountID > 0 {
-		var accountDataSourceID string
-		tl.dbMu.RLock()
-		err := tl.db.QueryRowContext(ctx,
-			`SELECT data_sources.name
-		FROM data_sources, accounts
-		WHERE accounts.id = ? AND data_source.id = accounts.data_source_id
-		LIMIT 1`,
-			accountID).Scan(&accountDataSourceID)
-		tl.dbMu.RUnlock()
-		if err != nil {
-			return jobRow{}, fmt.Errorf("querying DB to verify data source IDs: %w", err)
-		}
-		if accountDataSourceID != dataSourceID {
-			return jobRow{}, fmt.Errorf("data source ID and account's data source ID do not match: %s vs. %s",
-				dataSourceID, accountDataSourceID)
-		}
+// splitPathAtVolume splits an absolute filename into volume (or root)
+// and filename components. On Windows, the "root" of a filepath is the
+// volume (e.g. "C:"); on Unix-compatible systems, it is "/". Windows is
+// insane. Anyway, this is useful for constructing a fs.FS that provides
+// access to the whole file system. The returned rootOrVolume can be used
+// as the root of an os.DirFS or similar FS (such as archives.DeepFS),
+// and the relativePath is an fs.FS-compatible path that can be used to
+// access the file within the FS.
+//
+// See https://github.com/golang/go/issues/44279.
+func splitPathAtVolume(absFilename string) (rootOrVolume string, relativePath string, err error) {
+	if !filepath.IsAbs(absFilename) {
+		err = fmt.Errorf("filename is not absolute: %s", absFilename)
+		return
 	}
-
-	// TODO: Maybe this (getting a data source's row ID) should be a separate function
-	var dataSourceRowID int64
-	tl.dbMu.RLock()
-	err := tl.db.QueryRowContext(ctx, `SELECT id FROM data_sources WHERE name=? LIMIT 1`,
-		dataSourceID).Scan(&dataSourceRowID)
-	tl.dbMu.RUnlock()
+	rootOrVolume = "/" // assume non-Windows
+	if vol := filepath.VolumeName(absFilename); vol != "" {
+		rootOrVolume = vol // okay, it's actually Windows
+	}
+	relativePath, err = filepath.Rel(rootOrVolume, absFilename)
 	if err != nil {
-		return jobRow{}, fmt.Errorf("querying data source's row ID: %s: %w", dataSourceID, err)
+		return
 	}
-
-	imp := jobRow{
-		dataSourceName:    dataSourceID,
-		mode:              mode,
-		processingOptions: procOpt,
-	}
-	if accountID > 0 {
-		imp.accountID = &accountID
-	}
-
-	var procOptJSON []byte
-	if !imp.processingOptions.IsEmpty() {
-		procOptJSON, err = json.Marshal(imp.processingOptions)
-		if err != nil {
-			return jobRow{}, fmt.Errorf("marshaling processing options: %w", err)
-		}
-	}
-
-	hostname, _ := os.Hostname()
-
-	var started int64
-	tl.dbMu.Lock()
-	// TODO: update this when we are done figuring this out...
-	err = tl.db.QueryRow(`INSERT INTO jobs (action, configuration, status, hostname)
-		VALUES (?, ?, ?, ?)
-		RETURNING id, start, status`,
-		"import", string(procOptJSON), "started", hostname).Scan(&imp.id, &started, &imp.status)
-	tl.dbMu.Unlock()
-	if err != nil {
-		return jobRow{}, fmt.Errorf("inserting job row into DB: %w", err)
-	}
-	imp.started = time.Unix(started, 0)
-	return imp, nil
+	relativePath = filepath.ToSlash(relativePath)
+	return
 }
 
-type importMode string
+func (ij ImportJob) Run(job *Job, checkpoint []byte) error {
+	// TODO: are these racey?
+	ij.job = job
+	ij.itemCount = new(int64)
+	ij.newItemCount = new(int64)
+	ij.updatedItemCount = new(int64)
+	ij.skippedItemCount = new(int64)
+	ij.newEntityCount = new(int64)
 
-const (
-	importModeFile importMode = "file"
-	importModeAPI  importMode = "api"
-)
+	var chkpt importJobCheckpoint
+	if checkpoint != nil {
+		err := json.Unmarshal(checkpoint, &chkpt)
+		if err != nil {
+			return fmt.Errorf("decoding checkpoint: %w", err)
+		}
+	}
 
-type importStatus string
+	for i := chkpt.OuterIndex; i < len(ij.Plan.Files); i++ {
+		fileImport := ij.Plan.Files[i]
 
-const (
-	importStatusStarted = "started"
-	importStatusAborted = "abort"
-	importStatusSuccess = "ok" // TODO: "success", to be clearer, maybe?
-	importStatusError   = "err"
-)
+		// load data source tidbits
+		ds, ok := dataSources[fileImport.DataSourceName]
+		if !ok {
+			return fmt.Errorf("file import %d: unknown data source: %s", i, fileImport.DataSourceName)
+		}
+		dsRowID, ok := job.tl.dataSources[fileImport.DataSourceName]
+		if !ok {
+			return fmt.Errorf("file import %d: data source ID is unknown: %s", i, fileImport.DataSourceName)
+		}
+		dsOpt, err := ds.UnmarshalOptions(fileImport.DataSourceOptions)
+		if err != nil {
+			return err
+		}
+
+		logger := job.Logger().With(zap.String("data_source_name", ds.Name))
+
+		// batchSize is a minimum, so multiplier speeds up larger batches
+		const dlMultiplier = 2
+
+		p := processor{
+			estimatedCount:   new(int64),
+			ij:               ij,
+			ds:               ds,
+			dsRowID:          dsRowID,
+			dsOpt:            dsOpt,
+			tl:               job.Timeline(),
+			log:              logger,
+			progress:         logger.Named("progress"),
+			batchMu:          new(sync.Mutex),
+			downloadThrottle: make(chan struct{}, batchSize*workers*dlMultiplier),
+		}
+
+		// process each filename one at a time
+		for j := chkpt.InnerIndex; j < len(fileImport.Filenames); j++ {
+			filename := fileImport.Filenames[j]
+
+			// create a new "outer" checkpoint when arriving at a new filename to be imported
+			if err := ij.checkpoint(i, j, nil); err != nil {
+				job.Logger().Error("checkpointing", zap.Error(err))
+			}
+
+			// Create the file system from which this file/dir will be accessed. It must be
+			// a DeepFS since the filename might refer to a path inside an archive file.
+			// Rooting the FS is nuanced. If the FS is rooted at the file or directory
+			// itself, data sources that walk the FS (like if they support importing from a
+			// directory of similar independent files) must root their walk at ".", and
+			// then must check the filename passed into the WalkDirFunc for "." and replace
+			// it with the real filename, if they want to access the file's actual name
+			// (e.g. to check its file extension). It also forbids access to siblings, which
+			// can be useful if sidecar files contain relevant data.
+			//
+			// One way to solve this is rooting the FS at the volume or real file system
+			// root (e.g. "C:" or "/"), then walking starting from the full path to the
+			// file. This provides important context about the file's location, which
+			// some data sources may use (e.g. looking for a timestamp in the folder
+			// hierarchy), and also always provides the actual filename (never "." since
+			// a walk wouldn't start from "."); however, this makes other FS operations
+			// tedious. For example, accessing a specific path in a subfolder of the
+			// starting filename involves convoluted logic to determine if the starting
+			// filename is a directory or file, and if a file, to call path.Dir() then
+			// path.Join(), just to get the desired path. This is error-prone and repetitive.
+			//
+			// We can improve on this by rooting the FS not at the filename or at the volume
+			// root, but somewhere in between: the file if it's a directory, or the parent
+			// dir if it's a file. That way, if the filename is a file, fs.WalkDir(filename)
+			// will walk only the file as expected, and with its true filename (not ".");
+			// and if it's a dir, the whole directory will be walked. (The filename of the
+			// top directory in that case will be ".", but when walking a directory, the name
+			// of the top directory is seldom important; it can still be retrieved using
+			// another method or variable anyway). This also makes Open()/Stat()/etc work
+			// as expected when simply passing in a relative path, without any complex lexical
+			// manipulation (i.e. passing in "a/b/c.txt" will open "/fs/root/a/b/c.txt" as
+			// intended because the fs is rooted at "/fs/root" regardless if the starting
+			// filename was "/fs/root" or "/fs/root/file.txt"). And because we root the FS
+			// at the parent dir of a file, it grants access to siblings/sidecars if needed.
+			// (We can't ALWAYS root the FS at the parent dir, because if the target is
+			// a directory, then its parent dir is a *different* directory, making the
+			// construction of subpaths more tedious to do correctly.)
+			//
+			// There are two main downsides I can see. One is that the filename associated
+			// with this DirEntry will no longer be the full path from the volume root, thus
+			// losing potentially valuable context as to the file's location. This can be
+			// remedied by adding a field to the DirEntry that stores the FS root path, so
+			// it can be referred to if needed. This has been done. The other downside is
+			// that when walking the FS, one must remember to root the walk at the associated
+			// Filename field in the DirEntry, and not "." (Filename will be "." in the case
+			// of a directory, but for a file, the FS root will be its parent folder and
+			// Filename will be the file's name in that directory, so "." would walk all
+			// files adjacent to the Filename).
+
+			// start by assuming the filename is a directory, in which case the FS is rooted
+			// at the directory itself, and thus the filename within the FS is "."
+			fsRoot, filenameInsideFS := filename, "."
+
+			// if the filepath contains an archive (i.e. the path itself traverses into
+			// an archive), we need to use DeepFS; otherwise, traversing into an archive
+			// during import is (probably?) not desired, so use a "regular" file system
+			// TODO: BUG: changing the fsRoot below necessitates updating it in the fs itself
+			var fsys fs.FS
+			if archives.FilepathContainsArchive(fsRoot) {
+				fsys = &archives.DeepFS{Root: fsRoot, Context: job.Context()}
+			} else {
+				fsys, err = archives.FileSystem(job.ctx, fsRoot, nil)
+				if err != nil {
+					return fmt.Errorf("creating file system at %s: %w", fsRoot, err)
+				}
+			}
+
+			// this stat can be slow-ish, depending on if we're in a large, compressed tar file,
+			// and the file happens to be at the end, but we need to know if it's not a directory;
+			// and since we reuse the DeepFS, the results get amortized for later
+			info, err := fs.Stat(fsys, filenameInsideFS)
+			if err != nil {
+				return fmt.Errorf("could not stat file to import: %s: %w", filename, err)
+			}
+			if !info.IsDir() {
+				// as explained above, if it's NOT a directory, we root the FS at the
+				// parent folder and set the filename to the file's name in the dir.
+				fsRoot, filenameInsideFS = filepath.Split(fsRoot)
+
+				// since we changed the FS root, we have to update the fsys to reflect that
+				switch f := fsys.(type) {
+				case *archives.DeepFS:
+					f.Root = fsRoot
+				default:
+					// recreate the file system, since we might have just changed a FileFS
+					// into a DirFS, for example
+					fsys, err = archives.FileSystem(job.ctx, fsRoot, nil)
+					if err != nil {
+						return fmt.Errorf("recreating file system at %s: %w", fsRoot, err)
+					}
+				}
+			}
+
+			dirEntry := DirEntry{
+				DirEntry: fs.FileInfoToDirEntry(info),
+				FS:       fsys,
+				FSRoot:   fsRoot,
+				Filename: filenameInsideFS,
+			}
+
+			if err := p.process(job.Context(), dirEntry, chkpt.DataSourceCheckpoint); err != nil {
+				return fmt.Errorf("processing %s: %w", filename, err)
+			}
+
+			// the data source checkpoint is only applicable to the starting point (the filename we resumed from)
+			chkpt.DataSourceCheckpoint = nil
+		}
+	}
+
+	return nil
+}
+
+// ImportPlan describes what will be imported and how.
+type ImportPlan struct {
+	Files []FileImport `json:"files,omitempty"` // map of data source name to list of files+DSopt pairs
+}
+
+// FileImport represents a list of files to import with a specific
+// configuration from a data source.
+type FileImport struct {
+	// The name of the data source to use.
+	DataSourceName string `json:"data_source_name"`
+
+	// Configuration specific to the data source.
+	DataSourceOptions json.RawMessage `json:"data_source_options,omitempty"`
+
+	// The (OS-compatible) absolute filepaths to the files or directories
+	// to be imported. These paths may refer to files within archive files,
+	// so the archives.DeepFS type should be used to access them.
+	Filenames []string `json:"filenames"`
+}
+
+// ProposedImportPlan is a suggested import plan, to be reviewed and
+// tweaked by the user. It is similar to the ImportPlan type, but
+// instead of grouping a list of files by specific data source
+// configurations, each file is listed together with its results
+// from data source recognition, to be shown to the user so they
+// can tweak the results and approve a final import plan.
+type ProposedImportPlan struct {
+	Files []ProposedFileImport
+}
+
+type ProposedFileImport struct {
+	Filename         string            `json:"filename"`
+	RecognizeResults []RecognizeResult `json:"recognize_results,omitempty"`
+}

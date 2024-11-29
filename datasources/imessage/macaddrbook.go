@@ -33,7 +33,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (fimp *FileImporter) processContacts(ctx context.Context, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (fimp *FileImporter) processContacts(ctx context.Context, opt timeline.ImportParams) error {
 	// macOS Mavericks and above, I think
 
 	// TODO: maybe the user should be able to pass in address book databases directly too
@@ -61,7 +61,7 @@ func (fimp *FileImporter) processContacts(ctx context.Context, itemChan chan<- *
 	}
 
 	for _, bookPath := range allBooks {
-		if err := fimp.processAddressBook(ctx, itemChan, opt, bookPath); err != nil {
+		if err := fimp.processAddressBook(ctx, opt, bookPath); err != nil {
 			opt.Log.Error("could not process address book",
 				zap.String("db_path", bookPath),
 				zap.Error(err))
@@ -71,7 +71,7 @@ func (fimp *FileImporter) processContacts(ctx context.Context, itemChan chan<- *
 	return nil
 }
 
-func (*FileImporter) processAddressBook(ctx context.Context, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions, bookPath string) error {
+func (*FileImporter) processAddressBook(ctx context.Context, params timeline.ImportParams, bookPath string) error {
 	db, err := sql.Open("sqlite3", bookPath+"?mode=ro")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -116,7 +116,7 @@ func (*FileImporter) processAddressBook(ctx context.Context, itemChan chan<- *ti
 
 		// if this row is a new record (contact), process the previous one we filled in and replace current
 		if record.id != current.id {
-			itemChan <- &timeline.Graph{
+			params.Pipeline <- &timeline.Graph{
 				Entity: current.entity(),
 			}
 			current = record
@@ -140,7 +140,7 @@ func (*FileImporter) processAddressBook(ctx context.Context, itemChan chan<- *ti
 	}
 
 	// make sure to save the last contact we were filling in
-	itemChan <- &timeline.Graph{
+	params.Pipeline <- &timeline.Graph{
 		Entity: current.entity(),
 	}
 

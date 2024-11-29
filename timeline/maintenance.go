@@ -101,20 +101,6 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 		logger.Error("error when deleting data files of erased items (items have already been marked as deleted in DB)", zap.Error(err))
 	}
 
-	// delete thumbnails, if present
-	for _, itemID := range rowIDsToEmpty {
-		for _, format := range []ThumbnailType{ImageThumbnail, VideoThumbnail} {
-			thumbPath := tl.ThumbnailPath(itemID, format)
-			err = os.Remove(thumbPath)
-			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				Log.Error("unable to delete thumbnail file for erased item",
-					zap.Int64("item_id", itemID),
-					zap.String("thumbnail_file", thumbPath),
-					zap.Error(err))
-			}
-		}
-	}
-
 	if len(rowIDsToEmpty) > 0 || numFilesDeleted > 0 {
 		logger.Info("erased deleted items",
 			zap.Int("count", len(rowIDsToEmpty)),
@@ -122,6 +108,32 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 	}
 
 	return nil
+}
+
+func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []int64, dataFiles []string) error {
+	tl.thumbsMu.Lock()
+	defer tl.thumbsMu.Unlock()
+
+	thumbsTx, err := tl.thumbs.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning thumbnail transaction: %w", err)
+	}
+	defer thumbsTx.Rollback()
+
+	for _, itemID := range itemRowIDs {
+		_, err = thumbsTx.ExecContext(ctx, `DELETE FROM thumbnails WHERE item_id=?`, itemID)
+		if err != nil {
+			return fmt.Errorf("unable to delete thumbnail row for erased item %d: %w", itemID, err)
+		}
+	}
+	for _, dataFile := range dataFiles {
+		_, err = thumbsTx.ExecContext(ctx, `DELETE FROM thumbnails WHERE data_file=?`, dataFile)
+		if err != nil {
+			return fmt.Errorf("unable to delete thumbnail row for data file %s: %w", dataFile, err)
+		}
+	}
+
+	return thumbsTx.Commit()
 }
 
 func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (rowIDs []int64, dataFilesToDelete []string, err error) {

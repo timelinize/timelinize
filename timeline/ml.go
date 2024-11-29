@@ -27,13 +27,62 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"go.uber.org/zap"
 )
 
 const mlServer = "http://127.0.0.1:12003/"
+
+type embeddingJob struct {
+	// map key is item ID; useful for deduplicating if shared by other items
+	ItemIDs map[int64]embeddingTask `json:"item_ids,omitempty"`
+}
+
+type embeddingTask struct {
+	tl       *Timeline
+	ItemID   int64   `json:"item_id,omitempty"`
+	DataType string  `json:"data_type,omitempty"`
+	DataID   *int64  `json:"data_id,omitempty"`
+	DataText *string `json:"data_text,omitempty"`
+	DataFile *string `json:"data_file,omitempty"`
+}
+
+func (ej embeddingJob) Run(job *Job, checkpoint []byte) error {
+	// TODO: Resume from checkpoint
+
+	if ej.ItemIDs == nil {
+		// TODO: create embeddings for all qualifying items that need one;
+		// iterate DB in chunks of 100 or 1000, maybe?
+
+		return nil
+	}
+
+	// limit goroutines spawning, just in case there's a LOT of them...
+	// we need just enough to keep the CPU-intensive parts busy
+	goroutineThrottle := make(chan struct{}, 20)
+
+	for _, task := range ej.ItemIDs {
+		goroutineThrottle <- struct{}{}
+		// TODO: Should we just use the cpuIntensiveThrottle for these (and move those throttles out to here)?
+		// TODO: It'd be nice if we could batch our DB operations.
+		go func(job *Job, task embeddingTask) {
+			err := task.generateEmbeddingForItem(job.Context())
+			if err != nil {
+				job.logger.Error("failed generating embedding",
+					zap.Int64("job_id", job.ID()),
+					zap.Int64("item_id", task.ItemID),
+					zap.String("data_type", task.DataType),
+					zap.Stringp("data_file", task.DataFile),
+					zap.Stringp("data_text", task.DataText),
+					zap.Error(err))
+			}
+			<-goroutineThrottle
+		}(job, task)
+	}
+
+	return nil
+}
 
 func GenerateSerializedEmbedding(ctx context.Context, dataType string, data []byte) ([]byte, error) {
 	embedding, err := generateEmbedding(ctx, dataType, data, nil)
@@ -47,23 +96,33 @@ func GenerateSerializedEmbedding(ctx context.Context, dataType string, data []by
 	return v, nil
 }
 
-func (tl *Timeline) GenerateEmbeddingForItem(ctx context.Context, itemID int64, dataType string, dataFile, dataText *string) error {
-	if dataFile != nil && dataText != nil {
-		return fmt.Errorf("data_file and data_text cannot both be set (data_file=%s data_text=%s item_id=%d)",
-			*dataFile, *dataText, itemID)
+func (task embeddingTask) generateEmbeddingForItem(ctx context.Context) error {
+	if (task.DataFile != nil && task.DataText != nil) ||
+		(task.DataFile != nil && task.DataID != nil) ||
+		(task.DataID != nil && task.DataText != nil) {
+		panic("embedding task: only one of data_file, data_text, and data_id can be set")
 	}
 
 	var data []byte
-	if dataText != nil {
-		data = []byte(*dataText)
-	}
 	var filename *string
-	if dataFile != nil {
-		fn := tl.FullPath(*dataFile)
+
+	if task.DataID != nil {
+		task.tl.dbMu.RLock()
+		err := task.tl.db.QueryRowContext(ctx, `SELECT content FROM item_data WHERE id=? LIMIT 1`, *task.DataID).Scan(&data)
+		task.tl.dbMu.RUnlock()
+		if err != nil {
+			return fmt.Errorf("querying item content: %w", err)
+		}
+	}
+	if task.DataText != nil {
+		data = []byte(*task.DataText)
+	}
+	if task.DataFile != nil {
+		fn := task.tl.FullPath(*task.DataFile)
 		filename = &fn
 	}
 
-	embedding, err := generateEmbedding(ctx, dataType, data, filename)
+	embedding, err := generateEmbedding(ctx, task.DataType, data, filename)
 	if err != nil {
 		return err
 	}
@@ -73,29 +132,30 @@ func (tl *Timeline) GenerateEmbeddingForItem(ctx context.Context, itemID int64, 
 		return fmt.Errorf("serializing embedding: %w", err)
 	}
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
+	task.tl.dbMu.Lock()
+	defer task.tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := task.tl.db.Begin()
 	if err != nil {
 		return fmt.Errorf("opening transaction: %w", err)
 	}
 	defer tx.Rollback()
 
+	// TODO: Why don't we use RETURNING here? is it because the tx isn't committed?
 	_, err = tx.ExecContext(ctx, "INSERT INTO embeddings (embedding) VALUES (?)", v)
 	if err != nil {
-		return fmt.Errorf("storing embedding for item %d: %w", itemID, err)
+		return fmt.Errorf("storing embedding for item %d: %w", task.ItemID, err)
 	}
 
 	var embedRowID int64
 	err = tx.QueryRowContext(ctx, "SELECT last_insert_rowid() FROM embeddings LIMIT 1").Scan(&embedRowID)
 	if err != nil {
-		return fmt.Errorf("getting last-stored embedding ID for item %d: %w", itemID, err)
+		return fmt.Errorf("getting last-stored embedding ID for item %d: %w", task.ItemID, err)
 	}
 
-	_, err = tx.Exec(`UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, itemID) // TODO: LIMIT 1
+	_, err = tx.Exec(`UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, task.ItemID) // TODO: LIMIT 1
 	if err != nil {
-		return fmt.Errorf("linking item %d to embedding: %w", itemID, err)
+		return fmt.Errorf("linking item %d to embedding: %w", task.ItemID, err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -103,86 +163,6 @@ func (tl *Timeline) GenerateEmbeddingForItem(ctx context.Context, itemID int64, 
 	}
 
 	return nil
-}
-
-func (p *processor) generateEmbeddingsForImportedItems() {
-	p.tl.dbMu.RLock()
-	rows, err := p.tl.db.QueryContext(p.tl.ctx, `
-		SELECT id, data_type, data_text, data_file
-		FROM items
-		WHERE job_id=?
-			AND data_type IS NOT NULL
-			AND (data_text IS NOT NULL OR data_file IS NOT NULL)
-		`, p.jobRow.id)
-	if err != nil {
-		p.log.Error("unable to generate embeddings from this import",
-			zap.Int64("job_id", p.jobRow.id),
-			zap.Error(err))
-		return
-	}
-
-	type rowInfo struct {
-		rowID    int64
-		dataType string
-		dataText *string
-		dataFile *string
-	}
-	embeddingsNeeded := make(map[int64]rowInfo) // map key is item ID; useful for deduplicating if shared by other items
-
-	for rows.Next() {
-		var rowID int64
-		var dataType, dataText, dataFile *string
-
-		err := rows.Scan(&rowID, &dataType, &dataText, &dataFile)
-		if err != nil {
-			p.log.Error("unable to scan row to generate embeddings from this import",
-				zap.Int64("job_id", p.jobRow.id),
-				zap.Error(err))
-			defer p.tl.dbMu.RUnlock()
-			defer rows.Close()
-			return
-		}
-
-		if !strings.HasPrefix(*dataType, "image/") && !strings.HasPrefix(*dataType, "text/") {
-			continue
-		}
-
-		// TODO: use thumbnails if available, they should be used instead
-		embeddingsNeeded[rowID] = rowInfo{rowID, *dataType, dataText, dataFile}
-	}
-	rows.Close()
-	p.tl.dbMu.RUnlock()
-	if err = rows.Err(); err != nil {
-		p.log.Error("iterating rows for generating embeddings failed",
-			zap.Int64("job_id", p.jobRow.id),
-			zap.Error(err))
-		return
-	}
-
-	// now that our read lock on the DB is released, we can take our time generating embeddings in the background
-
-	p.log.Info("generating embeddings for imported items", zap.Int("count", len(embeddingsNeeded)))
-
-	const maxConcurrency = 10
-	throttle := make(chan struct{}, maxConcurrency)
-
-	for _, taskInfo := range embeddingsNeeded {
-		throttle <- struct{}{}
-		go func() {
-			defer func() { <-throttle }()
-
-			err := p.tl.GenerateEmbeddingForItem(p.tl.ctx, taskInfo.rowID, taskInfo.dataType, taskInfo.dataFile, taskInfo.dataText)
-			if err != nil {
-				p.log.Error("failed generating embedding",
-					zap.Int64("job_id", p.jobRow.id),
-					zap.Int64("row_id", taskInfo.rowID),
-					zap.String("data_type", taskInfo.dataType),
-					zap.Stringp("data_file", taskInfo.dataFile),
-					zap.Stringp("data_text", taskInfo.dataText),
-					zap.Error(err))
-			}
-		}()
-	}
 }
 
 func generateEmbedding(ctx context.Context, dataType string, data []byte, filename *string) ([]float32, error) {
@@ -207,6 +187,10 @@ func generateEmbedding(ctx context.Context, dataType string, data []byte, filena
 		return nil, fmt.Errorf("making request to generate embedding: %w", err)
 	}
 	req.Header.Set("Content-Type", dataType)
+
+	// throttle expensive operation
+	cpuIntensiveThrottle <- struct{}{}
+	defer func() { <-cpuIntensiveThrottle }()
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

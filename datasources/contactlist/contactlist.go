@@ -26,8 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/timelinize/timelinize/datasources/vcard"
@@ -51,17 +49,8 @@ func init() {
 type FileImporter struct{}
 
 // FileImport imports data from a file.
-func (fimp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	for _, filename := range filenames {
-		if err := fimp.importFile(ctx, filename, itemChan, opt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (fimp *FileImporter) importFile(_ context.Context, filename string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
-	file, err := os.Open(filepath.Clean(filename))
+func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	file, err := dirEntry.Open()
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
 	}
@@ -74,6 +63,10 @@ func (fimp *FileImporter) importFile(_ context.Context, filename string, itemCha
 	var bestMapping map[string][]int // canonical field name -> matched column indices
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		row, err := r.Read()
 		if err == io.EOF {
 			break
@@ -170,7 +163,7 @@ func (fimp *FileImporter) importFile(_ context.Context, filename string, itemCha
 		}
 
 		// finally, send person for processing
-		itemChan <- &timeline.Graph{Entity: p}
+		params.Pipeline <- &timeline.Graph{Entity: p}
 	}
 
 	return nil

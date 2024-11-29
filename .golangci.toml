@@ -109,7 +109,7 @@
         "$gostd",
         "github.com/timelinize",
         "github.com/jhillyerd/enmime",
-        "github.com/mholt/archiver/v4",
+        "github.com/mholt/archives",
         "github.com/mholt/goexif2/",
         "github.com/maruel/natural",
         "howett.net/plist",
