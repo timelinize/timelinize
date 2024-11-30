@@ -41,10 +41,11 @@ CREATE TABLE IF NOT EXISTS "thumbnails" (
 );
 
 -- ensure this DB remains linked to only one timeline repo
+-- TODO: Ensure this trigger is correct; doing BEFORE INSERT results in errors because it happens before the primary keys is checked (even with OR IGNORE), but is raising AFTER INSERT sufficient to prevent/undo the insert when the table already has a different entry?
 CREATE TRIGGER IF NOT EXISTS only_one_linked_repo
-	BEFORE INSERT ON repo_link
+	AFTER INSERT ON repo_link
 	FOR EACH ROW
 	BEGIN
-		SELECT RAISE(ABORT, 'Cannot link more than one timeline repository')
-		WHERE (SELECT count() FROM repo_link) > 0;
+		SELECT RAISE(ABORT, 'cannot link more than one timeline repository')
+		WHERE (SELECT count() FROM repo_link) > 1;
 	END;

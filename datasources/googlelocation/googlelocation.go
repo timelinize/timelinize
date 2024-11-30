@@ -35,7 +35,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -78,7 +77,7 @@ type Options struct {
 // FileImporter implements the timeline.FileImporter interface.
 type FileImporter struct {
 	ctx   context.Context
-	fsys  fs.FS
+	d     timeline.DirEntry
 	opt   timeline.ImportParams
 	dsOpt *Options
 
@@ -95,22 +94,10 @@ type FileImporter struct {
 // Recognize returns whether the file is supported.
 func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	if dirEntry.IsDir() {
-		// see if it's a Takeout-structured location history
-		for _, pathToTry := range []string{
-			takeoutLocationHistoryPath2024,
-			takeoutLocationHistoryPathPre2024,
-		} {
-			pathToTry = path.Join(pathToTry, "Records.json")
-			if timeline.FileExistsFS(dirEntry.FS, pathToTry) {
-				return timeline.Recognition{Confidence: 1}, nil
-			}
-			if timeline.FileExistsFS(dirEntry.FS, path.Base(pathToTry)) {
-				return timeline.Recognition{Confidence: 1}, nil
-			}
-			if file, err := archives.TopDirOpen(dirEntry.FS, pathToTry); err == nil {
-				file.Close()
-				return timeline.Recognition{Confidence: 1}, nil
-			}
+		// see if it's a Takeout-structured location history (a folder with Records.json in it)
+		pathToTry := path.Join(dirEntry.Filename, "Records.json")
+		if strings.Contains(dirEntry.Name(), "Location History") && timeline.FileExistsFS(dirEntry.FS, pathToTry) {
+			return timeline.Recognition{Confidence: 1}, nil
 		}
 	} else {
 		//  check for the newer on-device-only location history file from Q2 2024.
@@ -139,7 +126,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 	fi.dsOpt = params.DataSourceOptions.(*Options)
 	fi.ctx = ctx
 	fi.opt = params
-	fi.fsys = dirEntry.FS
+	fi.d = dirEntry
 
 	// verify input configuration
 	if fi.dsOpt.Simplification < 0 || fi.dsOpt.Simplification > 10 {
@@ -151,7 +138,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		// try to load settings file; this helps us identify devices; however
 		// this list is often incomplete, especially if user has removed them
 		// from their Google account
-		settings, err := loadSettingsFromTakeoutArchive(dirEntry.FS)
+		settings, err := loadSettingsFromTakeoutArchive(dirEntry)
 		if err != nil && errors.Is(err, fs.ErrNotExist) {
 			params.Log.Warn("no Settings.json file found; some information may be lacking")
 		}
@@ -340,7 +327,7 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 		takeoutLocationHistoryPath2024,
 		takeoutLocationHistoryPathPre2024,
 	} {
-		file, err = flexibleOpen(fi.fsys, path.Join(pathToTry, "Records.json"))
+		file, err = flexibleOpen(fi.d, path.Join(pathToTry, "Records.json"))
 		if err == nil || !errors.Is(err, fs.ErrNotExist) {
 			break
 		}
@@ -434,12 +421,12 @@ func FloatStringToIntE7(coord string) (int64, error) {
 // a "top dir open" (strips the first path component - the "top dir") in case the user
 // selected the folder created by extracting the archive; then if not found it tries
 // just the last path component in case the user navigated into the subfolder.
-func flexibleOpen(fsys fs.FS, filename string) (file fs.File, err error) {
+func flexibleOpen(d timeline.DirEntry, filename string) (file fs.File, err error) {
 	// perhaps archive was extracted and the "Takeout" folder was selected
-	file, err = archives.TopDirOpen(fsys, filename)
+	file, err = d.TopDirOpen(filename)
 	if errors.Is(err, fs.ErrNotExist) {
 		// okay, maybe they just selected the Location History subfolder
-		file, err = fsys.Open(path.Base(filename))
+		file, err = d.FS.Open(path.Join(d.Filename, path.Base(filename)))
 	}
 	return
 }
@@ -475,6 +462,6 @@ const (
 
 // The path within the Google Takeout archive of the location history records.
 const (
-	takeoutLocationHistoryPathPre2024 = "Takeout/Location History"
-	takeoutLocationHistoryPath2024    = "Takeout/Location History (Timeline)"
+	takeoutLocationHistoryPathPre2024 = "Location History"
+	takeoutLocationHistoryPath2024    = "Location History (Timeline)"
 )

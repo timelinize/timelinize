@@ -287,10 +287,12 @@ type FileImport struct {
 // from data source recognition, to be shown to the user so they
 // can tweak the results and approve a final import plan.
 type ProposedImportPlan struct {
-	Files []ProposedFileImport
+	Files []ProposedFileImport `json:"files,omitempty"`
 }
 
 type ProposedFileImport struct {
 	Filename         string            `json:"filename"`
 	RecognizeResults []RecognizeResult `json:"recognize_results,omitempty"`
 }
+
+func (p ProposedFileImport) String() string { return p.Filename }

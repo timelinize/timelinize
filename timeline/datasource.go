@@ -24,8 +24,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"sort"
 	"time"
+
+	"github.com/mholt/archives"
 )
 
 // DataSource has information about a
@@ -154,7 +157,7 @@ type Recognition struct {
 	DirThreshold float64 `json:"dir_threshold,omitempty"`
 
 	// Optional; TODO: used?
-	SnapshotDate time.Time `json:"snapshot_date,omitempty"`
+	SnapshotDate *time.Time `json:"snapshot_date,omitempty"`
 }
 
 // DirEntry is a fs.DirEntry that represents a directory entry (file
@@ -188,6 +191,20 @@ type DirEntry struct {
 }
 
 func (d DirEntry) Open() (fs.File, error) { return d.FS.Open(d.Filename) }
+
+// TODO: see if we can get by without the data sources needing to call these (shouldn't our new recursive importer be able to choose the right directory?)
+
+func (d DirEntry) TopDirOpen(filename string) (fs.File, error) {
+	return archives.TopDirOpen(d.FS, path.Join(d.Filename, filename))
+}
+
+func (d DirEntry) TopDirStat(filename string) (fs.FileInfo, error) {
+	return archives.TopDirStat(d.FS, path.Join(d.Filename, filename))
+}
+
+func (d DirEntry) TopDirReadDir(filename string) ([]fs.DirEntry, error) {
+	return archives.TopDirReadDir(d.FS, path.Join(d.Filename, filename))
+}
 
 // DataSourcesRecognize returns the list of data sources that reportedly
 // recognize the file described by the DirEntry.

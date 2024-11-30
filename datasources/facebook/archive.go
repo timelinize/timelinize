@@ -30,7 +30,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -59,9 +58,9 @@ type Archive struct {
 }
 
 // Recognize returns whether the input file is recognized.
-func (Archive) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
-	if _, err := archives.TopDirStat(dirEntry.FS, pre2024ProfileInfoPath); err != nil {
-		if _, err = archives.TopDirStat(dirEntry.FS, year2024ProfileInfoPath); err != nil {
+func (Archive) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	if _, err := dirEntry.TopDirStat(pre2024ProfileInfoPath); err != nil {
+		if _, err = dirEntry.TopDirStat(year2024ProfileInfoPath); err != nil {
 			return timeline.Recognition{}, nil
 		}
 	}
@@ -263,10 +262,10 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 }
 
 func (Archive) loadProfileInfo(d timeline.DirEntry) (profileInfo, error) {
-	file, err := archives.TopDirOpen(d.FS, pre2024ProfileInfoPath)
+	file, err := d.TopDirOpen(pre2024ProfileInfoPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		// try another archive version
-		file, err = archives.TopDirOpen(d.FS, year2024ProfileInfoPath)
+		file, err = d.TopDirOpen(year2024ProfileInfoPath)
 	}
 	if err != nil {
 		return profileInfo{}, err

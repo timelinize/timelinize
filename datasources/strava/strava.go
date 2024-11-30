@@ -27,7 +27,6 @@ import (
 	"io"
 	"io/fs"
 
-	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/datasources/gpx"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -62,14 +61,10 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 		"activities.csv",
 		"profile.csv",
 	} {
-		if !timeline.FileExistsFS(dirEntry.FS, expectedFile) {
-			file, err := archives.TopDirOpen(dirEntry.FS, expectedFile)
-			if err == nil {
-				file.Close()
-				continue
-			}
-			return timeline.Recognition{}, nil
+		if _, err := dirEntry.TopDirStat(expectedFile); err == nil {
+			continue
 		}
+		return timeline.Recognition{}, nil
 	}
 
 	return timeline.Recognition{Confidence: 1}, nil

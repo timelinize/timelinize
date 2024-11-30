@@ -23,7 +23,6 @@ package googlephotos
 import (
 	"context"
 
-	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -50,9 +49,9 @@ type FileImporter struct {
 }
 
 // Recognize returns whether this file or folder is supported.
-func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	// prefer a Google Takeout archive with Google Photos data inside it
-	if _, err := archives.TopDirStat(dirEntry.FS, googlePhotosPath); err == nil {
+	if _, err := dirEntry.TopDirStat(googlePhotosPath); err == nil {
 		return timeline.Recognition{Confidence: 1}, nil
 	}
 	return timeline.Recognition{}, nil
@@ -62,11 +61,11 @@ func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, o
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	fimp.filename = dirEntry.Name()
 
-	if _, err := archives.TopDirStat(dirEntry.FS, googlePhotosPath); err == nil {
-		return fimp.listFromTakeoutArchive(ctx, params, dirEntry.FS)
+	if _, err := dirEntry.TopDirStat(googlePhotosPath); err == nil {
+		return fimp.listFromTakeoutArchive(ctx, params, dirEntry)
 	}
 
-	if err := fimp.listFromAlbumFolder(ctx, params, dirEntry.FS); err != nil {
+	if err := fimp.listFromAlbumFolder(ctx, params, dirEntry); err != nil {
 		return err
 	}
 

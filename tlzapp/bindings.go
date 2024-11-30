@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -264,36 +263,6 @@ func (a App) RepositoryIsEmpty(repo string) (bool, error) {
 	return tl.Empty(), nil
 }
 
-// TODO: ....
-// func (a App) GetAccounts(repo string, accountIDs []int64, dataSourceID string, expandDS bool) ([]expandedAccount, error) {
-// 	tl, err := getOpenTimeline(repo)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	// by default, list all accounts (no ID or data source filter), unless specified
-// 	var dataSources []string
-// 	if dataSourceID != "" {
-// 		dataSources = []string{dataSourceID}
-// 	}
-
-// 	accounts, err := tl.LoadAccounts(accountIDs, dataSources)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	// expand data sources and owners if requested
-// 	allInfo := make([]expandedAccount, len(accounts))
-// 	for i, acc := range accounts {
-// 		allInfo[i], err = a.expandAccount(tl, acc, expandDS)
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 	}
-
-// 	return allInfo, nil
-// }
-
 func (a App) AuthAccount(repo string, accountID int64, dsOpt json.RawMessage) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
@@ -324,6 +293,7 @@ func (a App) AuthAccount(repo string, accountID int64, dsOpt json.RawMessage) er
 	return nil
 }
 
+// PlannerOptions configures how an import plan is created.
 type PlannerOptions struct {
 	Path             string `json:"path"` // file system path (with OS separators)
 	Recursive        bool   `json:"recursive"`
@@ -331,6 +301,7 @@ type PlannerOptions struct {
 	timeline.RecognizeParams
 }
 
+// PlanImport produces an import plan with the given settings.
 func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.ProposedImportPlan, error) {
 	var plan timeline.ProposedImportPlan
 
@@ -345,28 +316,34 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		}
 	}
 
-	var pairings []timeline.ProposedFileImport // the matches accumulated through the walk
-	var currentDir string                      // our current directory
-	var currentDirPairingsMarker int           // the index in pairings where the current dir started
+	var (
+		tree       []string                                         // for tracking the dir tree during the walk
+		currentDir string                                           // our current directory (the last element of tree)
+		pairings   = make(map[string][]timeline.ProposedFileImport) // the matches accumulated through the walk
+		dirSizes   = make(map[string]int)                           // number of (non-hidden) entries discovered in each directory
+	)
 
-	// finalizeLastDirectory is called during a walk as we move into
+	// finalizeDirectory is called during a walk as we move into
 	// a new directory, or when a walk is finished. It counts the
 	// number of matches by data source and checks if any of them
 	// can "claim" the directory as a whole after having matched
 	// enough individual entries within it. If so, the individual
 	// matches are replaced with a single match for the whole
 	// directory. (More than 1 data source may match the dir.)
-	finalizeLastDirectory := func() {
-		// TODO: Make sure this effect bubbles up in the end, so
-		// that all parent directories that match the data source
-		// get folded into the top-most directory, so we can have
-		// just 1 plan for the whole folder tree
+	finalizeDirectory := func(dir string) {
+		currentPairings := pairings[dir]
+
+		// no nee to sort/filter/consolidate if there's only 1 file
+		if len(currentPairings) <= 1 {
+			return
+		}
 
 		// start by iterating the pairings of matches from this
 		// directory only, and counting the number of entries that
 		// each data source matched; then sort by most matches
 		var counts dataSourceCounts
-		for _, p := range pairings[currentDirPairingsMarker:] {
+		// for _, p := range pairings[currentDirPairingsMarker:] {
+		for _, p := range currentPairings {
 			for _, match := range p.RecognizeResults {
 				if match.DirThreshold > 0 {
 					counts.count(match)
@@ -384,14 +361,13 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		// those with one for the whole dir
 		var consolidatedMatches []timeline.RecognizeResult
 		for _, c := range counts {
-			percentage := float64(c.count) / float64(len(currentDir))
+			percentage := float64(c.count) / float64(dirSizes[dir])
 			if percentage > c.dirThreshold {
 				// this data source matched enough entries in the directory to
 				// meet its self-specified threshold, so consider the entire
 				// directory a match instead of each individual item
 				consolidatedMatches = append(consolidatedMatches, timeline.RecognizeResult{
 					DataSource: c.ds,
-					// TODO: we need to reduce all the recognition values down to one... what's the best way to do this?
 					Recognition: timeline.Recognition{
 						Confidence: percentage,
 					},
@@ -405,13 +381,30 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			// the directory; delete the individual pairings from the walk and
 			// replace them all with our single new pairing representing the
 			// whole directory
-			pairings = pairings[:currentDirPairingsMarker]
-			pairings = append(pairings, timeline.ProposedFileImport{
-				Filename:         currentDir,
-				RecognizeResults: consolidatedMatches,
-			})
+			pairings[dir] = []timeline.ProposedFileImport{
+				{
+					Filename:         filepath.Join(filepath.Dir(options.Path), filepath.FromSlash(dir)),
+					RecognizeResults: consolidatedMatches,
+				},
+			}
+			for d := range pairings {
+				if d != dir && strings.HasPrefix(d, dir) {
+					delete(pairings, d)
+				}
+			}
 		}
 	}
+
+	// Prepare for walk. it's a little inconvenient, actually, that fs.WalkDir() is the conventional
+	// way to walk a file system, since it linearizes it, i.e., abstracts the recursion away to a
+	// single function. The recursion would be useful for knowing exactly when we're bubbling up
+	// out of a directory, or traversing deeper in, without having to keep track of the filenames
+	// as we go, and doing prefix comparisons, etc. But I bet the std lib handles edge cases
+	// that I don't want to think about, so I'm going to stick to using fs.WalkDir().
+
+	startingDir := filepath.Base(options.Path)
+	tree = append(tree, startingDir)
+	currentDir = startingDir
 
 	err := fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
 		if err := ctx.Err(); err != nil {
@@ -422,7 +415,7 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		}
 
 		// skip hidden files and folders
-		if strings.HasPrefix(path.Base(fpath), ".") {
+		if strings.HasPrefix(path.Base(d.Name()), ".") {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
@@ -432,16 +425,36 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		// check if we've entered a new directory, and if so,
 		// check if we need to fold all the individual matches
 		// into a single directory-wide match
-		dir := path.Dir(fpath)
+		dir := path.Join(filepath.Base(options.Path), path.Dir(fpath)) // account for fpath being "." by just always prepending the root dir name instead
 		if dir != currentDir {
-			finalizeLastDirectory()
+			// compare prefixes by appending "/" to prevent false positives with a scenario like "a/b" and "a/bb"; they are different subfolders!
+			if strings.HasPrefix(dir, currentDir+"/") {
+				// we have recursed into a subdirectory
 
-			// reset state for new directory
+				// I've found that when we enter a subdir, we may have left a subdir tree that we were in,
+				// i.e. this new dir might not be a subdir of the folder we were last in; so we need to
+				// check our tree and keep it in sync, popping off dirs until we get back to the closest
+				// common denominator with this new one.
+				for len(tree) > 0 && !strings.HasPrefix(dir, tree[len(tree)-1]+"/") {
+					finalizeDirectory(tree[len(tree)-1])
+					tree = tree[:len(tree)-1]
+				}
+
+				tree = append(tree, dir)
+			} else {
+				// we have finished a directory and are going up
+				tree = tree[:len(tree)-1]
+				finalizeDirectory(currentDir)
+			}
+
+			// update state for new dir
 			currentDir = dir
-			currentDirPairingsMarker = len(pairings)
 		}
 
-		log.Println("WALKING:", fpath, d.Name(), err)
+		// don't let directories count against the counts when it comes to consolidating results; doesn't seem right
+		if !d.IsDir() {
+			dirSizes[currentDir]++
+		}
 
 		// we make this DirEntry slightly different than we do when importing, due
 		// to the nature of the recognition process (we're doing the walk for the
@@ -469,10 +482,13 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			return nil
 		}
 
-		log.Println("RECOGNIZED:", fpath, results)
-
-		// TODO: This should be in order... do we need to use BinarySearch/Insert if not?
-		pairings = append(pairings, timeline.ProposedFileImport{Filename: filepath.Join(options.Path, filepath.FromSlash(fpath)), RecognizeResults: results})
+		// map the filename to its results, keeping all results within this directory together
+		// (we need them grouped in case we consolidate all the results to the directory itself,
+		// we end up deleting all the individual entry results; we linearize the pairings later)
+		pairings[currentDir] = append(pairings[currentDir], timeline.ProposedFileImport{
+			Filename:         filepath.Join(options.Path, filepath.FromSlash(fpath)),
+			RecognizeResults: results,
+		})
 
 		// skip directory; since this filename was recognized, if it was a directory,
 		// we don't need to traverse into it even if recursion is enabled, as a data
@@ -486,7 +502,21 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		return plan, fmt.Errorf("walking tree rooted at %s: %w (options=%+v)", options.Path, err, options)
 	}
 
-	finalizeLastDirectory()
+	// make sure to finalize/process/reduce the final directory we walked
+	finalizeDirectory(currentDir)
+
+	// make sure to check our tree for any base cases (end of dir; going up a dir) that
+	// may have happened implicitly during the recursive walk without an opportunity
+	// to close out those directories (see similar logic above in the walk fn)
+	for len(tree) > 0 {
+		finalizeDirectory(tree[len(tree)-1])
+		tree = tree[:len(tree)-1]
+	}
+
+	// linearize the map of results
+	for _, p := range pairings {
+		plan.Files = append(plan.Files, p...)
+	}
 
 	return plan, nil
 }

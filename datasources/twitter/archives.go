@@ -54,7 +54,7 @@ func (Client) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timelin
 
 	return timeline.Recognition{
 		Confidence:   1,
-		SnapshotDate: manifest.ArchiveInfo.GenerationDate,
+		SnapshotDate: &manifest.ArchiveInfo.GenerationDate,
 	}, nil
 }
 
