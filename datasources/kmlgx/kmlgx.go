@@ -67,7 +67,7 @@ type Options struct {
 type FileImporter struct{}
 
 // Recognize returns whether the file or folder is supported.
-func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	rec := timeline.Recognition{DirThreshold: .9}
 
 	// we can import directories, but let the import planner figure that out; only recognize files
@@ -76,14 +76,7 @@ func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, o
 	}
 
 	// recognize by file extension
-	switch strings.ToLower(path.Ext(dirEntry.Name())) {
-	case ".geojson":
-		rec.Confidence = 1
-	}
-
-	// recognize by file extension
-	switch strings.ToLower(path.Ext(dirEntry.Name())) {
-	case ".kml":
+	if strings.ToLower(path.Ext(dirEntry.Name())) == ".kml" {
 		rec.Confidence = 1
 	}
 

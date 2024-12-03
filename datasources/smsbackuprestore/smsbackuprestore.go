@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -53,24 +54,24 @@ func init() {
 type FileImporter struct{}
 
 // Recognize returns whether this input is supported.
-func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
-	file, err := openFile(ctx, dirEntry)
-	if errors.Is(err, fs.ErrNotExist) {
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	// not a match if the file is a directory
+	if dirEntry.IsDir() {
 		return timeline.Recognition{}, nil
 	}
+
+	// skip unsupported file types
+	switch strings.ToLower(path.Ext(dirEntry.Name())) {
+	case ".xml", ".zip":
+	default:
+		return timeline.Recognition{}, nil
+	}
+
+	file, err := dirEntry.Open()
 	if err != nil {
 		return timeline.Recognition{}, fmt.Errorf("opening file: %w", err)
 	}
 	defer file.Close()
-
-	// not a match if the file is a directory
-	info, err := file.Stat()
-	if err != nil {
-		return timeline.Recognition{}, err
-	}
-	if info.IsDir() {
-		return timeline.Recognition{}, nil
-	}
 
 	dec := xml.NewDecoder(file)
 
@@ -301,6 +302,7 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ImportParams, dsOpt Op
 	opt.Pipeline <- ig
 }
 
+// TODO: update godoc etc...
 // openFile opens the XML file at filename. However, as the Pro version
 // of SMS Backup & Restore can compress them as .zip files, we also
 // support that if the filename is a zip file. (The filename in the

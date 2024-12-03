@@ -134,7 +134,7 @@
 			<div class="col">
 				<div class="mb-3">
 					<label class="form-label required">Your phone number</label>
-					<input type="text" id="smsbackuprestore-owner-phone" class="form-control" placeholder="123-456-7890"
+					<input type="text" class="smsbackuprestore-owner-phone form-control" placeholder="123-456-7890"
 						required>
 					<small class="form-hint">Type the phone number of the owner of this file.</small>
 				</div>
@@ -148,7 +148,7 @@
 		<div class="mb-3 row">
 			<label class="col-4 col-form-label required">Person</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="google_location-owner">
+				<select class="google_location-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose location data this is.
@@ -158,7 +158,7 @@
 		<div class="mb-3 row">
 			<label class="col-4 col-form-label">Simplification</label>
 			<div class="col">
-				<div id="google_location-simplification" class="form-range mb-2 mt-2"></div>
+				<div class="google_location-simplification form-range mb-2 mt-2"></div>
 				<div class="small form-hint">
 					Reduce the size of the data set by dropping unimportant points
 					(after denoising and clustering).
@@ -179,7 +179,7 @@
 		<div class="mb-3 row">
 			<label class="col-4 col-form-label required">Person</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="gpx-owner">
+				<select class="gpx-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose location data this is.
@@ -189,7 +189,7 @@
 		<div class="mb-3 row">
 			<label class="col-3 col-form-label">Simplification</label>
 			<div class="col">
-				<div id="gpx-simplification" class="form-range mb-2 mt-2"></div>
+				<div class="gpx-simplification form-range mb-2 mt-2"></div>
 				<div class="small form-hint">
 					Reduce the size of the data set by dropping unimportant points
 					(after denoising and clustering).
@@ -210,7 +210,7 @@
 		<div class="mb-3 row">
 			<label class="col-3 col-form-label required">Person</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="geojson-owner">
+				<select class="geojson-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose location data this is.
@@ -221,7 +221,7 @@
 			<label class="col-3 col-form-label">Options</label>
 			<div class="col">
 				<label class="form-check mb-1">
-					<input id="geojson-lenient" class="form-check-input" type="checkbox">
+					<input class="geojson-lenient form-check-input" type="checkbox">
 					<span class="form-check-label">Lenient mode</span>
 				</label>
 				<div class="small form-hint">
@@ -238,7 +238,7 @@
 		<div class="mb-4 row">
 			<label class="col-4 col-form-label">Owner</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="icloud-owner">
+				<select class="icloud-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose iCloud data this is.
@@ -249,7 +249,7 @@
 			<label class="col-4 fw-medium">Recently deleted</label>
 			<div class="col">
 				<label class="form-check mb-1">
-					<input id="icloud-recently-deleted" class="form-check-input" type="checkbox">
+					<input class="icloud-recently-deleted form-check-input" type="checkbox">
 					<span class="form-check-label">Import recently deleted items</span>
 				</label>
 				<div class="small form-hint">
@@ -267,7 +267,7 @@
 		<div class="mb-4 row">
 			<label class="col-4 col-form-label">Owner</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="media-owner">
+				<select class="media-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose media data this is.
@@ -278,7 +278,7 @@
 			<label class="col-4 fw-medium">Albums</label>
 			<div class="col">
 				<label class="form-check mb-1">
-					<input id="media-folder-is-album" class="form-check-input" type="checkbox">
+					<input class="media-folder-is-album form-check-input" type="checkbox">
 					<span class="form-check-label">Each folder is an album</span>
 				</label>
 				<div class="small form-hint">
@@ -290,7 +290,7 @@
 			<label class="col-4 fw-medium">Timestamps</label>
 			<div class="col">
 				<label class="form-check mb-1">
-					<input id="media-use-file-path-time" class="form-check-input" type="checkbox" checked>
+					<input class="media-use-file-path-time form-check-input" type="checkbox" checked>
 					<span class="form-check-label">Use date from filepath</span>
 				</label>
 				<div class="small form-hint">
@@ -298,7 +298,7 @@
 				</div>
 
 				<label class="form-check mb-1 mt-3">
-					<input id="media-use-file-mod-time" class="form-check-input" type="checkbox">
+					<input class="media-use-file-mod-time form-check-input" type="checkbox">
 					<span class="form-check-label">Use file mod time</span>
 				</label>
 				<div class="small form-hint">
@@ -311,14 +311,14 @@
 			<div class="col">
 				<div class="row">
 					<div class="col-4">
-						<input type="text" id="media-start-year" class="form-control mb-2" placeholder="Start year"
+						<input type="text" class="media-start-year form-control mb-2" placeholder="Start year"
 							maxlength="4">
 					</div>
 					<div class="col-1 col-form-label">
 						&mdash;
 					</div>
 					<div class="col-4">
-						<input type="text" id="media-end-year" class="form-control mb-2" placeholder="End year"
+						<input type="text" class="media-end-year form-control mb-2" placeholder="End year"
 							maxlength="4">
 					</div>
 				</div>
@@ -337,7 +337,7 @@
 		<div class="mb-3 row">
 			<label class="col-4 col-form-label">Labels to skip</label>
 			<div class="col">
-				<input id="email-skip-labels" value="Spam,Trash,Chat" autocomplete="off" placeholder="Type label">
+				<input class="email-skip-labels" value="Spam,Trash,Chat" autocomplete="off" placeholder="Type label">
 				<div class="small form-hint mt-2">
 					Gmail labels to skip
 				</div>
@@ -349,7 +349,7 @@
 <template id="tpl-dsopt-generic">
 	<div class="mb-3">
 		<label class="form-label">Person</label>
-		<select class="form-select" placeholder="Name or contact info" id="generic-owner">
+		<select class="generic-owner form-select" placeholder="Name or contact info">
 		</select>
 		<small class="form-hint">Select the person to whom this data belongs (recommended).</small>
 	</div>

@@ -292,6 +292,7 @@ type ProposedImportPlan struct {
 
 type ProposedFileImport struct {
 	Filename         string            `json:"filename"`
+	FileType         string            `json:"file_type,omitempty"` // file, dir, or archive
 	RecognizeResults []RecognizeResult `json:"recognize_results,omitempty"`
 }
 

@@ -148,6 +148,9 @@ const app = {
 	OpenRepositories() {
 		return get("/api/open-repositories");
 	},
+	PlanImport(params) {
+		return post("/api/plan-import", params);
+	},
 	Recognize(filename) {
 		return post("/api/recognize", { filename });
 	},

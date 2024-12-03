@@ -134,7 +134,10 @@ const tlz = {
 		"twitter_username": "Twitter",
 		"google_location_device": "Google Location Device",
 		"url": "Website"
-	}
+	},
+
+	// counter for IDs of collapsable regions which may be dynamically created
+	collapseCounter: 0
 };
 
 get('/api/build-info').then(bi => {
@@ -513,15 +516,18 @@ function newDatePicker(opts) {
 	// prefer the "Clear" and "Apply" buttons to go at the end
 	dpOpts.buttons.push(
 		'clear',
-		{
+	);
+
+	if (!opts.noApply) {
+		dpOpts.buttons.push({
 			content() {
 				return '<b>Apply</b>';
 			},
 			onClick(dp) {
 				dp.hide();
 			}
-		}
-	);
+		});
+	}
 
 	$('.date-input', tpl).datepicker = new AirDatepicker($('.date-input', tpl), dpOpts);
 
@@ -1966,7 +1972,10 @@ function itemPreviews(items) {
 // Entity select dropdown
 ////////////////////////////////////////////////////
 
-function newEntitySelect(elementSelector, maxItems, noWrap) {
+function newEntitySelect(element, maxItems, noWrap) {
+	if (element.tomselect) {
+		return element.tomselect;
+	}
 
 	function tomSelectRenderItemAndOption(entity, escape) {
 		const {name, attribute} = entityDisplayNameAndAttr(entity);
@@ -1981,11 +1990,7 @@ function newEntitySelect(elementSelector, maxItems, noWrap) {
 		</div>`;
 	}
 
-	if ($(elementSelector).tomselect) {
-		return $(elementSelector).tomselect;
-	}
-
-	const ts = new TomSelect(elementSelector, {
+	const ts = new TomSelect(element, {
 		valueField: "id",
 		maxItems: maxItems,
 		searchField: [

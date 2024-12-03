@@ -227,7 +227,7 @@ func DataSourcesRecognize(ctx context.Context, entry DirEntry, opts RecognizePar
 		return nil
 	}
 
-	const maxDur = 5 * time.Second
+	const maxDur = 120 * time.Second
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, maxDur)
 	defer cancel()
@@ -435,6 +435,11 @@ type FileImporter interface {
 	//
 	// Recognize MUST NOT walk/traverse a directory if possible; spot-checking specific known or
 	// expected files within it is okay. The walking is already performed by the import planner.
+	//
+	// To keep import planning quick, opening the DirEntry or any other files in the FS should
+	// only happen if necessary, due to the possibility that it is within a compressed tar file,
+	// which is not efficient as it requires decompressing potentially most of the archive to
+	// find the file to open. File extensions may be a good way to avoid unnecessary Open() calls.
 	Recognize(context.Context, DirEntry, RecognizeParams) (Recognition, error)
 
 	FileImport(context.Context, DirEntry, ImportParams) error

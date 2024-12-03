@@ -115,7 +115,7 @@ tlz.pageControllers = {
 			$('#content-column').prepend(cloneTemplate('#tpl-pagination'));
 			$('#content-column').append(cloneTemplate('#tpl-pagination'));
 			
-			newEntitySelect('.entity-input', 1);
+			newEntitySelect($('.entity-input'), 1);
 			
 			$('.filter').prepend(newDatePicker({
 				passthru: {
@@ -134,6 +134,19 @@ tlz.pageControllers = {
 		unload() {
 			$('body').classList.remove('layout-fluid');
 			$('header').classList.remove('sticky-top', 'translucent');
+		}
+	},
+
+	"/pages/import.html": {
+		load() {
+			$('#timeframe').append(newDatePicker({
+				passthru: {
+					range: true
+				},
+				sort: false,
+				timeToggle: true,
+				noApply: true
+			}));
 		}
 	},
 
@@ -158,7 +171,7 @@ tlz.pageControllers = {
 				vertical: true
 			}));
 
-			newEntitySelect('.entity-input', 5, true);
+			newEntitySelect($('.entity-input'), 5, true);
 		},
 		async render() {
 			await itemsMain();
@@ -179,7 +192,7 @@ tlz.pageControllers = {
 				proximity: false,
 				vertical: false
 			}));
-			newEntitySelect('#select-person', 1, true);
+			newEntitySelect($('#select-person'), 1, true);
 		},
 		async render() {
 			await loadAndRenderMapData();
@@ -191,7 +204,7 @@ tlz.pageControllers = {
 
 	"/pages/timeline.html": {
 		load() {
-			newEntitySelect('.entity-input', 1);
+			newEntitySelect($('.entity-input'), 1);
 
 			$('.filter').prepend(newDatePicker({
 				passthru: {

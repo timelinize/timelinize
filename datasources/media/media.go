@@ -94,7 +94,7 @@ func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, o
 	}
 
 	// for regular files, file type must be recognized (relying on extension is hopefully good enough for now)
-	if _, ok := ItemClassByExtension(dirEntry.Filename); ok {
+	if _, ok := ItemClassByExtension(dirEntry.Name()); ok {
 		rec.Confidence = 1
 	}
 

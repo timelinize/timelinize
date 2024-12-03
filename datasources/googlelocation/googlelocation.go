@@ -99,7 +99,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 		if strings.Contains(dirEntry.Name(), "Location History") && timeline.FileExistsFS(dirEntry.FS, pathToTry) {
 			return timeline.Recognition{Confidence: 1}, nil
 		}
-	} else {
+	} else if dirEntry.Name() == "location-history.json" { // avoid opening all JSON files (can be slow esp. in archives)
 		//  check for the newer on-device-only location history file from Q2 2024.
 		f, err := dirEntry.Open()
 		if err != nil {

@@ -305,6 +305,8 @@ type PlannerOptions struct {
 func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.ProposedImportPlan, error) {
 	var plan timeline.ProposedImportPlan
 
+	logger := a.log.Named("import_planner").With(zap.String("root", options.Path))
+
 	var fsys fs.FS
 	if options.TraverseArchives {
 		fsys = &archives.DeepFS{Root: options.Path, Context: ctx}
@@ -384,6 +386,7 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			pairings[dir] = []timeline.ProposedFileImport{
 				{
 					Filename:         filepath.Join(filepath.Dir(options.Path), filepath.FromSlash(dir)),
+					FileType:         fileTypeDir,
 					RecognizeResults: consolidatedMatches,
 				},
 			}
@@ -411,7 +414,14 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			return err
 		}
 		if err != nil {
-			return err
+			// sometimes, archives may contain filenames with invalid encoding,
+			// or directories may have an archive extension (but are not actually
+			// archives; ignore such errors and just
+			// Most common errors I've seen: fs.ErrInvalid, zip.Err*
+			logger.Warn("encountered error during walk; skipping",
+				zap.String("path", fpath),
+				zap.Error(err))
+			return nil
 		}
 
 		// skip hidden files and folders
@@ -482,11 +492,21 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			return nil
 		}
 
+		ftype := fileTypeFile
+		if archives.FilepathContainsArchive(d.Name()) {
+			ftype = fileTypeArchive
+		} else if d.IsDir() {
+			// remember that the underlying FS, if it is a DeepFS, can report
+			// an archive as a directory, so do this check if it's not an archive
+			ftype = fileTypeDir
+		}
+
 		// map the filename to its results, keeping all results within this directory together
 		// (we need them grouped in case we consolidate all the results to the directory itself,
 		// we end up deleting all the individual entry results; we linearize the pairings later)
 		pairings[currentDir] = append(pairings[currentDir], timeline.ProposedFileImport{
 			Filename:         filepath.Join(options.Path, filepath.FromSlash(fpath)),
+			FileType:         ftype,
 			RecognizeResults: results,
 		})
 
@@ -499,7 +519,7 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		return nil
 	})
 	if err != nil {
-		return plan, fmt.Errorf("walking tree rooted at %s: %w (options=%+v)", options.Path, err, options)
+		return plan, fmt.Errorf("walking tree rooted at %s: %w (options=%+v fs=%#v)", options.Path, err, options, fsys)
 	}
 
 	// make sure to finalize/process/reduce the final directory we walked
@@ -520,6 +540,12 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 
 	return plan, nil
 }
+
+const (
+	fileTypeFile    = "file"
+	fileTypeDir     = "dir"
+	fileTypeArchive = "archive"
+)
 
 type dataSourceCount struct {
 	ds           timeline.DataSource
