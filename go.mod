@@ -19,7 +19,7 @@ require (
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/maruel/natural v1.1.1
 	github.com/mattn/go-sqlite3 v1.14.24
-	github.com/mholt/archives v0.0.0-20241203205847-f35e651607e8
+	github.com/mholt/archives v0.0.0-20241203232558-998c9622f6b8
 	github.com/mholt/goexif2 v0.0.0-20230302025153-4d89d35092b2
 	github.com/signal-golang/go-vcard v0.1.2
 	github.com/strukturag/libheif v1.19.5

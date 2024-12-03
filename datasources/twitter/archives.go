@@ -35,7 +35,7 @@ import (
 
 // Recognize returns whether the input is supported.
 func (Client) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
-	manifestFile, err := dirEntry.FS.Open(manifestFile)
+	manifestFile, err := dirEntry.FS.Open(path.Join(dirEntry.Filename, manifestFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return timeline.Recognition{}, nil
 	} else if err != nil {
