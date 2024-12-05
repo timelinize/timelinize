@@ -291,9 +291,9 @@ type ProposedImportPlan struct {
 }
 
 type ProposedFileImport struct {
-	Filename         string            `json:"filename"`
-	FileType         string            `json:"file_type,omitempty"` // file, dir, or archive
-	RecognizeResults []RecognizeResult `json:"recognize_results,omitempty"`
+	Filename    string                  `json:"filename"`
+	FileType    string                  `json:"file_type,omitempty"` // file, dir, or archive
+	DataSources []DataSourceRecognition `json:"data_sources,omitempty"`
 }
 
 func (p ProposedFileImport) String() string { return p.Filename }

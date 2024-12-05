@@ -58,7 +58,7 @@ func newLogger() *zap.Logger {
 	)
 
 	// avoid a firehose of logs (TODO: maybe only sample for certain logs named something...?)
-	const firstNMsgs, everyNthMsg = 1, 100
+	const firstNMsgs, everyNthMsg = 10, 100
 	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
 
 	return zap.New(core)

@@ -138,9 +138,9 @@ func AllDataSources() []DataSource {
 type RecognizeParams struct {
 }
 
-// RecognizeResult stores the result of whether a data source recognizes an input.
-type RecognizeResult struct {
-	DataSource
+// DataSourceRecognition stores the result of whether a data source recognizes an input.
+type DataSourceRecognition struct {
+	DataSource DataSource `json:"data_source"`
 	Recognition
 }
 
@@ -208,8 +208,8 @@ func (d DirEntry) TopDirReadDir(filename string) ([]fs.DirEntry, error) {
 
 // DataSourcesRecognize returns the list of data sources that reportedly
 // recognize the file described by the DirEntry.
-func DataSourcesRecognize(ctx context.Context, entry DirEntry, opts RecognizeParams) ([]RecognizeResult, error) {
-	var results []RecognizeResult
+func DataSourcesRecognize(ctx context.Context, entry DirEntry, opts RecognizeParams) ([]DataSourceRecognition, error) {
+	var results []DataSourceRecognition
 	tryDataSource := func(ctx context.Context, ds DataSource) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -222,7 +222,7 @@ func DataSourcesRecognize(ctx context.Context, entry DirEntry, opts RecognizePar
 			return fmt.Errorf("%s: %w", ds.Name, err)
 		}
 		if result.Confidence > 0 {
-			results = append(results, RecognizeResult{ds, result})
+			results = append(results, DataSourceRecognition{ds, result})
 		}
 		return nil
 	}

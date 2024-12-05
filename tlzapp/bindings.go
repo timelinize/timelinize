@@ -346,7 +346,7 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		var counts dataSourceCounts
 		// for _, p := range pairings[currentDirPairingsMarker:] {
 		for _, p := range currentPairings {
-			for _, match := range p.RecognizeResults {
+			for _, match := range p.DataSources {
 				if match.DirThreshold > 0 {
 					counts.count(match)
 				}
@@ -361,14 +361,14 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		// reached the threshold, then there's nothing to do (just keep the
 		// individual recognition matches as-is); otherwise, we will replace
 		// those with one for the whole dir
-		var consolidatedMatches []timeline.RecognizeResult
+		var consolidatedMatches []timeline.DataSourceRecognition
 		for _, c := range counts {
 			percentage := float64(c.count) / float64(dirSizes[dir])
 			if percentage > c.dirThreshold {
 				// this data source matched enough entries in the directory to
 				// meet its self-specified threshold, so consider the entire
 				// directory a match instead of each individual item
-				consolidatedMatches = append(consolidatedMatches, timeline.RecognizeResult{
+				consolidatedMatches = append(consolidatedMatches, timeline.DataSourceRecognition{
 					DataSource: c.ds,
 					Recognition: timeline.Recognition{
 						Confidence: percentage,
@@ -385,9 +385,9 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			// whole directory
 			pairings[dir] = []timeline.ProposedFileImport{
 				{
-					Filename:         filepath.Join(filepath.Dir(options.Path), filepath.FromSlash(dir)),
-					FileType:         fileTypeDir,
-					RecognizeResults: consolidatedMatches,
+					Filename:    filepath.Join(filepath.Dir(options.Path), filepath.FromSlash(dir)),
+					FileType:    fileTypeDir,
+					DataSources: consolidatedMatches,
 				},
 			}
 			for d := range pairings {
@@ -437,6 +437,9 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		// into a single directory-wide match
 		dir := path.Join(filepath.Base(options.Path), path.Dir(fpath)) // account for fpath being "." by just always prepending the root dir name instead
 		if dir != currentDir {
+			// TODO: This isn't really a helpful log, because it gets sampled, so if we're stuck on a dir for a long time, it might not be the dir that was last logged
+			logger.Info("traversing directory", zap.String("dir", dir))
+
 			// compare prefixes by appending "/" to prevent false positives with a scenario like "a/b" and "a/bb"; they are different subfolders!
 			if strings.HasPrefix(dir, currentDir+"/") {
 				// we have recursed into a subdirectory
@@ -505,9 +508,9 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		// (we need them grouped in case we consolidate all the results to the directory itself,
 		// we end up deleting all the individual entry results; we linearize the pairings later)
 		pairings[currentDir] = append(pairings[currentDir], timeline.ProposedFileImport{
-			Filename:         filepath.Join(options.Path, filepath.FromSlash(fpath)),
-			FileType:         ftype,
-			RecognizeResults: results,
+			Filename:    filepath.Join(options.Path, filepath.FromSlash(fpath)),
+			FileType:    ftype,
+			DataSources: results,
 		})
 
 		// skip directory; since this filename was recognized, if it was a directory,
@@ -555,7 +558,7 @@ type dataSourceCount struct {
 
 type dataSourceCounts []dataSourceCount
 
-func (dsCounts *dataSourceCounts) count(match timeline.RecognizeResult) {
+func (dsCounts *dataSourceCounts) count(match timeline.DataSourceRecognition) {
 	idx := -1
 	for i, c := range *dsCounts {
 		if c.ds.Name == match.DataSource.Name {

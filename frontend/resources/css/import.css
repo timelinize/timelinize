@@ -1,8 +1,8 @@
-.collapse-button {
+.accordion-button {
 	cursor: pointer;
 }
 
-.collapse-button:hover {
+.accordion-button:hover {
 	/* border-color: var(--tblr-body-color); */
 	border-color: rgba(var(--tblr-primary-rgb), .5);
 	background-color: rgba(var(--tblr-primary-rgb), .04);
