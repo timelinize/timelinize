@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -204,6 +205,24 @@ func (d DirEntry) TopDirStat(filename string) (fs.FileInfo, error) {
 
 func (d DirEntry) TopDirReadDir(filename string) ([]fs.DirEntry, error) {
 	return archives.TopDirReadDir(d.FS, path.Join(d.Filename, filename))
+}
+
+// FullPath returns the full path of the directory entry, including the FS
+// root (if a known FS type from the archives package), and the filename
+// in the archive.
+func (d DirEntry) FullPath() string {
+	var root string
+	switch fsys := d.FS.(type) {
+	case archives.FileFS:
+		root = fsys.Path
+	case archives.DirFS:
+		root = string(fsys)
+	case *archives.ArchiveFS:
+		root = fsys.Path
+	case *archives.DeepFS:
+		root = fsys.Root
+	}
+	return filepath.Join(root, filepath.FromSlash(d.Filename))
 }
 
 // DataSourcesRecognize returns the list of data sources that reportedly

@@ -330,14 +330,88 @@ on('click', '#collapse-all-dsgroup', event => {
 });
 
 // begin import!
-on('click', '#start-import', async e => {
+on('click', '#start-import', async event => {
+	// TODO: validate input (data source options, etc) -- show modal of DS options that need fixing
+
 	// TODO: This is the old import code. Update to new UI.
 
-	const ds = dataSource();
+
+	const importParams = {
+		repo: tlz.openRepos[0].instance_id,
+		job: {
+			plan: {
+				files: []
+			},
+			processing_options: {
+				integrity: $('#integrity-checks').checked,
+				overwrite_modifications: $('#overwrite-modifications').checked,
+				item_unique_constraints: {
+					// TODO: it occurred to me that an item need not be from the same
+					// data source to be the exact same thing; like if I copy a photo
+					// from my iPhone and import it with Media data source, but later
+					// from the iPhone data source, it should be considered the same, right?
+					// "data_source_name": true,
+					"classification_name": true,
+					// "original_location": true,
+					// "intermediate_location": true,
+					"filename": true, // TODO: <-- this one might only apply to some data sources, like photo libraries...
+					"timestamp": true,
+					"timespan": true,
+					"timeframe": true,
+					"data": true,
+					"location": true
+				},
+				// item_field_updates: {
+				// 	"attribute_id": 2,
+				// 	"classification_id": 2,
+				// 	"original_location": 2,
+				// 	"intermediate_location": 2,
+				// 	"timestamp": 2,
+				// 	"timespan": 2,
+				// 	"timeframe": 2,
+				// 	"time_offset": 2,
+				// 	"time_uncertainty": 2,
+				// 	"data": 2,
+				// 	"metadata": 2,
+				// 	"location": 2
+				// }
+			},
+			estimate_total: $('#estimate-total').checked
+		}
+	};
+
+	for (const dsgroup of $$('.file-import-plan-dsgroup')) {
+		importParams.job.plan.files.push({
+			data_source_name: dsgroup.ds.name,
+			data_source_options: dataSourceOptions(dsgroup.ds),
+			filenames: dsgroup.filenames
+		});
+	}
+
+	console.log("IMPORT PARAMS:", importParams)
+
+	const jobID = await app.Import(importParams);
+	console.log("JOB STARTED:", jobID);
+
+	notify({
+		type: "success",
+		title: "Import started",
+		duration: 2000
+	});
+});
+
+function dataSourceOptions(ds) {
+	dsoptContainer = $(`#modal-import-dsopt-${ds.name}`);
+	console.log(dsoptContainer);
+	if (!dsoptContainer) {
+		return;
+	}
 
 	let dsOpt;
-	if (ds == "smsbackuprestore") {
-		const ownerPhoneInput = $('#smsbackuprestore-owner-phone');
+
+	if (ds.name == "smsbackuprestore") {
+		const ownerPhoneInput = $('.smsbackuprestore-owner-phone', dsoptContainer);
+		console.log("INPUT:", ownerPhoneInput)
 		if (!ownerPhoneInput.value) {
 			// TODO: generalize field validation (see also the focusout event above)
 			ownerPhoneInput.classList.add('is-invalid');
@@ -348,126 +422,114 @@ on('click', '#start-import', async e => {
 			owner_phone_number: ownerPhoneInput.value
 		};
 	}
-	if (ds == "google_location") {
+	if (ds.name == "google_location") {
 		dsOpt = {};
-		const owner = $('#google_location-owner').tomselect.getValue();
+		const owner = $('.google_location-owner', dsoptContainer).tomselect.getValue();
 		if (owner.length) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
-		const simplification = $('#google_location-simplification').noUiSlider.get();
+		const simplification = $('.google_location-simplification', dsoptContainer).noUiSlider.get();
 		if (simplification) {
 			dsOpt.simplification = Number(simplification);
 		}
 	}
-	if (ds == "gpx") {
+	if (ds.name == "gpx") {
 		dsOpt = {};
-		const owner = $('#gpx-owner').tomselect.getValue();
+		const owner = $('.gpx-owner', dsoptContainer).tomselect.getValue();
 		if (owner.length) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
-		const simplification = $('#gpx-simplification').noUiSlider.get();
+		const simplification = $('.gpx-simplification', dsoptContainer).noUiSlider.get();
 		if (simplification) {
 			dsOpt.simplification = Number(simplification);
 		}
 	}
-	if (ds == "geojson") {
+	if (ds.name == "geojson") {
 		dsOpt = {};
-		const owner = $('#geojson-owner').tomselect.getValue();
+		const owner = $('.geojson-owner', dsoptContainer).tomselect.getValue();
 		if (owner.length) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
-		dsOpt.lenient = $('#geojson-lenient').checked;
+		dsOpt.lenient = $('.geojson-lenient', dsoptContainer).checked;
 	}
-	if (ds == "media") {
+	if (ds.name == "media") {
 		dsOpt = {
-			use_filepath_time: $('#media-use-file-path-time').checked,
-			use_file_mod_time: $('#media-use-file-mod-time').checked,
-			folder_is_album: $('#media-folder-is-album').checked,
+			use_filepath_time: $('.media-use-file-path-time', dsoptContainer).checked,
+			use_file_mod_time: $('.media-use-file-mod-time', dsoptContainer).checked,
+			folder_is_album: $('.media-folder-is-album', dsoptContainer).checked,
 			date_range: {}
 		};
-		const owner = $('#media-owner').tomselect.getValue();
+		const owner = $('.media-owner', dsoptContainer).tomselect.getValue();
 		if (owner.length) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
-		if ($('#media-start-year').value) {
-			dsOpt.date_range.since = DateTime.utc(Number($('#media-start-year').value)).toISO();
+		if ($('.media-start-year', dsoptContainer).value) {
+			dsOpt.date_range.since = DateTime.utc(Number($('.media-start-year', dsoptContainer).value)).toISO();
 		}
-		if ($('#media-end-year').value) {
-			dsOpt.date_range.until = DateTime.utc(Number($('#media-end-year').value)).endOf('year').toISO();
+		if ($('.media-end-year', dsoptContainer).value) {
+			dsOpt.date_range.until = DateTime.utc(Number($('.media-end-year', dsoptContainer).value)).endOf('year').toISO();
 		}
 	}
-	if (ds == "email") {
-		const skipLabels = $('#email-skip-labels').tomselect.getValue().split(",");
+	if (ds.name == "email") {
+		const skipLabels = $('.email-skip-labels', dsoptContainer).tomselect.getValue().split(",");
 		dsOpt = {
 			gmail_skip_labels: skipLabels
 		};
 	}
-	if (ds == "icloud") {
+	if (ds.name == "icloud") {
 		dsOpt = {
-			recently_deleted: $('#icloud-recently-deleted').checked
+			recently_deleted: $('.icloud-recently-deleted', dsoptContainer).checked
 		};
-		const owner = $('#icloud-owner').tomselect.getValue();
+		const owner = $('.icloud-owner', dsoptContainer).tomselect.getValue();
 		if (owner.length) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
 	}
 
-	console.log("DS OPT:", dsOpt);
-	const filenames = $('#modal-import .file-picker').selected();
-	console.log("FILENAMES:", filenames);
-	
-	const job = await app.Import({
-		repo: tlz.openRepos[0].instance_id,
-		filenames: filenames,
-		data_source_name: ds,
-		data_source_options: dsOpt,
-		processing_options: {
-			item_unique_constraints: {
-				// TODO: it occurred to me that an item need not be from the same
-				// data source to be the exact same thing; like if I copy a photo
-				// from my iPhone and import it with Media data source, but later
-				// from the iPhone data source, it should be considered the same, right?
+	return dsOpt;
+}
 
-				// "data_source_name": true,
-				"classification_name": true,
-				// "original_location": true,
-				// "intermediate_location": true,
-				"filename": true, // TODO: <-- this one might only apply to some data sources, like photo libraries...
-				"timestamp": true,
-				"timespan": true,
-				"timeframe": true,
-				"data": true,
-				"location": true
-			},
-			// item_field_updates: {
-			// 	"attribute_id": 2,
-			// 	"classification_id": 2,
-			// 	"original_location": 2,
-			// 	"intermediate_location": 2,
-			// 	"timestamp": 2,
-			// 	"timespan": 2,
-			// 	"timeframe": 2,
-			// 	"time_offset": 2,
-			// 	"time_uncertainty": 2,
-			// 	"data": 2,
-			// 	"metadata": 2,
-			// 	"location": 2
-			// }
-		}
-	});
-	console.log("JOB STARTED:", job);
 
-	notify({
-		type: "success",
-		title: "Import started",
-		message: filenames.join(", "),
-		duration: 2000
-	});
+// // TODO: generalize input validation
+// on('focusout', '.smsbackuprestore-owner-phone', async event => {
+// 	if (event.target.value) {
+// 		event.target.classList.remove('is-invalid');
+// 		event.target.classList.add('is-valid');
+// 	} else {
+// 		event.target.classList.add('is-invalid');
+// 		event.target.classList.remove('is-valid');
+// 	}
+// });
 
-	updateActiveJobs();
 
-	const importModal = bootstrap.Modal.getInstance('#modal-import');
-	importModal.hide();
+// // TODO: figure this out. I should be able to paste in a path or type a path and have the file picker go to work
+// on('change paste', '#modal-import .file-picker-path', async e => {
+// 	const doNav = async function() {
+// 		const info = await app.FileStat(e.target.value);
+// 		$('#modal-import .file-picker').navigate(info.full_name);
+// 	};
+// 	if (e.type == 'paste') {
+// 		setTimeout(doNav, 0);
+// 	} else {
+// 		doNav();
+// 	}
+// });
 
-	resetImportModal();
-});
+// TODO:
+// // validate year inputs
+// on('change keyup', '#media-start-year, #media-end-year', e => {
+// 	if (e.target.value && !/^\d{4}$/.test(e.target.value)) {
+// 		e.target.classList.add('is-invalid');
+// 		$('#start-import').classList.add('disabled');
+// 	} else if (parseInt(e.target.value) > 0) {
+// 		e.target.classList.remove('is-invalid');
+// 		e.target.classList.add('is-valid');
+// 	} else {
+// 		e.target.classList.remove('is-invalid', 'is-valid');
+// 	}
+
+// 	if (!$('#modal-import .is-invalid')) {
+// 		$('#start-import').classList.remove('disabled');
+// 	}
+// });
+

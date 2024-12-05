@@ -44,11 +44,11 @@ var (
 // CreateJob creates and runs a job described by action, with an estimated total units
 // of work, to be repeated after a certain interval (if > 0). If an identical job is
 // already running, the job will be queued. If an identical job is already queued, this
-// will be a no-op.
-func (tl *Timeline) CreateJob(action JobAction, total int, repeat time.Duration) error {
+// will be a no-op. The created job ID is returned.
+func (tl *Timeline) CreateJob(action JobAction, total int, repeat time.Duration) (int64, error) {
 	config, err := json.Marshal(action)
 	if err != nil {
-		return fmt.Errorf("JSON-encoding job action: %w", err)
+		return 0, fmt.Errorf("JSON-encoding job action: %w", err)
 	}
 
 	var name JobName
@@ -83,24 +83,24 @@ func (tl *Timeline) CreateJob(action JobAction, total int, repeat time.Duration)
 
 	tx, err := tl.db.Begin()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
 
 	jobID, err := tl.storeJob(tx, job)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	err = tl.startJob(tx, jobID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("committing new job transaction: %w", err)
+		return 0, fmt.Errorf("committing new job transaction: %w", err)
 	}
 
-	return nil
+	return jobID, nil
 }
 
 // storeJob adds the job to the database. It does not start it.
@@ -131,7 +131,7 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job jobRow) (int64, error) {
 		INSERT INTO jobs (name, configuration, hash, hostname, total, repeat)
 		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id`,
-		job.Name, job.Config, job.Hash, job.Hostname, job.Total, job.Repeat).Scan(&id)
+		job.Name, string(job.Config), job.Hash, job.Hostname, job.Total, job.Repeat).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("inserting new job row: %w", err)
 	}
@@ -282,13 +282,14 @@ func (tl *Timeline) runJob(row jobRow) error {
 		}
 
 		var newState JobState
-		if actionErr == nil {
+		switch {
+		case actionErr == nil:
 			newState = JobSucceeded
 			job.logger.Info("job succeeded", zap.Error(actionErr))
-		} else if errors.Is(actionErr, context.Canceled) {
+		case errors.Is(actionErr, context.Canceled):
 			newState = JobAborted
 			job.logger.Error("job aborted", zap.Error(actionErr))
-		} else {
+		default:
 			newState = JobFailed
 			job.logger.Error("job failed", zap.Error(actionErr))
 		}
@@ -313,7 +314,7 @@ func (tl *Timeline) runJob(row jobRow) error {
 
 		_, err = tx.ExecContext(job.Context(),
 			`UPDATE jobs SET state=?, end=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/802)
-			newState, end, job.id)
+			newState, end.Unix(), job.id)
 		if err != nil {
 			job.logger.Error("updating job state", zap.Error(err))
 		}

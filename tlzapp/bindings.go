@@ -496,7 +496,7 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		}
 
 		ftype := fileTypeFile
-		if archives.FilepathContainsArchive(d.Name()) {
+		if archives.FilepathContainsArchive(options.Path) || archives.FilepathContainsArchive(fpath) {
 			ftype = fileTypeArchive
 		} else if d.IsDir() {
 			// remember that the underlying FS, if it is a DeepFS, can report
@@ -586,12 +586,11 @@ type ImportParameters struct {
 	// DataSource timeline.DataSource // required: Name, Title, Icon, Description
 }
 
-func (a App) Import(params ImportParameters) error {
+func (a App) Import(params ImportParameters) (int64, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
-		return err
+		return 0, err
 	}
-
 	return tl.CreateJob(params.Job, 0, 0)
 }
 

@@ -23,13 +23,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/mholt/archives"
 	"go.uber.org/zap"
 )
 
@@ -58,10 +56,8 @@ type processor struct {
 }
 
 func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint json.RawMessage) error {
-	fullPath := filepath.Join(dirEntry.FS.(*archives.DeepFS).Root, filepath.FromSlash(dirEntry.Filename))
-
 	params := ImportParams{
-		Log:               p.log.With(zap.String("filename", fullPath)),
+		Log:               p.log.With(zap.String("filename", dirEntry.FullPath())),
 		Timeframe:         p.ij.ProcessingOptions.Timeframe,
 		Checkpoint:        dsCheckpoint,
 		DataSourceOptions: p.dsOpt,
@@ -289,7 +285,7 @@ func (p processor) generateThumbnailsForImportedItems() {
 
 	p.log.Info("generating thumbnails for imported items", zap.Int("count", total))
 
-	if err = p.tl.CreateJob(job, total, 0); err != nil {
+	if _, err = p.tl.CreateJob(job, total, 0); err != nil {
 		p.log.Error("creating thumbnail job", zap.Error(err))
 		return
 	}
@@ -354,7 +350,7 @@ func (p processor) generateEmbeddingsForImportedItems() {
 
 	p.log.Info("generating embeddings for imported items", zap.Int("count", total))
 
-	if err = p.tl.CreateJob(job, total, 0); err != nil {
+	if _, err = p.tl.CreateJob(job, total, 0); err != nil {
 		p.log.Error("creating embedding job", zap.Error(err))
 		return
 	}

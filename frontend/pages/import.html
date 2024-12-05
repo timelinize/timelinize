@@ -76,11 +76,11 @@
 			</div>
 
 			<div class="col-md-3">
-				<form action="./" method="get" autocomplete="off" novalidate class="sticky-top">
+				<div class="sticky-top">
 					<div class="form-label">Integrity checks</div>
 					<div class="mb-4">
 						<label class="form-check form-switch">
-							<input class="form-check-input" type="checkbox">
+							<input id="integrity-checks" class="form-check-input" type="checkbox">
 							<span class="form-check-label form-check-label-on">On</span>
 							<span class="form-check-label form-check-label-off">Off</span>
 						</label>
@@ -90,11 +90,21 @@
 					<div class="form-label">Overwrite modifications</div>
 					<div class="mb-4">
 						<label class="form-check form-switch">
-							<input class="form-check-input" type="checkbox">
+							<input id="overwrite-modifications" class="form-check-input" type="checkbox">
 							<span class="form-check-label form-check-label-on">On</span>
 							<span class="form-check-label form-check-label-off">Off</span>
 						</label>
 						<div class="small text-secondary">Items modified manually may be updated to the data in this import.</div>
+					</div>
+
+					<div class="form-label">Estimate total</div>
+					<div class="mb-4">
+						<label class="form-check form-switch">
+							<input id="estimate-total" class="form-check-input" type="checkbox">
+							<span class="form-check-label form-check-label-on">On</span>
+							<span class="form-check-label form-check-label-off">Off</span>
+						</label>
+						<div class="small text-secondary">Take extra time up front to estimate total size of the import, solely for progress updates.</div>
 					</div>
 
 					<div class="form-label">Timeframe</div>
@@ -105,7 +115,7 @@
 
 
 					<div class="col-auto ms-auto d-print-none">
-						<button id="start-import" class="btn btn-primary disabled" data-bs-toggle="modal" data-bs-target="#modal-file-picker">
+						<button id="start-import" class="btn btn-primary disabled">
 							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 								stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 								class="icon icon-tabler icons-tabler-outline icon-tabler-player-play">
@@ -115,7 +125,7 @@
 							Start import
 						</button>
 					</div>
-				</form>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -145,7 +155,7 @@
 				</label>
 				<label class="form-check me-5">
 					<input type="checkbox" id="traverse-archives" class="form-check-input">
-					<span class="form-check-label">Traverse archives</span>
+					<span class="form-check-label">Traverse archives (slower)</span>
 				</label>
 				<a id="select-file-picker" class="btn btn-primary disabled" data-bs-target="#modal-plan-loading" data-bs-toggle="modal">
 					Select

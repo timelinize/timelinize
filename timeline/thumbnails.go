@@ -96,7 +96,7 @@ func (tj thumbnailJob) Run(job *Job, checkpoint []byte) error {
 					zap.Int64("item_id", task.DataID),
 					zap.String("data_file", task.DataFile),
 					zap.String("data_type", task.DataType),
-					zap.String("thumbnail_type", string(task.ThumbType)),
+					zap.String("thumbnail_type", task.ThumbType),
 					zap.Error(err))
 			}
 

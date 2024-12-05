@@ -282,10 +282,9 @@ func (s *server) handlePlanImport(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *server) handleImport(w http.ResponseWriter, r *http.Request) error {
-	return errors.New("TODO: re-implement")
-	// params := *r.Context().Value(ctxKeyPayload).(*ImportParameters)
-	// job, err := s.app.Import(params)
-	// return jsonResponse(w, map[string]any{"job": job}, err)
+	params := *r.Context().Value(ctxKeyPayload).(*ImportParameters)
+	jobID, err := s.app.Import(params)
+	return jsonResponse(w, map[string]any{"job_id": jobID}, err)
 }
 
 func (s *server) handleSearchItems(w http.ResponseWriter, r *http.Request) error {
