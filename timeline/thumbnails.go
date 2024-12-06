@@ -23,6 +23,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -79,26 +80,40 @@ type thumbnailJob struct {
 }
 
 func (tj thumbnailJob) Run(job *Job, checkpoint []byte) error {
-	// TODO: Resume from checkpoint
-
-	if tj.Tasks == nil {
-		// TODO: create thumbnails for all qualifying items that need one;
-		// iterate DB in chunks of 100 or 1000, maybe?
-
-		return nil
+	var startIdx int
+	if checkpoint != nil {
+		if err := json.Unmarshal(checkpoint, &startIdx); err != nil {
+			job.logger.Error("failed to resume from checkpoint", zap.Error(err))
+		}
 	}
 
+	// Run each task in a goroutine by batch; this has multiple advantages:
+	// - Goroutines allow parallel computation, finishing the job faster.
+	// - By waiting at the end of every batch, we know that all goroutines in the batch
+	//   have finished, so we can checkpoint and thus resume correctly from that index,
+	//   without having to worry about some goroutines that haven't finished yet.
+	// - Batching in this way acts as a goroutine throttle, so we don't flood the CPU.
 	var wg sync.WaitGroup
-	goroutineThrottle := make(chan struct{}, 20)
+	const batchSize = 10
 
-	for _, task := range tj.Tasks {
-		wg.Add(1)
+	for i := startIdx; i < len(tj.Tasks); i++ {
+		// At the end of every batch, wait for all the goroutines to complete before
+		// proceeding; and once they complete, that's a good time to checkpoint
+		if i%batchSize == batchSize-1 {
+			wg.Wait()
 
+			if err := job.Checkpoint(i); err != nil {
+				job.logger.Error("failed to save checkpoint",
+					zap.Int("position", i),
+					zap.Error(err))
+			}
+		}
+
+		task := tj.Tasks[i]
 		task.tl = job.tl
-		// TODO: Should we just use the cpuIntensiveThrottle for these (and move those throttles out to here)?
-		goroutineThrottle <- struct{}{}
 
-		// TODO: It'd be nice if we could batch our DB operations, like we did before the jobs refactor
+		// proceed to spawn a new goroutine as part of this batch
+		wg.Add(1)
 		go func(job *Job, task thumbnailTask) {
 			defer wg.Done()
 
@@ -115,14 +130,11 @@ func (tj thumbnailJob) Run(job *Job, checkpoint []byte) error {
 					zap.Error(err))
 			}
 
-			if err := job.UpdateProgress(1); err != nil {
-				job.logger.Error("updating job progress", zap.Error(err))
-			}
-
-			<-goroutineThrottle
+			job.Progress(1)
 		}(job, task)
 	}
 
+	// all goroutines must be done before we return
 	wg.Wait()
 
 	return nil

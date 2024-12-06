@@ -41,27 +41,37 @@ type embeddingJob struct {
 }
 
 func (ej embeddingJob) Run(job *Job, checkpoint []byte) error {
-	// TODO: Resume from checkpoint
-
-	if ej.ItemIDs == nil {
-		// TODO: create embeddings for all qualifying items that need one;
-		// iterate DB in chunks of 100 or 1000, maybe?
-
-		return nil
+	var startIdx int
+	if checkpoint != nil {
+		if err := json.Unmarshal(checkpoint, &startIdx); err != nil {
+			job.logger.Error("failed to resume from checkpoint", zap.Error(err))
+		}
 	}
 
-	// limit goroutines spawning, just in case there's a LOT of them...
-	// we need just enough to keep the CPU-intensive parts busy
-	goroutineThrottle := make(chan struct{}, 20)
-
+	// run each task in a goroutine which we group by batch; this allows
+	// us to throttle concurrent goroutines, run tasks in parallel for speed,
+	// and checkpoint after the entire batch has finished, which allows for
+	// reliable resumption
 	var wg sync.WaitGroup
+	const batchSize = 10
 
-	for _, itemID := range ej.ItemIDs {
-		goroutineThrottle <- struct{}{}
+	for i := startIdx; i < len(ej.ItemIDs); i++ {
+		// At the end of every batch, wait for all the goroutines to complete before
+		// proceeding; and once they complete, that's a good time to checkpoint
+		if i%batchSize == batchSize-1 {
+			wg.Wait()
+
+			if err := job.Checkpoint(i); err != nil {
+				job.logger.Error("failed to save checkpoint",
+					zap.Int("position", i),
+					zap.Error(err))
+			}
+		}
+
+		itemID := ej.ItemIDs[i]
+
+		// proceed to spawn a new goroutine as part of this batch
 		wg.Add(1)
-
-		// TODO: Should we just use the cpuIntensiveThrottle for these (and move those throttles out to here)?
-		// TODO: It'd be nice if we could batch our DB operations.
 		go func(job *Job, itemID int64) {
 			defer wg.Done()
 
@@ -72,14 +82,11 @@ func (ej embeddingJob) Run(job *Job, checkpoint []byte) error {
 					zap.Error(err))
 			}
 
-			if err := job.UpdateProgress(1); err != nil {
-				job.logger.Error("updating job progress", zap.Error(err))
-			}
-
-			<-goroutineThrottle
+			job.Progress(1)
 		}(job, itemID)
 	}
 
+	// all goroutines must be done before we return
 	wg.Wait()
 
 	return nil

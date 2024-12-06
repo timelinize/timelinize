@@ -105,11 +105,7 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 					for _, g := range batch {
 						batchSize += g.Size()
 					}
-					if err := p.ij.job.UpdateProgress(batchSize); err != nil {
-						p.log.Error("could not update job progress",
-							zap.Int("worker", workerNum),
-							zap.Error(err))
-					}
+					p.ij.job.Progress(batchSize)
 				}
 			}
 
@@ -124,7 +120,7 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 				}
 				if countOnly {
 					newTotal := atomic.AddInt64(p.estimatedCount, int64(g.Size()))
-					_ = p.ij.job.SetTotal(int(newTotal))
+					p.ij.job.SetTotal(int(newTotal))
 					continue
 				}
 				addToBatch(g)

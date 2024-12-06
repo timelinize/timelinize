@@ -323,21 +323,15 @@ func (tl *Timeline) runJob(row jobRow) error {
 			logger.Error("updating job state", zap.Error(err))
 		}
 
-		// clear checkpoint and message sif job succeeds
+		// clear message and checkpoint in the DB if job succeeds (calling checkpoint() causes a sync to the DB)
 		if newState == JobSucceeded {
-			_, err = tx.ExecContext(job.Context(), `UPDATE jobs SET checkpoint=NULL, message=NULL WHERE id=?`, job.id)
-			if err != nil {
-				logger.Error("clearing job checkpoint and message", zap.Error(err))
+			job.Message("")
+			if err = job.checkpoint(tx, nil); err != nil {
+				logger.Error("clearing job checkpoint and message from successful job", zap.Error(err))
 			}
 		}
 
-		// updating the progress will sync it to the DB since we set its state
-		// to signal that it is done running
-		err = job.updateProgress(tx, 0)
-		if err != nil {
-			logger.Error("syncing job progress", zap.Error(err))
-		}
-
+		// see if there's another job queued up we should run
 		var nextJobID int64
 		err = tx.QueryRowContext(job.Context(),
 			`SELECT id
@@ -416,50 +410,53 @@ func (j *Job) Logger() *zap.Logger { return j.logger }
 
 // }
 
-func (j *Job) SetTotal(total int) error {
+func (j *Job) SetTotal(total int) {
 	j.mu.Lock()
-	defer j.mu.Unlock()
-
 	j.totalSinceLastSync = &total
-
+	j.mu.Unlock()
 	// TODO: emit log for the frontend to update the UI
-
-	return j.sync(nil)
 }
 
-// UpdateProgress updates the progress of the job in the DB by adding delta,
+// Progress updates the progress of the job in the DB by adding delta,
 // which is work completed since the previous update, towards the expected
-// total.
-func (j *Job) UpdateProgress(delta int) error {
-	return j.updateProgress(nil, delta)
-}
-
-// updateProgress updates the progress toward the total. It only syncs with
-// the DB if it has been a sufficient amount of time since the last update,
-// or if the job is completed (which is indicated by tx NOT being nil; we can
-// change the signature later if that assumption no longer holds true).
-func (j *Job) updateProgress(tx *sql.Tx, delta int) error {
-	if tx == nil && delta == 0 {
-		return nil
-	}
-
+// total. This will update progress bars in the frontend UI.
+func (j *Job) Progress(delta int) {
 	j.mu.Lock()
-	defer j.mu.Unlock()
-
 	j.progressSinceLastSync += delta
-
+	j.mu.Unlock()
 	// TODO: emit log for the frontend to update the UI
-
-	return j.sync(tx)
 }
 
+// Message updates the current job message or status to show the user.
+// TODO: rename to Status?
+func (j *Job) Message(message string) {
+	j.mu.Lock()
+	j.messageSinceLastSync = &message
+	j.mu.Unlock()
+	// TODO: emit log for the frontend to update the UI
+}
+
+// Checkpoint creates a checkpoint and syncs the job state with the database.
+// When creating a checkpoint, the total, progress, and message data should
+// be current such that resuming the job from this checkpoint would have the
+// correct total, progress, and message displayed. Usually, a checkpoint is
+// where to begin/resume the job. For example, if a job started at unit of
+// work ("task"?) index 0 and finished up through 3, the progress value would
+// have been updated to be 4 and the checkpoint would contain index 4 (so,
+// progress THEN checkpoint, usually).
+//
+// Checkpoint values are opaque and MUST be JSON-marshallable. They will be
+// returned to the job action in the form of JSON bytes.
 func (j *Job) Checkpoint(newCheckpoint any) error {
+	return j.checkpoint(nil, newCheckpoint)
+	// TODO: emit log for the frontend to update the UI
+}
+
+func (j *Job) checkpoint(tx *sql.Tx, newCheckpoint any) error {
 	chkpt, err := json.Marshal(newCheckpoint)
 	if err != nil {
 		return fmt.Errorf("JSON-encoding checkpoint %#v: %w", newCheckpoint, err)
 	}
-
-	// TODO: checkpoints should have progress at time of checkpoint bundled, so that we can restore that properly
 
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -472,21 +469,7 @@ func (j *Job) Checkpoint(newCheckpoint any) error {
 	}
 	j.checkpointSinceLastSync = chkpt
 
-	// TODO: emit log for the frontend to update the UI
-
-	return j.sync(nil)
-}
-
-// TODO: rename to Status?
-func (j *Job) Message(message string) error {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	j.messageSinceLastSync = &message
-
-	// TODO: emit log for the frontend to update the UI
-
-	return j.sync(nil)
+	return j.sync(tx)
 }
 
 // sync writes changes/updates to the DB. In case of rapid job progression, we avoid

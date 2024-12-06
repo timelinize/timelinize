@@ -19,11 +19,14 @@
 package timeline
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/mholt/archives"
 	"go.uber.org/zap"
@@ -261,7 +264,281 @@ func (ij ImportJob) Run(job *Job, checkpoint []byte) error {
 		}
 	}
 
+	job.Logger().Info("import complete; cleaning up")
+
+	if err := ij.successCleanup(); err != nil {
+		job.Logger().Error("cleaning up after import job", zap.Error(err))
+	}
+
+	ij.generateThumbnailsForImportedItems()
+	ij.generateEmbeddingsForImportedItems()
+
 	return nil
+}
+
+func (ij ImportJob) successCleanup() error {
+	// delete empty items from this import (items with no content and no meaningful relationships)
+	if err := ij.deleteEmptyItems(); err != nil {
+		return fmt.Errorf("deleting empty items: %w", err)
+	}
+	return nil
+}
+
+// deleteEmptyItems deletes items that have no content and no meaningful relationships,
+// from the given import.
+func (ij ImportJob) deleteEmptyItems() error {
+	// TODO: we can perform the deletes all at once with the commented query below,
+	// but it does not account for cleaning up the data files, which should only
+	// be done if they're only used by the one item -- maybe we could use `RETURNING data_file` to take care of this?
+	/*
+		DELETE FROM items WHERE id IN (SELECT id FROM items
+			WHERE job_id=?
+			AND (data_text IS NULL OR data_text='')
+				AND data_file IS NULL
+				AND longitude IS NULL
+				AND latitude IS NULL
+				AND altitude IS NULL
+				AND retrieval_key IS NULL
+				AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL))
+	*/
+
+	// we actually keep rows with no content if they are in a relationship, or if
+	// they have a retrieval key, which implies that they will be completed later
+	// (bookmark items are also a special case: they may be empty, to later be populated
+	// by a snapshot, as long as they have metadata)
+	ij.job.tl.dbMu.RLock()
+	rows, err := ij.job.tl.db.Query(`SELECT id FROM extended_items
+		WHERE job_id=?
+		AND (data_text IS NULL OR data_text='')
+			AND (classification_name != ? OR metadata IS NULL)
+			AND data_file IS NULL
+			AND longitude IS NULL
+			AND latitude IS NULL
+			AND altitude IS NULL
+			AND retrieval_key IS NULL
+			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL)`,
+		ij.job.id, ClassBookmark.Name) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
+	if err != nil {
+		ij.job.tl.dbMu.RUnlock()
+		return fmt.Errorf("querying empty items: %w", err)
+	}
+
+	var emptyItems []int64
+	for rows.Next() {
+		var rowID int64
+		err := rows.Scan(&rowID)
+		if err != nil {
+			defer ij.job.tl.dbMu.RUnlock()
+			defer rows.Close()
+			return fmt.Errorf("scanning item: %w", err)
+		}
+		emptyItems = append(emptyItems, rowID)
+	}
+	rows.Close()
+	ij.job.tl.dbMu.RUnlock()
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("iterating item rows: %w", err)
+	}
+
+	// nothing to do if no items were empty
+	if len(emptyItems) == 0 {
+		return nil
+	}
+
+	ij.job.Logger().Info("deleting empty items from this import", zap.Int("count", len(emptyItems)))
+
+	retention := time.Duration(0)
+	return ij.job.tl.deleteItemRows(ij.job.tl.ctx, emptyItems, false, &retention)
+}
+
+// generateThumbnailsForImportedItems generates thumbnails for qualifying items
+// that were a part of the import associated with this processor. It should be
+// run after the import completes.
+// TODO: What about generating thumbnails for... just anything that needs one
+func (ij ImportJob) generateThumbnailsForImportedItems() {
+	var job thumbnailJob
+
+	// prevent duplicates
+	var (
+		dataIDs   = make(map[int64]thumbnailTask)
+		dataFiles = make(map[string]thumbnailTask)
+	)
+
+	ij.job.tl.dbMu.RLock()
+	rows, err := ij.job.tl.db.QueryContext(ij.job.tl.ctx,
+		`SELECT id, data_id, data_type, data_file
+		FROM items
+		WHERE job_id=? AND (data_file IS NOT NULL OR data_id IS NOT NULL)`, ij.job.id)
+	if err != nil {
+		ij.job.tl.dbMu.RUnlock()
+		ij.job.Logger().Error("unable to generate thumbnails from this import", zap.Error(err))
+		return
+	}
+
+	for rows.Next() {
+		var rowID int64
+		var dataID *int64
+		var dataType, dataFile *string
+
+		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
+		if err != nil {
+			defer rows.Close()
+			ij.job.Logger().Error("unable to scan row to generate thumbnails from this import", zap.Error(err))
+			ij.job.tl.dbMu.RUnlock()
+			return
+		}
+		if qualifiesForThumbnail(dataType) {
+			if dataID != nil {
+				dataIDs[*dataID] = thumbnailTask{
+					DataID:    *dataID,
+					DataType:  *dataType,
+					ThumbType: thumbnailType(*dataType, false),
+				}
+			}
+			if dataFile != nil {
+				dataFiles[*dataFile] = thumbnailTask{
+					DataFile:  *dataFile,
+					DataType:  *dataType,
+					ThumbType: thumbnailType(*dataType, false),
+				}
+			}
+		}
+	}
+	rows.Close()
+	ij.job.tl.dbMu.RUnlock()
+
+	if err = rows.Err(); err != nil {
+		ij.job.Logger().Error("iterating rows for generating thumbnails failed", zap.Error(err))
+		return
+	}
+
+	// convert maps to a slice; ordering is important for checkpoints
+	job.Tasks = make([]thumbnailTask, len(dataIDs)+len(dataFiles))
+	var i int
+	for _, task := range dataIDs {
+		job.Tasks[i] = task
+		i++
+	}
+	for _, task := range dataFiles {
+		job.Tasks[i] = task
+		i++
+	}
+
+	ij.job.Logger().Info("generating thumbnails for imported items", zap.Int("count", len(job.Tasks)))
+
+	if _, err = ij.job.tl.CreateJob(job, len(job.Tasks), 0); err != nil {
+		ij.job.Logger().Error("creating thumbnail job", zap.Error(err))
+		return
+	}
+}
+
+func (ij ImportJob) generateEmbeddingsForImportedItems() {
+	ij.job.tl.dbMu.RLock()
+	rows, err := ij.job.tl.db.QueryContext(ij.job.tl.ctx, `
+		SELECT id, data_id, data_type, data_file
+		FROM items
+		WHERE job_id=?
+			AND data_type IS NOT NULL
+			AND (data_id IS NOT NULL OR data_text IS NOT NULL OR data_file IS NOT NULL)
+		`, ij.job.id)
+	if err != nil {
+		ij.job.tl.dbMu.RUnlock()
+		ij.job.Logger().Error("unable to generate embeddings from this import", zap.Error(err))
+		return
+	}
+
+	var job embeddingJob
+	var idMap = make(map[int64]struct{}) // prevent duplicates
+
+	for rows.Next() {
+		var rowID int64
+		var dataID *int64
+		var dataType, dataFile *string
+
+		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
+		if err != nil {
+			defer rows.Close()
+			ij.job.Logger().Error("unable to scan row to generate embeddings from this import", zap.Error(err))
+			ij.job.tl.dbMu.RUnlock()
+			return
+		}
+
+		if !strings.HasPrefix(*dataType, "image/") && !strings.HasPrefix(*dataType, "text/") {
+			continue
+		}
+
+		idMap[rowID] = struct{}{}
+	}
+	rows.Close()
+	ij.job.tl.dbMu.RUnlock()
+
+	if err = rows.Err(); err != nil {
+		ij.job.Logger().Error("iterating rows for generating embeddings failed", zap.Error(err))
+		return
+	}
+
+	total := len(idMap)
+
+	// now that our read lock on the DB is released, we can take our time generating embeddings in the background
+
+	ij.job.Logger().Info("generating embeddings for imported items", zap.Int("count", total))
+
+	// convert map to slice; it's more concise in the DB and ordering is important with checkpoints
+	job.ItemIDs = make([]int64, len(idMap))
+	var i int
+	for id := range idMap {
+		job.ItemIDs[i] = id
+		i++
+	}
+
+	if _, err = ij.job.tl.CreateJob(job, total, 0); err != nil {
+		ij.job.Logger().Error("creating embedding job", zap.Error(err))
+		return
+	}
+}
+
+// couldBeMarkdown is a very naive Markdown detector. I'm trying to avoid regexp for performance,
+// but this implementation is (admittedly) mildly effective. May have lots of false positives.
+func couldBeMarkdown(input []byte) bool {
+	for _, pattern := range [][]byte{
+		// links, images, and banners
+		[]byte("](http"),
+		[]byte("](/"),
+		[]byte("!["), // images
+		[]byte("[!"), // (GitHub-flavored) banners/notices
+		// blocks
+		[]byte("\n> "),
+		[]byte("\n```"),
+		// lists
+		[]byte("\n1. "),
+		[]byte("\n- "),
+		[]byte("\n* "),
+		// headings; ignore the h1 "# " since it could just as likely be a code comment
+		[]byte("\n## "),
+		[]byte("\n### "),
+		[]byte("\n=\n"),
+		[]byte("\n==\n"),
+		[]byte("\n==="),
+		[]byte("\n-\n"),
+		[]byte("\n--\n"),
+		[]byte("\n---"),
+	} {
+		if bytes.Contains(input, pattern) {
+			return true
+		}
+	}
+	for _, pair := range [][]byte{
+		{'_'},
+		{'*', '*'},
+		{'*'},
+		{'`'},
+	} {
+		// this isn't perfect, because the matching "end token" could have been truncated
+		if count := bytes.Count(input, pair); count > 0 && count%2 == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ImportPlan describes what will be imported and how.
