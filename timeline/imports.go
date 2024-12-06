@@ -49,9 +49,13 @@ type ImportJob struct {
 }
 
 func (ij ImportJob) checkpoint(outer, inner int, ds any) error {
-	dsChkpt, err := json.Marshal(ds)
-	if err != nil {
-		return fmt.Errorf("marshaling data source checkpoint %#v: %w", ds, err)
+	var dsChkpt json.RawMessage
+	if ds != nil {
+		var err error
+		dsChkpt, err = json.Marshal(ds)
+		if err != nil {
+			return fmt.Errorf("marshaling data source checkpoint %#v: %w", ds, err)
+		}
 	}
 	return ij.job.Checkpoint(importJobCheckpoint{
 		OuterIndex:           outer,

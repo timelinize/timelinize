@@ -82,7 +82,7 @@ type Options struct {
 type FileImporter struct{}
 
 // Recognize returns whether the file or folder is recognized.
-func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	// this threshold is a little lower because it's not uncommon to have a photo library where
 	// each media file has a sidecar file for metadata, like .xmp.
 	// TODO: Should there be a way to tell the import planner to not count a non-recognized file against this threshold? kind of a "we can use this, just not by itself"?
@@ -146,10 +146,12 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 		// etc. Come to think of it, we might need to move a lot of this logic into
 		// the Google Photos importer as well.
 
-		class, supported := ItemClassByExtension(dirEntry.Name())
+		class, supported := ItemClassByExtension(d.Name())
 		if !supported {
 			// skip unsupported files by filename extension (naive, but hopefully OK)
-			params.Log.Debug("skipping unrecognized file", zap.String("filename", dirEntry.Filename))
+			params.Log.Debug("skipping unrecognized file",
+				zap.String("filename", fpath),
+				zap.String("dir_entry_name", d.Name()))
 			return nil
 		}
 

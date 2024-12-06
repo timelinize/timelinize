@@ -104,6 +104,7 @@ func (tl *Timeline) CreateJob(action JobAction, total int, repeat time.Duration)
 }
 
 // storeJob adds the job to the database. It does not start it.
+// TODO: Job configs could be compressed to save space in the DB...
 func (tl *Timeline) storeJob(tx *sql.Tx, job jobRow) (int64, error) {
 	job.Hash = job.hash()
 
@@ -203,12 +204,14 @@ func (tl *Timeline) startJob(tx *sql.Tx, jobID int64) error {
 	}
 
 	// update the job's state to started
+	now := time.Now()
 	_, err = tx.ExecContext(tl.ctx, `UPDATE jobs SET state=?, start=? WHERE id=?`, // TODO: LIMIT 1
-		JobStarted, time.Now().Unix(), jobID)
+		JobStarted, now.Unix(), jobID)
 	if err != nil {
 		return fmt.Errorf("updating job state: %w", err)
 	}
 	job.State = JobStarted
+	job.Start = &now
 
 	// run the job
 	if err = tl.runJob(job); err != nil {
@@ -257,7 +260,8 @@ func (tl *Timeline) runJob(row jobRow) error {
 			zap.String("name", string(row.Name)),
 			zap.Int64("id", row.ID),
 			zap.Time("created", row.Created),
-			zap.Timep("started", row.Start)),
+			zap.Timep("started", row.Start),
+			zap.String("timeline", tl.ID().String())),
 	}
 
 	// run the job asynchronously -- never block the calling goroutine!
@@ -272,26 +276,26 @@ func (tl *Timeline) runJob(row jobRow) error {
 		// do the job
 		actionErr := action.Run(job, row.Checkpoint)
 
-		// we'll handle the error by logging the result
-		// and updating the state
+		// we'll handle the error by logging the result and updating the state
 
+		// create new logger, because changing the job.logger is not thread-safe
 		end := time.Now()
-		job.logger = job.logger.With(zap.Time("ended", end))
+		logger := job.logger.With(zap.Time("ended", end))
 		if row.Start != nil {
-			job.logger = job.logger.With(zap.Duration("duration", end.Sub(*row.Start)))
+			logger = logger.With(zap.Duration("duration", end.Sub(*row.Start)))
 		}
 
 		var newState JobState
 		switch {
 		case actionErr == nil:
 			newState = JobSucceeded
-			job.logger.Info("job succeeded", zap.Error(actionErr))
+			logger.Info("job succeeded", zap.Error(actionErr))
 		case errors.Is(actionErr, context.Canceled):
 			newState = JobAborted
-			job.logger.Error("job aborted", zap.Error(actionErr))
+			logger.Error("job aborted", zap.Error(actionErr))
 		default:
 			newState = JobFailed
-			job.logger.Error("job failed", zap.Error(actionErr))
+			logger.Error("job failed", zap.Error(actionErr))
 		}
 
 		// when we're done here, clean up our map of active jobs
@@ -307,7 +311,7 @@ func (tl *Timeline) runJob(row jobRow) error {
 
 		tx, err := tl.db.Begin()
 		if err != nil {
-			job.logger.Error("beginning transaction", zap.Error(err))
+			logger.Error("beginning transaction", zap.Error(err))
 			return
 		}
 		defer tx.Rollback()
@@ -316,14 +320,14 @@ func (tl *Timeline) runJob(row jobRow) error {
 			`UPDATE jobs SET state=?, end=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/802)
 			newState, end.Unix(), job.id)
 		if err != nil {
-			job.logger.Error("updating job state", zap.Error(err))
+			logger.Error("updating job state", zap.Error(err))
 		}
 
 		// clear checkpoint and message sif job succeeds
 		if newState == JobSucceeded {
 			_, err = tx.ExecContext(job.Context(), `UPDATE jobs SET checkpoint=NULL, message=NULL WHERE id=?`, job.id)
 			if err != nil {
-				job.logger.Error("clearing job checkpoint and message", zap.Error(err))
+				logger.Error("clearing job checkpoint and message", zap.Error(err))
 			}
 		}
 
@@ -331,7 +335,7 @@ func (tl *Timeline) runJob(row jobRow) error {
 		// to signal that it is done running
 		err = job.updateProgress(tx, 0)
 		if err != nil {
-			job.logger.Error("syncing job progress", zap.Error(err))
+			logger.Error("syncing job progress", zap.Error(err))
 		}
 
 		var nextJobID int64
@@ -345,15 +349,15 @@ func (tl *Timeline) runJob(row jobRow) error {
 		if nextJobID > 0 {
 			err := tl.startJob(tx, nextJobID)
 			if err != nil {
-				job.logger.Error("starting next job", zap.Error(err))
+				logger.Error("starting next job", zap.Error(err))
 			}
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			job.logger.Error("querying for next job", zap.Error(err))
+			logger.Error("querying for next job", zap.Error(err))
 		}
 
 		if err = tx.Commit(); err != nil {
-			job.logger.Error("committing post-job transaction", zap.Error(err))
+			logger.Error("committing post-job transaction", zap.Error(err))
 		}
 	}(job, row, action)
 
@@ -455,6 +459,8 @@ func (j *Job) Checkpoint(newCheckpoint any) error {
 		return fmt.Errorf("JSON-encoding checkpoint %#v: %w", newCheckpoint, err)
 	}
 
+	// TODO: checkpoints should have progress at time of checkpoint bundled, so that we can restore that properly
+
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
@@ -502,7 +508,7 @@ func (j *Job) sync(tx *sql.Tx) error {
 
 	var vals []any
 	if j.progressSinceLastSync != 0 {
-		sb.WriteString("progress = progress+?")
+		sb.WriteString("progress = COALESCE(progress, 0)+?")
 		vals = append(vals, j.progressSinceLastSync)
 	}
 	if j.checkpointSinceLastSync != nil || j.clearCheckpoint {
@@ -604,7 +610,10 @@ type JobAction interface {
 	// CPU-intensive work should use the throttle. If
 	// possible, the job status should be updated as it
 	// progresses. The job has a context which should
-	// be honored.
+	// be honored. The function should not return until
+	// the job is done (whether successful or not); this
+	// means waiting until any spawned goroutines have
+	// finished (using sync.WaitGroup is good parctice).
 	Run(job *Job, checkpoint []byte) error
 }
 

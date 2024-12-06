@@ -220,10 +220,13 @@ func (p *processor) deleteEmptyItems(importID int64) error {
 // run after the import completes.
 // TODO: What about generating thumbnails for... just anything that needs one
 func (p processor) generateThumbnailsForImportedItems() {
-	job := thumbnailJob{
-		DataIDs:   make(map[int64]thumbnailTask),
-		DataFiles: make(map[string]thumbnailTask),
-	}
+	var job thumbnailJob
+
+	// prevent duplicates
+	var (
+		dataIDs   = make(map[int64]thumbnailTask)
+		dataFiles = make(map[string]thumbnailTask)
+	)
 
 	p.tl.dbMu.RLock()
 	rows, err := p.tl.db.QueryContext(p.tl.ctx,
@@ -245,25 +248,23 @@ func (p processor) generateThumbnailsForImportedItems() {
 
 		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
 		if err != nil {
+			defer rows.Close()
 			p.log.Error("unable to scan row to generate thumbnails from this import",
 				zap.Int64("job_id", p.ij.job.id),
 				zap.Error(err))
-			rows.Close()
 			p.tl.dbMu.RUnlock()
 			return
 		}
 		if qualifiesForThumbnail(dataType) {
 			if dataID != nil {
-				job.DataIDs[*dataID] = thumbnailTask{
-					tl:        p.tl,
-					DataID:    rowID,
+				dataIDs[*dataID] = thumbnailTask{
+					DataID:    *dataID,
 					DataType:  *dataType,
 					ThumbType: thumbnailType(*dataType, false),
 				}
 			}
 			if dataFile != nil {
-				job.DataFiles[*dataFile] = thumbnailTask{
-					tl:        p.tl,
+				dataFiles[*dataFile] = thumbnailTask{
 					DataFile:  *dataFile,
 					DataType:  *dataType,
 					ThumbType: thumbnailType(*dataType, false),
@@ -281,11 +282,21 @@ func (p processor) generateThumbnailsForImportedItems() {
 		return
 	}
 
-	total := len(job.DataFiles) + len(job.DataIDs)
+	// convert maps to a slice; ordering is important for checkpoints
+	job.Tasks = make([]thumbnailTask, len(dataIDs)+len(dataFiles))
+	var i int
+	for _, task := range dataIDs {
+		job.Tasks[i] = task
+		i++
+	}
+	for _, task := range dataFiles {
+		job.Tasks[i] = task
+		i++
+	}
 
-	p.log.Info("generating thumbnails for imported items", zap.Int("count", total))
+	p.log.Info("generating thumbnails for imported items", zap.Int("count", len(job.Tasks)))
 
-	if _, err = p.tl.CreateJob(job, total, 0); err != nil {
+	if _, err = p.tl.CreateJob(job, len(job.Tasks), 0); err != nil {
 		p.log.Error("creating thumbnail job", zap.Error(err))
 		return
 	}
@@ -294,7 +305,7 @@ func (p processor) generateThumbnailsForImportedItems() {
 func (p processor) generateEmbeddingsForImportedItems() {
 	p.tl.dbMu.RLock()
 	rows, err := p.tl.db.QueryContext(p.tl.ctx, `
-		SELECT id, data_id, data_type, data_text, data_file
+		SELECT id, data_id, data_type, data_file
 		FROM items
 		WHERE job_id=?
 			AND data_type IS NOT NULL
@@ -308,21 +319,20 @@ func (p processor) generateEmbeddingsForImportedItems() {
 		return
 	}
 
-	job := embeddingJob{
-		ItemIDs: make(map[int64]embeddingTask),
-	}
+	var job embeddingJob
+	var idMap = make(map[int64]struct{}) // prevent duplicates
 
 	for rows.Next() {
 		var rowID int64
 		var dataID *int64
-		var dataType, dataText, dataFile *string
+		var dataType, dataFile *string
 
-		err := rows.Scan(&rowID, &dataID, &dataType, &dataText, &dataFile)
+		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
 		if err != nil {
+			defer rows.Close()
 			p.log.Error("unable to scan row to generate embeddings from this import",
 				zap.Int64("job_id", p.ij.job.id),
 				zap.Error(err))
-			rows.Close()
 			p.tl.dbMu.RUnlock()
 			return
 		}
@@ -331,8 +341,7 @@ func (p processor) generateEmbeddingsForImportedItems() {
 			continue
 		}
 
-		// TODO: use thumbnails if available, maybe that should be used instead?
-		job.ItemIDs[rowID] = embeddingTask{p.tl, rowID, *dataType, dataID, dataText, dataFile}
+		idMap[rowID] = struct{}{}
 	}
 	rows.Close()
 	p.tl.dbMu.RUnlock()
@@ -344,11 +353,19 @@ func (p processor) generateEmbeddingsForImportedItems() {
 		return
 	}
 
-	total := len(job.ItemIDs)
+	total := len(idMap)
 
 	// now that our read lock on the DB is released, we can take our time generating embeddings in the background
 
 	p.log.Info("generating embeddings for imported items", zap.Int("count", total))
+
+	// convert map to slice; it's more concise in the DB and ordering is important with checkpoints
+	job.ItemIDs = make([]int64, len(idMap))
+	var i int
+	for id := range idMap {
+		job.ItemIDs[i] = id
+		i++
+	}
 
 	if _, err = p.tl.CreateJob(job, total, 0); err != nil {
 		p.log.Error("creating embedding job", zap.Error(err))

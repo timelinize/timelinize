@@ -692,7 +692,7 @@ type ItemRow struct {
 	TimeUncertainty      *int64          `json:"time_uncertainty,omitempty"`
 	Stored               time.Time       `json:"stored,omitempty"`
 	Modified             *time.Time      `json:"modified,omitempty"`
-	DataID               *int64          `json:"data_id"`
+	DataID               *int64          `json:"data_id,omitempty"`
 	DataType             *string         `json:"data_type,omitempty"`
 	DataText             *string         `json:"data_text,omitempty"`
 	DataFile             *string         `json:"data_file,omitempty"` // must NOT be a pointer to an Item.dataFileName value (should be its own copy!)

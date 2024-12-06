@@ -53,7 +53,7 @@ on('click', '.dsgroup-remove-row', event => {
 	// remove entire DS group (and its DS options modal, if any) if no files left
 	if (dsgroup.filenames.length == 0) {
 		dsgroup.remove();
-		$(`#modal-import-dsopt-${dsgroup.ds.name}`).remove();
+		$(`#modal-import-dsopt-${dsgroup.ds.name}`)?.remove();
 	} else {
 		updateFileCountDisplays(dsgroup);
 	}

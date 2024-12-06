@@ -134,7 +134,7 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 		}
 		ds.NewAPIImporter = nil
 
-		// TODO: Start the the faker import job! Old code:
+		// TODO: Start the faker import job! Old code:
 
 		// importParams := ImportParameters{
 		// 	DataSourceName:    ds.Name,

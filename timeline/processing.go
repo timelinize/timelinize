@@ -99,6 +99,17 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 							zap.Int("worker", workerNum),
 							zap.Error(err))
 					}
+
+					// update job progress
+					var batchSize int
+					for _, g := range batch {
+						batchSize += g.Size()
+					}
+					if err := p.ij.job.UpdateProgress(batchSize); err != nil {
+						p.log.Error("could not update job progress",
+							zap.Int("worker", workerNum),
+							zap.Error(err))
+					}
 				}
 			}
 

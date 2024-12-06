@@ -652,7 +652,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	if vectorSearch {
 		if params.QueryText != "" {
 			// search relative to an arbitrary input (TODO: support image inputs too)
-			embedding, err := GenerateSerializedEmbedding(tl.ctx, "text/plain", []byte(params.QueryText))
+			embedding, err := GenerateSerializedEmbedding(tl.ctx, "text/plain", []byte(params.QueryText), nil)
 			if err != nil {
 				return "", nil, err
 			}

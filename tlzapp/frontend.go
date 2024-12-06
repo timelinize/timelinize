@@ -287,10 +287,24 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 			Message:    "invalid syntax for Accept header",
 		}
 	}
+
+	dataType := r.FormValue("data_type")
+
+	// figure out what type of thumbnail to serve, taking into account
+	// both server and client preferences; by default (if client has no
+	// preference), server prefers an image thumbnail if it's an image,
+	// or a video thumbnail if it's a video; but we can also honor
+	// client preference (for example, videos can have animated image
+	// thumbnails)
+	ourPref := []string{"image/*", "video/*"}
+	if strings.HasPrefix(dataType, "video/") {
+		ourPref[0], ourPref[1] = ourPref[1], ourPref[0]
+	}
 	thumbType := timeline.ImageAVIF
-	if clientPref := accept.preference("image/*", "video/*"); clientPref == "video/*" {
+	if clientPref := accept.preference(ourPref...); clientPref == "video/*" {
 		thumbType = timeline.VideoWebM
 	}
+
 	// sigh, precious Safari and its <video><source> tag...
 	if len(accept) == 1 && accept[0].mimeType == "*/*" {
 		if r.Header.Get("Sec-Fetch-Dest") == "video" {
@@ -298,7 +312,7 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 		}
 	}
 
-	thumb, err := tl.Thumbnail(r.Context(), itemDataID, r.FormValue("data_file"), r.FormValue("data_type"), thumbType)
+	thumb, err := tl.Thumbnail(r.Context(), itemDataID, r.FormValue("data_file"), dataType, thumbType)
 	if err != nil {
 		return fmt.Errorf("unable to provide thumbnail: %w", err)
 	}

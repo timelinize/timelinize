@@ -1,6 +1,6 @@
 module github.com/timelinize/timelinize
 
-go 1.22.5
+go 1.23.3
 
 toolchain go1.23.1
 
@@ -14,19 +14,20 @@ require (
 	github.com/davidbyttow/govips/v2 v2.15.0
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/galdor/go-thumbhash v1.0.1-0.20240227061205-5f40e920ff45
+	github.com/gen2brain/avif v0.4.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/maruel/natural v1.1.1
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/mholt/archives v0.0.0-20241203232558-998c9622f6b8
+	github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e
 	github.com/mholt/goexif2 v0.0.0-20230302025153-4d89d35092b2
 	github.com/signal-golang/go-vcard v0.1.2
-	github.com/strukturag/libheif v1.19.5
-	github.com/trimmer-io/go-xmp v1.0.0
 	github.com/ttacon/libphonenumber v1.2.1
 	github.com/zeebo/blake3 v0.2.4
 	go.uber.org/zap v1.27.0
+	golang.org/x/image v0.23.0
 	golang.org/x/oauth2 v0.24.0
 	howett.net/plist v1.0.1
 )
@@ -59,6 +60,7 @@ require (
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/ebitengine/purego v0.8.1 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
 	github.com/go-kit/kit v0.13.0 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
@@ -129,6 +131,7 @@ require (
 	github.com/ssor/bom v0.0.0-20170718123548-6386211fdfcf // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/tailscale/tscert v0.0.0-20240517230440-bbccfbf48933 // indirect
+	github.com/tetratelabs/wazero v1.8.1 // indirect
 	github.com/therootcompany/xz v1.0.1 // indirect
 	github.com/ttacon/builder v0.0.0-20170518171403-c099f663e1c2 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
@@ -145,13 +148,12 @@ require (
 	golang.org/x/crypto v0.26.0 // indirect
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20240507223354-67b13616a595 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
-	golang.org/x/image v0.19.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/sync v0.9.0 // indirect
+	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.23.0 // indirect
 	golang.org/x/term v0.23.0 // indirect
-	golang.org/x/text v0.20.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240506185236-b8a5c65736ae // indirect

@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"go.uber.org/zap"
@@ -35,17 +36,8 @@ import (
 const mlServer = "http://127.0.0.1:12003/"
 
 type embeddingJob struct {
-	// map key is item ID; useful for deduplicating if shared by other items
-	ItemIDs map[int64]embeddingTask `json:"item_ids,omitempty"`
-}
-
-type embeddingTask struct {
-	tl       *Timeline
-	ItemID   int64   `json:"item_id,omitempty"`
-	DataType string  `json:"data_type,omitempty"`
-	DataID   *int64  `json:"data_id,omitempty"`
-	DataText *string `json:"data_text,omitempty"`
-	DataFile *string `json:"data_file,omitempty"`
+	// be sure not to include duplicates in this list
+	ItemIDs []int64 `json:"item_ids,omitempty"`
 }
 
 func (ej embeddingJob) Run(job *Job, checkpoint []byte) error {
@@ -62,80 +54,71 @@ func (ej embeddingJob) Run(job *Job, checkpoint []byte) error {
 	// we need just enough to keep the CPU-intensive parts busy
 	goroutineThrottle := make(chan struct{}, 20)
 
-	for _, task := range ej.ItemIDs {
+	var wg sync.WaitGroup
+
+	for _, itemID := range ej.ItemIDs {
 		goroutineThrottle <- struct{}{}
+		wg.Add(1)
+
 		// TODO: Should we just use the cpuIntensiveThrottle for these (and move those throttles out to here)?
 		// TODO: It'd be nice if we could batch our DB operations.
-		go func(job *Job, task embeddingTask) {
-			err := task.generateEmbeddingForItem(job.Context())
+		go func(job *Job, itemID int64) {
+			defer wg.Done()
+
+			err := ej.generateEmbeddingForItem(job.Context(), job, itemID)
 			if err != nil {
 				job.logger.Error("failed generating embedding",
-					zap.Int64("job_id", job.ID()),
-					zap.Int64("item_id", task.ItemID),
-					zap.String("data_type", task.DataType),
-					zap.Stringp("data_file", task.DataFile),
-					zap.Stringp("data_text", task.DataText),
+					zap.Int64("item_id", itemID),
 					zap.Error(err))
 			}
+
+			if err := job.UpdateProgress(1); err != nil {
+				job.logger.Error("updating job progress", zap.Error(err))
+			}
+
 			<-goroutineThrottle
-		}(job, task)
+		}(job, itemID)
 	}
+
+	wg.Wait()
 
 	return nil
 }
 
-func GenerateSerializedEmbedding(ctx context.Context, dataType string, data []byte) ([]byte, error) {
-	embedding, err := generateEmbedding(ctx, dataType, data, nil)
-	if err != nil {
-		return nil, err
-	}
-	v, err := sqlite_vec.SerializeFloat32(embedding)
-	if err != nil {
-		return nil, fmt.Errorf("serializing embedding: %w", err)
-	}
-	return v, nil
-}
-
-func (task embeddingTask) generateEmbeddingForItem(ctx context.Context) error {
-	if (task.DataFile != nil && task.DataText != nil) ||
-		(task.DataFile != nil && task.DataID != nil) ||
-		(task.DataID != nil && task.DataText != nil) {
-		panic("embedding task: only one of data_file, data_text, and data_id can be set")
-	}
-
+func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Job, itemID int64) error {
 	var data []byte
-	var filename *string
+	var dataFile, dataText, dataType, filename *string
 
-	if task.DataID != nil {
-		task.tl.dbMu.RLock()
-		err := task.tl.db.QueryRowContext(ctx, `SELECT content FROM item_data WHERE id=? LIMIT 1`, *task.DataID).Scan(&data)
-		task.tl.dbMu.RUnlock()
-		if err != nil {
-			return fmt.Errorf("querying item content: %w", err)
-		}
+	job.tl.dbMu.RLock()
+	err := job.tl.db.QueryRowContext(ctx,
+		`SELECT items.data_file, items.data_text, items.data_type, item_data.content
+		FROM items
+		LEFT JOIN item_data ON item_data.id = items.data_id
+		WHERE items.id=?
+		LIMIT 1`, itemID).Scan(&dataFile, &dataText, &dataType, &data)
+	job.tl.dbMu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("querying item for which to generate embedding: %w", err)
 	}
-	if task.DataText != nil {
-		data = []byte(*task.DataText)
+	if dataType == nil {
+		return fmt.Errorf("item %d has no data type", itemID)
 	}
-	if task.DataFile != nil {
-		fn := task.tl.FullPath(*task.DataFile)
+
+	// convert data file path (if there is one) into a full filename
+	if dataFile != nil {
+		fn := job.tl.FullPath(*dataFile)
 		filename = &fn
 	}
 
-	embedding, err := generateEmbedding(ctx, task.DataType, data, filename)
+	v, err := GenerateSerializedEmbedding(ctx, *dataType, data, filename)
 	if err != nil {
 		return err
 	}
 
-	v, err := sqlite_vec.SerializeFloat32(embedding)
-	if err != nil {
-		return fmt.Errorf("serializing embedding: %w", err)
-	}
+	job.tl.dbMu.Lock()
+	defer job.tl.dbMu.Unlock()
 
-	task.tl.dbMu.Lock()
-	defer task.tl.dbMu.Unlock()
-
-	tx, err := task.tl.db.Begin()
+	tx, err := job.tl.db.Begin()
 	if err != nil {
 		return fmt.Errorf("opening transaction: %w", err)
 	}
@@ -144,18 +127,18 @@ func (task embeddingTask) generateEmbeddingForItem(ctx context.Context) error {
 	// TODO: Why don't we use RETURNING here? is it because the tx isn't committed?
 	_, err = tx.ExecContext(ctx, "INSERT INTO embeddings (embedding) VALUES (?)", v)
 	if err != nil {
-		return fmt.Errorf("storing embedding for item %d: %w", task.ItemID, err)
+		return fmt.Errorf("storing embedding for item %d: %w", itemID, err)
 	}
 
 	var embedRowID int64
 	err = tx.QueryRowContext(ctx, "SELECT last_insert_rowid() FROM embeddings LIMIT 1").Scan(&embedRowID)
 	if err != nil {
-		return fmt.Errorf("getting last-stored embedding ID for item %d: %w", task.ItemID, err)
+		return fmt.Errorf("getting last-stored embedding ID for item %d: %w", itemID, err)
 	}
 
-	_, err = tx.Exec(`UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, task.ItemID) // TODO: LIMIT 1
+	_, err = tx.Exec(`UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, itemID) // TODO: LIMIT 1
 	if err != nil {
-		return fmt.Errorf("linking item %d to embedding: %w", task.ItemID, err)
+		return fmt.Errorf("linking item %d to embedding: %w", itemID, err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -163,6 +146,18 @@ func (task embeddingTask) generateEmbeddingForItem(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func GenerateSerializedEmbedding(ctx context.Context, dataType string, data []byte, filename *string) ([]byte, error) {
+	embedding, err := generateEmbedding(ctx, dataType, data, filename)
+	if err != nil {
+		return nil, err
+	}
+	v, err := sqlite_vec.SerializeFloat32(embedding)
+	if err != nil {
+		return nil, fmt.Errorf("serializing embedding: %w", err)
+	}
+	return v, nil
 }
 
 func generateEmbedding(ctx context.Context, dataType string, data []byte, filename *string) ([]float32, error) {
