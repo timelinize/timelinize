@@ -30,7 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mholt/archiver/v4"
+	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -69,47 +69,37 @@ const (
 )
 
 // Recognize returns whether the file or folder is supported.
-func (FileImporter) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
-	for _, filename := range filenames {
-		baseName := filepath.Base(filename)
-		if baseName != icloudInfoZip &&
-			baseName != icloudContactsZip &&
-			baseName != icloudPhotosZip &&
-			!strings.HasPrefix(baseName, "iCloud Photos Part ") {
-			return timeline.Recognition{}, nil
-		}
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+	if dirEntry.Name() != icloudInfoZip &&
+		dirEntry.Name() != icloudContactsZip &&
+		dirEntry.Name() != icloudPhotosZip &&
+		!strings.HasPrefix(dirEntry.Name(), "iCloud Photos Part ") {
+		return timeline.Recognition{}, nil
 	}
 	return timeline.Recognition{Confidence: 1}, nil
 }
 
 // FileImport imports data from a file or folder.
-func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	for _, filename := range filenames {
-		baseName := filepath.Base(filename)
-		switch baseName {
-		case icloudInfoZip:
-			// TODO: implement
-		case icloudContactsZip:
-			// TODO: implement
-		case icloudPhotosZip:
-			fallthrough
-		default:
-			if baseName == icloudPhotosZip || strings.HasPrefix(baseName, "iCloud Photos Part ") {
-				fsys, err := archiver.FileSystem(ctx, filename)
-				if err != nil {
-					return err
-				}
-				topDir := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	switch dirEntry.Name() {
+	case icloudInfoZip:
+		// TODO: implement
+	case icloudContactsZip:
+		// TODO: implement
+	case icloudPhotosZip:
+		fallthrough
+	default:
+		if dirEntry.Name() == icloudPhotosZip || strings.HasPrefix(dirEntry.Name(), "iCloud Photos Part ") {
+			topDir := strings.TrimSuffix(dirEntry.Name(), filepath.Ext(dirEntry.Name()))
 
-				err = fi.importPhotos(ctx, topDir, fsys, itemChan, opt)
-				if err != nil {
-					return err
-				}
+			err := fi.importPhotos(ctx, topDir, dirEntry, params)
+			if err != nil {
+				return err
+			}
 
-				err = fi.importAlbumsAndMemories(ctx, topDir, fsys, itemChan, opt)
-				if err != nil {
-					return err
-				}
+			err = fi.importAlbumsAndMemories(ctx, topDir, dirEntry, params)
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -118,7 +108,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 
 const yes = "yes"
 
-func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys fs.FS, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, d timeline.DirEntry, opt timeline.ImportParams) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 	owner := timeline.Entity{ID: dsOpt.OwnerEntityID}
 
@@ -132,7 +122,7 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 			}
 			filename += ".csv"
 
-			detailsFile, err := archiver.TopDirOpen(fsys, path.Join(fsysName, "Photos", filename))
+			detailsFile, err := d.TopDirOpen(path.Join(fsysName, "Photos", filename))
 			if errors.Is(err, fs.ErrNotExist) {
 				return true, nil
 			}
@@ -184,8 +174,11 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 				imgName := row[cols["imgName"]]
 				imgPath := path.Join(fsysName, subfolder, imgName)
 
+				// since we may be operating in a sub-folder of the FS, be sure to account for that
+				imgPath = path.Join(d.Filename, imgPath)
+
 				// skip sidecar videos that are part of live photos (we'll connect it when we process the associated image file)
-				if media.IsSidecarVideo(fsys, imgPath) {
+				if media.IsSidecarVideo(d.FS, imgPath) {
 					continue
 				}
 
@@ -203,7 +196,7 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 					Content: timeline.ItemData{
 						Filename: imgName,
 						Data: func(_ context.Context) (io.ReadCloser, error) {
-							return archiver.TopDirOpen(fsys, imgPath)
+							return archives.TopDirOpen(d.FS, imgPath) // imgPath already prepended the DirEntry Filename
 						},
 					},
 					Metadata: timeline.Metadata{
@@ -223,7 +216,7 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 				}
 
 				// get as much metadata as possible from the picture
-				_, err = media.ExtractAllMetadata(opt.Log, fsys, imgPath, item, timeline.MetaMergeAppend)
+				_, err = media.ExtractAllMetadata(opt.Log, d.FS, imgPath, item, timeline.MetaMergeAppend)
 				if err != nil {
 					opt.Log.Warn("extracting metadata",
 						zap.String("file", imgPath),
@@ -232,9 +225,9 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 
 				ig := &timeline.Graph{Item: item}
 
-				media.ConnectMotionPhoto(opt.Log, fsys, imgPath, ig)
+				media.ConnectMotionPhoto(opt.Log, d.FS, imgPath, ig)
 
-				itemChan <- ig
+				opt.Pipeline <- ig
 			}
 
 			return false, nil
@@ -249,9 +242,9 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, fsys 
 	return nil
 }
 
-func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName string, fsys fs.FS, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName string, d timeline.DirEntry, opt timeline.ImportParams) error {
 	// albums
-	entries, err := archiver.TopDirReadDir(fsys, path.Join(fsysName, "Albums"))
+	entries, err := d.TopDirReadDir(path.Join(fsysName, "Albums"))
 	if err != nil {
 		return err
 	}
@@ -260,19 +253,19 @@ func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName st
 		if entry.Name() == "RAW.csv" {
 			continue
 		}
-		err := fi.importAlbumOrMemory(ctx, fsysName, fsys, path.Join(fsysName, "Albums", entry.Name()), itemChan, opt)
+		err := fi.importAlbumOrMemory(ctx, fsysName, d, path.Join(fsysName, "Albums", entry.Name()), opt)
 		if err != nil {
 			return err
 		}
 	}
 
 	// memories
-	entries, err = archiver.TopDirReadDir(fsys, path.Join(fsysName, "Memories"))
+	entries, err = d.TopDirReadDir(path.Join(fsysName, "Memories"))
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
-		err := fi.importAlbumOrMemory(ctx, fsysName, fsys, path.Join(fsysName, "Memories", entry.Name()), itemChan, opt)
+		err := fi.importAlbumOrMemory(ctx, fsysName, d, path.Join(fsysName, "Memories", entry.Name()), opt)
 		if err != nil {
 			return err
 		}
@@ -281,7 +274,7 @@ func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName st
 	return nil
 }
 
-func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string, fsys fs.FS, albumPath string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string, d timeline.DirEntry, albumPath string, opt timeline.ImportParams) error {
 	dsOpt := opt.DataSourceOptions.(*Options)
 	owner := timeline.Entity{ID: dsOpt.OwnerEntityID}
 
@@ -296,7 +289,7 @@ func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string
 		Owner: owner,
 	}
 
-	albumListing, err := archiver.TopDirOpen(fsys, albumPath)
+	albumListing, err := d.TopDirOpen(albumPath)
 	if err != nil {
 		return err
 	}
@@ -339,6 +332,9 @@ func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string
 		imgName := row[cols["imgName"]]
 		imgPath := path.Join(fsysName, "Photos", imgName)
 
+		// since we may be operating in a sub-folder of the FS, be sure to account for that
+		imgPath = path.Join(d.Filename, imgPath)
+
 		class, supported := media.ItemClassByExtension(imgName)
 		if !supported {
 			// skip unsupported files by filename extension (naive, but hopefully OK)
@@ -353,13 +349,13 @@ func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string
 			Content: timeline.ItemData{
 				Filename: imgName,
 				Data: func(_ context.Context) (io.ReadCloser, error) {
-					return archiver.TopDirOpen(fsys, imgPath)
+					return archives.TopDirOpen(d.FS, imgPath) // imgPath already prepended the DirEntry Filename
 				},
 			},
 		}
 
 		// get as much metadata as possible from the picture
-		_, err = media.ExtractAllMetadata(opt.Log, fsys, imgPath, item, timeline.MetaMergeAppend)
+		_, err = media.ExtractAllMetadata(opt.Log, d.FS, imgPath, item, timeline.MetaMergeAppend)
 		if err != nil {
 			opt.Log.Warn("extracting metadata",
 				zap.String("file", imgPath),
@@ -371,7 +367,7 @@ func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string
 
 		pos++
 
-		itemChan <- ig
+		opt.Pipeline <- ig
 	}
 
 	return nil

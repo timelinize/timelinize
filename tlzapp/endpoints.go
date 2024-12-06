@@ -142,17 +142,17 @@ func (a *App) registerCommands() {
 			Payload: openRepoPayload{},
 			Help:    "Open a timeline repository.",
 		},
+		"plan-import": {
+			Handler: a.server.handlePlanImport,
+			Method:  http.MethodPost,
+			Payload: PlannerOptions{},
+			Help:    "Proposes an import plan in preparation for performing a data import.",
+		},
 		"recent-conversations": {
 			Handler: a.server.handleRecentConversations,
 			Method:  http.MethodPost,
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Loads recent conversations.",
-		},
-		"recognize": {
-			Handler: a.server.handleRecognize,
-			Method:  http.MethodPost,
-			Payload: []string{},
-			Help:    "Returns the list of data sources that recognize the given file/folder names.",
 		},
 		"repository-empty": {
 			Handler: a.server.handleRepositoryEmpty,

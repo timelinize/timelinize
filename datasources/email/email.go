@@ -29,12 +29,10 @@ import (
 	"io/fs"
 	"net/mail"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jhillyerd/enmime"
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -56,62 +54,22 @@ func init() {
 type FileImporter struct{}
 
 // Recognize returns whether the file is recognized for this data source.
-func (fi FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
+func (fi FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	rec := timeline.Recognition{DirThreshold: 0.9}
+
+	// special case: Google Takeout archive with mail folder
+	if timeline.FileExistsFS(dirEntry.FS, googleTakeoutMailFolder) {
+		rec.Confidence = 1
+		return rec, nil
+	}
+
 	// TODO: proper detection, not just filename
-
-	var totalCount, matchCount int
-
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-
-		if timeline.FileExistsFS(fsys, googleTakeoutMailFolder) {
-			return timeline.Recognition{Confidence: 1}, nil
-		}
-
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if fpath == "." {
-					return nil
-				}
-				return fs.SkipDir // don't walk subfolders; it's uncommon and slower
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-
-			totalCount++
-
-			ext := strings.ToLower(filepath.Ext(fpath))
-			if ext == extMbox || ext == extEml {
-				matchCount++
-			}
-
-			return nil
-		})
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
+	ext := strings.ToLower(path.Ext(dirEntry.Filename))
+	if ext == extMbox || ext == extEml {
+		rec.Confidence = 1
 	}
 
-	var confidence float64
-	if totalCount > 0 {
-		confidence = float64(matchCount) / float64(totalCount)
-	}
-
-	return timeline.Recognition{Confidence: confidence}, nil
+	return rec, nil
 }
 
 // Options configures the data source.
@@ -121,128 +79,117 @@ type Options struct {
 }
 
 // FileImport imports data from a file.
-func (fi FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	dsOpt := opt.DataSourceOptions.(*Options)
+func (fi FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	dsOpt := params.DataSourceOptions.(*Options)
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
+	// as a special case, support Google Takeout's "Mail" folder
+	walkDir := dirEntry.Filename
+	if timeline.FileExistsFS(dirEntry.FS, googleTakeoutMailFolder) {
+		walkDir = googleTakeoutMailFolder
+	}
+
+	err := fs.WalkDir(dirEntry.FS, walkDir, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
-		// as a special case, support Google Takeout's "Mail" folder
-		walkDir := "."
-		if timeline.FileExistsFS(fsys, googleTakeoutMailFolder) {
-			walkDir = googleTakeoutMailFolder
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir // skip hidden files & folders
+		}
+		if d.IsDir() {
+			return nil // traverse into subdirectories
 		}
 
-		err = fs.WalkDir(fsys, walkDir, func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil // traverse into subdirectories
-			}
-
-			// skip unsupported file types
-			ext := path.Ext(strings.ToLower(fpath))
-			if ext != ".eml" && ext != ".mbox" {
-				return nil
-			}
-
-			file, err := fsys.Open(fpath)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			// .eml files are easy: should be just a single message in them
-			if path.Ext(strings.ToLower(fpath)) == ".eml" {
-				msg := message{mboxName: filepath.Base(filename)}
-				fi.processMessage(file, msg, itemChan, opt, dsOpt)
-				return nil
-			}
-
-			// .mbox files contain multiple messages
-			bufr := bufio.NewReader(file)
-
-			// we gradually fill buf with every line we read,
-			// and we'll keep current message state in msg
-			buf := new(bytes.Buffer)
-			msg := message{mboxName: filepath.Base(filename)}
-
-			// read each line of the mbox file, looking for boundary/separator
-			// lines that start with "From ", and fill the buffer up to each one
-			for {
-				// check for context cancellation
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-
-				line, err := bufr.ReadBytes('\n')
-				if errors.Is(err, io.EOF) {
-					// don't forget to process last message in file
-					fi.processMessage(buf, msg, itemChan, opt, dsOpt)
-					break
-				}
-				if err != nil {
-					return err
-				}
-
-				// if not at a message boundary, append to buffer and continue
-				if !isBoundary(line, buf) {
-					buf.Write(line)
-					continue
-				}
-
-				// reached message boundary
-
-				// process buffered message and reset for next one
-				if buf.Len() > 0 {
-					fi.processMessage(buf, msg, itemChan, opt, dsOpt)
-					buf.Reset()
-					msg = message{mboxName: filepath.Base(filename), index: msg.index + 1}
-				}
-
-				// boundary lines are anything goes, but generally we see a gibberish email address followed by a timestamp
-				if err = parseFromLine(&msg, line); err != nil {
-					opt.Log.Warn("invalid or unrecognized 'From ' boundary line fields", zap.Error(err))
-				}
-			}
-
+		// skip unsupported file types
+		ext := path.Ext(strings.ToLower(d.Name()))
+		if ext != extEml && ext != extMbox {
 			return nil
-		})
+		}
+
+		file, err := dirEntry.FS.Open(fpath)
 		if err != nil {
 			return err
 		}
+		defer file.Close()
+
+		// .eml files are easy: should be just a single message in them
+		if ext == extEml {
+			msg := message{mboxName: d.Name()}
+			fi.processMessage(file, msg, params, dsOpt)
+			return nil
+		}
+
+		// .mbox files contain multiple messages
+		bufr := bufio.NewReader(file)
+
+		// we gradually fill buf with every line we read,
+		// and we'll keep current message state in msg
+		buf := new(bytes.Buffer)
+		msg := message{mboxName: d.Name()}
+
+		// read each line of the mbox file, looking for boundary/separator
+		// lines that start with "From ", and fill the buffer up to each one
+		for {
+			// check for context cancellation
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			line, err := bufr.ReadBytes('\n')
+			if errors.Is(err, io.EOF) {
+				// don't forget to process last message in file
+				fi.processMessage(buf, msg, params, dsOpt)
+				break
+			}
+			if err != nil {
+				return err
+			}
+
+			// if not at a message boundary, append to buffer and continue
+			if !isBoundary(line, buf) {
+				buf.Write(line)
+				continue
+			}
+
+			// reached message boundary
+
+			// process buffered message and reset for next one
+			if buf.Len() > 0 {
+				fi.processMessage(buf, msg, params, dsOpt)
+				buf.Reset()
+				msg = message{mboxName: d.Name(), index: msg.index + 1}
+			}
+
+			// boundary lines are anything goes, but generally we see a gibberish email address followed by a timestamp
+			if err = parseFromLine(&msg, line); err != nil {
+				params.Log.Warn("invalid or unrecognized 'From ' boundary line fields", zap.Error(err))
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (fi FileImporter) processMessage(r io.Reader, msg message, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions, dsOpt *Options) {
-	ig, err := fi.messageToGraph(r, msg, opt, dsOpt)
+func (fi FileImporter) processMessage(r io.Reader, msg message, params timeline.ImportParams, dsOpt *Options) {
+	graph, err := fi.messageToGraph(r, msg, params, dsOpt)
 	if err != nil {
-		opt.Log.Error("building item graph from envelope",
+		params.Log.Error("building item graph from envelope",
 			zap.Error(err),
 			zap.Int("message_index", msg.index))
 	}
-	if ig != nil {
-		itemChan <- ig
+	if graph != nil {
+		params.Pipeline <- graph
 	}
 }
 
-func (FileImporter) messageToGraph(r io.Reader, msg message, opt timeline.ListingOptions, dsOpt *Options) (*timeline.Graph, error) {
+func (FileImporter) messageToGraph(r io.Reader, msg message, opt timeline.ImportParams, dsOpt *Options) (*timeline.Graph, error) {
 	// parse message
 	env, err := enmime.ReadEnvelope(r)
 	if err != nil {
@@ -281,7 +228,7 @@ func parseFromLine(msg *message, line []byte) error {
 
 // itemGraphFromEnvelope builds the message's item graph. It may return nil and nil if the message
 // is to be skipped, either because of a severe error that was logged, or configuration options.
-func itemGraphFromEnvelope(m message, opt timeline.ListingOptions, dsOpt *Options) (*timeline.Graph, error) {
+func itemGraphFromEnvelope(m message, opt timeline.ImportParams, dsOpt *Options) (*timeline.Graph, error) {
 	// checkErrors returns the first severe error, and logs all others.
 	checkErrors := func(part *enmime.Part) error {
 		for _, err := range part.Errors {

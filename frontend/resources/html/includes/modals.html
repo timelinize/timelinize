@@ -1,128 +1,96 @@
-<div id="modal-import" class="modal modal-blur fade" data-bs-backdrop="static" tabindex="-1" role="dialog" aria-hidden="true">
-	<div class="modal-dialog modal-lg" role="document">
-		<div class="modal-content">
-			<div class="modal-header">
-
-				<h5 class="modal-title">Timelinize file(s)</h5>
-				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-
+<template id="tpl-dsopt-media">
+	<fieldset class="form-fieldset mb-0">
+		<div class="mb-4 row">
+			<label class="col-4 col-form-label">Owner</label>
+			<div class="col">
+				<select class="media-owner form-select" placeholder="Name or contact info">
+				</select>
+				<div class="small form-hint">
+					Select the person whose media data this is.
+				</div>
 			</div>
-			<div class="modal-body">
-
-				<ul class="steps steps-vertical steps-counter">
-
-					<li id="import-step-choose-files" class="step-item active pb-3">
-						<div class="step-title form-label required mb-3 h2 lh-1">Choose file or folder</div>
-						<fieldset class="file-picker-container form-fieldset">
-
-						</fieldset>
-					</li>
-
-					<li id="import-step-data-source" class="step-item pb-3">
-						<div class="step-title form-label">Confirm data source</div>
-
-						<!-- placeholders for recognize results -->
-						<div class="recognize-placeholders row d-none">
-							<div class="col-lg-6 mb-2 d-flex placeholder-glow">
-								<label class="form-selectgroup-item flex-fill">
-									<input type="radio" class="form-selectgroup-input placeholder" disabled>
-									<span class="form-selectgroup-label d-flex align-items-center p-3 h-100">
-										<span class="me-3">
-											<span class="form-selectgroup-check placeholder"></span>
-										</span>
-										<div class="form-selectgroup-label-content d-flex align-items-center w-100">
-											<span class="avatar flex-shrink-0 me-3 placeholder"></span>
-											<div class="row flex-fill">
-												<div class="placeholder col-8 mb-1"></div>
-												<div class="placeholder placeholder-xs col-6"></div>
-											</div>
-										</div>
-									</span>
-								</label>
-							</div>
-							<div class="col-lg-6 mb-2 d-flex placeholder-glow">
-								<label class="form-selectgroup-item flex-fill">
-									<input type="radio" class="form-selectgroup-input placeholder" disabled>
-									<span class="form-selectgroup-label d-flex align-items-center p-3 h-100">
-										<span class="me-3">
-											<span class="form-selectgroup-check placeholder"></span>
-										</span>
-										<div class="form-selectgroup-label-content d-flex align-items-center w-100">
-											<span class="avatar flex-shrink-0 me-3 placeholder"></span>
-											<div class="row flex-fill">
-												<div class="placeholder col-8 mb-1"></div>
-												<div class="placeholder placeholder-xs col-6"></div>
-											</div>
-										</div>
-									</span>
-								</label>
-							</div>
-						</div>
-
-						<!-- recognize results -->
-						<div class="after-file-selection fw-normal d-none">
-							<div class="recognize-results form-selectgroup-boxes row">
-
-							</div>
-						</div>
-					</li>
-
-					<li id="import-step-customize" class="step-item">
-						<div class="step-title form-label">Customize import</div>
-						<div class="dsopt-nothing d-none fst-italic fw-normal text-secondary">
-							There is nothing to customize. You're good to go!
-						</div>
-						<div class="dsopt-container fw-normal d-none">
-
-						</div>
-					</li>
-				</ul>
-
+		</div>
+		<div class="mb-4 row">
+			<label class="col-4 fw-medium">Albums</label>
+			<div class="col">
+				<label class="form-check mb-1">
+					<input class="media-folder-is-album form-check-input" type="checkbox">
+					<span class="form-check-label">Each folder is an album</span>
+				</label>
+				<div class="small form-hint">
+					Treat folders as album names and organize media items accordingly
+				</div>
 			</div>
+		</div>
+		<div class="mb-4 row">
+			<label class="col-4 fw-medium">Timestamps</label>
+			<div class="col">
+				<label class="form-check mb-1">
+					<input class="media-use-file-path-time form-check-input" type="checkbox" checked>
+					<span class="form-check-label">Use date from filepath</span>
+				</label>
+				<div class="small form-hint">
+					Find dates in folder names or the filename if no embedded timestamp is found.
+				</div>
 
-			<div class="modal-footer">
-				<a id="cancel-import" class="btn btn-link link-secondary" data-bs-dismiss="modal">
-					Cancel
-				</a>
-				<a id="start-import" class="btn btn-primary disabled ms-auto">
-					<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-database-import"
-						width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
-						stroke-linecap="round" stroke-linejoin="round">
-						<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-						<ellipse cx="12" cy="6" rx="8" ry="3"></ellipse>
-						<path d="M4 6v8m5.009 .783c.924 .14 1.933 .217 2.991 .217c4.418 0 8 -1.343 8 -3v-6"></path>
-						<path
-							d="M11.252 20.987c.246 .009 .496 .013 .748 .013c4.418 0 8 -1.343 8 -3v-6m-18 7h7m-3 -3l3 3l-3 3">
-						</path>
-					</svg>
-					Start import
-				</a>
+				<label class="form-check mb-1 mt-3">
+					<input class="media-use-file-mod-time form-check-input" type="checkbox">
+					<span class="form-check-label">Use file mod time</span>
+				</label>
+				<div class="small form-hint">
+					Use file modification time if no better timestamp is found.
+				</div>
+			</div>
+		</div>
+		<div class="mb-3 row">
+			<label class="col-4 col-form-label">Expected date range</label>
+			<div class="col">
+				<div class="row">
+					<div class="col-4">
+						<input type="text" class="media-start-year form-control mb-2" placeholder="Start year"
+							maxlength="4">
+					</div>
+					<div class="col-1 col-form-label">
+						&mdash;
+					</div>
+					<div class="col-4">
+						<input type="text" class="media-end-year form-control mb-2" placeholder="End year"
+							maxlength="4">
+					</div>
+				</div>
+				<div class="row">
+					<div class="small form-hint">
+						If choosing between multiple timestamps, prefer dates in this range.
+					</div>
+				</div>
+			</div>
+		</div>
+	</fieldset>
+</template>
+
+
+<template id="tpl-modal-import-dsopt">
+	<div class="modal modal-lg modal-blur fade" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" role="dialog" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered" role="document">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title">
+						<span class="avatar avatar-sm align-middle me-2"></span>
+						
+					</h5>
+				</div>
+				<div class="modal-body">
+					
+				</div>
+				<div class="modal-footer">
+					<button class="btn btn-green" data-bs-dismiss="modal">Save for this import</button>
+				</div>
 			</div>
 		</div>
 	</div>
-</div>
-
-
-
-<template id="tpl-import-file-data-source">
-	<div class="col-lg-6 mb-2 d-flex">
-		<label class="form-selectgroup-item flex-fill">
-			<input type="radio" name="data-source" class="form-selectgroup-input">
-			<span class="form-selectgroup-label d-flex align-items-center p-3 h-100">
-				<span class="me-3">
-					<span class="form-selectgroup-check"></span>
-				</span>
-				<div class="form-selectgroup-label-content d-flex align-items-center">
-					<span class="avatar flex-shrink-0 me-3"></span>
-					<div>
-						<div class="font-weight-bold"></div>
-						<div class="text-secondary small"></div>
-					</div>
-				</div>
-			</span>
-		</label>
-	</div>
 </template>
+
+
 
 
 <template id="tpl-dsopt-smsbackuprestore">
@@ -134,7 +102,7 @@
 			<div class="col">
 				<div class="mb-3">
 					<label class="form-label required">Your phone number</label>
-					<input type="text" id="smsbackuprestore-owner-phone" class="form-control" placeholder="123-456-7890"
+					<input type="text" class="smsbackuprestore-owner-phone form-control" placeholder="123-456-7890"
 						required>
 					<small class="form-hint">Type the phone number of the owner of this file.</small>
 				</div>
@@ -148,7 +116,7 @@
 		<div class="mb-3 row">
 			<label class="col-4 col-form-label required">Person</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="google_location-owner">
+				<select class="google_location-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose location data this is.
@@ -158,7 +126,7 @@
 		<div class="mb-3 row">
 			<label class="col-4 col-form-label">Simplification</label>
 			<div class="col">
-				<div id="google_location-simplification" class="form-range mb-2 mt-2"></div>
+				<div class="google_location-simplification form-range mb-2 mt-2"></div>
 				<div class="small form-hint">
 					Reduce the size of the data set by dropping unimportant points
 					(after denoising and clustering).
@@ -179,7 +147,7 @@
 		<div class="mb-3 row">
 			<label class="col-4 col-form-label required">Person</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="gpx-owner">
+				<select class="gpx-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose location data this is.
@@ -189,7 +157,7 @@
 		<div class="mb-3 row">
 			<label class="col-3 col-form-label">Simplification</label>
 			<div class="col">
-				<div id="gpx-simplification" class="form-range mb-2 mt-2"></div>
+				<div class="gpx-simplification form-range mb-2 mt-2"></div>
 				<div class="small form-hint">
 					Reduce the size of the data set by dropping unimportant points
 					(after denoising and clustering).
@@ -210,7 +178,7 @@
 		<div class="mb-3 row">
 			<label class="col-3 col-form-label required">Person</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="geojson-owner">
+				<select class="geojson-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose location data this is.
@@ -221,7 +189,7 @@
 			<label class="col-3 col-form-label">Options</label>
 			<div class="col">
 				<label class="form-check mb-1">
-					<input id="geojson-lenient" class="form-check-input" type="checkbox">
+					<input class="geojson-lenient form-check-input" type="checkbox">
 					<span class="form-check-label">Lenient mode</span>
 				</label>
 				<div class="small form-hint">
@@ -238,7 +206,7 @@
 		<div class="mb-4 row">
 			<label class="col-4 col-form-label">Owner</label>
 			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="icloud-owner">
+				<select class="icloud-owner form-select" placeholder="Name or contact info">
 				</select>
 				<div class="small form-hint">
 					Select the person whose iCloud data this is.
@@ -249,7 +217,7 @@
 			<label class="col-4 fw-medium">Recently deleted</label>
 			<div class="col">
 				<label class="form-check mb-1">
-					<input id="icloud-recently-deleted" class="form-check-input" type="checkbox">
+					<input class="icloud-recently-deleted form-check-input" type="checkbox">
 					<span class="form-check-label">Import recently deleted items</span>
 				</label>
 				<div class="small form-hint">
@@ -262,82 +230,12 @@
 	</fieldset>
 </template>
 
-<template id="tpl-dsopt-media">
-	<fieldset class="form-fieldset mb-0">
-		<div class="mb-4 row">
-			<label class="col-4 col-form-label">Owner</label>
-			<div class="col">
-				<select class="form-select" placeholder="Name or contact info" id="media-owner">
-				</select>
-				<div class="small form-hint">
-					Select the person whose media data this is.
-				</div>
-			</div>
-		</div>
-		<div class="mb-4 row">
-			<label class="col-4 fw-medium">Albums</label>
-			<div class="col">
-				<label class="form-check mb-1">
-					<input id="media-folder-is-album" class="form-check-input" type="checkbox">
-					<span class="form-check-label">Each folder is an album</span>
-				</label>
-				<div class="small form-hint">
-					Treat folders as album names and organize media items accordingly
-				</div>
-			</div>
-		</div>
-		<div class="mb-4 row">
-			<label class="col-4 fw-medium">Timestamps</label>
-			<div class="col">
-				<label class="form-check mb-1">
-					<input id="media-use-file-path-time" class="form-check-input" type="checkbox" checked>
-					<span class="form-check-label">Use date from filepath</span>
-				</label>
-				<div class="small form-hint">
-					Find dates in folder names or the filename if no embedded timestamp is found.
-				</div>
-
-				<label class="form-check mb-1 mt-3">
-					<input id="media-use-file-mod-time" class="form-check-input" type="checkbox">
-					<span class="form-check-label">Use file mod time</span>
-				</label>
-				<div class="small form-hint">
-					Use file modification time if no better timestamp is found.
-				</div>
-			</div>
-		</div>
-		<div class="mb-3 row">
-			<label class="col-4 col-form-label">Expected date range</label>
-			<div class="col">
-				<div class="row">
-					<div class="col-4">
-						<input type="text" id="media-start-year" class="form-control mb-2" placeholder="Start year"
-							maxlength="4">
-					</div>
-					<div class="col-1 col-form-label">
-						&mdash;
-					</div>
-					<div class="col-4">
-						<input type="text" id="media-end-year" class="form-control mb-2" placeholder="End year"
-							maxlength="4">
-					</div>
-				</div>
-				<div class="row">
-					<div class="small form-hint">
-						If choosing between multiple timestamps, prefer dates in this range.
-					</div>
-				</div>
-			</div>
-		</div>
-	</fieldset>
-</template>
-
 <template id="tpl-dsopt-email">
 	<fieldset class="form-fieldset mb-0">
 		<div class="mb-3 row">
 			<label class="col-4 col-form-label">Labels to skip</label>
 			<div class="col">
-				<input id="email-skip-labels" value="Spam,Trash,Chat" autocomplete="off" placeholder="Type label">
+				<input class="email-skip-labels" value="Spam,Trash,Chat" autocomplete="off" placeholder="Type label">
 				<div class="small form-hint mt-2">
 					Gmail labels to skip
 				</div>
@@ -349,7 +247,7 @@
 <template id="tpl-dsopt-generic">
 	<div class="mb-3">
 		<label class="form-label">Person</label>
-		<select class="form-select" placeholder="Name or contact info" id="generic-owner">
+		<select class="generic-owner form-select" placeholder="Name or contact info">
 		</select>
 		<small class="form-hint">Select the person to whom this data belongs (recommended).</small>
 	</div>
@@ -401,7 +299,7 @@
 		<div class="modal-content">
 			<div class="modal-header">
 				<h5 class="modal-title">Merge entities</h5>
-				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				<button class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
 			</div>
 			<div class="modal-body">
 

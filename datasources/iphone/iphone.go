@@ -62,9 +62,8 @@ func init() {
 
 // FileImporter can import iPhone backups from a folder on disk.
 type FileImporter struct {
-	itemChan chan<- *timeline.Graph
-	opt      timeline.ListingOptions
-	dsOpt    *Options
+	opt   timeline.ImportParams
+	dsOpt *Options
 
 	// these change as we iterate the list of input folders
 	root              string
@@ -75,45 +74,32 @@ type FileImporter struct {
 }
 
 // Recognize returns whether the folder is recognized.
-func (FileImporter) Recognize(_ context.Context, folders []string) (timeline.Recognition, error) {
+func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
 	var found, total int
-	for _, folder := range folders {
-		for _, filename := range []string{
-			"Manifest.db",
-			"Manifest.plist",
-			"Info.plist",
-			"Status.plist",
-		} {
-			total++
-			if timeline.FileExists(filepath.Join(folder, filename)) {
-				found++
-			} else if filename == "Manifest.db" {
-				return timeline.Recognition{}, nil // the manifest DB is absolutely required
-			}
+	for _, filename := range []string{
+		"Manifest.db",
+		"Manifest.plist",
+		"Info.plist",
+		"Status.plist",
+	} {
+		total++
+		if timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, filename)) {
+			found++
+		} else if filename == "Manifest.db" {
+			return timeline.Recognition{}, nil // the manifest DB is absolutely required
 		}
 	}
 	return timeline.Recognition{Confidence: float64(found) / float64(total)}, nil
 }
 
 // FileImport imports data from the given folder.
-func (fimp *FileImporter) FileImport(ctx context.Context, roots []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	fimp.dsOpt = opt.DataSourceOptions.(*Options)
-	fimp.itemChan = itemChan
-	fimp.opt = opt
+func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	fimp.dsOpt = params.DataSourceOptions.(*Options)
+	fimp.opt = params
 
-	for _, root := range roots {
-		if err := fimp.importFolder(ctx, root); err != nil {
-			return fmt.Errorf("%s: %w", root, err)
-		}
-	}
-
-	return nil
-}
-
-func (fimp *FileImporter) importFolder(ctx context.Context, root string) error {
-	fimp.root = root
-
-	db, err := sql.Open("sqlite3", filepath.Join(root, "Manifest.db")+"?mode=ro")
+	// we can't open a SQLite DB using io/fs interfaces, so we have to just utilize disk directly.
+	dbPath := filepath.Join(dirEntry.FSRoot, filepath.FromSlash(dirEntry.Filename), "Manifest.db")
+	db, err := sql.Open("sqlite3", dbPath+"?mode=ro")
 	if err != nil {
 		return fmt.Errorf("opening manifest DB: %w", err)
 	}

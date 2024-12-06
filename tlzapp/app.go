@@ -34,6 +34,8 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -153,7 +155,85 @@ func (a *App) MustServe(adminAddr string) error {
 	return a.serve(adminAddr)
 }
 
+// TODO: This is not ideal, but I'm just throwing this together temporarily to get us up and running quickly and easily.
+// We should have a less externally-dependent way of getting this running. :)
+func installPython() error {
+	if _, err := exec.LookPath("uv"); err == nil {
+		return nil
+	}
+
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		resp, err := http.Get("https://astral.sh/uv/install.sh")
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("downloading installer script: got HTTP status %d", resp.StatusCode)
+		}
+
+		const maxScriptSize = 1024 * 256
+		respBody := io.LimitReader(resp.Body, maxScriptSize)
+
+		cmd := exec.Command("sh")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		inPipe, err := cmd.StdinPipe()
+		if err != nil {
+			return err
+		}
+
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		if _, err := io.Copy(inPipe, respBody); err != nil {
+			return err
+		}
+		inPipe.Close()
+		if err := cmd.Wait(); err != nil {
+			return err
+		}
+
+		// TODO: Figure out how to update the PATH or at least get the 'uv' path so we can execute it right away;
+		// currently we have to restart the shell Timelinize is running in
+
+	case "windows":
+		cmd := exec.Command("powershell", "-c", "irm https://astral.sh/uv/install.ps1 | iex")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+
+	default:
+		return fmt.Errorf("OS not supported for auto-installation of ML environment: %s", runtime.GOOS)
+	}
+
+	return nil
+}
+
+func startMLServer() error {
+	// TODO: This has to be distributable somehow; maybe embed it into the binary and then write it to an application dir or something
+	cmd := exec.Command("uv", "run", "server.py")
+	cmd.Dir = "ml"
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	// TODO: a way to manage the process (stop it, etc)...
+	return cmd.Start()
+}
+
 func (a *App) serve(adminAddr string) error {
+	// TODO: Eventually this will be configurable, but seems like a good idea to do at first
+	if err := installPython(); err != nil {
+		return fmt.Errorf("setting up ML environment: %w", err)
+	}
+
+	if err := startMLServer(); err != nil {
+		return fmt.Errorf("starting ML server: %w", err)
+	}
+
 	if err := a.openRepos(); err != nil {
 		return fmt.Errorf("opening previously-opened repositories: %w", err)
 	}
@@ -345,7 +425,7 @@ func (a *App) openRepos() error {
 	// TODO: use race detector to verify ^
 	lastOpenedRepos := a.cfg.Repositories
 	for i, repoDir := range lastOpenedRepos {
-		_, err := app.openRepository(repoDir, false)
+		_, err := app.openRepository(a.ctx, repoDir, false)
 		if err != nil {
 			app.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(a.cfg.Repositories)),
 				zap.Error(err),

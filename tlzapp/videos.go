@@ -19,6 +19,7 @@
 package tlzapp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +36,7 @@ import (
 
 // Transcode transcodes the file at inputPath, or inputStream (but not both), to contentType, and writes it to output.
 // inputStream can only be used on video files that can be streamed (MP4, for example, requires seeking and cannot be streamed in).
-func (a *App) Transcode(inputPath string, inputStream io.Reader, contentType string, output io.Writer, blur bool) error {
+func (a *App) Transcode(ctx context.Context, inputPath string, inputStream io.Reader, contentType string, output io.Writer, blur bool) error {
 	if inputPath != "" && inputStream != nil {
 		return errors.New("cannot specify both an input path and an input stream")
 	}
@@ -47,7 +48,7 @@ func (a *App) Transcode(inputPath string, inputStream io.Reader, contentType str
 	// some Pixel/Google motion photos have multiple video streams where stream index 1 (second stream) is higher resolution,
 	// but only has 1 frame -- essentially a still/preview; ffmpeg's default selection behavior is to prefer the highest-res
 	// stream, but that is incorrect in the case of Google Motion Pictures. So this function is used to select the best stream.
-	videoStreamMapping, err := determineVideoStream(inputPath)
+	videoStreamMapping, err := determineVideoStream(ctx, inputPath)
 	if err != nil {
 		a.log.Error("unable to determine best video stream; using ffmpeg default stream selection", zap.Error(err))
 	}
@@ -99,7 +100,7 @@ func (a *App) Transcode(inputPath string, inputStream io.Reader, contentType str
 	// finally, finish with the output ("-" is apparently equivalent to "pipe:" -- stdout is assumed in this position)
 	args = append(args, "-")
 
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	if inputStream != nil {
 		cmd.Stdin = inputStream
 	}
@@ -137,12 +138,12 @@ func (a *App) Transcode(inputPath string, inputStream io.Reader, contentType str
 // determineVideoStream returns the value to use for the "-map" option of ffmpeg.
 // Note that an empty string and nil error may be returned if no specific stream
 // mapping/selection could be determined.
-func determineVideoStream(inputPath string) (string, error) {
+func determineVideoStream(ctx context.Context, inputPath string) (string, error) {
 	if inputPath == "" {
 		return "", nil
 	}
 
-	probe := exec.Command("ffprobe",
+	probe := exec.CommandContext(ctx, "ffprobe",
 		"-output_format", "json",
 		"-show_streams",
 		"-i", inputPath,

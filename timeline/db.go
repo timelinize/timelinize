@@ -19,25 +19,34 @@
 package timeline
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"fmt"
 	"path/filepath"
 	"strings"
 
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3" // register the sqlite3 driver
 )
 
+func init() {
+	sqlite_vec.Auto()
+}
+
 //go:embed schema.sql
 var createDB string
 
-func openAndProvisionDB(repoDir string) (*sql.DB, error) {
+//go:embed thumbnails.sql
+var createThumbsDB string
+
+func openAndProvisionDB(ctx context.Context, repoDir string) (*sql.DB, error) {
 	db, err := openDB(repoDir)
 	if err != nil {
 		return nil, err
 	}
-	if err = provisionDB(db); err != nil {
+	if err = provisionDB(ctx, db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -63,8 +72,8 @@ func openDB(repoDir string) (*sql.DB, error) {
 	return db, nil
 }
 
-func provisionDB(db *sql.DB) error {
-	_, err := db.Exec(createDB)
+func provisionDB(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, createDB)
 	if err != nil {
 		return fmt.Errorf("setting up database: %w", err)
 	}
@@ -81,19 +90,19 @@ func provisionDB(db *sql.DB) error {
 	}
 
 	// add all registered data sources
-	err = saveAllDataSources(db)
+	err = saveAllDataSources(ctx, db)
 	if err != nil {
 		return fmt.Errorf("saving registered data sources to database: %w", err)
 	}
 
 	// add all standard classifications
-	err = saveAllStandardClassifications(db)
+	err = saveAllStandardClassifications(ctx, db)
 	if err != nil {
 		return fmt.Errorf("saving standard classifications to database: %w", err)
 	}
 
 	// add all standard entity types
-	err = saveAllStandardEntityTypes(db)
+	err = saveAllStandardEntityTypes(ctx, db)
 	if err != nil {
 		return fmt.Errorf("saving standard entity types to database: %w", err)
 	}
@@ -101,7 +110,7 @@ func provisionDB(db *sql.DB) error {
 	return nil
 }
 
-func saveAllDataSources(db *sql.DB) error {
+func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 	if len(dataSources) == 0 {
 		return nil
 	}
@@ -120,7 +129,7 @@ func saveAllDataSources(db *sql.DB) error {
 		count++
 	}
 
-	_, err := db.Exec(query, vals...)
+	_, err := db.ExecContext(ctx, query, vals...)
 	if err != nil {
 		return fmt.Errorf("writing data sources to DB: %w", err)
 	}
@@ -128,7 +137,7 @@ func saveAllDataSources(db *sql.DB) error {
 	return nil
 }
 
-func saveAllStandardEntityTypes(db *sql.DB) error {
+func saveAllStandardEntityTypes(ctx context.Context, db *sql.DB) error {
 	entityTypes := []string{
 		"person",
 		"creature", // animals, insects, fish, pets... etc.
@@ -154,7 +163,7 @@ func saveAllStandardEntityTypes(db *sql.DB) error {
 	}
 	query += ` ON CONFLICT DO UPDATE SET name=excluded.name`
 
-	_, err := db.Exec(query, vals...)
+	_, err := db.ExecContext(ctx, query, vals...)
 	if err != nil {
 		return fmt.Errorf("writing standard entity types to DB: %w", err)
 	}
@@ -162,7 +171,7 @@ func saveAllStandardEntityTypes(db *sql.DB) error {
 	return nil
 }
 
-func saveAllStandardClassifications(db *sql.DB) error {
+func saveAllStandardClassifications(ctx context.Context, db *sql.DB) error {
 	query := `INSERT INTO "classifications" ("standard", "name", "labels", "description") VALUES`
 
 	vals := make([]any, 0, len(classifications)*4) //nolint:mnd
@@ -179,7 +188,7 @@ func saveAllStandardClassifications(db *sql.DB) error {
 	query += ` ON CONFLICT DO UPDATE SET standard=excluded.standard, name=excluded.name,
 		labels=excluded.labels, description=excluded.description`
 
-	_, err := db.Exec(query, vals...)
+	_, err := db.ExecContext(ctx, query, vals...)
 	if err != nil {
 		return fmt.Errorf("writing standard classifications to DB: %w", err)
 	}
@@ -187,9 +196,9 @@ func saveAllStandardClassifications(db *sql.DB) error {
 	return nil
 }
 
-func loadRepoID(db *sql.DB) (uuid.UUID, error) {
+func loadRepoID(ctx context.Context, db *sql.DB) (uuid.UUID, error) {
 	var idStr string
-	err := db.QueryRow(`SELECT value FROM repo WHERE key=? LIMIT 1`, "id").Scan(&idStr)
+	err := db.QueryRowContext(ctx, `SELECT value FROM repo WHERE key=? LIMIT 1`, "id").Scan(&idStr)
 	if err != nil {
 		return uuid.UUID{}, fmt.Errorf("selecting repo UUID: %w", err)
 	}
@@ -198,4 +207,50 @@ func loadRepoID(db *sql.DB) (uuid.UUID, error) {
 		return uuid.UUID{}, fmt.Errorf("malformed UUID %s: %w", idStr, err)
 	}
 	return id, nil
+}
+
+func openAndProvisionThumbsDB(ctx context.Context, repoDir string, repoID uuid.UUID) (*sql.DB, error) {
+	db, err := openThumbsDB(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	if err = provisionThumbsDB(ctx, db, repoID); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func openThumbsDB(repoDir string) (*sql.DB, error) {
+	var db *sql.DB
+	var err error
+	defer func() {
+		if err != nil && db != nil {
+			db.Close()
+		}
+	}()
+
+	dbPath := filepath.Join(repoDir, ThumbsDBFilename)
+
+	db, err = sql.Open("sqlite3", dbPath+"?_foreign_keys=on&_journal_mode=WAL")
+	if err != nil {
+		return nil, fmt.Errorf("opening thumbnail database: %w", err)
+	}
+
+	return db, nil
+}
+
+func provisionThumbsDB(ctx context.Context, thumbsDB *sql.DB, repoID uuid.UUID) error {
+	_, err := thumbsDB.ExecContext(ctx, createThumbsDB)
+	if err != nil {
+		return fmt.Errorf("setting up thumbnail database: %w", err)
+	}
+
+	// link this database to the repo
+	_, err = thumbsDB.ExecContext(ctx, `INSERT OR IGNORE INTO repo_link (repo_id) VALUES (?)`, repoID.String())
+	if err != nil {
+		return fmt.Errorf("linking repo UUID: %w", err)
+	}
+
+	return nil
 }

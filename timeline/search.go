@@ -27,6 +27,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,10 +41,15 @@ type ItemSearchParams struct {
 	// The UUID of the open timeline to search.
 	Repo string `json:"repo,omitempty"`
 
+	// ML searches -- currently, only one of these can be set at a time
+	// TODO: add a QueryImage field for image search
+	QueryText string  `json:"query_text,omitempty"` // results
+	SimilarTo []int64 `json:"similar_to,omitempty"` // similar to the centroid of the vectors of the specified items
+
 	RowID []int64 `json:"row_id,omitempty"`
 	// AccountID  []int    `json:"account_id,omitempty"` // TODO: restore this, if useful
 	DataSourceName []string `json:"data_source,omitempty"`
-	ImportID       []int64  `json:"import_id,omitempty"`
+	JobID          []int64  `json:"job_id,omitempty"`
 	AttributeID    []int64  `json:"attribute_id,omitempty"`
 	EntityID       []int64  `json:"entity_id,omitempty"`
 	Classification []string `json:"classification,omitempty"`
@@ -176,6 +182,9 @@ type SearchResults struct {
 }
 
 func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (SearchResults, error) {
+	// setting a natural language input has big implications, so make sure it's not just whitespace by accident
+	params.QueryText = strings.TrimSpace(params.QueryText)
+
 	// get the DB query string and associated arguments
 	q, args, err := tl.prepareSearchQuery(params)
 	if err != nil {
@@ -260,16 +269,20 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		}
 
 		var re relatedEntity // entity is left-joined, so could be null
-		entityTargets := []any{&re.ID, &re.Name, &re.Picture, &re.Attribute.Name, &re.Attribute.Value, &re.Attribute.AltValue}
+		var embedDist float64
+		extraTargets := []any{&re.ID, &re.Name, &re.Picture, &re.Attribute.Name, &re.Attribute.Value, &re.Attribute.AltValue}
 		if params.WithTotal {
-			entityTargets = append(entityTargets, &totalCount)
+			extraTargets = append(extraTargets, &totalCount)
 		}
-		itemRow, err := scanItemRow(rows, entityTargets)
+		if params.QueryText != "" || len(params.SimilarTo) > 0 {
+			extraTargets = append(extraTargets, &embedDist)
+		}
+		itemRow, err := scanItemRow(rows, extraTargets)
 		if err != nil {
 			rows.Close()
 			return SearchResults{}, err
 		}
-		sr := &SearchResult{RepoID: tl.id.String(), ItemRow: itemRow}
+		sr := &SearchResult{RepoID: tl.id.String(), ItemRow: itemRow, Distance: embedDist}
 		if re.ID != nil {
 			sr.Entity = &re
 		}
@@ -284,6 +297,48 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	if params.GeoJSON {
 		sb.WriteString(`]}}`)
 		return SearchResults{GeoJSON: sb.String(), Total: totalCount}, nil
+	}
+
+	// TODO: this needs tuning
+	if params.QueryText != "" {
+		// filter results for relevance by passing them through the classifier...
+		// this is kind of a hack, but it's a well-known difficult problem apparently,
+		// for any KNN search, to only show relevant results
+		itemFiles := make(map[int64]string)
+		for _, result := range results {
+			if result.DataFile == nil || result.DataType == nil {
+				continue
+			}
+			if !strings.HasPrefix(*result.DataType, "image/") {
+				continue
+			}
+			itemFiles[result.ID] = tl.FullPath(*result.DataFile)
+		}
+
+		scores, err := classify(ctx, itemFiles, []string{params.QueryText})
+		if err != nil {
+			return SearchResults{}, fmt.Errorf("classifying results: %w", err)
+		}
+		for _, sr := range results {
+			if score, ok := scores[sr.ID]; ok {
+				sr.Score = score
+			}
+		}
+		// sort by score descending, then prefer items that weren't scored over scored items with a low score
+		sort.Slice(results, func(i, j int) bool {
+			_, iWasScored := scores[results[i].ID]
+			_, jWasScored := scores[results[j].ID]
+			return results[i].Score > results[j].Score || (jWasScored && !iWasScored)
+		})
+		// chop off results that are irrelevant, starting with the first result that was scored and has a score near zero
+		for i, sr := range results {
+			_, wasScored := scores[sr.ID]
+			// TODO: Be smarter: find the range the top/best results score, and only cull results below a significant threshold difference
+			if sr.Score <= 0.0001 && wasScored {
+				results = results[:i]
+				break
+			}
+		}
 	}
 
 	// traverse relationships
@@ -360,6 +415,14 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		itemsTable = "extended_items"
 	}
 
+	// If searching by embeddings, we have to SELECT from the embeddings
+	// virtual table, and join in the items table.
+	vectorSearch := params.QueryText != "" || len(params.SimilarTo) > 0
+	selectFromTable, selectFromAs := itemsTable, " AS items"
+	if vectorSearch {
+		selectFromTable, selectFromAs = "embeddings", ""
+	}
+
 	// honor inclusivity for bounding-box searches
 	lt, gt := "<", ">"
 	if params.Inclusive {
@@ -376,12 +439,21 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	if params.WithTotal {
 		q += ", count() over() AS total_count"
 	}
+	if vectorSearch {
+		q += ", embeddings.distance"
+	}
 	q += fmt.Sprintf(`
-		FROM %s AS items
+		FROM %s%s`, selectFromTable, selectFromAs)
+
+	if vectorSearch {
+		q += fmt.Sprintf(`
+		LEFT JOIN %s AS items ON items.embedding_id = embeddings.id`, itemsTable)
+	}
+
+	q += `
 		LEFT JOIN attributes ON items.attribute_id = attributes.id
 		LEFT JOIN entity_attributes ON attributes.id = entity_attributes.attribute_id
-		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`,
-		itemsTable)
+		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`
 
 	if len(params.ToAttributeID) > 0 || len(params.ToEntityID) > 0 {
 		q += `
@@ -438,11 +510,11 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		}
 	})
 	and(func() {
-		if params.ImportID != nil && len(params.ImportID) == 0 {
-			or("items.import_id IS ?", nil)
+		if params.JobID != nil && len(params.JobID) == 0 {
+			or("items.job_id IS ?", nil)
 		}
-		for _, v := range params.ImportID {
-			or("items.import_id=?", v)
+		for _, v := range params.JobID {
+			or("items.job_id=?", v)
 		}
 	})
 	and(func() {
@@ -577,6 +649,35 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		}
 	}
 
+	if vectorSearch {
+		if params.QueryText != "" {
+			// search relative to an arbitrary input (TODO: support image inputs too)
+			embedding, err := GenerateSerializedEmbedding(tl.ctx, "text/plain", []byte(params.QueryText), nil)
+			if err != nil {
+				return "", nil, err
+			}
+			and(func() {
+				or("embeddings.embedding MATCH ?", embedding)
+				and(func() {
+					// TODO: pull up limit calculation so we can use it early here... sigh.
+					or("k=?", 50)
+				})
+			})
+		} else if len(params.SimilarTo) > 0 {
+			// search items similar to existing embeddings
+			// TODO: for multiple values in this slice, compute centroid instead of using 'or'/'and' in the sql statement...?
+			for _, similarItemID := range params.SimilarTo {
+				and(func() {
+					or("embeddings.embedding MATCH (SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)", similarItemID)
+					and(func() {
+						// TODO: pull up limit calculation so we can use it early here... sigh.
+						or("k=?", 50)
+					})
+				})
+			}
+		}
+	}
+
 	// skip deleted items unless we are explicitly supposed to include them
 	// (NOTE: we include them if the specific row IDs are requested)
 	if !params.Deleted && len(params.RowID) == 0 {
@@ -597,7 +698,9 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		})
 	}
 
-	if params.Sort != SortNone {
+	if vectorSearch {
+		q += " ORDER BY embeddings.distance"
+	} else if params.Sort != SortNone {
 		q += " ORDER BY "
 
 		// TODO: not sure if this is how autocomplete will work or be useful, but basically
@@ -834,6 +937,10 @@ type SearchResult struct {
 	Entity  *relatedEntity `json:"entity,omitempty"`
 	Related []Related      `json:"related,omitempty"`
 	Size    int64          `json:"size,omitempty"`
+
+	// from ML model
+	Distance float64 `json:"distance,omitempty"`
+	Score    float64 `json:"score,omitempty"`
 }
 
 // TODO: Finish making this work

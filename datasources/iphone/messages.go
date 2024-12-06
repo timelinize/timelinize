@@ -73,7 +73,7 @@ func (fimp *FileImporter) messages(ctx context.Context) error {
 		DeviceID: fimp.devicePhoneNumber,
 	}
 
-	return im.ImportMessages(ctx, fimp.itemChan, fimp.opt)
+	return im.ImportMessages(ctx, fimp.opt)
 }
 
 func iMessageAttachmentRelativeFilename(filename string) string {

@@ -35,7 +35,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -77,12 +76,10 @@ type Options struct {
 
 // FileImporter implements the timeline.FileImporter interface.
 type FileImporter struct {
-	ctx      context.Context
-	fsys     fs.FS
-	filename string
-	itemChan chan<- *timeline.Graph
-	opt      timeline.ListingOptions
-	dsOpt    *Options
+	ctx   context.Context
+	d     timeline.DirEntry
+	opt   timeline.ImportParams
+	dsOpt *Options
 
 	// device affinity: if seenDevices is not nil, then each
 	// DeviceTag will be treated as a separate path, and only
@@ -95,47 +92,29 @@ type FileImporter struct {
 }
 
 // Recognize returns whether the file is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	if dirEntry.IsDir() {
+		// see if it's a Takeout-structured location history (a folder with Records.json in it)
+		pathToTry := path.Join(dirEntry.Filename, "Records.json")
+		if strings.Contains(dirEntry.Name(), "Location History") && timeline.FileExistsFS(dirEntry.FS, pathToTry) {
+			return timeline.Recognition{Confidence: 1}, nil
+		}
+	} else if dirEntry.Name() == "location-history.json" { // avoid opening all JSON files (can be slow esp. in archives)
+		//  check for the newer on-device-only location history file from Q2 2024.
+		f, err := dirEntry.Open()
 		if err != nil {
 			return timeline.Recognition{}, err
 		}
-		// first, see if this is a file not a directory, and if so, see if it's
-		// the newer on-device-only location history file from Q2 2024.
-		if fs, ok := fsys.(archiver.FileFS); ok {
-			f, err := fs.Open(".")
-			if err != nil {
-				return timeline.Recognition{}, err
-			}
-			defer f.Close()
-			dec := json.NewDecoder(f)
-			if token, err := dec.Token(); err == nil {
-				if _, ok := token.(json.Delim); ok {
-					var loc onDeviceLocation
-					if err := dec.Decode(&loc); err == nil {
-						if !loc.StartTime.IsZero() && !loc.EndTime.IsZero() {
-							return timeline.Recognition{Confidence: 0.9}, nil
-						}
+		defer f.Close()
+		dec := json.NewDecoder(f)
+		if token, err := dec.Token(); err == nil {
+			if _, ok := token.(json.Delim); ok {
+				var loc onDeviceLocation
+				if err := dec.Decode(&loc); err == nil {
+					if !loc.StartTime.IsZero() && !loc.EndTime.IsZero() {
+						return timeline.Recognition{Confidence: 1}, nil
 					}
 				}
-			}
-		}
-		// see if it's a Takeout-structured location history
-		for _, pathToTry := range []string{
-			takeoutLocationHistoryPath2024,
-			takeoutLocationHistoryPathPre2024,
-		} {
-			pathToTry = path.Join(pathToTry, "Records.json")
-			if timeline.FileExistsFS(fsys, pathToTry) {
-				return timeline.Recognition{Confidence: 1}, nil
-			}
-			if timeline.FileExistsFS(fsys, path.Base(pathToTry)) {
-				return timeline.Recognition{Confidence: 1}, nil
-			}
-			if file, err := archiver.TopDirOpen(fsys, pathToTry); err == nil {
-				file.Close()
-				return timeline.Recognition{Confidence: 1}, nil
 			}
 		}
 	}
@@ -143,77 +122,25 @@ func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline
 }
 
 // FileImport imports data from a file.
-func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	fi.dsOpt = opt.DataSourceOptions.(*Options)
+func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	fi.dsOpt = params.DataSourceOptions.(*Options)
 	fi.ctx = ctx
-	fi.itemChan = itemChan
-	fi.opt = opt
+	fi.opt = params
+	fi.d = dirEntry
 
 	// verify input configuration
 	if fi.dsOpt.Simplification < 0 || fi.dsOpt.Simplification > 10 {
 		return fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", fi.dsOpt.Simplification)
 	}
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return fmt.Errorf("opening data file: %w", err)
-		}
-
-		// first see if this is a location history file that is the
-		// newer on-device location history export starting from Q2 2024
-		if fs, ok := fsys.(archiver.FileFS); ok {
-			f, err := fs.Open(".")
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			dec := json.NewDecoder(f)
-
-			// consume opening '['
-			if token, err := dec.Token(); err != nil {
-				return err
-			} else if tkn, ok := token.(json.Delim); !ok || tkn != '[' {
-				return fmt.Errorf("unexpected opening token: %v", token)
-			}
-
-			onDevDec := &onDeviceDecoder{Decoder: dec}
-			locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.Simplification)
-			if err != nil {
-				return err
-			}
-
-			for {
-				if err := fi.ctx.Err(); err != nil {
-					return err
-				}
-
-				result, err := locProc.NextLocation(ctx)
-				if err != nil {
-					return err
-				}
-				if result == nil {
-					break
-				}
-
-				item := result.Original.(*onDeviceLocation).toItem(result, fi.dsOpt)
-
-				if fi.opt.Timeframe.ContainsItem(item, false) {
-					fi.itemChan <- &timeline.Graph{Item: item}
-				}
-			}
-
-			return nil
-		}
-
-		// otherwise, this must/should be a (now-legacy) Takeout archive of location history
-
+	// see if this is a (now-legacy) Takeout archive of location history
+	if dirEntry.IsDir() {
 		// try to load settings file; this helps us identify devices; however
 		// this list is often incomplete, especially if user has removed them
 		// from their Google account
-		settings, err := loadSettingsFromTakeoutArchive(fsys)
+		settings, err := loadSettingsFromTakeoutArchive(dirEntry)
 		if err != nil && errors.Is(err, fs.ErrNotExist) {
-			opt.Log.Warn("no Settings.json file found; some information may be lacking")
+			params.Log.Warn("no Settings.json file found; some information may be lacking")
 		}
 
 		// key device settings to their device tag for future storage in DB
@@ -221,10 +148,6 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 		for _, dev := range settings.DeviceSettings {
 			fi.dsOpt.devices[dev.DeviceTag] = dev
 		}
-
-		// attach state to the struct to be read by goroutines during import
-		fi.fsys = fsys
-		fi.filename = filename
 
 		// The data looks much better when we only process one path
 		// at a time (a path being the points belonging to a DeviceTag),
@@ -247,11 +170,57 @@ func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, item
 		fi.wg.Add(1)
 		err = fi.processFile(ctx, &decoder{fi: fi})
 		if err != nil {
-			return fmt.Errorf("top scan processing %s: %w", filename, err)
+			return fmt.Errorf("top scan processing %s: %w", dirEntry.Filename, err)
 		}
 		fi.wg.Done()
 
 		fi.wg.Wait()
+
+		return nil
+	}
+
+	// otherwise, this is a location history file that is the newer
+	// on-device location history export starting from Q2 2024
+
+	f, err := dirEntry.Open()
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+
+	// consume opening '['
+	if token, err := dec.Token(); err != nil {
+		return err
+	} else if tkn, ok := token.(json.Delim); !ok || tkn != '[' {
+		return fmt.Errorf("unexpected opening token: %v", token)
+	}
+
+	onDevDec := &onDeviceDecoder{Decoder: dec}
+	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.Simplification)
+	if err != nil {
+		return err
+	}
+
+	for {
+		if err := fi.ctx.Err(); err != nil {
+			return err
+		}
+
+		result, err := locProc.NextLocation(ctx)
+		if err != nil {
+			return err
+		}
+		if result == nil {
+			break
+		}
+
+		item := result.Original.(*onDeviceLocation).toItem(result, fi.dsOpt)
+
+		if fi.opt.Timeframe.ContainsItem(item, false) {
+			params.Pipeline <- &timeline.Graph{Item: item}
+		}
 	}
 
 	return nil
@@ -358,7 +327,7 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 		takeoutLocationHistoryPath2024,
 		takeoutLocationHistoryPathPre2024,
 	} {
-		file, err = flexibleOpen(fi.fsys, path.Join(pathToTry, "Records.json"))
+		file, err = flexibleOpen(fi.d, path.Join(pathToTry, "Records.json"))
 		if err == nil || !errors.Is(err, fs.ErrNotExist) {
 			break
 		}
@@ -411,7 +380,7 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 
 		item := l.toItem(fi.dsOpt)
 		if fi.opt.Timeframe.ContainsItem(item, false) {
-			fi.itemChan <- &timeline.Graph{Item: item}
+			fi.opt.Pipeline <- &timeline.Graph{Item: item}
 		}
 	}
 
@@ -452,12 +421,12 @@ func FloatStringToIntE7(coord string) (int64, error) {
 // a "top dir open" (strips the first path component - the "top dir") in case the user
 // selected the folder created by extracting the archive; then if not found it tries
 // just the last path component in case the user navigated into the subfolder.
-func flexibleOpen(fsys fs.FS, filename string) (file fs.File, err error) {
+func flexibleOpen(d timeline.DirEntry, filename string) (file fs.File, err error) {
 	// perhaps archive was extracted and the "Takeout" folder was selected
-	file, err = archiver.TopDirOpen(fsys, filename)
+	file, err = d.TopDirOpen(filename)
 	if errors.Is(err, fs.ErrNotExist) {
 		// okay, maybe they just selected the Location History subfolder
-		file, err = fsys.Open(path.Base(filename))
+		file, err = d.FS.Open(path.Join(d.Filename, path.Base(filename)))
 	}
 	return
 }
@@ -493,6 +462,6 @@ const (
 
 // The path within the Google Takeout archive of the location history records.
 const (
-	takeoutLocationHistoryPathPre2024 = "Takeout/Location History"
-	takeoutLocationHistoryPath2024    = "Takeout/Location History (Timeline)"
+	takeoutLocationHistoryPathPre2024 = "Location History"
+	takeoutLocationHistoryPath2024    = "Location History (Timeline)"
 )

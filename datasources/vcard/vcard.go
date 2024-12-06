@@ -26,9 +26,9 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/signal-golang/go-vcard"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -50,75 +50,230 @@ func init() {
 type FileImporter struct{}
 
 // Recognize returns whether the input is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	var totalCount, matchCount int
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	rec := timeline.Recognition{DirThreshold: .9}
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
+	// we can import directories, but let the import planner figure that out; only recognize files
+	if dirEntry.IsDir() {
+		return rec, nil
+	}
+
+	// skip unsupported file types
+	switch strings.ToLower(path.Ext(dirEntry.Name())) {
+	case ".vcf", ".vcard":
+	default:
+		return rec, nil
+	}
+
+	file, err := dirEntry.Open()
+	if err != nil {
+		return rec, err
+	}
+	defer file.Close()
+
+	buf := bufPool.Get().([]byte)
+	defer bufPool.Put(buf[:len(buf)]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice)
+
+	// read the first few bytes to see if it looks like a legit vcard; ignore empty or short files
+	_, err = io.ReadFull(file, buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return rec, err
+	}
+	if string(buf) == beginVCard {
+		rec.Confidence = 1
+	}
+
+	return rec, nil
+}
+
+// FileImport imports data from the given file/folder.
+func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return timeline.Recognition{}, err
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir // skip hidden files & folders
+		}
+		if d.IsDir() {
+			return nil // traverse into subdirectories
 		}
 
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
+		file, err := dirEntry.Open()
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		dec := vcard.NewDecoder(file)
+		for {
+			card, err := dec.Decode()
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			if err != nil {
 				return err
 			}
-			if fpath == "." {
-				fpath = path.Base(filename)
+
+			p := &timeline.Entity{
+				Name: strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
 			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files; they are cruft
-				if d.IsDir() {
-					return fs.SkipDir
+			if p.Name == "" {
+				if name := card.Name(); name != nil {
+					formattedName := join(" ", []string{
+						name.GivenName,
+						name.AdditionalName,
+						name.FamilyName,
+					})
+					p.Name = strings.Trim(formattedName, nameCutset)
+					p.Metadata["Honorific prefix"] = name.HonorificPrefix
+					p.Metadata["Honorific suffix"] = name.HonorificSuffix
 				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil // traverse into subdirectories
 			}
 
-			totalCount++
-
-			switch path.Ext(strings.ToLower(fpath)) {
-			case ".vcf", ".vcard":
-			default:
-				return nil // skip non-vcard files
+			if rawBday := card.PreferredValue(vcard.FieldBirthday); rawBday != "" {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "birth_date",
+					Value: ParseBirthday(rawBday),
+				})
 			}
 
-			file, err := fsys.Open(fpath)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			// read the first few bytes to see if it looks like a legit vcard; ignore empty or short files
-			buf := make([]byte, len(beginVCard))
-			_, err = io.ReadFull(file, buf)
-			if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-				return err
-			}
-			if string(buf) == beginVCard {
-				matchCount++
+			for _, phone := range card.Values(vcard.FieldTelephone) {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:        timeline.AttributePhoneNumber,
+					Value:       phone,
+					Identifying: true,
+				})
 			}
 
-			return nil
-		})
-		if err != nil {
-			return timeline.Recognition{}, err
+			for _, email := range card.Values(vcard.FieldEmail) {
+				if email == p.Name {
+					p.Name = "" // sometimes the email or phone number is also in the Name field for some reason (old Google Contacts)
+				}
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:        timeline.AttributeEmail,
+					Value:       email,
+					Identifying: true,
+				})
+			}
+
+			if gender := card.PreferredValue(vcard.FieldGender); gender != "" {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  timeline.AttributeGender,
+					Value: gender,
+				})
+			}
+
+			photoURL := card.PreferredValue(vcard.FieldPhoto)
+			if photoURL == "" {
+				photoURL = card.PreferredValue(vcard.FieldLogo)
+			}
+			if photoURL != "" {
+				p.NewPicture = timeline.DownloadData(photoURL)
+			}
+
+			// the following fields are less common or useful, but still good to have if specified
+
+			if nickname := card.PreferredValue(vcard.FieldNickname); nickname != "" {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "nickname",
+					Value: nickname,
+				})
+			}
+
+			for _, addr := range card.Addresses() {
+				// TODO: store components in metadata? or maybe use address parsing service later if needed
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name: "address",
+					Value: join(" ", []string{
+						addr.PostOfficeBox,
+						addr.StreetAddress,
+						addr.ExtendedAddress,
+						addr.Locality,
+						addr.Region,
+						addr.PostalCode,
+						addr.Country,
+					}),
+				})
+			}
+
+			for _, url := range card.Values(vcard.FieldURL) {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "url",
+					Value: url,
+				})
+			}
+
+			if anniversary := card.PreferredValue(vcard.FieldAnniversary); anniversary != "" {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "anniversary",
+					Value: anniversary,
+				})
+			}
+
+			for _, title := range card.Values(vcard.FieldTitle) {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "title",
+					Value: title,
+				})
+			}
+
+			for _, role := range card.Values(vcard.FieldRole) {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "role",
+					Value: role,
+				})
+			}
+
+			for _, note := range card.Values(vcard.FieldNote) {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "note",
+					Value: note,
+				})
+			}
+
+			// vCard extension: https://www.rfc-editor.org/rfc/rfc6474.html#section-2.1
+			if birthPlace := card.PreferredValue("BIRTHPLACE"); birthPlace != "" {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "birth_place",
+					Value: birthPlace,
+				})
+			}
+			if rawDeathDate := card.PreferredValue("DEATHDATE"); rawDeathDate != "" {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "death_date",
+					Value: ParseBirthday(rawDeathDate),
+				})
+			}
+			if deathPlace := card.PreferredValue("DEATHPLACE"); deathPlace != "" {
+				p.Attributes = append(p.Attributes, timeline.Attribute{
+					Name:  "death_place",
+					Value: deathPlace,
+				})
+			}
+
+			// if we have at least some useful data for the entity, process it
+			if p.Name != "" || len(p.Attributes) > 0 {
+				params.Pipeline <- &timeline.Graph{Entity: p}
+			}
 		}
+
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
-	if totalCount > 0 {
-		return timeline.Recognition{Confidence: float64(matchCount) / float64(totalCount)}, nil
-	}
-	return timeline.Recognition{}, nil
+	return nil
 }
 
 // ParseBirthday parses bday in either "--MMDD" or "YYYYMMDD" format.
 // If the former, the year is omitted, and as such, the Unix timestamp
 // of the date will compute to be over 2000 years ago. If the date
 // fails to parse, a nil time is returned.
-// TODO: move this into the timeline package? maybe if --MMDD format is somewhat standard...
 func ParseBirthday(bday string) *time.Time {
 	const fullBdayFormat = "20060102"
 	if len(bday) == 6 && bday[:2] == "--" {
@@ -132,201 +287,6 @@ func ParseBirthday(bday string) *time.Time {
 			return &fullDate
 		}
 	}
-	return nil
-}
-
-// FileImport imports data from the given file/folder.
-func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return err
-		}
-
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files; they are cruft
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil // traverse into subdirectories
-			}
-
-			file, err := fsys.Open(fpath)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			dec := vcard.NewDecoder(file)
-			for {
-				card, err := dec.Decode()
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				if err != nil {
-					return err
-				}
-
-				p := &timeline.Entity{
-					Name: strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
-				}
-				if p.Name == "" {
-					if name := card.Name(); name != nil {
-						formattedName := join(" ", []string{
-							name.GivenName,
-							name.AdditionalName,
-							name.FamilyName,
-						})
-						p.Name = strings.Trim(formattedName, nameCutset)
-						p.Metadata["Honorific prefix"] = name.HonorificPrefix
-						p.Metadata["Honorific suffix"] = name.HonorificSuffix
-					}
-				}
-
-				if rawBday := card.PreferredValue(vcard.FieldBirthday); rawBday != "" {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "birth_date",
-						Value: ParseBirthday(rawBday),
-					})
-				}
-
-				for _, phone := range card.Values(vcard.FieldTelephone) {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:        timeline.AttributePhoneNumber,
-						Value:       phone,
-						Identifying: true,
-					})
-				}
-
-				for _, email := range card.Values(vcard.FieldEmail) {
-					if email == p.Name {
-						p.Name = "" // sometimes the email or phone number is also in the Name field for some reason (old Google Contacts)
-					}
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:        timeline.AttributeEmail,
-						Value:       email,
-						Identifying: true,
-					})
-				}
-
-				if gender := card.PreferredValue(vcard.FieldGender); gender != "" {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  timeline.AttributeGender,
-						Value: gender,
-					})
-				}
-
-				photoURL := card.PreferredValue(vcard.FieldPhoto)
-				if photoURL == "" {
-					photoURL = card.PreferredValue(vcard.FieldLogo)
-				}
-				if photoURL != "" {
-					p.NewPicture = timeline.DownloadData(photoURL)
-				}
-
-				// the following fields are less common or useful, but still good to have if specified
-
-				if nickname := card.PreferredValue(vcard.FieldNickname); nickname != "" {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "nickname",
-						Value: nickname,
-					})
-				}
-
-				for _, addr := range card.Addresses() {
-					// TODO: store components in metadata? or maybe use address parsing service later if needed
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name: "address",
-						Value: join(" ", []string{
-							addr.PostOfficeBox,
-							addr.StreetAddress,
-							addr.ExtendedAddress,
-							addr.Locality,
-							addr.Region,
-							addr.PostalCode,
-							addr.Country,
-						}),
-					})
-				}
-
-				for _, url := range card.Values(vcard.FieldURL) {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "url",
-						Value: url,
-					})
-				}
-
-				if anniversary := card.PreferredValue(vcard.FieldAnniversary); anniversary != "" {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "anniversary",
-						Value: anniversary,
-					})
-				}
-
-				for _, title := range card.Values(vcard.FieldTitle) {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "title",
-						Value: title,
-					})
-				}
-
-				for _, role := range card.Values(vcard.FieldRole) {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "role",
-						Value: role,
-					})
-				}
-
-				for _, note := range card.Values(vcard.FieldNote) {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "note",
-						Value: note,
-					})
-				}
-
-				// vCard extension: https://www.rfc-editor.org/rfc/rfc6474.html#section-2.1
-				if birthPlace := card.PreferredValue("BIRTHPLACE"); birthPlace != "" {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "birth_place",
-						Value: birthPlace,
-					})
-				}
-				if rawDeathDate := card.PreferredValue("DEATHDATE"); rawDeathDate != "" {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "death_date",
-						Value: ParseBirthday(rawDeathDate),
-					})
-				}
-				if deathPlace := card.PreferredValue("DEATHPLACE"); deathPlace != "" {
-					p.Attributes = append(p.Attributes, timeline.Attribute{
-						Name:  "death_place",
-						Value: deathPlace,
-					})
-				}
-
-				// if we have at least some useful data for the entity, process it
-				if p.Name != "" || len(p.Attributes) > 0 {
-					itemChan <- &timeline.Graph{Entity: p}
-				}
-			}
-
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -349,3 +309,9 @@ func join(sep string, elems []string) string {
 const nameCutset = "<\"“”'>"
 
 const beginVCard = "BEGIN:VCARD"
+
+var bufPool = sync.Pool{
+	New: func() any {
+		return make([]byte, len(beginVCard))
+	},
+}

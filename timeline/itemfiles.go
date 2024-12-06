@@ -85,10 +85,10 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	itCopy := *it
 	itCopy.ID = ""
 	var dsName *string
-	if p.params.DataSourceName != "" {
-		dsName = &p.params.DataSourceName
+	if p.ds.Name != "" {
+		dsName = &p.ds.Name
 	}
-	if existingItemRow, err := p.tl.loadItemRow(ctx, tx, 0, &itCopy, dsName, p.params.ProcessingOptions.ItemUniqueConstraints, true); err == nil && existingItemRow.ID > 0 && existingItemRow.ID != it.row.ID {
+	if existingItemRow, err := p.tl.loadItemRow(ctx, tx, 0, &itCopy, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true); err == nil && existingItemRow.ID > 0 && existingItemRow.ID != it.row.ID {
 		// ah, so with the file hash, we have now determined that we already have the item;
 		// this is a duplicate ITEM, so delete the row and file we just created, and since this
 		// is being done asynchronously, the duplicate item has already finished processing

@@ -23,9 +23,9 @@ package imessage
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path"
@@ -54,29 +54,24 @@ func init() {
 type FileImporter struct{}
 
 // Recognize returns whether this file or folder is supported.
-func (FileImporter) Recognize(_ context.Context, filepaths []string) (timeline.Recognition, error) {
-	for _, fpath := range filepaths {
-		if chatDBPath(fpath) != "" {
-			return timeline.Recognition{Confidence: .85}, nil
-		}
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	if chatDBPath(dirEntry) != "" {
+		return timeline.Recognition{Confidence: .85}, nil
 	}
 	return timeline.Recognition{}, nil
 }
 
 // FileImport imports data from the given file or folder.
-func (fimp *FileImporter) FileImport(ctx context.Context, inputPaths []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	if len(inputPaths) != 1 {
-		return errors.New("only 1 input path supported")
-	}
-	inputPath := inputPaths[0]
-
+func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	// start by adding contacts (TODO: this maybe should be separate? assumes we're on a Mac with the AddressBook DB)
-	if err := fimp.processContacts(ctx, itemChan, opt); err != nil {
+	if err := fimp.processContacts(ctx, params); err != nil {
 		return err
 	}
 
-	// open messages DB and prepare importer
-	db, err := sql.Open("sqlite3", chatDBPath(inputPath)+"?mode=ro")
+	// open messages DB as read-only and prepare importer
+	// note that the SQL APIs don't support io/fs APIs, so we cheat and just access the disk directly
+	dbPath := filepath.Join(dirEntry.FSRoot, filepath.FromSlash(chatDBPath(dirEntry)))
+	db, err := sql.Open("sqlite3", dbPath+"?mode=ro")
 	if err != nil {
 		return fmt.Errorf("opening chat.db: %w", err)
 	}
@@ -85,7 +80,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, inputPaths []string, i
 	im := Importer{
 		DB: db,
 		FillOutAttachmentItem: func(_ context.Context, filename string, attachment *timeline.Item) {
-			chatDBFolderPath := filepath.FromSlash(filepath.Dir(chatDBPath(inputPath)))
+			chatDBFolderPath := filepath.FromSlash(filepath.Dir(chatDBPath(dirEntry)))
 			relativeFilename := filepath.FromSlash(strings.TrimPrefix(filename, "~/Library/Messages/"))
 
 			attachment.OriginalLocation = relativeFilename
@@ -95,7 +90,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, inputPaths []string, i
 		},
 	}
 
-	if err := im.ImportMessages(ctx, itemChan, opt); err != nil {
+	if err := im.ImportMessages(ctx, params); err != nil {
 		return err
 	}
 
@@ -119,7 +114,7 @@ type Importer struct {
 }
 
 // ImportMessages imports messages from the chat DB.
-func (im Importer) ImportMessages(ctx context.Context, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
+func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams) error {
 	rows, err := im.DB.QueryContext(ctx,
 		`SELECT
 			m.ROWID, m.guid, m.text, m.attributedBody, m.service, m.date, m.date_read, m.date_delivered,
@@ -193,7 +188,7 @@ func (im Importer) ImportMessages(ctx context.Context, itemChan chan<- *timeline
 			ig.ToItem(timeline.RelReply, &timeline.Item{ID: *currentMessage.replyToGUID})
 		}
 
-		itemChan <- ig
+		opt.Pipeline <- ig
 	}
 
 	for rows.Next() {
@@ -246,7 +241,7 @@ func (im Importer) ImportMessages(ctx context.Context, itemChan chan<- *timeline
 					Item: &timeline.Item{ID: associatedGUID},
 				}
 				reactionGraph.FromEntityWithValue(&reactor, timeline.RelReacted, reaction)
-				itemChan <- reactionGraph
+				opt.Pipeline <- reactionGraph
 				continue
 			}
 		}
@@ -282,20 +277,20 @@ func (im Importer) ImportMessages(ctx context.Context, itemChan chan<- *timeline
 	return nil
 }
 
-func chatDBPath(inputPath string) string {
-	info, err := os.Stat(inputPath)
+func chatDBPath(input timeline.DirEntry) string {
+	info, err := fs.Stat(input.FS, input.Filename)
 	if err != nil {
 		return ""
 	}
 	// To be 100% confident we should open chat.db and see if we can query it...
 	if !info.IsDir() &&
-		filepath.Base(inputPath) == "chat.db" &&
-		timeline.FileExists(filepath.Join(filepath.Dir(inputPath), "Attachments")) {
-		return inputPath
+		input.Name() == "chat.db" &&
+		timeline.FileExists(path.Join(path.Dir(input.Filename), "Attachments")) {
+		return input.Filename
 	} else if info.IsDir() &&
-		timeline.FileExists(filepath.Join(inputPath, "Attachments")) &&
-		timeline.FileExists(filepath.Join(inputPath, "chat.db")) {
-		return filepath.Join(inputPath, "chat.db")
+		timeline.FileExists(path.Join(input.Filename, "Attachments")) &&
+		timeline.FileExists(path.Join(input.Filename, "chat.db")) {
+		return path.Join(input.Filename, "chat.db")
 	}
 	return ""
 }

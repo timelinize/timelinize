@@ -106,7 +106,7 @@ func (fimp *FileImporter) addressBook(ctx context.Context) error {
 			g.FromEntityWithValue(fimp.owner, timeline.Relation{Label: "saved_contact"}, strconv.FormatInt(creationDate.Unix(), 10))
 		}
 
-		fimp.itemChan <- g
+		fimp.opt.Pipeline <- g
 	}
 
 	for rows.Next() {

@@ -24,16 +24,18 @@ import (
 	"io/fs"
 	"path"
 	"time"
+
+	"github.com/timelinize/timelinize/timeline"
 )
 
-func loadSettingsFromTakeoutArchive(fsys fs.FS) (settings, error) {
+func loadSettingsFromTakeoutArchive(d timeline.DirEntry) (settings, error) {
 	var file fs.File
 	var err error
 	for _, pathToTry := range []string{
 		takeoutLocationHistoryPath2024,
 		takeoutLocationHistoryPathPre2024,
 	} {
-		file, err = flexibleOpen(fsys, path.Join(pathToTry, "Settings.json"))
+		file, err = flexibleOpen(d, path.Join(pathToTry, "Settings.json"))
 		if err == nil || !errors.Is(err, fs.ErrNotExist) {
 			break
 		}

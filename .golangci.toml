@@ -109,13 +109,13 @@
         "$gostd",
         "github.com/timelinize",
         "github.com/jhillyerd/enmime",
-        "github.com/mholt/archiver/v4",
+        "github.com/mholt/archives",
         "github.com/mholt/goexif2/",
         "github.com/maruel/natural",
         "howett.net/plist",
         "github.com/abema/go-mp4",
 	    "github.com/dhowden/tag",
-        "github.com/trimmer-io/go-xmp",
+        "github.com/mholt/go-xmp",
         "github.com/adrianmo/go-nmea",
         "github.com/signal-golang/go-vcard",
         "github.com/google/uuid",
@@ -127,8 +127,10 @@
         "github.com/davidbyttow/govips/v2/vips",
         "github.com/galdor/go-thumbhash",
         "github.com/strukturag/libheif/go/heif",
+        "github.com/gen2brain/avif",
         "github.com/Masterminds/sprig/v3",
         "github.com/caddyserver/caddy/v2",
+        "github.com/asg017/sqlite-vec-go-bindings/cgo",
     ]
 
     [linters-settings.depguard.rules.Tests]

@@ -28,11 +28,9 @@ import (
 	"io/fs"
 	"math"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/datasources/googlelocation"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -77,155 +75,103 @@ type Options struct {
 type FileImporter struct{}
 
 // Recognize returns whether the file is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	var totalCount, matchCount int
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	rec := timeline.Recognition{DirThreshold: .9}
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if fpath == "." {
-					return nil
-				}
-				return fs.SkipDir // don't walk subfolders; it's uncommon and slower
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-
-			totalCount++
-
-			ext := strings.ToLower(filepath.Ext(fpath))
-			if ext == ".geojson" {
-				matchCount++
-			}
-
-			return nil
-		})
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
+	// we can import directories, but let the import planner figure that out; only recognize files
+	if dirEntry.IsDir() {
+		return rec, nil
 	}
 
-	var confidence float64
-	if totalCount > 0 {
-		confidence = float64(matchCount) / float64(totalCount)
+	// recognize by file extension
+	switch strings.ToLower(path.Ext(dirEntry.Name())) {
+	case ".geojson":
+		rec.Confidence = 1
 	}
 
-	return timeline.Recognition{Confidence: confidence}, nil
+	return rec, nil
 }
 
 // FileImport conducts an import of the data from a file.
-func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	dsOpt := opt.DataSourceOptions.(*Options)
+func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	dsOpt := params.DataSourceOptions.(*Options)
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
+	return fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir // skip hidden files & folders
+		}
+		if d.IsDir() {
+			return nil // traverse into subdirectories
+		}
 
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil // traverse into subdirectories
-			}
-
-			// skip unsupported file types
-			ext := path.Ext(strings.ToLower(fpath))
-			if ext != ".geojson" {
-				return nil
-			}
-
-			file, err := fsys.Open(fpath)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			// create JSON decoder (wrapped to track some state as it decodes)
-			jsonDec := &decoder{Decoder: json.NewDecoder(file), lenient: dsOpt.Lenient}
-
-			// create location processor to clean up any noisy raw data
-			locProc, err := googlelocation.NewLocationProcessor(jsonDec, dsOpt.Simplification)
-			if err != nil {
-				return err
-			}
-
-			// iterate each resulting location point and process it as an item
-			for {
-				l, err := locProc.NextLocation(ctx)
-				if err != nil {
-					return err
-				}
-				if l == nil {
-					break
-				}
-
-				feature := l.Original.(feature)
-
-				// use generic properties as metadata
-				meta := timeline.Metadata(feature.Properties)
-				meta = meta.HumanizeKeys()
-
-				// fill in special-case, standardized metadata using
-				// the same keys as with Google Location History
-				meta["Velocity"] = feature.velocity
-				meta["Heading"] = feature.heading
-
-				// include any metadata added by location processor
-				meta.Merge(l.Metadata, timeline.MetaMergeReplace)
-
-				item := &timeline.Item{
-					Classification: timeline.ClassLocation,
-					Timestamp:      l.Timestamp,
-					Timespan:       l.Timespan,
-					Location:       l.Location(),
-					Owner: timeline.Entity{
-						ID: dsOpt.OwnerEntityID,
-					},
-					Metadata: meta,
-				}
-
-				if opt.Timeframe.ContainsItem(item, false) {
-					itemChan <- &timeline.Graph{Item: item}
-				}
-			}
-
+		// skip unsupported file types
+		if ext := strings.ToLower(path.Ext(d.Name())); ext != ".geojson" {
 			return nil
-		})
+		}
+
+		file, err := dirEntry.FS.Open(fpath)
 		if err != nil {
 			return err
 		}
-	}
+		defer file.Close()
 
-	return nil
+		// create JSON decoder (wrapped to track some state as it decodes)
+		jsonDec := &decoder{Decoder: json.NewDecoder(file), lenient: dsOpt.Lenient}
+
+		// create location processor to clean up any noisy raw data
+		locProc, err := googlelocation.NewLocationProcessor(jsonDec, dsOpt.Simplification)
+		if err != nil {
+			return err
+		}
+
+		// iterate each resulting location point and process it as an item
+		for {
+			l, err := locProc.NextLocation(ctx)
+			if err != nil {
+				return err
+			}
+			if l == nil {
+				break
+			}
+
+			feature := l.Original.(feature)
+
+			// use generic properties as metadata
+			meta := timeline.Metadata(feature.Properties)
+			meta = meta.HumanizeKeys()
+
+			// fill in special-case, standardized metadata using
+			// the same keys as with Google Location History
+			meta["Velocity"] = feature.velocity
+			meta["Heading"] = feature.heading
+
+			// include any metadata added by location processor
+			meta.Merge(l.Metadata, timeline.MetaMergeReplace)
+
+			item := &timeline.Item{
+				Classification: timeline.ClassLocation,
+				Timestamp:      l.Timestamp,
+				Timespan:       l.Timespan,
+				Location:       l.Location(),
+				Owner: timeline.Entity{
+					ID: dsOpt.OwnerEntityID,
+				},
+				Metadata: meta,
+			}
+
+			if params.Timeframe.ContainsItem(item, false) {
+				params.Pipeline <- &timeline.Graph{Item: item}
+			}
+		}
+
+		return nil
+	})
 }
 
 // decoder wraps the JSON decoder to get the next location from the document.

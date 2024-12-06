@@ -29,7 +29,6 @@ import (
 	"path"
 	"time"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/datasources/facebook"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -51,153 +50,139 @@ func init() {
 type Client struct{}
 
 // Recognize returns whether the file or folder is recognized.
-func (Client) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-		_, err = fs.Stat(fsys, personalInformationPath)
-		if err != nil {
-			return timeline.Recognition{}, nil
-		}
+func (Client) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	if timeline.FileExistsFS(dirEntry.FS, personalInformationPath) {
+		return timeline.Recognition{Confidence: .9}, nil
 	}
-	return timeline.Recognition{Confidence: 1}, nil
+	return timeline.Recognition{}, nil
 }
 
 // FileImport imports data from the file or folder.
-func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return err
+func (c *Client) FileImport(_ context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	// first, load the profile information
+	pi, err := c.getPersonalInfo(dirEntry.FS)
+	if err != nil {
+		return fmt.Errorf("loading profile: %w", err)
+	}
+	if len(pi.ProfileUser) == 0 {
+		return errors.New("no profile information found: missing profile user")
+	}
+	personalInfo := pi.ProfileUser[0].StringMapData
+
+	owner := timeline.Entity{
+		Name: personalInfo.Name.Value,
+		Attributes: []timeline.Attribute{
+			{
+				Name:     "instagram_username",
+				Value:    personalInfo.Username.Value,
+				Identity: true,
+			},
+			{
+				Name:  timeline.AttributeGender,
+				Value: personalInfo.Gender.Value,
+			},
+			{
+				Name:        timeline.AttributePhoneNumber,
+				Value:       personalInfo.PhoneNumber.Value,
+				Identifying: true,
+			},
+			{
+				Name:        timeline.AttributeEmail,
+				Value:       personalInfo.Email.Value,
+				Identifying: true,
+			},
+			{
+				Name:  "instagram_bio",
+				Value: personalInfo.Bio.Value,
+			},
+			{
+				Name:  "website",
+				Value: personalInfo.Website.Value,
+			},
+		},
+	}
+	if picFilename := pi.ProfileUser[0].MediaMapData.ProfilePhoto.URI; picFilename != "" {
+		owner.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+			return dirEntry.FS.Open(picFilename)
+		}
+	}
+	if personalInfo.DateOfBirth.Value != "" {
+		bd, err := time.Parse("2006-01-02", personalInfo.DateOfBirth.Value)
+		if err == nil {
+			owner.Attributes = append(owner.Attributes, timeline.Attribute{
+				Name:  "birth_date",
+				Value: bd,
+			})
+		}
+	}
+
+	// then, load the posts index
+	postIdx, err := c.getPostsIndex(dirEntry.FS)
+	if err != nil {
+		return fmt.Errorf("loading index: %w", err)
+	}
+	for _, post := range postIdx {
+		// a post may have multiple media items, we'll treat them as attachments
+
+		var ig *timeline.Graph
+		var firstMedia int
+
+		// if there is text, use that as the "main" item
+		if postText := post.allText(); postText != "" {
+			ig = &timeline.Graph{
+				Item: &timeline.Item{
+					Classification: timeline.ClassSocial,
+					Timestamp:      post.timestamp(),
+					Owner:          owner,
+					Content: timeline.ItemData{
+						Data: timeline.StringData(postText),
+					},
+					IntermediateLocation: post.filename,
+				},
+			}
+		} else if len(post.Media) > 0 {
+			item := post.Media[0].timelineItem(dirEntry.FS, owner)
+			ig = &timeline.Graph{Item: item}
+			firstMedia = 1 // the 0th media was used as the root of the graph
 		}
 
-		// first, load the profile information
-		pi, err := c.getPersonalInfo(fsys)
-		if err != nil {
-			return fmt.Errorf("loading profile: %w", err)
+		// add remaining media to graph
+		for i := firstMedia; i < len(post.Media); i++ {
+			ig.ToItem(timeline.RelAttachment, post.Media[i].timelineItem(dirEntry.FS, owner))
 		}
-		if len(pi.ProfileUser) == 0 {
-			return errors.New("no profile information found: missing profile user")
-		}
-		personalInfo := pi.ProfileUser[0].StringMapData
 
-		owner := timeline.Entity{
-			Name: personalInfo.Name.Value,
-			Attributes: []timeline.Attribute{
-				{
-					Name:     "instagram_username",
-					Value:    personalInfo.Username.Value,
-					Identity: true,
+		params.Pipeline <- ig
+	}
+
+	// stories
+	// TODO: Maybe stories should go into a collection
+	storyIdx, err := c.getStoryIndex(dirEntry.FS)
+	if err != nil {
+		return err
+	}
+	for _, story := range storyIdx.IgStories {
+		params.Pipeline <- &timeline.Graph{
+			Item: &timeline.Item{
+				Timestamp:            time.Unix(story.CreationTimestamp, 0),
+				Owner:                owner,
+				IntermediateLocation: story.URI,
+				Content: timeline.ItemData{
+					Filename: path.Base(story.URI),
+					Data: func(_ context.Context) (io.ReadCloser, error) {
+						return dirEntry.FS.Open(story.URI)
+					},
 				},
-				{
-					Name:  timeline.AttributeGender,
-					Value: personalInfo.Gender.Value,
-				},
-				{
-					Name:        timeline.AttributePhoneNumber,
-					Value:       personalInfo.PhoneNumber.Value,
-					Identifying: true,
-				},
-				{
-					Name:        timeline.AttributeEmail,
-					Value:       personalInfo.Email.Value,
-					Identifying: true,
-				},
-				{
-					Name:  "instagram_bio",
-					Value: personalInfo.Bio.Value,
-				},
-				{
-					Name:  "website",
-					Value: personalInfo.Website.Value,
+				Metadata: timeline.Metadata{
+					"Caption": facebook.FixString(story.Title),
 				},
 			},
 		}
-		if picFilename := pi.ProfileUser[0].MediaMapData.ProfilePhoto.URI; picFilename != "" {
-			owner.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
-				return fsys.Open(picFilename)
-			}
-		}
-		if personalInfo.DateOfBirth.Value != "" {
-			bd, err := time.Parse("2006-01-02", personalInfo.DateOfBirth.Value)
-			if err == nil {
-				owner.Attributes = append(owner.Attributes, timeline.Attribute{
-					Name:  "birth_date",
-					Value: bd,
-				})
-			}
-		}
+	}
 
-		// then, load the posts index
-		postIdx, err := c.getPostsIndex(fsys)
-		if err != nil {
-			return fmt.Errorf("loading index: %w", err)
-		}
-		for _, post := range postIdx {
-			// a post may have multiple media items, we'll treat them as attachments
-
-			var ig *timeline.Graph
-			var firstMedia int
-
-			// if there is text, use that as the "main" item
-			if postText := post.allText(); postText != "" {
-				ig = &timeline.Graph{
-					Item: &timeline.Item{
-						Classification: timeline.ClassSocial,
-						Timestamp:      post.timestamp(),
-						Owner:          owner,
-						Content: timeline.ItemData{
-							Data: timeline.StringData(postText),
-						},
-						IntermediateLocation: post.filename,
-					},
-				}
-			} else if len(post.Media) > 0 {
-				item := post.Media[0].timelineItem(fsys, owner)
-				ig = &timeline.Graph{Item: item}
-				firstMedia = 1 // the 0th media was used as the root of the graph
-			}
-
-			// add remaining media to graph
-			for i := firstMedia; i < len(post.Media); i++ {
-				ig.ToItem(timeline.RelAttachment, post.Media[i].timelineItem(fsys, owner))
-			}
-
-			itemChan <- ig
-		}
-
-		// stories
-		// TODO: Maybe stories should go into a collection
-		storyIdx, err := c.getStoryIndex(fsys)
-		if err != nil {
-			return err
-		}
-		for _, story := range storyIdx.IgStories {
-			itemChan <- &timeline.Graph{
-				Item: &timeline.Item{
-					Timestamp:            time.Unix(story.CreationTimestamp, 0),
-					Owner:                owner,
-					IntermediateLocation: story.URI,
-					Content: timeline.ItemData{
-						Filename: path.Base(story.URI),
-						Data: func(_ context.Context) (io.ReadCloser, error) {
-							return fsys.Open(story.URI)
-						},
-					},
-					Metadata: timeline.Metadata{
-						"Caption": facebook.FixString(story.Title),
-					},
-				},
-			}
-		}
-
-		// messages
-		err = facebook.GetMessages(fsys, itemChan, "instagram", opt.Log)
-		if err != nil {
-			return err
-		}
+	// messages
+	err = facebook.GetMessages("instagram", dirEntry, params)
+	if err != nil {
+		return err
 	}
 
 	return nil

@@ -30,21 +30,12 @@ import (
 	"path"
 	"strings"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/timeline"
 )
 
 // Recognize returns whether the input is supported.
-func (Client) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	if len(filenames) != 1 {
-		return timeline.Recognition{}, errors.New("only 1 archive may be imported at a time")
-	}
-
-	fsys, err := archiver.FileSystem(ctx, filenames[0])
-	if err != nil {
-		return timeline.Recognition{}, err
-	}
-	manifestFile, err := fsys.Open(manifestFile)
+func (Client) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	manifestFile, err := dirEntry.FS.Open(path.Join(dirEntry.Filename, manifestFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return timeline.Recognition{}, nil
 	} else if err != nil {
@@ -63,33 +54,23 @@ func (Client) Recognize(ctx context.Context, filenames []string) (timeline.Recog
 
 	return timeline.Recognition{
 		Confidence:   1,
-		SnapshotDate: manifest.ArchiveInfo.GenerationDate,
+		SnapshotDate: &manifest.ArchiveInfo.GenerationDate,
 	}, nil
 }
 
 // FileImport imports data from the input.
-func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	if len(filenames) != 1 {
-		return errors.New("only 1 archive may be imported at a time")
-	}
-
-	dsOpt := *opt.DataSourceOptions.(*Options)
-
-	fsys, err := archiver.FileSystem(ctx, filenames[0])
-	if err != nil {
-		return err
-	}
-	c.fsys = fsys
+func (c *Client) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	dsOpt := *params.DataSourceOptions.(*Options)
 
 	// load the owner info
-	acc, err := c.loadOwnerAccountFromArchive(fsys)
+	acc, err := c.loadOwnerAccountFromArchive(dirEntry.FS)
 	if err != nil {
 		return fmt.Errorf("unable to get owner account: %w", err)
 	}
-	c.owner = acc.entity(ctx, fsys)
+	c.owner = acc.entity(ctx, dirEntry.FS)
 
 	// first pass - add tweets to timeline
-	err = c.processArchive(ctx, fsys, itemChan, c.makeItemGraphFromTweet, dsOpt)
+	err = c.processArchive(ctx, dirEntry.FS, params.Pipeline, c.makeItemGraphFromTweet, dsOpt)
 	if err != nil {
 		return fmt.Errorf("processing tweets: %w", err)
 	}
@@ -101,7 +82,7 @@ func (c *Client) FileImport(ctx context.Context, filenames []string, itemChan ch
 	// 	return fmt.Errorf("processing tweets round 2: %v", err)
 	// }
 
-	err = c.processDirectMessages(ctx, fsys, itemChan, dsOpt)
+	err = c.processDirectMessages(ctx, dirEntry.FS, params.Pipeline, dsOpt)
 	if err != nil {
 		return fmt.Errorf("processing direct messages: %w", err)
 	}

@@ -23,8 +23,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"path"
+	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/mholt/archives"
 )
 
 // DataSource has information about a
@@ -42,7 +47,7 @@ type DataSource struct {
 
 	// The name of the image representing
 	// this data source, relative to the
-	// server/website/resources/images/data-sources
+	// frontend/resources/images/data-sources
 	// folder.
 	// TODO: If we could get all icons to the same format (svg, ideally) we could remove this
 	Icon string `json:"icon"`
@@ -130,22 +135,100 @@ func AllDataSources() []DataSource {
 	return sources
 }
 
-// RecognizeResult stores the result of whether a data source recognizes an input.
-type RecognizeResult struct {
-	DataSource
+// TODO: WIP...
+type RecognizeParams struct {
+}
+
+// DataSourceRecognition stores the result of whether a data source recognizes an input.
+type DataSourceRecognition struct {
+	DataSource DataSource `json:"data_source"`
 	Recognition
 }
 
-// DataSourcesRecognize returns the list of data sources that reportedly
-// recognize the file on disk at the name of filename. If timeout is set,
-// that will be the max time PER DATA SOURCE.
-func DataSourcesRecognize(ctx context.Context, filenames []string, timeout time.Duration) ([]RecognizeResult, error) {
-	if len(filenames) == 0 {
-		return nil, errors.New("no filenames provided")
+// Recognition is a type that indicates how well, if at all, an importer
+// recognized or supports an input, as well as any relevant information
+// regarding the data set that may be useful later or for storage.
+type Recognition struct {
+	// TODO: rename to Score? Actually, just make a bool? Why would a source ever be unsure? (they shouldn't be traversing direcctories anyway)
+	Confidence float64 `json:"confidence"`
+
+	// If > 0, and the data source matches this much of all the entries
+	// in a directory (sans hidden files), assign the entire directory
+	// to the data source; 0 <= DirThreshold <= 1
+	DirThreshold float64 `json:"dir_threshold,omitempty"`
+
+	// Optional; TODO: used?
+	SnapshotDate *time.Time `json:"snapshot_date,omitempty"`
+}
+
+// DirEntry is a fs.DirEntry that represents a directory entry (file
+// or folder), and also carries the associated file system it came
+// from, the filename of the file (within the FS), and the root path
+// of the OS (as an OS-compatible filepath).
+type DirEntry struct {
+	fs.DirEntry
+
+	// FS is a file system that can be used to access the
+	// file represented by this DirEntry. During Recognize,
+	// it is rooted at the file itself. During import, it
+	// may be rooted at the file itself (if it's a directory)
+	// or at the parent folder (if it's a file). Use
+	// the Filename field to get the path of the DirEntry
+	// within the FS.
+	FS fs.FS
+
+	// FSRoot is the root of the FS (OS-compatible filepath).
+	FSRoot string
+
+	// Filename is the name of the file in the FS represented
+	// by this DirEntry. It is the fs.FS-compatible path that
+	// can and should be used to access the file within the
+	// associated FS. Thus, it is not an OS path, it has no
+	// root component (no leading "/" or drive letter, for
+	// example), may be either a directory or a file, and may
+	// be "." or a true  filename. To always get the true
+	// filename, use the Name() method. (TODO: Verify this)
+	Filename string
+}
+
+func (d DirEntry) Open() (fs.File, error) { return d.FS.Open(d.Filename) }
+
+// TODO: see if we can get by without the data sources needing to call these (shouldn't our new recursive importer be able to choose the right directory?)
+
+func (d DirEntry) TopDirOpen(filename string) (fs.File, error) {
+	return archives.TopDirOpen(d.FS, path.Join(d.Filename, filename))
+}
+
+func (d DirEntry) TopDirStat(filename string) (fs.FileInfo, error) {
+	return archives.TopDirStat(d.FS, path.Join(d.Filename, filename))
+}
+
+func (d DirEntry) TopDirReadDir(filename string) ([]fs.DirEntry, error) {
+	return archives.TopDirReadDir(d.FS, path.Join(d.Filename, filename))
+}
+
+// FullPath returns the full path of the directory entry, including the FS
+// root (if a known FS type from the archives package), and the filename
+// in the archive.
+func (d DirEntry) FullPath() string {
+	var root string
+	switch fsys := d.FS.(type) {
+	case archives.FileFS:
+		root = fsys.Path
+	case archives.DirFS:
+		root = string(fsys)
+	case *archives.ArchiveFS:
+		root = fsys.Path
+	case *archives.DeepFS:
+		root = fsys.Root
 	}
+	return filepath.Join(root, filepath.FromSlash(d.Filename))
+}
 
-	var results []RecognizeResult
-
+// DataSourcesRecognize returns the list of data sources that reportedly
+// recognize the file described by the DirEntry.
+func DataSourcesRecognize(ctx context.Context, entry DirEntry, opts RecognizeParams) ([]DataSourceRecognition, error) {
+	var results []DataSourceRecognition
 	tryDataSource := func(ctx context.Context, ds DataSource) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -153,26 +236,28 @@ func DataSourcesRecognize(ctx context.Context, filenames []string, timeout time.
 		if ds.NewFileImporter == nil {
 			return nil
 		}
-		if timeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, timeout)
-			defer cancel()
-		}
-		result, err := ds.NewFileImporter().Recognize(ctx, filenames)
-		if errors.Is(err, context.DeadlineExceeded) {
-			// if this one data source took too long, don't skip remaining...
-			return nil
-		}
+		result, err := ds.NewFileImporter().Recognize(ctx, entry, opts)
 		if err != nil {
 			return fmt.Errorf("%s: %w", ds.Name, err)
 		}
 		if result.Confidence > 0 {
-			results = append(results, RecognizeResult{ds, result})
+			results = append(results, DataSourceRecognition{ds, result})
 		}
 		return nil
 	}
 
+	const maxDur = 120 * time.Second
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, maxDur)
+	defer cancel()
+
 	for _, ds := range dataSources {
+		if ds.Name == "generic" {
+			continue // this is only a special fallback data source, to be applied in special cases elsewhere
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("trying data sources: %w", err)
+		}
 		if err := tryDataSource(ctx, ds); err != nil {
 			return nil, err
 		}
@@ -196,6 +281,7 @@ type OAuth2 struct {
 	Scopes []string `json:"scopes,omitempty"`
 }
 
+// TODO: unused?
 // AuthenticateFn is a function that authenticates userID with a service.
 // It returns the authorization or credentials needed to operate. The return
 // value should be byte-encoded so it can be stored in the DB to be reused.
@@ -350,23 +436,44 @@ func (tf Timeframe) ContainsItem(it *Item, strict bool) bool {
 }
 
 // FileImporter is a type that can import data from files or folders.
+//
+// Implementations MUST treat the input parameters as read-only; i.e.
+// the values should not be changed. Doing so will cause bugs.
 type FileImporter interface {
-	Recognize(ctx context.Context, filenames []string) (Recognition, error)
-	FileImport(ctx context.Context, filenames []string, itemChan chan<- *Graph, opt ListingOptions) error
+	// Recognize determines whether the data source supports the input described by the DirEntry.
+	// It should be implemented in a way that is efficient to be called many times on multiple
+	// files throughout a walk (pool buffers for reuse, skip work that doesn't need to be done,
+	// etc; for example, ignore hidden files).
+	//
+	// Recognize should perform any combination of 3 primary recognition algorithms:
+	//
+	// 1. Filename match (fast and easy, but less reliable)
+	// 2. Content match (ideally just read a file's header or other small amount; more reliable)
+	// 3. Directory structure match (for directories, check for presence of certain files and
+	//    possibly verify by reading part of them; i.e. also perform 1 and/or 2 for expected files).
+	//
+	// Recognize MUST NOT walk/traverse a directory if possible; spot-checking specific known or
+	// expected files within it is okay. The walking is already performed by the import planner.
+	//
+	// To keep import planning quick, opening the DirEntry or any other files in the FS should
+	// only happen if necessary, due to the possibility that it is within a compressed tar file,
+	// which is not efficient as it requires decompressing potentially most of the archive to
+	// find the file to open. File extensions may be a good way to avoid unnecessary Open() calls.
+	Recognize(context.Context, DirEntry, RecognizeParams) (Recognition, error)
+
+	FileImport(context.Context, DirEntry, ImportParams) error
 }
 
+// TODO: unused?
 // APIImporter is a type that can import data via a remote service API.
 type APIImporter interface {
 	Authenticate(ctx context.Context, acc Account, dsOpt any) error
-	APIImport(ctx context.Context, acc Account, itemChan chan<- *Graph, opt ListingOptions) error
+	APIImport(context.Context, Account, chan<- *Graph, ImportParams) error
 }
 
-// Recognition is a type that indicates how well, if at all, an importer
-// recognized or supports an input, as well as any relevant information
-// regarding the data set that may be useful later or for storage.
-type Recognition struct {
-	Confidence   float64   `json:"confidence"`
-	SnapshotDate time.Time `json:"snapshot_date"`
+// TODO: experimental
+type SizeEstimator interface {
+	EstimateSize(context.Context, DirEntry, ImportParams) (int, error)
 }
 
 var dataSources = make(map[string]DataSource) // keyed by name (not DB row ID)

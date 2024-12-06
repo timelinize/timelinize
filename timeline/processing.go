@@ -57,7 +57,7 @@ const (
 	workers = 5
 )
 
-func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions) (*sync.WaitGroup, chan<- *Graph) {
+func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, countOnly bool) (*sync.WaitGroup, chan<- *Graph) {
 	wg := new(sync.WaitGroup)
 	ch := make(chan *Graph)
 
@@ -99,6 +99,13 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions) (
 							zap.Int("worker", workerNum),
 							zap.Error(err))
 					}
+
+					// update job progress
+					var batchSize int
+					for _, g := range batch {
+						batchSize += g.Size()
+					}
+					p.ij.job.Progress(batchSize)
 				}
 			}
 
@@ -109,6 +116,11 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions) (
 					return
 				}
 				if g == nil {
+					continue
+				}
+				if countOnly {
+					newTotal := atomic.AddInt64(p.estimatedCount, int64(g.Size()))
+					p.ij.job.SetTotal(int(newTotal))
 					continue
 				}
 				addToBatch(g)
@@ -144,6 +156,9 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph, rs *recursiveS
 
 // phase1 inserts items into the database and preps data files for writing.
 func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Graph) error {
+	// TODO: maybe if we first go through the batch in a readlock, we can determine what are
+	// duplicates, before acquiring a write lock, and that could help for faster resumption
+	// (especially if we have even more workers)
 	p.tl.dbMu.Lock()
 	defer p.tl.dbMu.Unlock()
 
@@ -284,11 +299,11 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 			zap.String("graph", fmt.Sprintf("%p", ig)),
 			zap.Int64("row_id", rowID.id()),
 			zap.Duration("duration", duration),
-			zap.Int64("new_entities", atomic.LoadInt64(p.newEntityCount)),
-			zap.Int64("new_items", atomic.LoadInt64(p.newItemCount)),
-			zap.Int64("updated_items", atomic.LoadInt64(p.updatedItemCount)),
-			zap.Int64("skipped_items", atomic.LoadInt64(p.skippedItemCount)),
-			zap.Int64("total_items", atomic.LoadInt64(p.itemCount)),
+			zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
+			zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
+			zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
+			zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
+			zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
 		)
 		if ig.Item != nil && !ig.Item.Timestamp.IsZero() {
 			l = l.With(zap.Time("item_timestamp", ig.Item.Timestamp))
@@ -328,13 +343,13 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 
 	// successfully finished processing graph; save checkpoint, if specified
 	if ig.Checkpoint != nil {
-		chkpt, err := marshalGob(checkpoint{p.filenames, p.params.ProcessingOptions, ig.Checkpoint})
+		chkpt, err := marshalGob(ig.Checkpoint)
 		if err != nil {
 			return latentID{}, err
 		}
 
-		_, err = tx.Exec(`UPDATE imports SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
-			chkpt, p.impRow.id)
+		_, err = tx.Exec(`UPDATE jobs SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
+			chkpt, p.ij.job.id)
 		if err != nil {
 			return latentID{}, err
 		}
@@ -377,7 +392,7 @@ func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state
 // TODO: godoc about return value of 0, nil
 func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64, error) {
 	// keep count of number of items processed, mainly for logging
-	defer atomic.AddInt64(p.itemCount, 1)
+	defer atomic.AddInt64(p.ij.itemCount, 1)
 
 	// obtain a handle on the item data (if any), and determine whether
 	// it'll be stored in the database or on disk
@@ -479,8 +494,8 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// prepare for DB queries to see if we have this same item already
 	// in some form or another
 	var dsName *string
-	if p.params.DataSourceName != "" {
-		dsName = &p.params.DataSourceName
+	if p.ds.Name != "" {
+		dsName = &p.ds.Name
 	}
 	it.makeIDHash(dsName)
 	it.makeContentHash()
@@ -492,7 +507,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	var updateOverrides map[string]fieldUpdatePolicy
 
 	// if the item is already in our DB, load it
-	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.params.ProcessingOptions.ItemUniqueConstraints, true)
+	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true)
 	if err != nil {
 		return 0, fmt.Errorf("looking up item in database: %w", err)
 	}
@@ -506,7 +521,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 			// dataFileIn gets closed and nilified
 			processDataFile = false
 
-			atomic.AddInt64(p.skippedItemCount, 1)
+			atomic.AddInt64(p.ij.skippedItemCount, 1)
 			p.log.Debug("skipping processing of existing item",
 				zap.Int64("row_id", ir.ID),
 				zap.String("filename", it.Content.Filename),
@@ -703,7 +718,7 @@ func (tl *Timeline) cleanDataFile(tx *sql.Tx, dataFilePath string) error {
 }
 
 func (p *processor) integrityCheck(dbItem ItemRow) error {
-	if p.params.ProcessingOptions.Integrity || dbItem.DataFile == nil {
+	if p.ij.ProcessingOptions.Integrity || dbItem.DataFile == nil {
 		return nil
 	}
 
@@ -762,7 +777,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// (Example: filename is IMG_1234.HEIC, but data_file ends in IMG_1234__abcd.HEIC. We could rename to IMG_1234.HEIC
 	// if that filename is available in the repo and update the DB row to match.)
 	// TODO: Try to figure this out to make it correct. We might need a process-wide map mutex or something to avoid hacky solutions?
-	if dbItem.ImportID != nil && *dbItem.ImportID == p.impRow.id &&
+	if dbItem.JobID != nil && *dbItem.JobID == p.ij.job.id &&
 		dbItem.DataHash == nil &&
 		dbItem.DataFile != nil && FileExists(p.tl.FullPath(*dbItem.DataFile)) {
 		p.log.Debug("processing existing item, but skipping data file because it is already being processed by this import",
@@ -778,7 +793,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// (like an ID), then later as it iterates it finds that related item and fills out the rest
 	// of the item's information -- so if our current item row is missing information, we can at
 	// least safely add new info I think
-	if dbItem.ImportID != nil && *dbItem.ImportID == p.impRow.id {
+	if dbItem.JobID != nil && *dbItem.JobID == p.ij.job.id {
 		updateOverrides = make(map[string]fieldUpdatePolicy)
 
 		// if there's an incoming data file and we don't have one, then update
@@ -859,7 +874,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	}
 
 	// if modified manually, do not overwrite changes unless specifically enabled
-	if dbItem.Modified != nil && !p.params.ProcessingOptions.OverwriteModifications {
+	if dbItem.Modified != nil && !p.ij.ProcessingOptions.OverwriteModifications {
 		p.log.Debug("skipping processing of existing item because it has been manually modified within the repo (enable modification overwrites to override)",
 			zap.Int64("item_row_id", dbItem.ID),
 			zap.String("filename", it.Content.Filename),
@@ -869,7 +884,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 
 	// if the item data is explicitly configured to overwrite existing, then it
 	// should always be reprocessed, even if NULL
-	dataUpdatePolicy, dataUpdateEnabled := p.params.ProcessingOptions.ItemFieldUpdates["data"]
+	dataUpdatePolicy, dataUpdateEnabled := p.ij.ProcessingOptions.ItemFieldUpdates["data"]
 	if dataUpdatePolicy == updatePolicyOverwriteExisting {
 		return true, true, nil
 	}
@@ -926,7 +941,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	}
 
 	// finally, if the user has configured/enabled updates, reprocess the item
-	item = len(p.params.ProcessingOptions.ItemFieldUpdates) > 0
+	item = len(p.ij.ProcessingOptions.ItemFieldUpdates) > 0
 
 	return item || dataFile, dataFile, nil
 }
@@ -972,7 +987,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 
 	ir.DataSourceID = &p.dsRowID
 	ir.DataSourceName = &p.ds.Name
-	ir.ImportID = &p.impRow.id
+	ir.JobID = &p.ij.job.id
 	if attrID != 0 {
 		ir.AttributeID = &attrID
 	}
@@ -1257,7 +1272,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 		err := tx.QueryRowContext(ctx,
 			`INSERT INTO items
-				(data_source_id, import_id, attribute_id, classification_id,
+				(data_source_id, job_id, attribute_id, classification_id,
 				original_id, original_location, intermediate_location, filename,
 				timestamp, timespan, timeframe, time_offset, time_uncertainty,
 				data_type, data_text, data_file, data_hash, metadata,
@@ -1265,7 +1280,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 				note, starred, original_id_hash, initial_content_hash, retrieval_key)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			RETURNING id`,
-			ir.DataSourceID, ir.ImportID, ir.AttributeID, ir.ClassificationID,
+			ir.DataSourceID, ir.JobID, ir.AttributeID, ir.ClassificationID,
 			ir.OriginalID, ir.OriginalLocation, ir.IntermediateLocation, ir.Filename,
 			ir.timestampUnix(), ir.timespanUnix(), ir.timeframeUnix(), ir.TimeOffset, ir.TimeUncertainty,
 			ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, string(ir.Metadata),
@@ -1274,7 +1289,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			ir.Note, ir.Starred, ir.OriginalIDHash, ir.InitialContentHash, ir.RetrievalKey,
 		).Scan(&rowID)
 
-		atomic.AddInt64(p.newItemCount, 1)
+		atomic.AddInt64(p.ij.newItemCount, 1)
 
 		return rowID, err
 	}
@@ -1282,7 +1297,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	// existing item; update it
 
 	// ...only if any fields are configured to be updated
-	if len(p.params.ProcessingOptions.ItemFieldUpdates) == 0 && len(updateOverrides) == 0 {
+	if len(p.ij.ProcessingOptions.ItemFieldUpdates) == 0 && len(updateOverrides) == 0 {
 		return ir.ID, nil
 	}
 
@@ -1292,11 +1307,11 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 	sb.WriteString(`UPDATE items SET `)
 
-	// set the modified_import_id (the ID of the import that most recently modified the item) only if
+	// set the modified_job_id (the ID of the import that most recently modified the item) only if
 	// it's not the original import, I think it makes sense to count the original import only once
-	if ir.ImportID != nil && *ir.ImportID != p.impRow.id {
-		sb.WriteString(`modified_import_id=?`)
-		args = append(args, p.impRow.id)
+	if ir.JobID != nil && *ir.JobID != p.ij.job.id {
+		sb.WriteString(`modified_job_id=?`)
+		args = append(args, p.ij.job.id)
 		needsComma = true
 	}
 
@@ -1409,7 +1424,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	}
 
 	// then for every remaining field, apply the default policy
-	for field, policy := range p.params.ProcessingOptions.ItemFieldUpdates {
+	for field, policy := range p.ij.ProcessingOptions.ItemFieldUpdates {
 		// skip overrides; already applied
 		if _, ok := updateOverrides[field]; ok {
 			continue
@@ -1438,7 +1453,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		}
 	}
 
-	atomic.AddInt64(p.updatedItemCount, 1)
+	atomic.AddInt64(p.ij.updatedItemCount, 1)
 
 	return ir.ID, nil
 }

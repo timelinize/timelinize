@@ -25,12 +25,10 @@ import (
 	"errors"
 	"io/fs"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/datasources/googlelocation"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -69,153 +67,101 @@ type Options struct {
 type FileImporter struct{}
 
 // Recognize returns whether the file or folder is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	var totalCount, matchCount int
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	rec := timeline.Recognition{DirThreshold: .9}
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if fpath == "." {
-					return nil
-				}
-				return fs.SkipDir // don't walk subfolders; it's uncommon and slower
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-
-			totalCount++
-
-			ext := strings.ToLower(filepath.Ext(fpath))
-			if ext == ".kml" {
-				matchCount++
-			}
-
-			return nil
-		})
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
+	// we can import directories, but let the import planner figure that out; only recognize files
+	if dirEntry.IsDir() {
+		return rec, nil
 	}
 
-	var confidence float64
-	if totalCount > 0 {
-		confidence = float64(matchCount) / float64(totalCount)
+	// recognize by file extension
+	if strings.ToLower(path.Ext(dirEntry.Name())) == ".kml" {
+		rec.Confidence = 1
 	}
 
-	return timeline.Recognition{Confidence: confidence}, nil
+	return rec, nil
 }
 
 // FileImport imports data from a folder or file.
-func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	dsOpt := opt.DataSourceOptions.(*Options)
+func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	dsOpt := params.DataSourceOptions.(*Options)
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
+	return fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir // skip hidden files & folders
+		}
+		if d.IsDir() {
+			return nil // traverse into subdirectories
+		}
 
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-			if d.IsDir() {
-				return nil // traverse into subdirectories
-			}
-
-			// skip unsupported file types
-			ext := path.Ext(strings.ToLower(fpath))
-			if ext != ".kml" {
-				return nil
-			}
-
-			file, err := fsys.Open(fpath)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			var doc document
-			err = xml.NewDecoder(file).Decode(&doc)
-			if err != nil {
-				return err
-			}
-			doc.i = -1
-
-			if doc.XMLNSGX != "http://www.google.com/kml/ext/2.2" {
-				// actually, we may not need this version specifically; other versions might work just as well
-				return errors.New("KML document does not support Google extension 'gx' namespace")
-			}
-			if len(doc.Document.Placemark.Track.When) != len(doc.Document.Placemark.Track.Coord) {
-				return errors.New("corrupt gx:Track data in Placemark: number of timestamps does not match number of coordinates")
-			}
-
-			// create location processor to clean up any noisy raw data
-			locProc, err := googlelocation.NewLocationProcessor(&doc, dsOpt.Simplification)
-			if err != nil {
-				return err
-			}
-
-			// iterate each resulting location point and process it as an item
-			for {
-				l, err := locProc.NextLocation(ctx)
-				if err != nil {
-					return err
-				}
-				if l == nil {
-					break
-				}
-
-				item := &timeline.Item{
-					Classification: timeline.ClassLocation,
-					Timestamp:      l.Timestamp,
-					Timespan:       l.Timespan,
-					Location:       l.Location(),
-					Owner: timeline.Entity{
-						ID: dsOpt.OwnerEntityID,
-					},
-					Metadata: l.Metadata,
-				}
-
-				if opt.Timeframe.ContainsItem(item, false) {
-					itemChan <- &timeline.Graph{Item: item}
-				}
-			}
-
+		// skip unsupported file types
+		if ext := strings.ToLower(path.Ext(d.Name())); ext != ".kml" {
 			return nil
-		})
+		}
+
+		file, err := dirEntry.FS.Open(fpath)
 		if err != nil {
 			return err
 		}
-	}
+		defer file.Close()
 
-	return nil
+		var doc document
+		err = xml.NewDecoder(file).Decode(&doc)
+		if err != nil {
+			return err
+		}
+		doc.i = -1
+
+		if doc.XMLNSGX != "http://www.google.com/kml/ext/2.2" {
+			// actually, we may not need this version specifically; other versions might work just as well
+			return errors.New("KML document does not support Google extension 'gx' namespace")
+		}
+		if len(doc.Document.Placemark.Track.When) != len(doc.Document.Placemark.Track.Coord) {
+			return errors.New("corrupt gx:Track data in Placemark: number of timestamps does not match number of coordinates")
+		}
+
+		// create location processor to clean up any noisy raw data
+		locProc, err := googlelocation.NewLocationProcessor(&doc, dsOpt.Simplification)
+		if err != nil {
+			return err
+		}
+
+		// iterate each resulting location point and process it as an item
+		for {
+			l, err := locProc.NextLocation(ctx)
+			if err != nil {
+				return err
+			}
+			if l == nil {
+				break
+			}
+
+			item := &timeline.Item{
+				Classification: timeline.ClassLocation,
+				Timestamp:      l.Timestamp,
+				Timespan:       l.Timespan,
+				Location:       l.Location(),
+				Owner: timeline.Entity{
+					ID: dsOpt.OwnerEntityID,
+				},
+				Metadata: l.Metadata,
+			}
+
+			if params.Timeframe.ContainsItem(item, false) {
+				params.Pipeline <- &timeline.Graph{Item: item}
+			}
+		}
+
+		return nil
+	})
+
 }
 
 // NextLocation returns the next available point from the XML document.

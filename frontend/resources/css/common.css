@@ -7,7 +7,7 @@
 
 /*
 
-MY OWN TABLER (BETA 19, 20) FIXES
+MY OWN TABLER (BETA 19, 20, 21) FIXES
 
 */
 
@@ -19,6 +19,12 @@ MY OWN TABLER (BETA 19, 20) FIXES
 /* override tabler's .navbar-brand:hover style  */
 .navbar h1.navbar-brand:hover {
 	opacity: 1;
+}
+
+/* override tabler's style that removes spacing from before the down-arrow
+  because it assumes it is on its own */
+.dropdown-toggle-split::after {
+	margin-left: 0.4em;
 }
 
 /* Tabler's default .input-group styles don't work well for
@@ -87,6 +93,7 @@ body {
 #page-content.opacity0,
 .filter-results.opacity0 {
 	opacity: 0;
+	pointer-events: none;
 }
 
 .thumbhash-container {
@@ -396,7 +403,7 @@ slightly reducing the padding makes a subtle improvement IMO */
 
 
 .file-picker-table {
-	max-height: 350px;
+	max-height: 700px;
 	user-select: none;
 	background: var(--tblr-bg-forms);
 	border: 1px solid var(--tblr-border-color);

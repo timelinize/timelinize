@@ -19,78 +19,38 @@
 package timeline
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"math"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	// TODO: I would like to just use "github.com/strukturag/libheif/go/heif"
+	// as our AVIF decoder, since that is what we used earlier during development
+	// but now I just get a distorted green mess:
+	// https://x.com/mholt6/status/1864894439061381393
 
 	"github.com/davidbyttow/govips/v2/vips"
 	"github.com/galdor/go-thumbhash"
-	_ "github.com/strukturag/libheif/go/heif" // register AVIF image decoder
+	_ "github.com/gen2brain/avif" // register AVIF image decoder
 	"go.uber.org/zap"
+	_ "golang.org/x/image/webp" // register WEBP image decoder
 )
 
 func init() {
 	vips.LoggingSettings(nil, vips.LogLevelError)
 	vips.Startup(nil) // Shutdown() is called in a sigtrap for clean shutdowns
-
-	const cpuFraction = 3
-	numThreads := runtime.NumCPU() / cpuFraction
-	if numThreads == 0 {
-		numThreads = 1
-	}
-	for range numThreads {
-		go thumbnailWorker()
-	}
-}
-
-// thumbnailTask represents a thumbnail that needs to be generated.
-type thumbnailTask struct {
-	ctx          context.Context
-	tl           *Timeline     // the timeline of the item
-	itemID       int64         // the item's row ID
-	dataFile     string        // path to the data file (the data_file field of the item row), if known
-	dataType     string        // media type (the data_type field of the item row), if known
-	outputFormat ThumbnailType // whether to make an image or video thumbnail
-	err          chan<- error  // the return value is sent here; never closed, to allow for reuse in batches
-}
-
-// TODO: Ideally, we'd also compute a thumbhash when we generate the thumbnail and store it
-// with the item row.
-
-// Channels in which to give tasks to the thumbnail generator workers.
-// Foreground tasks are prioritized and should be used if a thumbnail
-// is needed immediately, like when the user is loading a page that
-// displays the thumbnail.
-var thumbnailBackground, thumbnailForeground = make(chan thumbnailTask), make(chan thumbnailTask)
-
-// thumbnailWorker loops forever and processes thumbnail tasks as they come in.
-// It prioritizes foreground tasks over background tasks.
-func thumbnailWorker() {
-	for {
-		select {
-		// prioritize foreground thumbnails first (i.e. user is loading a page that needs this thumbnail right now)
-		case highPriority := <-thumbnailForeground:
-			generateThumbnail(highPriority)
-		default:
-			// no high-priority jobs, so accept whatever job comes in first
-			select {
-			case highPriority := <-thumbnailForeground:
-				generateThumbnail(highPriority)
-			case lowPriority := <-thumbnailBackground:
-				generateThumbnail(lowPriority)
-			}
-		}
-	}
 }
 
 /*
@@ -100,7 +60,8 @@ func thumbnailWorker() {
 
 	This is an animated webp image of quite low quality, of the first 3 seconds of the video.
 	Max width 320, scale height to preserve aspect ratio. The quality and size params can be
-	increased but it will go slower. I think '-vcodec libwebp' is implied with the file ext.
+	increased but it will go slower. I think '-vcodec libwebp' is implied with the file ext
+	(but then again, specifying -f webp also works if I want to pipe the output)
 
 
 	TODO: To generate a video preview (webm):
@@ -111,75 +72,212 @@ func thumbnailWorker() {
 	satisfaction.
 */
 
-func generateThumbnail(task thumbnailTask) {
-	if task.ctx == nil {
-		task.ctx = context.Background()
+type thumbnailJob struct {
+	// must make sure there are no duplicate tasks in this slice,
+	// but a slice is important because ordering is important for
+	// checkpoints
+	Tasks []thumbnailTask `json:"tasks,omitempty"`
+}
+
+func (tj thumbnailJob) Run(job *Job, checkpoint []byte) error {
+	var startIdx int
+	if checkpoint != nil {
+		if err := json.Unmarshal(checkpoint, &startIdx); err != nil {
+			job.logger.Error("failed to resume from checkpoint", zap.Error(err))
+		}
 	}
 
-	// if the client already knows the item's data type and file path, we can skip a
-	// DB query entirely when provided it to us; granted, we skip some media type
-	// checks, but that's probably OK (the client does some basic vetting and
-	// generation will fail anyways, nbd)
-	if task.dataFile == "" || task.dataType == "" {
-		results, err := task.tl.Search(task.ctx, ItemSearchParams{
-			Repo:  task.tl.ID().String(),
-			RowID: []int64{task.itemID},
-		})
+	// Run each task in a goroutine by batch; this has multiple advantages:
+	// - Goroutines allow parallel computation, finishing the job faster.
+	// - By waiting at the end of every batch, we know that all goroutines in the batch
+	//   have finished, so we can checkpoint and thus resume correctly from that index,
+	//   without having to worry about some goroutines that haven't finished yet.
+	// - Batching in this way acts as a goroutine throttle, so we don't flood the CPU.
+	var wg sync.WaitGroup
+	const batchSize = 10
+
+	for i := startIdx; i < len(tj.Tasks); i++ {
+		// At the end of every batch, wait for all the goroutines to complete before
+		// proceeding; and once they complete, that's a good time to checkpoint
+		if i%batchSize == batchSize-1 {
+			wg.Wait()
+
+			if err := job.Checkpoint(i); err != nil {
+				job.logger.Error("failed to save checkpoint",
+					zap.Int("position", i),
+					zap.Error(err))
+			}
+		}
+
+		task := tj.Tasks[i]
+		task.tl = job.tl
+
+		// proceed to spawn a new goroutine as part of this batch
+		wg.Add(1)
+		go func(job *Job, task thumbnailTask) {
+			defer wg.Done()
+
+			_, err := task.thumbnailAndThumbhash(job.Context(), task.DataID, task.DataFile)
+			if err != nil {
+				// don't terminate the job if there's an error
+				// TODO: but we should probably note somewhere in the job's
+				// row in the DB that this error happened... maybe?
+				job.logger.Error("thumbnail/thumbhash generation failed",
+					zap.Int64("data_id", task.DataID),
+					zap.String("data_file", task.DataFile),
+					zap.String("data_type", task.DataType),
+					zap.String("thumbnail_type", task.ThumbType),
+					zap.Error(err))
+			}
+
+			job.Progress(1)
+		}(job, task)
+	}
+
+	// all goroutines must be done before we return
+	wg.Wait()
+
+	return nil
+}
+
+// thumbnailTask represents a thumbnail that needs to be generated.
+type thumbnailTask struct {
+	tl *Timeline
+
+	// set only ONE of these, DataID if the content to be thumbnailed
+	// is in the database, or dataFile if the content is in a file
+	DataID   int64  `json:"data_id,omitempty"`
+	DataFile string `json:"data_file,omitempty"`
+
+	// the media type (data_type field of the item row), if known,
+	// can avoid an extra DB query; needed to determine how to load
+	// and process the media we are thumbnailing
+	DataType string `json:"data_type,omitempty"`
+
+	// whether to make an image or video thumbnail; images have to
+	// have image thumbnails, but videos can have either
+	ThumbType string `json:"thumb_type,omitempty"`
+}
+
+// thumbnailAndThumbhash returns the thumbnail, even if this returns an error because thumbhash
+// generation fails, the thumbnail is still usable in yhat case.
+func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context, dataID int64, dataFile string) (Thumbnail, error) {
+	if dataID > 0 && dataFile != "" {
+		// is the content in the DB or a file?? can't be both
+		panic("ambiguous thumbnail task given both dataID and dataFile")
+	}
+	thumb, err := task.generateAndStoreThumbnail(ctx, dataID, dataFile)
+	if err != nil {
+		return Thumbnail{}, fmt.Errorf("generating/storing thumbnail: %w", err)
+	}
+	if strings.HasPrefix(thumb.MediaType, "image/") {
+		if err = task.generateAndStoreThumbhash(ctx, dataID, dataFile, thumb.Content); err != nil {
+			return thumb, fmt.Errorf("generating/storing thumbhash: %w", err)
+		}
+	}
+	return thumb, nil
+}
+
+func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID int64, dataFile string) (Thumbnail, error) {
+	var inputBuf []byte
+	var inputFilename string
+
+	task.DataType = strings.ToLower(task.DataType)
+	task.ThumbType = strings.ToLower(task.ThumbType)
+
+	if dataFile != "" {
+		inputFilename = task.tl.FullPath(dataFile)
+	} else if dataID > 0 {
+		task.tl.dbMu.RLock()
+		err := task.tl.db.QueryRowContext(ctx,
+			`SELECT content FROM item_data WHERE id=? LIMIT 1`, dataID).Scan(&inputBuf)
+		task.tl.dbMu.RUnlock()
 		if err != nil {
-			task.err <- err
-			return
+			return Thumbnail{}, fmt.Errorf("querying item data content: %w", err)
 		}
-		if len(results.Items) == 0 {
-			task.err <- fmt.Errorf("no item found with ID %d", task.itemID)
-			return
-		}
-		if len(results.Items) > 1 {
-			task.err <- fmt.Errorf("somehow, %d items were found having ID %d", len(results.Items), task.itemID)
-			return
-		}
-		itemRow := results.Items[0]
-		if itemRow.DataFile == nil {
-			task.err <- fmt.Errorf("item %d does not have a data file recorded, so no thumbnail is possible", task.itemID)
-			return
-		}
-		task.dataFile = *results.Items[0].DataFile
-		task.dataType = *results.Items[0].DataType
 	}
 
-	if !qualifiesForThumbnail(&task.dataType) {
-		task.err <- fmt.Errorf("media type of item %d does not support thumbnailing: %s", task.itemID, task.dataType)
-		return
+	if !qualifiesForThumbnail(&task.DataType) {
+		return Thumbnail{}, fmt.Errorf("media type does not support thumbnailing: %s (item_data_id=%d data_file='%s')", task.DataType, dataID, dataFile)
 	}
 
-	// form the item's data file's full path so we can load it, and the output filepath so we can save it
-	inputFilename := filepath.Join(task.tl.repoDir, filepath.FromSlash(task.dataFile))
-	outputFilename := task.tl.ThumbnailPath(task.itemID, task.outputFormat)
-
-	// make sure the parent directory for the output file exists
-	if err := os.MkdirAll(filepath.Dir(outputFilename), 0700); err != nil {
-		task.err <- fmt.Errorf("item %d: making thumbnail directory tree for %s: %w", task.itemID, outputFilename, err)
-		return
+	thumbnail, mimeType, err := task.generateThumbnail(ctx, inputFilename, inputBuf)
+	if err != nil {
+		return Thumbnail{}, fmt.Errorf("generating thumbnail for content: %w (item_data_id=%d data_file='%s')", err, dataID, inputFilename)
 	}
+
+	dataFileToInsert, dataIDToInsert := &dataFile, &dataID
+	if dataFile == "" {
+		dataFileToInsert = nil
+	} else {
+		dataIDToInsert = nil
+	}
+	now := time.Now()
+
+	task.tl.thumbsMu.Lock()
+	defer task.tl.thumbsMu.Unlock()
+
+	_, err = task.tl.thumbs.ExecContext(ctx, `
+		INSERT INTO thumbnails (data_file, item_data_id, mime_type, content)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT DO UPDATE
+		SET generated=?, mime_type=?, content=?
+		WHERE (data_file=? OR (data_file IS NULL AND ? IS NULL))
+			AND (item_data_id=? OR (item_data_id IS NULL AND ? IS NULL))`,
+		dataFileToInsert, dataIDToInsert, mimeType, thumbnail,
+		now.Unix(), mimeType, thumbnail,
+		dataFileToInsert, dataFileToInsert, dataIDToInsert, dataIDToInsert)
+	if err != nil {
+		return Thumbnail{}, fmt.Errorf("saving thumbnail to database: %w (item_data_id=%d data_file='%s')", err, dataID, dataFile)
+	}
+
+	return Thumbnail{
+		Name:      fakeThumbnailFilename(dataID, dataFile, mimeType),
+		MediaType: mimeType,
+		ModTime:   now,
+		Content:   thumbnail,
+	}, nil
+}
+
+// fakeThumbnailFilename generates a fake name for a thumbnail. Sometimes this
+// can be useful in an HTTP context.
+func fakeThumbnailFilename(itemDataID int64, dataFile, dataType string) string {
+	fakeName := dataFile
+	if itemDataID > 0 {
+		fakeName = strconv.FormatInt(itemDataID, 10)
+	}
+	fakeName += ".thumb"
+	_, after, found := strings.Cut(dataType, "/")
+	if found {
+		fakeName += "." + after
+	}
+	return fakeName
+}
+
+func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename string, inputBuf []byte) ([]byte, string, error) {
+	// throttle expensive operation
+	cpuIntensiveThrottle <- struct{}{}
+	defer func() { <-cpuIntensiveThrottle }()
+
+	var thumbnail []byte
+	var mimeType string
 
 	switch {
-	case strings.HasPrefix(task.dataType, "image/"):
-		inputImage, err := loadImageFromFile(inputFilename)
+	case strings.HasPrefix(task.DataType, "image/"):
+		inputImage, err := loadImageVips(inputFilename, inputBuf)
 		if err != nil {
-			task.err <- fmt.Errorf("opening source file from item %d: %s: %w", task.itemID, inputFilename, err)
-			return
+			return nil, "", fmt.Errorf("opening source file: %w", err)
 		}
 		defer inputImage.Close()
 
 		// scale down to a thumbnail size
 		if err := resizeImage(inputImage, maxThumbnailDimension); err != nil {
-			task.err <- fmt.Errorf("item %d: image %s: %w", task.itemID, inputFilename, err)
-			return
+			return nil, "", fmt.Errorf("resizing image: %w", err)
 		}
 
 		// encode the resized image as the proper output format
-		var imageBytes []byte
-		switch strings.ToLower(thumbnailImgExt) {
-		case extJpg, ".jpe", extJpeg:
+		switch task.ThumbType {
+		case ImageJPEG:
 			ep := vips.NewJpegExportParams()
 			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
 			ep.Quality = 40
@@ -187,41 +285,60 @@ func generateThumbnail(task thumbnailTask) {
 			ep.SubsampleMode = vips.VipsForeignSubsampleAuto
 			ep.TrellisQuant = true
 			ep.QuantTable = 3
-			imageBytes, _, err = inputImage.ExportJpeg(ep)
-		case extAvif:
+			thumbnail, _, err = inputImage.ExportJpeg(ep)
+		case ImageAVIF:
 			// fun fact: AVIF supports animation, but I can't get ffmpeg to generate it faster than 0.0016x speed
 			// (vips is fast enough for stills though, as long as we tune down the parameters sufficiently)
 			ep := vips.NewAvifExportParams()
 			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-			ep.Quality = 30
+			ep.Quality = 45
 			ep.Bitdepth = 10
 			ep.Effort = 1
-			imageBytes, _, err = inputImage.ExportAvif(ep)
+			thumbnail, _, err = inputImage.ExportAvif(ep)
+		case ImageWebP:
+			ep := vips.NewWebpExportParams()
+			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
+			ep.Quality = 50
+			thumbnail, _, err = inputImage.ExportWebp(ep)
 		default:
-			panic("unsupported thumbnail image type: " + thumbnailImgExt)
+			panic("unsupported thumbnail MIME type: " + task.ThumbType)
 		}
 		if err != nil {
-			task.err <- fmt.Errorf("item %d: encoding thumbnail image of %s: %w", task.itemID, inputFilename, err)
-			return
+			return nil, "", fmt.Errorf("encoding image thumbnail: %w", err)
+		}
+		mimeType = task.ThumbType
+
+	case strings.HasPrefix(task.DataType, "video/"):
+		// TODO: support inputBuf here... dunno if we can pipe it (ideal), or if we have to write a temporary file
+		if inputFilename == "" {
+			return nil, "", fmt.Errorf("TODO: not implemented: support for video items stored in DB")
 		}
 
-		err = os.WriteFile(outputFilename, imageBytes, 0600)
-		if err != nil {
-			task.err <- fmt.Errorf("item %d: writing thumbnail image to %s: %w", task.itemID, outputFilename, err)
-			return
-		}
-
-	case strings.HasPrefix(task.dataType, "video/"):
 		var cmd *exec.Cmd
-		if task.outputFormat == ImageThumbnail {
-			cmd = exec.Command("ffmpeg",
-				"-ss", "00:00:01.000",
+		if strings.HasPrefix(task.ThumbType, "image/") {
+			// I have found that smaller dimension and higher quality is a good tradeoff for keeping
+			// file size small -- it obviously doesn't look great, but lower quality looks REALLY bad
+			//nolint:gosec
+			cmd = exec.CommandContext(ctx, "ffmpeg",
 				"-i", inputFilename,
-				"-vf", fmt.Sprintf("scale=%d:-1", maxThumbnailDimension),
-				"-vframes", "1",
-				outputFilename,
+				"-vf", fmt.Sprintf("scale=%d:-1", maxVideoThumbnailDimension),
+				"-quality", "80",
+				"-ss", "0",
+				"-t", "2", // how many seconds to animate
+				"-f", "webp", // TODO: avif would be preferred... but can't be piped out I guess?
+				"-", // pipe to stdout
 			)
-		} else if task.outputFormat == VideoThumbnail {
+			mimeType = ImageWebP
+			// This generates a still:
+			// cmd = exec.Command("ffmpeg",
+			// 	"-ss", "00:00:01.000",
+			// 	"-i", inputFilename,
+			// 	"-vf", fmt.Sprintf("scale=%d:-1", maxThumbnailDimension),
+			// 	"-vframes", "1",
+			// 	"-f", "webp", // TODO: avif would be preferred... but can't be piped out I guess?
+			// 	"-", // pipe to stdout
+			// )
+		} else if strings.HasPrefix(task.ThumbType, "video/") {
 			cmd = exec.Command("ffmpeg",
 				"-i", inputFilename,
 
@@ -243,49 +360,146 @@ func generateThumbnail(task thumbnailTask) {
 				// we are already running concurrently, so limit to just 1 CPU thread
 				"-threads", "1",
 
-				outputFilename,
+				// when piping out (no output filename), we have to explicitly specify
+				// the format since ffmpeg can't deduce it from a file extension
+				"-f", "webm",
+
+				// pipe to stdout
+				"-",
 			)
+			mimeType = VideoWebM
+		} else {
+			return nil, "", fmt.Errorf("task has no target media type: %+v (inputFilename=%s)", task, inputFilename)
 		}
+
+		// capture stdout, which is the thumbnail
+		// (we don't pool this because the caller would need to read the bytes
+		// after the buffer is returned to the pool, and copying the buffer
+		// defeats the purpose)
+		stdoutBuf := new(bytes.Buffer)
+		cmd.Stdout = stdoutBuf
 		cmd.Stderr = os.Stderr
 
 		if err := cmd.Run(); err != nil {
-			task.err <- fmt.Errorf("generating video thumbnail: %w", err)
+			return nil, "", fmt.Errorf("generating video thumbnail: %w", err)
 		}
 
+		thumbnail = stdoutBuf.Bytes()
+
 	default:
-		task.err <- fmt.Errorf("not sure how to generate thumbnail for '%s' data type", task.dataType)
+		return nil, "", fmt.Errorf("not sure how to generate thumbnail for '%s' data type", task.DataType)
 	}
 
-	task.err <- nil
+	return thumbnail, mimeType, nil
 }
 
-func thumbnailDir(cacheDir, repoID string) string {
-	return path.Join(cacheDir, "thumbnails", repoID)
-}
-
-// ThumbnailPath returns the full path to the thumbnail for the item with the given ID.
-// imageOrVideo should be either "image" or "video" to generate that type of thumbnail.
-// An image item may only have an image thumbnail. A video item may have an image or a
-// video thumbnail. The default type is an image thumbnail.
-//
-// TODO: what should we do about data files that are shared across multiple items? they're stored by item row ID, so maybe we are generating the same thumbnail multiple times? hmm...
-func ThumbnailPath(cacheDir, repoID string, itemID int64, imageOrVideo ThumbnailType) string {
-	ext := thumbnailImgExt
-	if imageOrVideo == VideoThumbnail {
-		ext = thumbnailVidExt
+func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, dataID int64, dataFile string, thumb []byte) error {
+	thash, err := task.generateThumbhash(thumb)
+	if err != nil {
+		return err
 	}
 
-	// subdivide into folders to avoid any one folder having too many files
-	topFolder := strconv.FormatInt(itemID/100000+1, 10)
-	subFolder := strconv.FormatInt(itemID/1000+1, 10)
-	filename := strconv.FormatInt(itemID, 10) + ext
+	task.tl.dbMu.Lock()
+	defer task.tl.dbMu.Unlock()
 
-	return path.Join(thumbnailDir(cacheDir, repoID), topFolder, subFolder, filename)
+	if dataID != 0 {
+		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_id=?`, thash, dataID)
+	} else {
+		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_file=?`, thash, dataFile)
+	}
+	return err
 }
 
-// ThumbnailPath returns the path to the thumbnail for the item in this timeline with the given ID.
-func (tl *Timeline) ThumbnailPath(itemID int64, imageOrVideo ThumbnailType) string {
-	return ThumbnailPath(tl.cacheDir, tl.ID().String(), itemID, imageOrVideo)
+func (thumbnailTask) generateThumbhash(thumb []byte) ([]byte, error) {
+	// throttle expensive operation
+	cpuIntensiveThrottle <- struct{}{}
+	defer func() { <-cpuIntensiveThrottle }()
+
+	img, format, err := image.Decode(bytes.NewReader(thumb))
+	if err != nil {
+		return nil, fmt.Errorf("decoding thumbnail (format=%s) for thumbhash computation failed: %w", format, err)
+	}
+
+	// thumbhash can recover the _approximate_ aspect ratio, but not
+	// exactly, which makes sizing the image difficult on the UI because
+	// replacing the thumbhash image with the real image would result in
+	// a content jump because the images are different sizes! so we
+	// prepend the thumbhash with the exact aspect ratio... and program
+	// the frontend to split it... hey, it works...
+	aspectRatio := float32(img.Bounds().Dx()) / float32(img.Bounds().Dy())
+
+	return append(float32ToByte(aspectRatio), thumbhash.EncodeImage(img)...), nil
+}
+
+// Thumbnail returns a thumbnail for either the given itemDataID or the dataFile, along with
+// media type. If a thumbnail does not yet exist, one is generated and stored for future use.
+func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, dataType, thumbType string) (Thumbnail, error) {
+	var mimeType string
+	var modTimeUnix int64
+	var thumbnail []byte
+
+	dataType = strings.ToLower(dataType)
+	thumbType = strings.ToLower(thumbType)
+
+	// the DB uses nullable fields; and if a dataFile is set,
+	// query for the thumbnail exclusively by that, since we
+	// don't want to confuse by also querying by item ID if
+	// present, since that might not give intended results
+	var itemDataIDToQuery *int64
+	var dataFileToQuery *string
+	if dataFile != "" {
+		dataFileToQuery = &dataFile
+	} else {
+		// only set this if the item doesn't have a data
+		// file, and its content is stored in the DB
+		itemDataIDToQuery = &itemDataID
+	}
+
+	// first try the fast path: get the thumbnail if it exists
+	tl.thumbsMu.RLock()
+	err := tl.thumbs.QueryRowContext(ctx,
+		`SELECT generated, mime_type, content
+			FROM thumbnails
+			WHERE (item_data_id=? OR data_file=?) AND mime_type=?
+			LIMIT 1`,
+		itemDataIDToQuery, dataFileToQuery, thumbType).Scan(&modTimeUnix, &mimeType, &thumbnail)
+	tl.thumbsMu.RUnlock()
+
+	// found existing thumbnail!
+	if err == nil {
+		return Thumbnail{
+			Name:      fakeThumbnailFilename(itemDataID, dataFile, mimeType),
+			MediaType: mimeType,
+			ModTime:   time.Unix(modTimeUnix, 0),
+			Content:   thumbnail,
+		}, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		// error other than "no thumbnail found"
+		return Thumbnail{}, err
+	}
+
+	// slower path: no thumbnail found (of the desired media type), so generate one
+
+	task := thumbnailTask{
+		tl:        tl,
+		DataType:  dataType,
+		ThumbType: thumbType,
+	}
+
+	thumb, err := task.thumbnailAndThumbhash(ctx, itemDataID, dataFile)
+	if err != nil {
+		return Thumbnail{}, err
+	}
+
+	return thumb, nil
+}
+
+type Thumbnail struct {
+	Name      string
+	MediaType string
+	ModTime   time.Time
+	Content   []byte
 }
 
 func qualifiesForThumbnail(mimeType *string) bool {
@@ -299,74 +513,31 @@ func qualifiesForThumbnail(mimeType *string) bool {
 		*mimeType != imageGif
 }
 
-// GenerateThumbnail generates a thumbnail for the given item. If the data file path is known, pass it in
-// to avoid a database query. The thumbnail is saved directly to the configured cache directory. The task
-// is given low priority and is suitable for background operations. Use GenerateThumbnailNow for
-// high-priority thumbnails.
-//
-// This method does not block, but you can still get the result and wait until the thumbnail is ready if
-// needed. If you need the error AND/OR you are waiting for the thumbnail to be available, make an errChan
-// and be sure to read from it properly. If you do not need to block, errChan can be nil and any error
-// will be logged instead.
-func (tl *Timeline) GenerateThumbnail(ctx context.Context, itemID int64,
-	dataFileIfKnown, dataTypeIfKnown string, outputFormat ThumbnailType, errChan chan error) {
-	if errChan == nil {
-		errChan = make(chan error)
-		go func() {
-			if err := <-errChan; err != nil {
-				Log.Error("generating thumbnail failed",
-					zap.Int64("item_id", itemID),
-					zap.String("data_file", dataFileIfKnown),
-					zap.String("output_type", string(outputFormat)),
-					zap.Error(err))
-			}
-		}()
-	}
-	tl.generateThumbnail(ctx, itemID, dataFileIfKnown, dataTypeIfKnown, outputFormat, false, errChan)
-}
-
-// GenerateThumbnailNow is the same as GenerateThumbnail, except the task is given higher
-// priority, which is useful when you need the thumbnail ASAP (e.g. rendering a page).
-func (tl *Timeline) GenerateThumbnailNow(ctx context.Context, itemID int64,
-	dataFileIfKnown, dataTypeIfKnown string, outputFormat ThumbnailType) error {
-	err := make(chan error)
-	tl.generateThumbnail(ctx, itemID, dataFileIfKnown, dataTypeIfKnown, outputFormat, true, err)
-	return <-err
-}
-
-func (tl *Timeline) generateThumbnail(ctx context.Context, itemID int64, dataFileIfKnown, dataTypeIfKnown string, outputFormat ThumbnailType, urgent bool, err chan<- error) {
-	if ctx == nil {
-		ctx = tl.ctx
-	}
-	task := thumbnailTask{
-		ctx:          ctx,
-		tl:           tl,
-		itemID:       itemID,
-		dataFile:     dataFileIfKnown,
-		dataType:     dataTypeIfKnown,
-		outputFormat: outputFormat,
-		err:          err,
-	}
-	if urgent {
-		thumbnailForeground <- task
-	} else {
-		thumbnailBackground <- task
-	}
-}
-
 // GeneratePreviewImage generates a higher quality preview image for the given item. The
 // extension should be for a supported image format such as JPEG, PNG, WEBP, or AVIF.
 // (JPEG or WEBP recommended.) As preview images are not cached, the image bytes are
 // returned instead.
-func (tl *Timeline) GeneratePreviewImage(itemRow ItemRow, ext string) ([]byte, error) {
+func (tl *Timeline) GeneratePreviewImage(ctx context.Context, itemRow ItemRow, ext string) ([]byte, error) {
 	ext = strings.ToLower(ext)
 	if ext != extJpeg && ext != extJpg && ext != extPng && ext != extWebp && ext != extAvif {
 		return nil, fmt.Errorf("unsupported file extension/type: %s", ext)
 	}
 
-	inputFilePath := filepath.Join(tl.repoDir, filepath.FromSlash(*itemRow.DataFile))
+	var inputFilePath string
+	var inputBuf []byte
+	if itemRow.DataFile != nil {
+		inputFilePath = filepath.Join(tl.repoDir, filepath.FromSlash(*itemRow.DataFile))
+	} else if itemRow.DataID != nil {
+		tl.dbMu.RLock()
+		err := tl.db.QueryRowContext(ctx,
+			`SELECT content FROM item_data WHERE id=? LIMIT 1`, *itemRow.DataID).Scan(&inputBuf)
+		tl.dbMu.RUnlock()
+		if err != nil {
+			return nil, fmt.Errorf("loading content from database: %w", err)
+		}
+	}
 
-	inputImage, err := loadImageFromFile(inputFilePath)
+	inputImage, err := loadImageVips(inputFilePath, inputBuf)
 	if err != nil {
 		return nil, fmt.Errorf("opening source file from item %d: %s: %w", itemRow.ID, inputFilePath, err)
 	}
@@ -401,267 +572,45 @@ func (tl *Timeline) GeneratePreviewImage(itemRow ItemRow, ext string) ([]byte, e
 	case extAvif:
 		ep := vips.NewAvifExportParams()
 		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-		ep.Quality = 40
+		ep.Quality = 65
 		ep.Effort = 1
 		ep.Bitdepth = 10
 		imageBytes, _, err = inputImage.ExportAvif(ep)
 	}
 	if err != nil {
 		// I have seen "VipsJpeg: Corrupt JPEG data: N extraneous bytes before marker 0xdb" for some N,
-		// even though my computer can show the image just fine. Not sure how to fix this.
+		// even though my computer can show the image just fine. Not sure how to fix this, other than
+		// configuring vips to continue on error (I think -- I know it fixed some errors)
 		Log.Error("could not encode preview image, falling back to original image",
 			zap.Int64("item_id", itemRow.ID),
 			zap.String("filename", inputFilePath),
 			zap.String("ext", ext),
 			zap.Error(err))
 
-		// we can try using built-in Go library? TODO: maybe try pure Go solution, at least for common file types like JPEG
-		// we cam also just return the image as-is and hope the browser can handle it?
+		// I guess just try returning the full image as-is and hope the browser
+		// can handle it
+		// TODO: maybe try a std lib solution, even if slower
+
+		if inputBuf != nil {
+			return inputBuf, nil
+		}
 		return os.ReadFile(inputFilePath)
 	}
 
 	return imageBytes, nil
 }
 
-// regenerateAllThumbnails generates thumbnails for all qualifying items in the database.
-func (tl *Timeline) regenerateAllThumbnails() error {
-	tl.dbMu.RLock()
-	rows, err := tl.db.QueryContext(tl.ctx, `SELECT id, data_type, data_file FROM items WHERE data_file IS NOT NULL`)
-	if err != nil {
-		return fmt.Errorf("querying items: %w", err)
+func thumbnailType(inputDataType string, onlyImage bool) string {
+	if strings.HasPrefix(inputDataType, "image/") {
+		return ImageAVIF
 	}
-
-	type thumbInfo struct {
-		rowID    int64
-		dataType string
-	}
-	thumbnailsNeeded := make(map[string]thumbInfo) // map key is item ID; useful for deduplicating if shared by other items
-
-	for rows.Next() {
-		var rowID int64
-		var dataType, dataFile *string
-
-		err := rows.Scan(&rowID, &dataType, &dataFile)
-		if err != nil {
-			defer tl.dbMu.RUnlock()
-			defer rows.Close()
-			return fmt.Errorf("scanning item row for thumbnails: %w", err)
+	if strings.HasPrefix(inputDataType, "video/") {
+		if onlyImage {
+			return ImageWebP // webp supports animation (avif does too, apparently, but I can't figure it out with ffmpeg)
 		}
-		if dataFile != nil && dataType != nil && qualifiesForThumbnail(dataType) {
-			thumbnailsNeeded[*dataFile] = thumbInfo{rowID, *dataType}
-		}
+		return VideoWebM
 	}
-	rows.Close()
-	tl.dbMu.RUnlock()
-	if err = rows.Err(); err != nil {
-		return fmt.Errorf("iterating rows: %w", err)
-	}
-
-	ctx := context.Background()
-	for dataFile, info := range thumbnailsNeeded {
-		thumbType := ImageThumbnail
-		if strings.HasPrefix(info.dataType, "video/") {
-			thumbType = VideoThumbnail
-		}
-		tl.GenerateThumbnail(ctx, info.rowID, dataFile, info.dataType, thumbType, nil)
-	}
-
-	return nil
-}
-
-// generateThumbnailsForImportedItems generates thumbnails for qualifying items
-// that were a part of the import associated with this processor. It should be
-// run after the import completes.
-func (p *processor) generateThumbnailsForImportedItems() {
-	p.tl.dbMu.RLock()
-	rows, err := p.tl.db.QueryContext(p.tl.ctx, `SELECT id, data_type, data_file FROM items WHERE import_id=? AND data_file IS NOT NULL`, p.impRow.id)
-	if err != nil {
-		p.log.Error("unable to generate thumbnails from this import",
-			zap.Int64("import_id", p.impRow.id),
-			zap.Error(err))
-		return
-	}
-
-	type thumbInfo struct {
-		rowID    int64
-		dataType string
-	}
-	thumbnailsNeeded := make(map[string]thumbInfo) // map key is item ID; useful for deduplicating if shared by other items
-
-	for rows.Next() {
-		var rowID int64
-		var dataType, dataFile *string
-
-		err := rows.Scan(&rowID, &dataType, &dataFile)
-		if err != nil {
-			p.log.Error("unable to scan row to generate thumbnails from this import",
-				zap.Int64("import_id", p.impRow.id),
-				zap.Error(err))
-			defer p.tl.dbMu.RUnlock()
-			defer rows.Close()
-			return
-		}
-		if dataFile != nil && dataType != nil && qualifiesForThumbnail(dataType) {
-			thumbnailsNeeded[*dataFile] = thumbInfo{rowID, *dataType}
-		}
-	}
-	rows.Close()
-	p.tl.dbMu.RUnlock()
-	if err = rows.Err(); err != nil {
-		p.log.Error("iterating rows for generating thumbnails failed",
-			zap.Int64("import_id", p.impRow.id),
-			zap.Error(err))
-		return
-	}
-
-	p.log.Info("generating thumbnails for imported items", zap.Int("count", len(thumbnailsNeeded)))
-
-	// now that we've closed our DB lock, we can take our
-	// time generating thumbnails in the background
-	errs := make(chan error)
-	done := make(chan struct{})
-	go func() {
-		for range thumbnailsNeeded {
-			// don't wait for a context cancellation here because
-			// we always need to drain the channel in order to
-			// unblock the parent goroutine
-			if err := <-errs; err != nil {
-				p.log.Error("unable to generate thumbnail",
-					zap.Int64("import_id", p.impRow.id),
-					zap.Error(err))
-			}
-		}
-		close(done)
-	}()
-	for dataFile, info := range thumbnailsNeeded {
-		format := ImageThumbnail
-		if strings.HasPrefix(info.dataType, "video/") {
-			format = VideoThumbnail
-		}
-		p.tl.GenerateThumbnail(p.tl.ctx, info.rowID, dataFile, info.dataType, format, errs)
-	}
-	<-done
-
-	// from the thumbnails, we can easily generate thumbhashes
-	p.generateThumbhashesForItemsThatNeedOne()
-}
-
-func (p *processor) generateThumbhashesForItemsThatNeedOne() {
-	p.log.Info("generating thumbhashes for imported items", zap.Int64("import_id", p.impRow.id))
-	defer p.log.Info("finished thumbhash generation routine", zap.Int64("import_id", p.impRow.id))
-
-	p.tl.dbMu.RLock()
-	rows, err := p.tl.db.QueryContext(p.tl.ctx,
-		`SELECT id, data_type FROM items WHERE import_id=? AND data_file IS NOT NULL AND thumb_hash IS NULL`,
-		p.impRow.id)
-	if err != nil {
-		p.log.Error("unable to generate thumbhashes for this import",
-			zap.Int64("import_id", p.impRow.id),
-			zap.Error(err))
-		return
-	}
-
-	var thumbhashesNeeded []int64
-	for rows.Next() {
-		var rowID int64
-		var dataType *string
-		err := rows.Scan(&rowID, &dataType)
-		if err != nil {
-			p.log.Error("unable to scan row to generate thumbhashes from this import",
-				zap.Int64("import_id", p.impRow.id),
-				zap.Error(err))
-			defer p.tl.dbMu.RUnlock()
-			defer rows.Close()
-			return
-		}
-		// TODO: we can probably generate thumbhashes for videos (and even PDFs; whatever we generate thumbnails for) but we need to use ffmpeg to get a single frame of a video, or a screenshot of a PDF, etc.
-		if dataType != nil && !strings.HasPrefix(*dataType, "image/") && *dataType != imageGif {
-			continue
-		}
-		thumbhashesNeeded = append(thumbhashesNeeded, rowID)
-	}
-	rows.Close()
-	p.tl.dbMu.RUnlock()
-	if err = rows.Err(); err != nil {
-		p.log.Error("iterating rows for generating thumbhashes failed",
-			zap.Int64("import_id", p.impRow.id),
-			zap.Error(err))
-		return
-	}
-
-	const numWorkers = 5
-	var wg sync.WaitGroup
-
-	thumbhashesPerWorker := len(thumbhashesNeeded)/numWorkers + 1
-
-	for w := range numWorkers {
-		wg.Add(1)
-		go func(w int) {
-			defer wg.Done()
-
-			// compute thumbhashes from thumbnails and store them in the DB in batches
-			batch := make(map[int64][]byte) // map of row ID to thumbhash
-			for i := thumbhashesPerWorker * w; i < thumbhashesPerWorker*(w+1) && i < len(thumbhashesNeeded); i++ {
-				rowID := thumbhashesNeeded[i]
-
-				thumbnailPath := p.tl.ThumbnailPath(rowID, ImageThumbnail)
-				file, err := os.Open(thumbnailPath)
-				if err != nil {
-					p.log.Error("opening thumbnail to compute thumbhash failed",
-						zap.Int64("import_id", p.impRow.id),
-						zap.Int64("item_id", rowID),
-						zap.String("thumbnail_path", thumbnailPath),
-						zap.Error(err))
-					continue
-				}
-				img, _, err := image.Decode(file)
-				if err != nil {
-					p.log.Error("decoding thumbnail for thumbhash computation failed",
-						zap.Int64("import_id", p.impRow.id),
-						zap.Int64("item_id", rowID),
-						zap.String("thumbnail_path", thumbnailPath),
-						zap.Error(err))
-					continue
-				}
-
-				// thumbhash can recover the _approximate_ aspect ratio, but not
-				// exactly, which makes sizing the image difficult on the UI because
-				// replacing the thumbhash image with the real image would result in
-				// a content jump because the images are different sizes! so we
-				// prepend the thumbhash with the exact aspect ratio...
-				aspectRatio := float32(img.Bounds().Dx()) / float32(img.Bounds().Dy())
-				aspectRatioPre := float32ToByte(aspectRatio)
-
-				batch[rowID] = append(aspectRatioPre, thumbhash.EncodeImage(img)...)
-
-				// if batch is full, store into DB
-				const batchSize = 100
-				if len(batch) >= batchSize {
-					err := p.thumbhashBatch(batch)
-					if err != nil {
-						p.log.Error("storing thumbhashes failed",
-							zap.Int64("import_id", p.impRow.id),
-							zap.Error(err))
-						return
-					}
-					batch = make(map[int64][]byte)
-				}
-			}
-
-			// store what remains in the batch
-			if len(batch) > 0 {
-				err := p.thumbhashBatch(batch)
-				if err != nil {
-					p.log.Error("storing remaining thumbhashes failed",
-						zap.Int64("import_id", p.impRow.id),
-						zap.Error(err))
-					return
-				}
-			}
-		}(w)
-	}
-
-	wg.Wait()
+	return ""
 }
 
 func float32ToByte(f float32) []byte {
@@ -670,35 +619,14 @@ func float32ToByte(f float32) []byte {
 	return buf[:]
 }
 
-func (p *processor) thumbhashBatch(batch map[int64][]byte) error {
-	p.log.Info("storing thumbhashes for batch of imported items",
-		zap.Int64("import_id", p.impRow.id),
-		zap.Int("batch_size", len(batch)))
-
-	p.tl.dbMu.Lock()
-	defer p.tl.dbMu.Unlock()
-
-	tx, err := p.tl.db.Begin()
-	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+func loadImageVips(inputFilePath string, inputBytes []byte) (*vips.ImageRef, error) {
+	if inputFilePath != "" && inputBytes != nil {
+		panic("load image with vips: input cannot be both a filename and a buffer")
 	}
-	defer tx.Rollback()
-
-	for rowID, thumbhash := range batch {
-		_, err = p.tl.db.Exec(`UPDATE items SET thumb_hash=? WHERE id=?`, thumbhash, rowID)
-		if err != nil {
-			return err
-		}
+	if inputFilePath == "" && inputBytes == nil {
+		panic("load image with vips: input must be either a filename or a buffer")
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction: %w", err)
-	}
-
-	return nil
-}
-
-func loadImageFromFile(inputFilePath string) (*vips.ImageRef, error) {
 	importParams := vips.NewImportParams()
 
 	// I have seen "VipsJpeg: Corrupt JPEG data: N extraneous bytes before marker 0xdb" for some N,
@@ -710,7 +638,10 @@ func loadImageFromFile(inputFilePath string) (*vips.ImageRef, error) {
 	// (or we can do a separate call to AutoRotate)
 	importParams.AutoRotate.Set(true)
 
-	return vips.LoadImageFromFile(inputFilePath, importParams)
+	if inputFilePath != "" {
+		return vips.LoadImageFromFile(inputFilePath, importParams)
+	}
+	return vips.LoadImageFromBuffer(inputBytes, importParams)
 }
 
 func resizeImage(inputImage *vips.ImageRef, maxDimension int) error {
@@ -737,22 +668,17 @@ func resizeImage(inputImage *vips.ImageRef, maxDimension int) error {
 	return nil
 }
 
-// The file extensions designate the type (encoding) of the thumbnails.
-const (
-	thumbnailImgExt = extAvif
-	thumbnailVidExt = ".webm"
-)
-
-// ThumbnailType describes a type of thumbnail (either image or video).
-type ThumbnailType string
-
-const (
-	ImageThumbnail ThumbnailType = "image"
-	VideoThumbnail ThumbnailType = "video"
-)
-
 // Maximum X and Y dimensions for generated images.
 const (
-	maxThumbnailDimension    = 720
+	// larger than ordinary thumbnails because we generate embeddings with
+	// them; higher size = more detail = better embeddings, in theory
+	maxThumbnailDimension = 720
+
+	// video thumbnails (animated webp) can be rather large, so quality
+	// is less important to us
+	maxVideoThumbnailDimension = 140
+
+	// preview images are like full-screen images, so they can be a bit
+	// bigger to preserve quality
 	maxPreviewImageDimension = 1400
 )

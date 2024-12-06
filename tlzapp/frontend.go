@@ -20,12 +20,12 @@ package tlzapp
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"mime"
 	"net/http"
 	"os"
@@ -39,7 +39,6 @@ import (
 	"github.com/Masterminds/sprig/v3"
 	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
-	"go.uber.org/zap"
 )
 
 // serveFrontend serves resources to the UI in this URL format:
@@ -138,7 +137,7 @@ func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error
 
 	case "thumbnail":
 		// item thumbnail; serve from cache or generate if needed
-		return s.serveThumbnail(w, r, tl, parts)
+		return s.serveThumbnail(w, r, tl)
 
 	case "image":
 		// preview image; generate on-the-fly
@@ -148,7 +147,7 @@ func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error
 		// stream video data file in a format that can be played by the browser
 		dataFile := strings.Join(parts[4:], "/")
 		inputPath := tl.FullPath(dataFile)
-		return s.transcodeVideo(w, inputPath)
+		return s.transcodeVideo(r.Context(), w, inputPath, nil)
 
 	case "motion-photo":
 		// given the data path of a photo, stream its motion photo in a format playable by the browser
@@ -189,7 +188,7 @@ func (s server) serveDataFile(w http.ResponseWriter, r *http.Request, tl openedT
 	}
 	if results.Items[0].DataType != nil {
 		if obfuscate() && strings.HasPrefix(*results.Items[0].DataType, "video/") {
-			return s.transcodeVideo(w, tl.FullPath(dataFile))
+			return s.transcodeVideo(r.Context(), w, tl.FullPath(dataFile), nil)
 		}
 		w.Header().Set("Content-Type", *results.Items[0].DataType)
 	}
@@ -250,7 +249,7 @@ func (s server) servePreviewImage(w http.ResponseWriter, r *http.Request, tl ope
 		return nil
 	}
 
-	imageBytes, err := tl.GeneratePreviewImage(itemRow, ext)
+	imageBytes, err := tl.GeneratePreviewImage(r.Context(), itemRow, ext)
 	if err != nil {
 		return err
 	}
@@ -266,11 +265,15 @@ func (s server) servePreviewImage(w http.ResponseWriter, r *http.Request, tl ope
 	return nil
 }
 
-func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl openedTimeline, parts []string) error {
-	itemIDStr := parts[4]
-	itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
-	if err != nil || itemID < 0 {
-		return fmt.Errorf("invalid item ID: %s", itemIDStr)
+func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl openedTimeline) error {
+	var itemDataID int64
+	itemDataIDStr := r.FormValue("data_id")
+	if itemDataIDStr != "" {
+		var err error
+		itemDataID, err = strconv.ParseInt(itemDataIDStr, 10, 64)
+		if err != nil || itemDataID < 0 {
+			return fmt.Errorf("invalid item data ID: %s", itemDataIDStr)
+		}
 	}
 
 	// determine thumbnail type; we have to be smart about this because sweet, special
@@ -284,62 +287,46 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 			Message:    "invalid syntax for Accept header",
 		}
 	}
-	thumbType := timeline.ImageThumbnail
-	if clientPref := accept.preference("image/*", "video/*"); clientPref == "video/*" {
-		thumbType = timeline.VideoThumbnail
+
+	dataType := r.FormValue("data_type")
+
+	// figure out what type of thumbnail to serve, taking into account
+	// both server and client preferences; by default (if client has no
+	// preference), server prefers an image thumbnail if it's an image,
+	// or a video thumbnail if it's a video; but we can also honor
+	// client preference (for example, videos can have animated image
+	// thumbnails)
+	ourPref := []string{"image/*", "video/*"}
+	if strings.HasPrefix(dataType, "video/") {
+		ourPref[0], ourPref[1] = ourPref[1], ourPref[0]
 	}
+	thumbType := timeline.ImageAVIF
+	if clientPref := accept.preference(ourPref...); clientPref == "video/*" {
+		thumbType = timeline.VideoWebM
+	}
+
 	// sigh, precious Safari and its <video><source> tag...
 	if len(accept) == 1 && accept[0].mimeType == "*/*" {
 		if r.Header.Get("Sec-Fetch-Dest") == "video" {
-			thumbType = timeline.VideoThumbnail
+			thumbType = timeline.VideoWebM
 		}
 	}
 
-	// TODO: I feel like the cache dir should be configurable, but I'm not sure at what layer yet (the config file maybe?)
-	thumbPath := timeline.ThumbnailPath(DefaultCacheDir(), tl.ID().String(), itemID, thumbType)
-
-	f, err := os.Open(thumbPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		if err := tl.GenerateThumbnailNow(r.Context(), itemID, r.FormValue("data_file"), r.FormValue("data_type"), thumbType); err != nil {
-			// TODO: ideally we should get the true values from the DB, but
-			// this works for now... icons and animated gifs don't really benefit
-			// from thumbnails, so just serve them directly, I guess?
-			if r.FormValue("data_type") == "image/x-icon" ||
-				r.FormValue("data_type") == "image/gif" {
-				thumbPath = tl.FullPath(r.FormValue("data_file"))
-			} else {
-				// TODO: if the file is small enough, try just serving it directly as a last resort
-				return fmt.Errorf("could not generate thumbnail: %w", err)
-			}
-		}
-
-		if obfuscate() && thumbType == timeline.VideoThumbnail {
-			return s.transcodeVideo(w, thumbPath)
-		}
-
-		f, err = os.Open(thumbPath)
-		// TODO: if thumbnail or thumbhash generation background routine is interrupted, the thumbhashes
-		// may never be generated; we need to be able to generate them on-the-fly if they are missing
-	}
+	thumb, err := tl.Thumbnail(r.Context(), itemDataID, r.FormValue("data_file"), dataType, thumbType)
 	if err != nil {
-		return fmt.Errorf("opening thumbnail file: %w", err)
-	}
-	if obfuscate() && thumbType == timeline.VideoThumbnail {
-		f.Close()
-		return s.transcodeVideo(w, thumbPath)
-	}
-	defer f.Close()
-
-	var modTime time.Time
-	info, err := f.Stat()
-	if err != nil {
-		s.log.Error("getting mod time of thumbnail", zap.Error(err))
-	}
-	if info != nil {
-		modTime = info.ModTime()
+		return fmt.Errorf("unable to provide thumbnail: %w", err)
 	}
 
-	http.ServeContent(w, r, thumbPath, modTime, f)
+	if thumb.MediaType != "" {
+		w.Header().Set("Content-Type", thumb.MediaType)
+	}
+
+	thumbReader := bytes.NewReader(thumb.Content)
+	if obfuscate() && strings.HasPrefix(thumbType, "video/") {
+		return s.transcodeVideo(r.Context(), w, "", thumbReader)
+	}
+
+	http.ServeContent(w, r, thumb.Name, thumb.ModTime, bytes.NewReader(thumb.Content))
 	return nil
 }
 
@@ -440,7 +427,7 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 	isGoogleMP := path.Ext(strings.ToLower(videoDataFile)) == ".mp" ||
 		path.Ext(strings.ToLower(strings.TrimSuffix(imgDataFile, imgExt))) == ".mp"
 	if videoDataFile == "" || imgExt == ".heif" || imgExt == ".heic" || isGoogleMP || obfuscate() {
-		return s.transcodeVideo(w, inputFile)
+		return s.transcodeVideo(r.Context(), w, inputFile, nil)
 	}
 
 	r.URL.Path = "/" + path.Join("repo", tl.ID().String(), videoDataFile)
@@ -598,12 +585,12 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 	return nil
 }
 
-func (s server) transcodeVideo(w http.ResponseWriter, inputVideoFilePath string) error {
+func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, inputVideoFilePath string, inputVideoStream io.Reader) error {
 	// TODO: potentially use Accept header to make this dynamic
 	const format = "video/webm"
 	w.Header().Set("Content-Type", format)
 
-	if err := s.app.Transcode(inputVideoFilePath, nil, format, w, obfuscate()); err != nil {
+	if err := s.app.Transcode(ctx, inputVideoFilePath, inputVideoStream, format, w, obfuscate()); err != nil {
 		return fmt.Errorf("video transcode error: %#w", err)
 	}
 

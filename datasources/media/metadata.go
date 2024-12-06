@@ -33,11 +33,11 @@ import (
 
 	"github.com/abema/go-mp4"
 	"github.com/dhowden/tag"
+	"github.com/mholt/go-xmp/xmp"
 	"github.com/mholt/goexif2/exif"
 	"github.com/mholt/goexif2/mknote"
 	"github.com/mholt/goexif2/tiff"
 	"github.com/timelinize/timelinize/timeline"
-	"github.com/trimmer-io/go-xmp/xmp"
 	"go.uber.org/zap"
 )
 

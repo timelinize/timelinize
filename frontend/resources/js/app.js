@@ -66,11 +66,6 @@ async function myFetch(signal, endpoint, data, method) {
 		body: data,
 		signal: signal
 	}).then(async (response) => {
-		// re-enable form inputs
-		if ($('#modal-preview')?.offsetParent === null) {
-			formFields.forEach((elem) => { elem.disabled = false; });
-		}
-
 		if (response.ok) {
 			if (response.headers.get('Content-Type') == 'application/json')
 				return response.json();
@@ -86,6 +81,11 @@ async function myFetch(signal, endpoint, data, method) {
 		}
 
 		throw {response: response};
+	}).finally(function() {
+		// re-enable form inputs
+		if ($('#modal-preview')?.offsetParent === null) {
+			formFields.forEach((elem) => { elem.disabled = false; });
+		}
 	});
 }
 
@@ -148,8 +148,11 @@ const app = {
 	OpenRepositories() {
 		return get("/api/open-repositories");
 	},
+	PlanImport(params) {
+		return post("/api/plan-import", params);
+	},
 	Recognize(filename) {
-		return post("/api/recognize", filename);
+		return post("/api/recognize", { filename });
 	},
 	RepositoryIsEmpty(repoID) {
 		 return post("/api/repository-empty", repoID);
