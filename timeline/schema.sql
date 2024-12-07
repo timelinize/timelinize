@@ -416,25 +416,6 @@ CREATE VIEW IF NOT EXISTS "extended_items" AS
 	LEFT JOIN data_sources ON data_sources.id = items.data_source_id
 	LEFT JOIN classifications ON classifications.id = items.classification_id;
 
--- This view filters out items that are dependent on other items; technically,
--- it selects items that are NOT at the end of a directed relation from another
--- item. For example, this view skips items that are attachments of other items;
--- these items may not make much sense alone, without the context of the root
--- item, so this view omits those. However, it does include items that are at
--- the "to" end of a directed relation from an entity, because an item that is
--- "reacted" to by an entity still makes sense on its own.
--- We add "GROUP BY items.id" because an item that is the root of multiple other
--- items (e.g. a collection item) would appear as many times as it has relationships,
--- which is probably not desired.
-CREATE VIEW IF NOT EXISTS "root_items" AS
-	SELECT items.* FROM extended_items AS items
-		LEFT JOIN relationships ON relationships.to_item_id = items.id
-		LEFT JOIN relations ON relations.id = relationships.relation_id
-		WHERE relations.directed != 1
-			OR relations.subordinating = 0
-			OR relationships.to_item_id IS NULL
-		GROUP BY items.id;
-
 -- Don't allow stray attributes; if for any reason no entity_attributes rows
 -- point to a given attribute, always delete the attribute to clean up. The
 -- only reason we have them separated into two tables is to allow multiple

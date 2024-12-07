@@ -974,7 +974,7 @@ func sqlArray(rowIDs []int64) (string, []any) {
 // file existence, and a table and value within the database.It returns an
 // error only if it is unable to assess whether a valid timeline exists.
 func Valid(ctx context.Context, repo string) (bool, error) {
-	db, err := openDB(repo)
+	db, err := openDB(ctx, repo)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil

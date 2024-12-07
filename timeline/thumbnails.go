@@ -40,7 +40,6 @@ import (
 	// as our AVIF decoder, since that is what we used earlier during development
 	// but now I just get a distorted green mess:
 	// https://x.com/mholt6/status/1864894439061381393
-
 	"github.com/davidbyttow/govips/v2/vips"
 	"github.com/galdor/go-thumbhash"
 	_ "github.com/gen2brain/avif" // register AVIF image decoder
@@ -178,12 +177,33 @@ func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context, dataID int6
 	return thumb, nil
 }
 
-func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID int64, dataFile string) (Thumbnail, error) {
-	var inputBuf []byte
-	var inputFilename string
+var thumbnailMapMu = newMapMutex()
 
+func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID int64, dataFile string) (Thumbnail, error) {
 	task.DataType = strings.ToLower(task.DataType)
 	task.ThumbType = strings.ToLower(task.ThumbType)
+
+	if !qualifiesForThumbnail(&task.DataType) {
+		return Thumbnail{}, fmt.Errorf("media type does not support thumbnailing: %s (item_data_id=%d data_file='%s')", task.DataType, dataID, dataFile)
+	}
+
+	// sync generation to save resources: don't allow a thumbnail to be generated multiple times
+	var lockKey any = dataFile
+	if dataID != 0 {
+		lockKey = dataID
+	}
+	thumbnailMapMu.Lock(lockKey)
+	defer thumbnailMapMu.Unlock(lockKey)
+
+	// see if it was already done (TODO: Is this extra query worth the potential resource savings? how often do they get generated concurrently?)
+	if thumb, err := task.tl.loadThumbnail(ctx, dataID, dataFile, task.ThumbType); err == nil {
+		return thumb, nil
+	}
+
+	// if not, or if the other goroutine failed, we need to generate it
+
+	var inputBuf []byte
+	var inputFilename string
 
 	if dataFile != "" {
 		inputFilename = task.tl.FullPath(dataFile)
@@ -195,10 +215,6 @@ func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID 
 		if err != nil {
 			return Thumbnail{}, fmt.Errorf("querying item data content: %w", err)
 		}
-	}
-
-	if !qualifiesForThumbnail(&task.DataType) {
-		return Thumbnail{}, fmt.Errorf("media type does not support thumbnailing: %s (item_data_id=%d data_file='%s')", task.DataType, dataID, dataFile)
 	}
 
 	thumbnail, mimeType, err := task.generateThumbnail(ctx, inputFilename, inputBuf)
@@ -311,11 +327,12 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 	case strings.HasPrefix(task.DataType, "video/"):
 		// TODO: support inputBuf here... dunno if we can pipe it (ideal), or if we have to write a temporary file
 		if inputFilename == "" {
-			return nil, "", fmt.Errorf("TODO: not implemented: support for video items stored in DB")
+			return nil, "", errors.New("TODO: not implemented: support for video items stored in DB")
 		}
 
 		var cmd *exec.Cmd
-		if strings.HasPrefix(task.ThumbType, "image/") {
+		switch {
+		case strings.HasPrefix(task.ThumbType, "image/"):
 			// I have found that smaller dimension and higher quality is a good tradeoff for keeping
 			// file size small -- it obviously doesn't look great, but lower quality looks REALLY bad
 			//nolint:gosec
@@ -338,9 +355,19 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 			// 	"-f", "webp", // TODO: avif would be preferred... but can't be piped out I guess?
 			// 	"-", // pipe to stdout
 			// )
-		} else if strings.HasPrefix(task.ThumbType, "video/") {
+		case strings.HasPrefix(task.ThumbType, "video/"):
 			cmd = exec.Command("ffmpeg",
+				// include only the first few seconds of video; start at the beginning
+				// (putting this before -i is a fast, but inaccurate skip-to, but we know
+				// the beginning will have a keyframe)
+				"-ss", "0",
+
 				"-i", inputFilename,
+
+				// keep thumbnail video short; limit it to this many seconds
+				// (TODO: Shorter videos will still look this long but won't be, and may not loop in some players; we can determine
+				// video length pretty quickly with: `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 input.mp4`)
+				"-t", "5",
 
 				// important to scale down the video for fast encoding
 				"-vf", "scale='min(480,iw)':-1",
@@ -350,12 +377,8 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 				"-acodec", "libvorbis",
 
 				// bitrate, important quality determination
-				"-b:v", "1M",
-
-				// include only the first few seconds of video
-				// TODO: Should this go before -i?
-				"-ss", "0",
-				"-t", "3",
+				"-b:v", "256k", // constant bitrate, default is 256k
+				// "-crf", "40", // variable bitrate, valid range for vpx is 4-63; higher number is lower quality
 
 				// we are already running concurrently, so limit to just 1 CPU thread
 				"-threads", "1",
@@ -368,7 +391,7 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 				"-",
 			)
 			mimeType = VideoWebM
-		} else {
+		default:
 			return nil, "", fmt.Errorf("task has no target media type: %+v (inputFilename=%s)", task, inputFilename)
 		}
 
@@ -434,11 +457,32 @@ func (thumbnailTask) generateThumbhash(thumb []byte) ([]byte, error) {
 // Thumbnail returns a thumbnail for either the given itemDataID or the dataFile, along with
 // media type. If a thumbnail does not yet exist, one is generated and stored for future use.
 func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, dataType, thumbType string) (Thumbnail, error) {
+	// first try loading existing thumbnail from DB
+	thumb, err := tl.loadThumbnail(ctx, itemDataID, dataFile, thumbType)
+	if err == nil {
+		return thumb, nil // found existing thumbnail!
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		// no existing thumbnail; generate it and return it
+		task := thumbnailTask{
+			tl:        tl,
+			DataType:  dataType,
+			ThumbType: thumbType,
+		}
+		thumb, err = task.thumbnailAndThumbhash(ctx, itemDataID, dataFile)
+		if err != nil {
+			return Thumbnail{}, fmt.Errorf("existing thumbnail not found, so tried generating one, but got error: %w", err)
+		}
+		return thumb, nil
+	}
+	return Thumbnail{}, err
+}
+
+func (tl *Timeline) loadThumbnail(ctx context.Context, dataID int64, dataFile, thumbType string) (Thumbnail, error) {
 	var mimeType string
 	var modTimeUnix int64
 	var thumbnail []byte
 
-	dataType = strings.ToLower(dataType)
 	thumbType = strings.ToLower(thumbType)
 
 	// the DB uses nullable fields; and if a dataFile is set,
@@ -452,10 +496,9 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 	} else {
 		// only set this if the item doesn't have a data
 		// file, and its content is stored in the DB
-		itemDataIDToQuery = &itemDataID
+		itemDataIDToQuery = &dataID
 	}
 
-	// first try the fast path: get the thumbnail if it exists
 	tl.thumbsMu.RLock()
 	err := tl.thumbs.QueryRowContext(ctx,
 		`SELECT generated, mime_type, content
@@ -464,35 +507,16 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 			LIMIT 1`,
 		itemDataIDToQuery, dataFileToQuery, thumbType).Scan(&modTimeUnix, &mimeType, &thumbnail)
 	tl.thumbsMu.RUnlock()
-
-	// found existing thumbnail!
-	if err == nil {
-		return Thumbnail{
-			Name:      fakeThumbnailFilename(itemDataID, dataFile, mimeType),
-			MediaType: mimeType,
-			ModTime:   time.Unix(modTimeUnix, 0),
-			Content:   thumbnail,
-		}, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		// error other than "no thumbnail found"
-		return Thumbnail{}, err
-	}
-
-	// slower path: no thumbnail found (of the desired media type), so generate one
-
-	task := thumbnailTask{
-		tl:        tl,
-		DataType:  dataType,
-		ThumbType: thumbType,
-	}
-
-	thumb, err := task.thumbnailAndThumbhash(ctx, itemDataID, dataFile)
 	if err != nil {
 		return Thumbnail{}, err
 	}
 
-	return thumb, nil
+	return Thumbnail{
+		Name:      fakeThumbnailFilename(dataID, dataFile, mimeType),
+		MediaType: mimeType,
+		ModTime:   time.Unix(modTimeUnix, 0),
+		Content:   thumbnail,
+	}, nil
 }
 
 type Thumbnail struct {

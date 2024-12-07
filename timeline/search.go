@@ -222,7 +222,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	// for JSON serialization, always initialize so "0 results" is at least an empty list and not null
 	results := make([]*SearchResult, 0)
 	var count, totalCount int
-	for rows.Next() {
+	for rows.Next() { // fun fact, the first call to Next() is actually what runs the query
 		// in GeoJSON mode, skip the usual full-row scan, and instead focus
 		// on the coordinates which is much more efficient
 		if params.GeoJSON {
@@ -408,12 +408,12 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	// such items to appear as their own items in the top level.
 	// Note: We also do astructured if specific row IDs are being queried
 	// since we still want to select those specific rows even if
-	// they are, say, attachments of a message (who cares! we have
-	// specific rows to get).
-	itemsTable := "root_items"
-	if params.Astructured || len(params.RowID) > 0 {
-		itemsTable = "extended_items"
-	}
+	// they are, say, attachments of a message. Querying specific
+	// rows has priority over relationships.
+	rootItemsOnly := !params.Astructured || len(params.RowID) > 0
+
+	// select from the extended items table so we can get a little more information
+	const itemsTable = "extended_items"
 
 	// If searching by embeddings, we have to SELECT from the embeddings
 	// virtual table, and join in the items table.
@@ -458,6 +458,10 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	if len(params.ToAttributeID) > 0 || len(params.ToEntityID) > 0 {
 		q += `
 		JOIN relationships ON relationships.from_item_id = items.id`
+	} else if rootItemsOnly {
+		q += `
+		LEFT JOIN relationships ON relationships.to_item_id = items.id
+		LEFT JOIN relations ON relations.id = relationships.relation_id`
 	}
 
 	// build the WHERE in terms of groups of OR's that are AND'ed together
@@ -466,7 +470,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	and := func(ors func()) {
 		clauseCount = 0
 		if len(args) == 0 {
-			q += " WHERE"
+			q += "\n\t\tWHERE"
 		} else {
 			if params.OrFields {
 				q += " OR"
@@ -482,7 +486,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		// this is a poor-man's way of undoing it
 		q = strings.TrimSuffix(q, " OR ()")
 		q = strings.TrimSuffix(q, " AND ()")
-		q = strings.TrimSuffix(q, " WHERE ()")
+		q = strings.TrimSuffix(q, "\n\t\tWHERE ()")
 	}
 	or := func(clause string, val any) {
 		if clauseCount > 0 {
@@ -698,10 +702,20 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		})
 	}
 
+	if rootItemsOnly {
+		// select only items which are not dependent on other items, i.e., items
+		// that are not at the end of a directed relation from another item
+		and(func() {
+			or("relations.directed != ?", 1)
+			or("relations.subordinating = ?", 0)
+			or("relationships.to_item_id IS ?", nil)
+		})
+	}
+
 	if vectorSearch {
-		q += " ORDER BY embeddings.distance"
+		q += "\n\t\tORDER BY embeddings.distance"
 	} else if params.Sort != SortNone {
-		q += " ORDER BY "
+		q += "\n\t\tORDER BY "
 
 		// TODO: not sure if this is how autocomplete will work or be useful, but basically
 		// this sorts by data text so that if it's a prefix, it's weighed higher in the
@@ -762,11 +776,11 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		params.Limit = 1000
 	}
 	if params.Limit > 0 {
-		q += " LIMIT ?"
+		q += "\n\t\tLIMIT ?"
 		args = append(args, params.Limit)
 	}
 	if params.Offset > 0 {
-		q += " OFFSET ?"
+		q += "\n\t\tOFFSET ?"
 		args = append(args, params.Offset)
 	}
 

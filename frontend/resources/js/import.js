@@ -85,6 +85,11 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 
 	console.log("IMPORT PLAN:", plan);
 
+	if (!plan || !plan.files) {
+		// TODO: show modal saying that nothing was found
+		return;
+	}
+
 	for (const file of plan.files) {
 		// one drawback of our current UI is we only make available the first data source that matches
 		// (but so far, it is rare for multiple to match, especially with near-equivalent confidence, I think)

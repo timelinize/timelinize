@@ -157,7 +157,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 
 		// if this is a sidecar video for a photograph (a motion picture or live photo),
 		// skip it, since we'll come back to this when we get to the photograph file itself
-		if IsSidecarVideo(dirEntry.FS, dirEntry.Filename) {
+		if IsSidecarVideo(dirEntry.FS, fpath) {
 			return nil
 		}
 
@@ -256,7 +256,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				ig.ToItem(RelCoverArt, picItem)
 			}
 
-			ConnectMotionPhoto(params.Log, dirEntry.FS, dirEntry.Filename, ig)
+			ConnectMotionPhoto(params.Log, dirEntry.FS, fpath, ig)
 
 			// now assemble collection info
 

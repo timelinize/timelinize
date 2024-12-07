@@ -383,10 +383,15 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			// the directory; delete the individual pairings from the walk and
 			// replace them all with our single new pairing representing the
 			// whole directory
+			filename := filepath.Join(filepath.Dir(options.Path), filepath.FromSlash(dir))
+			ftype := fileTypeDir
+			if archives.PathContainsArchive(filename) {
+				ftype = fileTypeArchive
+			}
 			pairings[dir] = []timeline.ProposedFileImport{
 				{
-					Filename:    filepath.Join(filepath.Dir(options.Path), filepath.FromSlash(dir)),
-					FileType:    fileTypeDir,
+					Filename:    filename,
+					FileType:    ftype,
 					DataSources: consolidatedMatches,
 				},
 			}
@@ -496,7 +501,7 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		}
 
 		ftype := fileTypeFile
-		if archives.FilepathContainsArchive(options.Path) || archives.FilepathContainsArchive(fpath) {
+		if archives.PathContainsArchive(path.Join(filepath.ToSlash(options.Path), fpath)) {
 			ftype = fileTypeArchive
 		} else if d.IsDir() {
 			// remember that the underlying FS, if it is a DeepFS, can report

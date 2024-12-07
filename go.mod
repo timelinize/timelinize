@@ -2,8 +2,6 @@ module github.com/timelinize/timelinize
 
 go 1.23.3
 
-toolchain go1.23.1
-
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/abema/go-mp4 v1.2.0
@@ -20,7 +18,7 @@ require (
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/maruel/natural v1.1.1
 	github.com/mattn/go-sqlite3 v1.14.24
-	github.com/mholt/archives v0.0.0-20241203232558-998c9622f6b8
+	github.com/mholt/archives v0.0.0-20241207175349-5e373c52f8aa
 	github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e
 	github.com/mholt/goexif2 v0.0.0-20230302025153-4d89d35092b2
 	github.com/signal-golang/go-vcard v0.1.2

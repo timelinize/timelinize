@@ -211,9 +211,8 @@ func (ij ImportJob) Run(job *Job, checkpoint []byte) error {
 			// if the filepath contains an archive (i.e. the path itself traverses into
 			// an archive), we need to use DeepFS; otherwise, traversing into an archive
 			// during import is (probably?) not desired, so use a "regular" file system
-			// TODO: BUG: changing the fsRoot below necessitates updating it in the fs itself
 			var fsys fs.FS
-			if archives.FilepathContainsArchive(fsRoot) {
+			if archives.PathContainsArchive(filepath.ToSlash(fsRoot)) {
 				fsys = &archives.DeepFS{Root: fsRoot, Context: job.Context()}
 			} else {
 				fsys, err = archives.FileSystem(job.ctx, fsRoot, nil)
@@ -412,6 +411,11 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 		return
 	}
 
+	if len(dataIDs) == 0 && len(dataFiles) == 0 {
+		ij.job.Logger().Debug("no thumbnails to generate from this job")
+		return
+	}
+
 	// convert maps to a slice; ordering is important for checkpoints
 	job.Tasks = make([]thumbnailTask, len(dataIDs)+len(dataFiles))
 	var i int
@@ -474,6 +478,11 @@ func (ij ImportJob) generateEmbeddingsForImportedItems() {
 
 	if err = rows.Err(); err != nil {
 		ij.job.Logger().Error("iterating rows for generating embeddings failed", zap.Error(err))
+		return
+	}
+
+	if len(idMap) == 0 {
+		ij.job.Logger().Debug("no embeddings to generate from this job")
 		return
 	}
 

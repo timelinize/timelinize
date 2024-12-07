@@ -29,6 +29,7 @@ import (
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3" // register the sqlite3 driver
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -42,7 +43,7 @@ var createDB string
 var createThumbsDB string
 
 func openAndProvisionDB(ctx context.Context, repoDir string) (*sql.DB, error) {
-	db, err := openDB(repoDir)
+	db, err := openDB(ctx, repoDir)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +54,7 @@ func openAndProvisionDB(ctx context.Context, repoDir string) (*sql.DB, error) {
 	return db, nil
 }
 
-func openDB(repoDir string) (*sql.DB, error) {
+func openDB(ctx context.Context, repoDir string) (*sql.DB, error) {
 	var db *sql.DB
 	var err error
 	defer func() {
@@ -67,6 +68,19 @@ func openDB(repoDir string) (*sql.DB, error) {
 	db, err = sql.Open("sqlite3", dbPath+"?_foreign_keys=on&_journal_mode=WAL")
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
+	}
+
+	// print version, because I keep losing track of it :)
+	var version string
+	err = db.QueryRow("SELECT sqlite_version() AS version").Scan(&version)
+	if err == nil {
+		Log.Info("using sqlite", zap.String("version", version))
+	}
+
+	// Best practice, according to the SQLite docs.
+	_, err = db.ExecContext(ctx, `PRAGMA optimize=0x10002`)
+	if err != nil {
+		Log.Error("optimizing database: %w", zap.Error(err))
 	}
 
 	return db, nil
@@ -105,6 +119,28 @@ func provisionDB(ctx context.Context, db *sql.DB) error {
 	err = saveAllStandardEntityTypes(ctx, db)
 	if err != nil {
 		return fmt.Errorf("saving standard entity types to database: %w", err)
+	}
+
+	// "Applications with long-lived database connections should run "PRAGMA
+	// optimize=0x10002" when the database connection first opens, then run
+	// "PRAGMA optimize" again at periodic intervals - perhaps once per day.
+	// All applications should run "PRAGMA optimize" after schema changes,
+	// especially CREATE INDEX."
+	// - https://www.sqlite.org/pragma.html#pragma_optimize
+	//
+	// I noticed a situation where running ANALYZE (which PRAGMA optimize does
+	// if needed, apparently) solved a major performance issue by helping the
+	// query planner choose the right optimizer for searching items.
+	// https://x.com/mholt6/status/1865169910940471492
+	// --> https://x.com/carlsverre/status/1865185078067835167 (whole thread)
+	//
+	// TODO: The docs recommend doing this about once per day (we run it
+	// here since we just ran CREATE INDEX a lot if this is a new DB) --
+	// I dunno if we'd need it that often, but maybe set up a timer?
+	Log.Debug("optimizing DB")
+	_, err = db.ExecContext(ctx, `PRAGMA optimize`)
+	if err != nil {
+		Log.Error("optimizing database: %w", zap.Error(err))
 	}
 
 	return nil
@@ -210,7 +246,7 @@ func loadRepoID(ctx context.Context, db *sql.DB) (uuid.UUID, error) {
 }
 
 func openAndProvisionThumbsDB(ctx context.Context, repoDir string, repoID uuid.UUID) (*sql.DB, error) {
-	db, err := openThumbsDB(repoDir)
+	db, err := openThumbsDB(ctx, repoDir)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +257,7 @@ func openAndProvisionThumbsDB(ctx context.Context, repoDir string, repoID uuid.U
 	return db, nil
 }
 
-func openThumbsDB(repoDir string) (*sql.DB, error) {
+func openThumbsDB(ctx context.Context, repoDir string) (*sql.DB, error) {
 	var db *sql.DB
 	var err error
 	defer func() {
@@ -235,6 +271,11 @@ func openThumbsDB(repoDir string) (*sql.DB, error) {
 	db, err = sql.Open("sqlite3", dbPath+"?_foreign_keys=on&_journal_mode=WAL")
 	if err != nil {
 		return nil, fmt.Errorf("opening thumbnail database: %w", err)
+	}
+
+	_, err = db.ExecContext(ctx, `PRAGMA optimize=0x10002`)
+	if err != nil {
+		Log.Error("optimizing database: %w", zap.Error(err))
 	}
 
 	return db, nil
