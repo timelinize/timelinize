@@ -670,12 +670,12 @@ func (*App) LoadItemStats(statName, repoID string, params url.Values) (any, erro
 }
 
 // TODO: very experimental
-func (a *App) LoadRecentConversations(params timeline.ItemSearchParams) ([]*timeline.Conversation, error) {
+func (a *App) LoadRecentConversations(ctx context.Context, params timeline.ItemSearchParams) ([]*timeline.Conversation, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
 		return nil, err
 	}
-	convos, err := tl.RecentConversations(params)
+	convos, err := tl.RecentConversations(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -692,12 +692,12 @@ func (a *App) LoadRecentConversations(params timeline.ItemSearchParams) ([]*time
 	return convos, nil
 }
 
-func (a App) LoadConversation(params timeline.ItemSearchParams) (timeline.SearchResults, error) {
+func (a App) LoadConversation(ctx context.Context, params timeline.ItemSearchParams) (timeline.SearchResults, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
 		return timeline.SearchResults{}, err
 	}
-	convo, err := tl.LoadConversation(a.ctx, params)
+	convo, err := tl.LoadConversation(ctx, params)
 	if err != nil {
 		return timeline.SearchResults{}, err
 	}

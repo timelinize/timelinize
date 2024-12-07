@@ -53,7 +53,7 @@ outer:
 }
 
 // RecentConversations loads recent conversations from the DB. It honors a select number of ItemSearchParams fields.
-func (tl *Timeline) RecentConversations(params ItemSearchParams) ([]*Conversation, error) {
+func (tl *Timeline) RecentConversations(ctx context.Context, params ItemSearchParams) ([]*Conversation, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
@@ -64,7 +64,7 @@ func (tl *Timeline) RecentConversations(params ItemSearchParams) ([]*Conversatio
 	defer tx.Rollback()
 
 	// start by loading the bare conversations, which gives us entities involved and at least one message for each
-	convosMap, err := tl.loadRecentConversations(tx, params)
+	convosMap, err := tl.loadRecentConversations(ctx, tx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func (tl *Timeline) RecentConversations(params ItemSearchParams) ([]*Conversatio
 	return conversations, tx.Commit()
 }
 
-func (tl *Timeline) loadRecentConversations(tx *sql.Tx, params ItemSearchParams) (map[string]*Conversation, error) {
+func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, params ItemSearchParams) (map[string]*Conversation, error) {
 	// keyed by hash of entities, as a unique set of entities is what
 	// distinguishes conversations from one another (TODO: or attributes rather than entities? i.e. specific phone numbers instead of people?)
 	convosMap := make(map[string]*Conversation)
@@ -258,7 +258,7 @@ func (tl *Timeline) loadRecentConversations(tx *sql.Tx, params ItemSearchParams)
 			ORDER BY items.timestamp DESC
 			LIMIT ?`
 
-		rows, err := tx.Query(q, args...)
+		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -380,7 +380,7 @@ func (tl *Timeline) LoadConversation(ctx context.Context, params ItemSearchParam
 	defer tx.Rollback()
 
 	// start by loading the bare conversations, which gives us entities involved and at least one message for each
-	results, err := tl.loadConversation(tx, params)
+	results, err := tl.loadConversation(ctx, tx, params)
 	if err != nil {
 		return SearchResults{}, err
 	}
@@ -400,7 +400,7 @@ func (tl *Timeline) LoadConversation(ctx context.Context, params ItemSearchParam
 	return sr, tx.Commit()
 }
 
-func (tl *Timeline) loadConversation(tx *sql.Tx, params ItemSearchParams) ([]*SearchResult, error) {
+func (tl *Timeline) loadConversation(ctx context.Context, tx *sql.Tx, params ItemSearchParams) ([]*SearchResult, error) {
 	// if no entities or attributes specified, no conversation can be found
 	if len(params.EntityID) == 0 && len(params.AttributeID) == 0 {
 		return []*SearchResult{}, nil
@@ -410,8 +410,9 @@ func (tl *Timeline) loadConversation(tx *sql.Tx, params ItemSearchParams) ([]*Se
 	if err != nil {
 		return nil, err
 	}
+	tl.explainQueryPlan(ctx, q, args...) // TODO: temporarily for debugging slow query
 
-	rows, err := tx.Query(q, args...)
+	rows, err := tx.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

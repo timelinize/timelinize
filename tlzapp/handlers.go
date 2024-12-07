@@ -301,13 +301,13 @@ func (s *server) handleSearchEntities(w http.ResponseWriter, r *http.Request) er
 
 func (s *server) handleRecentConversations(w http.ResponseWriter, r *http.Request) error {
 	params := r.Context().Value(ctxKeyPayload).(*timeline.ItemSearchParams)
-	results, err := s.app.LoadRecentConversations(*params)
+	results, err := s.app.LoadRecentConversations(r.Context(), *params)
 	return jsonResponse(w, results, err)
 }
 
 func (s *server) handleConversation(w http.ResponseWriter, r *http.Request) error {
 	params := r.Context().Value(ctxKeyPayload).(*timeline.ItemSearchParams)
-	results, err := s.app.LoadConversation(*params)
+	results, err := s.app.LoadConversation(r.Context(), *params)
 	return jsonResponse(w, results, err)
 }
 

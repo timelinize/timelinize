@@ -23,8 +23,10 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
@@ -294,4 +296,38 @@ func provisionThumbsDB(ctx context.Context, thumbsDB *sql.DB, repoID uuid.UUID) 
 	}
 
 	return nil
+}
+
+func (tl *Timeline) explainQueryPlan(ctx context.Context, q string, args ...any) {
+	logger := Log.Named("query_planner")
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
+	fmt.Fprint(w, "\nQUERY PLAN FOR:\n============================================================================================\n")
+	fmt.Fprint(w, q)
+	fmt.Fprint(w, "\n============================================================================================\n")
+
+	tl.dbMu.RLock()
+	rows, err := tl.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+q, args...)
+	tl.dbMu.RUnlock()
+	if err != nil {
+		logger.Error("explaining query plan", zap.Error(err))
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		err := rows.Scan(&id, &parent, &notUsed, &detail)
+		if err != nil {
+			logger.Error("scanning query plan row", zap.Error(err))
+			return
+		}
+		fmt.Fprintf(w, "%d\t%d\t%d\t%s\n", id, parent, notUsed, detail)
+	}
+	if err := rows.Err(); err != nil {
+		logger.Error("iterating query plan rows", zap.Error(err))
+		return
+	}
+
+	w.Flush()
 }
