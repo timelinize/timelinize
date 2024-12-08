@@ -139,7 +139,13 @@ func provisionDB(ctx context.Context, db *sql.DB) error {
 	// TODO: The docs recommend doing this about once per day (we run it
 	// here since we just ran CREATE INDEX a lot if this is a new DB) --
 	// I dunno if we'd need it that often, but maybe set up a timer?
+	// TODO: I also encountered an issue where `PRAGMA optimize` did not
+	// fix the performance, but running `ANALYZE` did. Hence I run both here.
 	Log.Debug("optimizing DB")
+	_, err = db.ExecContext(ctx, `ANALYZE`)
+	if err != nil {
+		Log.Error("analyzing database: %w", zap.Error(err))
+	}
 	_, err = db.ExecContext(ctx, `PRAGMA optimize`)
 	if err != nil {
 		Log.Error("optimizing database: %w", zap.Error(err))

@@ -272,6 +272,16 @@ func (ij ImportJob) Run(job *Job, checkpoint []byte) error {
 	ij.generateThumbnailsForImportedItems()
 	ij.generateEmbeddingsForImportedItems()
 
+	// TODO: I had a performance issue that was solved by running ANALYZE after a large import.
+	// Hence doing it here. Hopefully this is fine?
+	Log.Debug("optimizing DB")
+	job.tl.dbMu.RLock()
+	_, err := job.tl.db.ExecContext(job.ctx, `ANALYZE`)
+	job.tl.dbMu.RUnlock()
+	if err != nil {
+		Log.Error("analyzing database: %w", zap.Error(err))
+	}
+
 	return nil
 }
 

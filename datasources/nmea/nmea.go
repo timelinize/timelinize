@@ -48,7 +48,7 @@ func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
 		Name:            "nmea0183",
 		Title:           "NMEA-0183",
-		Icon:            "nmea.svg",
+		Icon:            "nmea.jpg",
 		Description:     "Data output typically associated with marine electronics from a GPS receiver, radio, sonar, echo sounder, anemometer, gyrocompass, etc.",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
