@@ -369,15 +369,20 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 
 	// prevent duplicates
 	var (
-		dataIDs   = make(map[int64]thumbnailTask)
-		dataFiles = make(map[string]thumbnailTask)
+		dataIDs   = make(map[int64]struct{})
+		dataFiles = make(map[string]struct{})
 	)
 
+	// get the items in reverse timestamp order since the
+	// most recent items are most likely to be displayed by
+	// various frontend pages, i.e. the user will likely
+	// see thoes first
 	ij.job.tl.dbMu.RLock()
 	rows, err := ij.job.tl.db.QueryContext(ij.job.tl.ctx,
 		`SELECT id, data_id, data_type, data_file
 		FROM items
-		WHERE job_id=? AND (data_file IS NOT NULL OR data_id IS NOT NULL)`, ij.job.id)
+		WHERE job_id=? AND (data_file IS NOT NULL OR data_id IS NOT NULL)
+		ORDER BY timestamp DESC`, ij.job.id)
 	if err != nil {
 		ij.job.tl.dbMu.RUnlock()
 		ij.job.Logger().Error("unable to generate thumbnails from this import", zap.Error(err))
@@ -398,17 +403,20 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 		}
 		if qualifiesForThumbnail(dataType) {
 			if dataID != nil {
-				dataIDs[*dataID] = thumbnailTask{
-					DataID:    *dataID,
-					DataType:  *dataType,
-					ThumbType: thumbnailType(*dataType, false),
+				if _, seen := dataIDs[*dataID]; !seen {
+					job.Tasks = append(job.Tasks, thumbnailTask{
+						DataID:    *dataID,
+						DataType:  *dataType,
+						ThumbType: thumbnailType(*dataType, false),
+					})
 				}
-			}
-			if dataFile != nil {
-				dataFiles[*dataFile] = thumbnailTask{
-					DataFile:  *dataFile,
-					DataType:  *dataType,
-					ThumbType: thumbnailType(*dataType, false),
+			} else if dataFile != nil {
+				if _, seen := dataFiles[*dataFile]; !seen {
+					job.Tasks = append(job.Tasks, thumbnailTask{
+						DataFile:  *dataFile,
+						DataType:  *dataType,
+						ThumbType: thumbnailType(*dataType, false),
+					})
 				}
 			}
 		}
@@ -421,22 +429,22 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 		return
 	}
 
-	if len(dataIDs) == 0 && len(dataFiles) == 0 {
+	if len(job.Tasks) == 0 {
 		ij.job.Logger().Debug("no thumbnails to generate from this job")
 		return
 	}
 
-	// convert maps to a slice; ordering is important for checkpoints
-	job.Tasks = make([]thumbnailTask, len(dataIDs)+len(dataFiles))
-	var i int
-	for _, task := range dataIDs {
-		job.Tasks[i] = task
-		i++
-	}
-	for _, task := range dataFiles {
-		job.Tasks[i] = task
-		i++
-	}
+	// // convert maps to a slice; ordering is important for checkpoints
+	// job.Tasks = make([]thumbnailTask, len(dataIDs)+len(dataFiles))
+	// var i int
+	// for _, task := range dataIDs {
+	// 	job.Tasks[i] = task
+	// 	i++
+	// }
+	// for _, task := range dataFiles {
+	// 	job.Tasks[i] = task
+	// 	i++
+	// }
 
 	ij.job.Logger().Info("generating thumbnails for imported items", zap.Int("count", len(job.Tasks)))
 

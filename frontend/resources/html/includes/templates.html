@@ -179,36 +179,39 @@
 </template>
 
 <template id="loader-container">
-	<div class="loader-container bg-muted-lt ratio ratio-4x3">
-		<div class="loader-container-content">
-			<svg class="loader" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-				viewBox="0 0 100 100" preserveAspectRatio="xMidYMid">
-				<g>
-					<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
-						values="0 50 50;360 50 50" keyTimes="0;1" dur="0.625s"></animateTransform>
-					<path fill-opacity="0.49" fill="#004d73" d="M50 50L50 0A50 50 0 0 1 100 50Z"></path>
-				</g>
-				<g>
-					<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
-						values="0 50 50;360 50 50" keyTimes="0;1" dur="0.8s"></animateTransform>
-					<path fill-opacity="0.49" fill="#00334e" d="M50 50L50 0A50 50 0 0 1 100 50Z"
-						transform="rotate(90 50 50)"></path>
-				</g>
-				<g>
-					<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
-						values="0 50 50;360 50 50" keyTimes="0;1" dur="1.25s"></animateTransform>
-					<path fill-opacity="0.49" fill="#007fdb" d="M50 50L50 0A50 50 0 0 1 100 50Z"
-						transform="rotate(180 50 50)"></path>
-				</g>
-				<g>
-					<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
-						values="0 50 50;360 50 50" keyTimes="0;1" dur="2.5s"></animateTransform>
-					<path fill-opacity="0.49" fill="#dbebfa" d="M50 50L50 0A50 50 0 0 1 100 50Z"
-						transform="rotate(270 50 50)"></path>
-				</g>
-			</svg>
+	<!-- The "supercontainer" can contain the image/video that is being loaded, then we fade out the loader for a nice effect. -->
+	<div class="loader-supercontainer ratio ratio-4x3">
+		<div class="loader-container bg-muted-lt">
+			<div class="loader-container-content">
+				<svg class="loader" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+					viewBox="0 0 100 100" preserveAspectRatio="xMidYMid">
+					<g>
+						<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
+							values="0 50 50;360 50 50" keyTimes="0;1" dur="0.625s"></animateTransform>
+						<path fill-opacity="0.49" fill="#004d73" d="M50 50L50 0A50 50 0 0 1 100 50Z"></path>
+					</g>
+					<g>
+						<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
+							values="0 50 50;360 50 50" keyTimes="0;1" dur="0.8s"></animateTransform>
+						<path fill-opacity="0.49" fill="#00334e" d="M50 50L50 0A50 50 0 0 1 100 50Z"
+							transform="rotate(90 50 50)"></path>
+					</g>
+					<g>
+						<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
+							values="0 50 50;360 50 50" keyTimes="0;1" dur="1.25s"></animateTransform>
+						<path fill-opacity="0.49" fill="#007fdb" d="M50 50L50 0A50 50 0 0 1 100 50Z"
+							transform="rotate(180 50 50)"></path>
+					</g>
+					<g>
+						<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
+							values="0 50 50;360 50 50" keyTimes="0;1" dur="2.5s"></animateTransform>
+						<path fill-opacity="0.49" fill="#dbebfa" d="M50 50L50 0A50 50 0 0 1 100 50Z"
+							transform="rotate(270 50 50)"></path>
+					</g>
+				</svg>
 
-			<div class="loading-message text-secondary">Loading</div>
+				<div class="loading-message text-secondary">Loading</div>
+			</div>
 		</div>
 	</div>
 </template>

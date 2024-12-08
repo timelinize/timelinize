@@ -323,7 +323,7 @@ function connectLog() {
 			return;
 		}
 
-		if (l.logger == "processor.progress") {
+		if (l.logger == "job.progress") {
 			const jobElem = $(`#active-job-${l.job_id}`);
 			if (!jobElem) return;
 			$('.import-item-count', jobElem).innerText = `${l.total_items.toLocaleString()} items`;

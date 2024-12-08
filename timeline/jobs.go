@@ -34,7 +34,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const maxThrottleCPUPct = 0.75
+const maxThrottleCPUPct = 0.25
 
 var (
 	throttleSize         = int(float64(runtime.NumCPU()) * maxThrottleCPUPct)

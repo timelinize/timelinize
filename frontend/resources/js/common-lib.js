@@ -1220,19 +1220,30 @@ function itemContentElement(item, opts) {
 					container.append(imgTag);
 				}
 			} else {
-				const loader = cloneTemplate('#loader-container');
-				$('.loading-message', loader).innerText = "Rendering preview";
+				const loaderSupercontainer = cloneTemplate('#loader-container');
+				$('.loading-message', loaderSupercontainer).innerText = "Rendering preview";
 
-				container.append(loader);
+				// prepend the img tag to the supercontainer since it's (probably)
+				// lazy-loaded, and it has to be on the DOM to try loading -- then
+				// we can fade out the loader 
+				// TODO: Make videos have the same effect
+				loaderSupercontainer.prepend(imgTag);
+
+				container.append(loaderSupercontainer);
 
 				// when the image has loaded, replace loader element with the image
 				// (imgTag might be unset if obfuscation is enabled)
 				imgTag?.addEventListener('load', function() {
+					// TODO: is this still true now that we don't replace the container? (TODO: actually, we probably should, to keep things tidy, no need to keep the "supercontainer" around. just the content)
 					// In case the caller added classes to the returned element (the container),
 					// we will need to add those to the imgTag since it will replace the container.
 					container.classList.forEach(name => imgTag.classList.add(name));
 
-					loader.parentElement.replaceWith(imgTag);
+					$('.loader-container', loaderSupercontainer).classList.add('fade-out');
+					setTimeout(function() {
+						$('.loader-container', loaderSupercontainer).remove();
+					}, 1000);
+					
 				});
 			}
 
