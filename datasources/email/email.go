@@ -96,7 +96,11 @@ func (fi FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntr
 			return err
 		}
 		if strings.HasPrefix(d.Name(), ".") {
-			return fs.SkipDir // skip hidden files & folders
+			// skip hidden files & folders
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			return nil // traverse into subdirectories

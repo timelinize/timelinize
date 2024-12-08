@@ -17,6 +17,14 @@
 */
 
 // Package nmea0183 implements a data source for NMEA 0183 logs (radios, marine electronics, etc).
+// The official NMEA Standard is expensive ($7,500 for acadamic and testing purposes -- an absolute
+// scam; $10k if you want to implement it! but only $1k if you're a member of the NMEA):
+// https://www.nmea.org/nmea-0183.html
+//
+// Here are some free reference manuals that have the most important information, which I used
+// to write this package:
+// - https://receiverhelp.trimble.com/alloy-gnss/en-us/NMEA-0183messages_MessageOverview.html
+// - https://www.sparkfun.com/datasheets/GPS/NMEA%20Reference%20Manual-Rev2.1-Dec07.pdf
 package nmea0183
 
 import (
@@ -100,7 +108,11 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 			return err
 		}
 		if strings.HasPrefix(d.Name(), ".") {
-			return fs.SkipDir // skip hidden files & folders
+			// skip hidden files & folders
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			return nil // traverse into subdirectories
@@ -118,7 +130,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		}
 		defer file.Close()
 
-		proc, err := NewProcessor(file, owner, params, dsOpt.Simplification, dsOpt.ReferenceYear)
+		proc, err := NewProcessor(file, owner, params, dsOpt.Simplification, dsOpt.ReferenceYear, params.Log.Named("nmea_processor"))
 		if err != nil {
 			return err
 		}
@@ -148,12 +160,13 @@ type Processor struct {
 }
 
 // NewProcessor returns a new file processor.
-func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportParams, simplification float64, refYear int) (*Processor, error) {
+func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportParams,
+	simplification float64, refYear int, logger *zap.Logger) (*Processor, error) {
 	if refYear >= 0 {
 		refYear = time.Now().UTC().Year()
 	}
 
-	dec := &decoder{scanner: bufio.NewScanner(file), refYear: refYear}
+	dec := &decoder{scanner: bufio.NewScanner(file), refYear: refYear, logger: logger}
 
 	// some radios (like my Yaesu) produce \r-delimited (carriage-return ONLY) newlines,
 	// which the default scanner does not support. Use custom split function.
@@ -220,11 +233,12 @@ type decoder struct {
 	scanner  *bufio.Scanner
 	refYear  int
 	lastDate nmea.Date
+	logger   *zap.Logger
 }
 
 // NextLocation returns the next available point from the NMEA file.
 func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, error) {
-	if d.scanner.Scan() {
+	for d.scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -249,6 +263,18 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 			loc.Metadata["Heading"] = s.Course
 
 		case nmea.GGA:
+			if !d.lastDate.Valid {
+				// No date... it's possible this came before any RMC lines, which means we don't
+				// know which date the time occurred on. We could try to be clever and read ahead
+				// to find a date, but that's complex and error-prone, and even then, there's no
+				// guarantee that a line in the future was the same date as this one. The processor
+				// will end up rejecting this if it becomes part of a cluster because a cluster has
+				// to have a start timestamp if it has an end timestamp. I guess just drop this
+				// data point. I don't know a better way to handle this.
+				d.logger.Warn("encountered GGA sentence before any sentence with a date, so we cannot make timestamp; dropping data point",
+					zap.String("raw", s.Raw))
+				continue
+			}
 			loc.LatitudeE7 = int64(s.Latitude * placesMult)
 			loc.LongitudeE7 = int64(s.Longitude * placesMult)
 			loc.Altitude = s.Altitude

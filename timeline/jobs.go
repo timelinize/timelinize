@@ -257,10 +257,10 @@ func (tl *Timeline) runJob(row jobRow) error {
 		id:  row.ID,
 		tl:  tl,
 		logger: Log.Named("job").With(
-			zap.String("name", string(row.Name)),
-			zap.Int64("id", row.ID),
-			zap.Time("created", row.Created),
-			zap.Timep("started", row.Start),
+			zap.String("job_name", string(row.Name)),
+			zap.Int64("job_id", row.ID),
+			zap.Time("job_created", row.Created),
+			zap.Timep("job_started", row.Start),
 			zap.String("timeline", tl.ID().String())),
 	}
 

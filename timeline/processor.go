@@ -101,9 +101,7 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 	// we are no longer sending to the pipeline channel; closing it signals to the workers to exit
 	close(ch)
 
-	params.Log.Info("importer done sending items; waiting for processing to finish",
-		zap.Int64("job_id", p.ij.job.id),
-		zap.Error(err))
+	params.Log.Info("importer done sending items; waiting for processing to finish", zap.Error(err))
 
 	// wait for all processing workers to complete
 	wg.Wait()
