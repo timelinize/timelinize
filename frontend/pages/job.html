@@ -1,0 +1,128 @@
+<title>Job</title>
+
+<link rel="stylesheet" href="/resources/css/job.css">
+
+<div class="page-header d-print-none text-white">
+	<div class="container-xl">
+		<div class="row g-3 align-items-center">
+			<div class="col-auto">
+				<span class="status-indicator job-status-indicator">
+					<span class="status-indicator-circle"></span>
+					<span class="status-indicator-circle"></span>
+					<span class="status-indicator-circle"></span>
+				</span>
+			</div>
+			<div class="col">
+				<h2 class="page-title job-name">
+					
+				</h2>
+				<div class="text-secondary">
+					<ul class="list-inline list-inline-dots mb-0">
+						<li class="list-inline-item job-status"></li>
+						<li class="list-inline-item"><span class="job-time-basis"></span> <span class="job-time"></span></li>
+					</ul>
+				</div>
+			</div>
+			<div class="col-md-auto ms-auto d-print-none">
+				<div class="btn-list">
+					<a class="btn btn-dark job-config">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon icon-tabler icons-tabler-outline icon-tabler-settings">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<path
+								d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
+							<path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+						</svg>
+						Config
+					</a>
+					<a class="btn btn-outline-danger cancel-job d-none">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon icon-tabler icons-tabler-outline icon-tabler-cancel">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+							<path d="M18.364 5.636l-12.728 12.728" />
+						</svg>
+						Cancel
+					</a>
+					<a class="btn btn-primary pause-job d-none">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+							<path d="M6 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z">
+							</path>
+							<path d="M14 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z">
+							</path>
+						</svg>
+						Pause
+					</a>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="page-body">
+	<div class="container-xl">
+		<div class="row row-cards">
+			<div class="col-12">
+				<div class="card">
+					<div class="card-body">
+						<div class="progress job-progress big-progress">
+							<div class="progress-bar bg-green" style="width: 0%" role="progressbar" aria-valuenow="0"
+								aria-valuemin="0" aria-valuemax="100" aria-label="0% Complete">
+								<span class="visually-hidden">0% Complete</span>
+							</div>
+						</div>
+						<div class="h2 mt-3 mb-0 text-center job-progress-text">
+
+						</div>
+						<div class="text-center job-message"></div>
+					</div>
+				</div>
+			</div>
+			<div class="col-md-4">
+				<div class="card">
+					<div class="card-body">
+						<div class="subheader">Currently up for</div>
+						<div class="h3 m-0">14 days 2 hours 54 mins 34 seconds</div>
+					</div>
+				</div>
+			</div>
+			<div class="col-md-4">
+				<div class="card">
+					<div class="card-body">
+						<div class="d-flex align-items-center">
+							<div class="subheader">Items/minute</div>
+						</div>
+						<div class="d-flex align-items-baseline">
+							<div class="h1 mb-3 me-2">31</div>
+							<div class="me-auto">
+								<span class="text-yellow d-inline-flex align-items-center lh-1">
+									0%
+									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+										fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+										stroke-linejoin="round" class="icon ms-1">
+										<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+										<path d="M5 12l14 0" />
+									</svg>
+								</span>
+							</div>
+						</div>
+						<div id="chart-items-per-minute" class="chart-lg"></div>
+					</div>
+				</div>
+			</div>
+			<div class="col-md-4">
+				<div class="card">
+					<div class="card-body">
+						<div class="subheader">Incidents</div>
+						<div class="h3 m-0">3</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>

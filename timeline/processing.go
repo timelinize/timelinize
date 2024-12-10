@@ -294,7 +294,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
-		l := p.progress.With(
+		l := p.log.With(
 			zap.Int("worker", state.worker),
 			zap.String("graph", fmt.Sprintf("%p", ig)),
 			zap.Int64("row_id", rowID.id()),
@@ -311,7 +311,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 		if ig.Entity != nil {
 			l = l.With(zap.String("entity_name", ig.Entity.Name))
 		}
-		l.Info("finished graph")
+		l.Debug("finished graph")
 	}()
 
 	// process root node

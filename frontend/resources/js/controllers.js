@@ -238,5 +238,17 @@ tlz.pageControllers = {
 
 			$('.filter-results').replaceChildren(renderTimelineGroups(groups));
 		}
-	}
+	},
+
+	"/pages/job.html": {
+		load() {
+			$('.navbar').classList.add('navbar-overlap');
+		},
+		async render() {
+			jobPageMain();
+		},
+		unload() {
+			$('.navbar').classList.remove('navbar-overlap');
+		}
+	},
 }

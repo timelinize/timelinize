@@ -961,7 +961,7 @@ function humanizeBytes(size) {
 }
 
 
-// for pages like /[entities|items]/uuid/rowID
+// for pages like /[entities|items|jobs]/uuid/rowID
 function parseURIPath() {
 	let parts = window.location.pathname.split('/');
 	return {

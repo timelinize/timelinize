@@ -61,7 +61,7 @@ func newLogger() *zap.Logger {
 	const firstNMsgs, everyNthMsg = 10, 100
 	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
 
-	return zap.New(core)
+	return zap.New(&customCore{core})
 }
 
 // multiConnWriter is like io.multiWriter from the standard lib,
@@ -117,12 +117,6 @@ func (mw *multiConnWriter) RemoveConn(conn *websocket.Conn) {
 	mw.connsMu.Unlock()
 }
 
-// func SetWailsAppContext(ctx context.Context) {
-// 	websocketLogOutputs.connsMu.Lock()
-// 	websocketLogOutputs.appCtx = ctx
-// 	websocketLogOutputs.connsMu.Unlock()
-// }
-
 // websocketLogOutputs mediates the list of active
 // websocket connections that are receiving process
 // logs.
@@ -139,4 +133,17 @@ func AddLogConn(conn *websocket.Conn) {
 // It is idempotent.
 func RemoveLogConn(conn *websocket.Conn) {
 	websocketLogOutputs.RemoveConn(conn)
+}
+
+// customCore wraps another zapcore.Core and prevents sampling based on logger name.
+type customCore struct {
+	zapcore.Core
+}
+
+func (c *customCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if ent.LoggerName == "job.status" {
+		// always allow through, no sampling -- otherwise UI gets out of sync
+		return ce.AddCore(ent, c)
+	}
+	return c.Core.Check(ent, ce)
 }

@@ -21,6 +21,7 @@ package tlzapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -32,6 +33,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/timeline"
@@ -596,7 +598,9 @@ func (a App) Import(params ImportParameters) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return tl.CreateJob(params.Job, 0, 0)
+	// queue job for a brief period to allow UI to render job page first and to help
+	// user get their bearings
+	return tl.CreateJob(params.Job, time.Now().Add(5*time.Second), 0, 0, 0)
 }
 
 func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {
@@ -722,6 +726,17 @@ func (a App) DeleteItems(repo string, itemRowIDs []int64, options timeline.Delet
 		return err
 	}
 	return tl.DeleteItems(a.ctx, itemRowIDs, options)
+}
+
+func (a App) Jobs(repo string, jobIDs []int64) ([]timeline.Job, error) {
+	if repo != "" {
+		tl, err := getOpenTimeline(repo)
+		if err != nil {
+			return nil, err
+		}
+		return tl.GetJobs(a.ctx, jobIDs)
+	}
+	return nil, errors.New("TODO: Getting jobs other than by specific IDs not yet implemented")
 }
 
 type BuildInfo struct {

@@ -60,9 +60,7 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 	}
 
 	// if enabled, estimate the units of work to be completed before starting the actual import
-	if p.ij.EstimateTotal {
-		params.Log.Info("estimating size; this may take a bit")
-
+	if p.estimatedCount != nil {
 		fileImporter := p.ds.NewFileImporter()
 		if estimator, ok := fileImporter.(SizeEstimator); ok {
 			// faster (but probably still slow) path: data source supports optimized size estimation
@@ -87,8 +85,7 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 			// wait for all processing workers to complete so we have an accurate count
 			wg.Wait()
 		}
-
-		params.Log.Info("done with size estimation", zap.Int64("estimated_size", atomic.LoadInt64(p.estimatedCount)))
+		return nil
 	}
 
 	wg, ch := p.beginProcessing(ctx, p.ij.ProcessingOptions, false)

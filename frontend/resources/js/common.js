@@ -274,6 +274,24 @@ on('click', '[data-bs-toggle="switch-icon"]', e => {
 });
 
 
+// Dynamic timestamps which update as much as every second to always show a correct
+// relative time on the screen. Pass in the element to put the relative text in
+// and the timestamp string from a JSON object.
+function setDynamicTimestamp(elem, isoOrUnixSecTime) {
+	elem._timestamp = typeof isoOrUnixSecTime === 'number'
+		? DateTime.fromSeconds(isoOrUnixSecTime)
+		: DateTime.fromISO(isoOrUnixSecTime);
+	elem.innerText = elem._timestamp.toRelative();
+	elem.classList.add("dynamic-time");
+}
+
+// Update the dynamic timestamps every second to keep them accurate
+setInterval(function() {
+	for (elem of $$('.dynamic-time')) {
+		elem.innerText = elem._timestamp.toRelative();
+	}
+}, 1000);
+
 
 
 
@@ -323,11 +341,8 @@ function connectLog() {
 			return;
 		}
 
-		if (l.logger == "job.progress") {
-			const jobElem = $(`#active-job-${l.job_id}`);
-			if (!jobElem) return;
-			$('.import-item-count', jobElem).innerText = `${l.total_items.toLocaleString()} items`;
-			$('.import-duration', jobElem).innerText = $('.import-duration').innerText = DateTime.now().diff(DateTime.fromISO(jobElem.dataset.started)).toFormat("h 'h' m 'min' s 'sec'");
+		if (l.logger == "job.status") {
+			jobProgressUpdate(l);
 			return;
 		}
 	
@@ -344,6 +359,200 @@ function connectLog() {
 
 connectLog();
 
+
+function jobProgressUpdate(job) {
+	if (job.name == "import") {
+		for (elem of $$(`.job-name.job-id-${job.id}`)) {
+			elem.innerText = "Import job";
+		}
+	} else if (job.name == "thumbnails") {
+		for (elem of $$(`.job-name.job-id-${job.id}`)) {
+			elem.innerText = "Generate thumbnails";
+		}
+	} else if (job.name == "embeddings") {
+		for (elem of $$(`.job-name.job-id-${job.id}`)) {
+			elem.innerText = "Generate embeddings";
+		}
+	}
+
+	if (job.state == "started")
+	{
+		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+			elem.classList.add('status-green', 'status-indicator-animated');
+		}
+		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+			elem.innerText = "Running";
+			elem.classList.add("text-green");
+		}
+		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+			elem.innerText = "Started";
+		}
+		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+			setDynamicTimestamp(elem, job.start);
+		}
+
+		// buttons
+		$('.pause-job')?.classList?.remove("d-none");
+		$('.cancel-job')?.classList?.remove("d-none");
+	}
+	else if (job.state == "succeeded")
+	{
+		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+			elem.classList.add('status-green');
+			elem.classList.remove('status-indicator-animated');
+		}
+		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+			elem.innerText = "Completed"
+			elem.classList.add("text-green");
+		}
+		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+			elem.innerText = "Finished";
+		}
+		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+			setDynamicTimestamp(elem, job.ended);
+		}
+
+		// buttons
+		$('.pause-job')?.classList?.add("d-none");
+		$('.cancel-job')?.classList?.add("d-none");
+	}
+	else if (job.state == "queued")
+	{
+		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+			elem.classList.add('status-secondary', 'status-indicator-animated');
+		}
+		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+			elem.innerText = "Queued"
+			elem.classList.add("text-secondary");
+		}
+		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+			if (job.start) {
+				elem.innerText = "Starting";
+			} else {
+				elem.innerText = "Created";
+			}
+		}
+		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+			if (job.start) {
+				setDynamicTimestamp(elem, job.start);
+			} else {
+				setDynamicTimestamp(elem, job.created);
+			}
+		}
+
+		// buttons
+		$('.pause-job')?.classList?.add("d-none");
+		$('.cancel-job')?.classList?.remove("d-none");
+	}
+	else if (job.state == "paused")
+	{
+		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+			elem.classList.add('status-yellow', 'status-indicator-animated');
+		}
+		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+			elem.innerText = "Paused"
+			elem.classList.add("text-yellow");
+		}
+		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+			elem.innerText = "Paused";
+		}
+		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+			setDynamicTimestamp(elem, job.updated);
+		}
+
+		// buttons
+		$('.pause-job')?.classList?.add("d-none");
+		$('.cancel-job')?.classList?.remove("d-none");
+	}
+	else if (job.state == "aborted")
+	{
+		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+			elem.classList.add('status-orange');
+			elem.classList.remove('status-indicator-animated');
+		}
+		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+			elem.innerText = "Aborted"
+			elem.classList.add("text-orange");
+		}
+		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+			elem.innerText = "Ended";
+		}
+		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+			setDynamicTimestamp(elem, job.ended);
+		}
+
+		// buttons
+		$('.pause-job')?.classList?.add("d-none");
+		$('.cancel-job')?.classList?.add("d-none");
+	}
+	else if (job.state == "failed")
+	{
+		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+			elem.classList.add('status-red');
+			elem.classList.remove('status-indicator-animated');
+		}
+		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+			elem.innerText = "Failed"
+			elem.classList.add("text-red");
+		}
+		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+			elem.innerText = "Ended";
+		}
+		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+			setDynamicTimestamp(elem, job.ended);
+		}
+
+		// buttons
+		$('.pause-job')?.classList?.add("d-none");
+		$('.cancel-job')?.classList?.add("d-none");
+	}
+
+	// progress bars
+	if (job.total == null) {
+		// indeterminate maximum; but if job is successful, just max out the progress bar
+		if (job.state == "succeeded") {
+			for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+				elem.style.width = "100%";
+			}
+		} else if (job.state) {
+			for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+				elem.style.width = "0%";
+				if (job.state == "queued") {
+					elem.classList.remove('bg-green');
+					elem.classList.add('bg-secondary');
+				} else if (job.state == "started") {
+					elem.classList.remove('bg-secondary');
+					elem.classList.add('bg-green');
+					elem.classList.add('progress-bar-indeterminate');
+				}
+			}
+		}
+		if (job.progress != null) {
+			for (elem of $$(`.job-progress-text.job-id-${job.id}`)) {
+				elem.innerText = job.progress;
+			}
+		}
+	} else {
+		// known maximum; show progress
+		let percent = 100;
+		if (job.total > 0) {
+			percent = (job.progress || 0)/job.total * 100;
+		}
+		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+			elem.style.width = `${percent}%`;
+			elem.classList.remove('progress-bar-indeterminate');
+		}
+		const percentDisplay = `${percent.toFixed(2).replace(".00", "")}%`;
+		for (elem of $$(`.job-progress-text.job-id-${job.id}`)) {
+			elem.innerText = percentDisplay;
+		}
+	}
+
+	// message
+	for (elem of $$(`.job-message.job-id-${job.id}`)) {
+		elem.innerText = job.message || "";
+	}
+}
 
 
 

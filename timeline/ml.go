@@ -40,7 +40,7 @@ type embeddingJob struct {
 	ItemIDs []int64 `json:"item_ids,omitempty"`
 }
 
-func (ej embeddingJob) Run(job *Job, checkpoint []byte) error {
+func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 	var startIdx int
 	if checkpoint != nil {
 		if err := json.Unmarshal(checkpoint, &startIdx); err != nil {
@@ -72,7 +72,7 @@ func (ej embeddingJob) Run(job *Job, checkpoint []byte) error {
 
 		// proceed to spawn a new goroutine as part of this batch
 		wg.Add(1)
-		go func(job *Job, itemID int64) {
+		go func(job *ActiveJob, itemID int64) {
 			defer wg.Done()
 
 			err := ej.generateEmbeddingForItem(job.Context(), job, itemID)
@@ -92,7 +92,7 @@ func (ej embeddingJob) Run(job *Job, checkpoint []byte) error {
 	return nil
 }
 
-func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Job, itemID int64) error {
+func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *ActiveJob, itemID int64) error {
 	var data []byte
 	var dataFile, dataText, dataType, filename *string
 

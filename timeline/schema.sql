@@ -47,16 +47,17 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	"state" TEXT NOT NULL DEFAULT 'queued', -- queued, started, paused, aborted, succeeded, failed
 	"hostname" TEXT, -- hostname of the machine the job was created on
 	"created" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp job was stored/enqueued in unix seconds UTC
-	"start" INTEGER, -- timestamp job was actually started in unix seconds UTC
-	"end" INTEGER, -- timestamp in unix seconds UTC (TODO: only when finalized, or paused too?)
-	"message" TEXT, -- brief message describing current status to be shown to the user, changes less frequently than log emissions (TODO: rename to status?)
+	"updated" INTEGER, -- timestamp of last DB sync (in unix seconds UTC)
+	"start" INTEGER, -- timestamp job was actually started in unix seconds UTC *could be future, so not called "started")
+	"ended" INTEGER, -- timestamp in unix seconds UTC (TODO: only when finalized, or paused too?)
+	"message" TEXT, -- brief message describing current status to be shown to the user, changes less frequently than log emissions
 	"total" INTEGER, -- total number of units to complete
 	"progress" INTEGER, -- number of units completed towards the total count
 	"checkpoint" BLOB, -- required state for resuming an incomplete job
 	-- if job is scheduled to run automatically at a certain interval, the following fields track that state
 	"repeat" INTEGER, -- when this job is started, next job should be scheduled (inserted for future start) this many seconds from start time (not to be started if previous still running)
-	"prev_job_id" INTEGER, -- the job before this one that scheduled this one, forming a chain
-	FOREIGN KEY ("prev_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL
+	"parent_job_id" INTEGER, -- the job before this one that scheduled or created this one, forming a chain or linked list
+	FOREIGN KEY ("parent_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS "idx_jobs_name" ON "jobs"("name");

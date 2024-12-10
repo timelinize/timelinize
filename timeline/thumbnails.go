@@ -78,7 +78,7 @@ type thumbnailJob struct {
 	Tasks []thumbnailTask `json:"tasks,omitempty"`
 }
 
-func (tj thumbnailJob) Run(job *Job, checkpoint []byte) error {
+func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 	var startIdx int
 	if checkpoint != nil {
 		if err := json.Unmarshal(checkpoint, &startIdx); err != nil {
@@ -113,8 +113,10 @@ func (tj thumbnailJob) Run(job *Job, checkpoint []byte) error {
 
 		// proceed to spawn a new goroutine as part of this batch
 		wg.Add(1)
-		go func(job *Job, task thumbnailTask) {
+		go func(job *ActiveJob, task thumbnailTask) {
 			defer wg.Done()
+
+			job.Message(task.DataFile)
 
 			_, err := task.thumbnailAndThumbhash(job.Context(), task.DataID, task.DataFile)
 			if err != nil {

@@ -60,6 +60,10 @@ type Timeline struct {
 	relations       map[string]int64
 	dataSources     map[string]int64
 
+	// currently-running jobs for this timeline
+	activeJobs   map[int64]*ActiveJob
+	activeJobsMu sync.RWMutex
+
 	// The database handle and its mutex. Why a mutex for a DB handle? Because
 	// high-volume imports can sometimes yield "database is locked" errors,
 	// presumably because of scanning rows (`for rows.Next()`) while trying
@@ -382,6 +386,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		classifications: classes,
 		entityTypes:     entityTypes,
 		relations:       relations,
+		activeJobs:      make(map[int64]*ActiveJob),
 	}
 
 	// TODO: should we do this if the new thumbnails DB is missing too?

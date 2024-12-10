@@ -13,10 +13,9 @@
         "dupword",
         "durationcheck",
         "errcheck",
-        "errchkjson",
+        # "errchkjson", TODO: This one is broken, still need to file an issue
         "errname",
         "errorlint",
-        "exhaustive",
         "fatcontext",
         #"forbidigo", TODO: enable to forbid accidental "fmt.Print*" statements
         "gci",

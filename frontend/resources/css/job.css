@@ -1,0 +1,19 @@
+.navbar-overlap::after {
+	background-color: #e3e9f1;
+	/* background-color: #143a56; */
+	background-color: rgb(24, 36, 51);
+}
+
+
+/* make the pulsing effect more visible on a dark background */
+.text-white .status-indicator-circle:nth-child(2) {
+	opacity: 0.3;
+}
+.text-white .status-indicator-circle:nth-child(3) {
+	opacity: 0.75;
+}
+
+.big-progress {
+	--tblr-progress-height: 2.5rem;
+	--tblr-progress-border-radius: var(--tblr-progress-height);
+}

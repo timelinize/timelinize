@@ -93,9 +93,6 @@ async function myFetch(signal, endpoint, data, method) {
 
 
 const app = {
-	ActiveJobs() {
-		return get("/api/jobs");
-	},
 	AddEntity(repo_id, entity) {
 		return post("/api/add-entity", { repo_id, entity });
 	},
@@ -129,6 +126,9 @@ const app = {
 	},
 	ItemClassifications(repoID) {
 		return post("/api/item-classifications", repoID);
+	},
+	Jobs(params) {
+		return post("/api/jobs", params, "QUERY");
 	},
 	LoadConversation(params) {
 		return post("/api/conversation", params);

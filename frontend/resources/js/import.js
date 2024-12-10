@@ -338,11 +338,10 @@ on('click', '#collapse-all-dsgroup', event => {
 on('click', '#start-import', async event => {
 	// TODO: validate input (data source options, etc) -- show modal of DS options that need fixing
 
-	// TODO: This is the old import code. Update to new UI.
-
+	const repoID = tlz.openRepos[0].instance_id;
 
 	const importParams = {
-		repo: tlz.openRepos[0].instance_id,
+		repo: repoID,
 		job: {
 			plan: {
 				files: []
@@ -395,14 +394,17 @@ on('click', '#start-import', async event => {
 
 	console.log("IMPORT PARAMS:", importParams)
 
-	const jobID = await app.Import(importParams);
-	console.log("JOB STARTED:", jobID);
+	const result = await app.Import(importParams);
+	console.log("JOB STARTED:", result);
 
 	notify({
 		type: "success",
 		title: "Import started",
 		duration: 2000
 	});
+
+	// redirect to job status, I guess
+	navigateSPA(`/jobs/${repoID}/${result.job_id}`);
 });
 
 function dataSourceOptions(ds) {

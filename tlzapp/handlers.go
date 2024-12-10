@@ -94,10 +94,15 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) error {
 	return jsonResponse(w, stats, err)
 }
 
-func (s *server) handleJobs(w http.ResponseWriter, _ *http.Request) error {
-	return errors.New("TODO: re-implement")
-	// jobs, err := s.app.ActiveJobs()
-	// return jsonResponse(w, jobs, err)
+type jobsPayload struct {
+	RepoID string  `json:"repo_id"`
+	JobIDs []int64 `json:"job_ids"`
+}
+
+func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*jobsPayload)
+	jobs, err := s.app.Jobs(payload.RepoID, payload.JobIDs)
+	return jsonResponse(w, jobs, err)
 }
 
 func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) error {

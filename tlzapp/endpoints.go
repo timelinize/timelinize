@@ -116,9 +116,11 @@ func (a *App) registerCommands() {
 			Help:    "Returns the item classifications for the given timeline.",
 		},
 		"jobs": {
-			Handler: a.server.handleJobs,
-			Method:  http.MethodGet,
-			Help:    "Lists recent/active jobs.",
+			Handler:     a.server.handleJobs,
+			Method:      methodQuery,
+			Payload:     jobsPayload{},
+			ContentType: JSON,
+			Help:        "Gets current information about jobs.",
 		},
 		"logs": {
 			Handler: a.server.handleLogs,
@@ -193,11 +195,15 @@ type Endpoint struct {
 func (e Endpoint) GetContentType() ContentType {
 	if e.ContentType == None && e.Payload != nil &&
 		(e.Method == http.MethodPost || e.Method == http.MethodPut ||
-			e.Method == http.MethodPatch || e.Method == http.MethodDelete) {
+			e.Method == http.MethodPatch || e.Method == http.MethodDelete ||
+			e.Method == methodQuery) {
 		return JSON
 	}
 	return e.ContentType
 }
+
+// GET but officially supports a request body.
+const methodQuery = "QUERY"
 
 type ctxKey string
 
