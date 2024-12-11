@@ -253,7 +253,8 @@ setInterval(function() {
 		elem.innerText = elem._timestamp.toRelative();
 	}
 	for (elem of $$('.dynamic-duration')) {
-		elem.innerText = betterToHuman(elem._timestamp.diffNow());
+		// don't use diffNow() because it's implemented backwards (durations are always negative)!
+		elem.innerText = betterToHuman(DateTime.now().diff(elem._timestamp));
 	}
 }, 1000);
 
