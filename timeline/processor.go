@@ -68,35 +68,40 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 			if err != nil {
 				params.Log.Error("could not estimate import size", zap.Error(err))
 			}
-			newTotal := atomic.AddInt64(p.estimatedCount, int64(totalSize))
-			p.ij.job.SetTotal(int(newTotal))
+			// don't call SetTotal() yet -- wait until we're done counting,
+			// so progress bars don't think we are done with the estimate
+			atomic.AddInt64(p.estimatedCount, int64(totalSize))
 		} else {
-			wg, ch := p.beginProcessing(ctx, p.ij.ProcessingOptions, true)
-			params.Pipeline = ch
+			done := make(chan struct{})
+			wg, graphs := p.beginProcessing(ctx, p.ij.ProcessingOptions, true, done)
+			params.Pipeline = graphs
 
 			// slow path: data source does not have an optimized estimator implementation, but we can count
 			// the graph sizes that come in to do our own estimates
 			err := fileImporter.FileImport(ctx, dirEntry, params)
 			if err != nil {
-				params.Log.Error("could not estimate size before import", zap.Error(err))
+				params.Log.Error("failed estimating size before import", zap.Error(err))
 			}
-			// we are no longer sending to the pipeline channel; closing it signals to the workers to exit
-			close(ch)
+
+			// sending on the pipeline must be complete by now; signal to workers to exit
+			close(done)
+
 			// wait for all processing workers to complete so we have an accurate count
 			wg.Wait()
 		}
 		return nil
 	}
 
-	wg, ch := p.beginProcessing(ctx, p.ij.ProcessingOptions, false)
-	params.Pipeline = ch
+	done := make(chan struct{})
+	wg, graphs := p.beginProcessing(ctx, p.ij.ProcessingOptions, false, done)
+	params.Pipeline = graphs
 
 	// even if we estimated size above, use a fresh file importer to avoid any potentially reused state (TODO: necessary?)
 	err := p.ds.NewFileImporter().FileImport(ctx, dirEntry, params)
 	// handle error in a little bit (see below)
 
-	// we are no longer sending to the pipeline channel; closing it signals to the workers to exit
-	close(ch)
+	// sending on the pipeline must be complete by now; signal to workers to exit
+	close(done)
 
 	params.Log.Info("importer done sending items; waiting for processing to finish", zap.Error(err))
 

@@ -53,11 +53,11 @@ const (
 	// don't want too many workers because they can starve other
 	// imports happening at the same time, especially if one import
 	// is not very file-heavy and is more DB-heavy (after all, only
-	// 1 worker can have a lock at the DB at a time anyway)
+	// 1 worker can have a write lock at the DB at a time anyway)
 	workers = 5
 )
 
-func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, countOnly bool) (*sync.WaitGroup, chan<- *Graph) {
+func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, countOnly bool, done <-chan struct{}) (*sync.WaitGroup, chan<- *Graph) {
 	wg := new(sync.WaitGroup)
 	ch := make(chan *Graph)
 
@@ -109,25 +109,43 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 				}
 			}
 
-			// read all incoming item graphs (or entities) and add them
-			// to a batch, and process the batch if it is full
-			for g := range ch {
-				if ctx.Err() != nil {
+			// read all incoming graphs and add them to a batch, and'
+			// process the batch if it is full
+			for {
+				// it may seem weird that we don't select on ctx.Done()
+				// here, and that's because we expect data sources to
+				// honor context cancellation; once they return, the
+				// done channel will be closed, and that's what we
+				// terminate on; if we return of our own accord when
+				// the context is canceled, we may leave data source
+				// goroutines hanging if they're trying to send on
+				// the pipeline channel... they can't know the context
+				// has canceled because they're blocked on a send,
+				// so we need to receive their sends until they
+				// are done (and data sources are expected to wait
+				// for their own goroutines to finish before they
+				// return completely)
+				select {
+				case <-done:
+					// process the remaining items in the last batch
+					// if the context hasn't been cancelled
+					if ctx.Err() == nil {
+						addToBatch(nil)
+					}
 					return
+				case g := <-ch:
+					if g == nil {
+						continue
+					}
+					if countOnly {
+						// don't call SetTotal() yet -- wait until we're done counting,
+						// so progress bars don't think we are done with the estimate
+						atomic.AddInt64(p.estimatedCount, int64(g.Size()))
+						continue
+					}
+					addToBatch(g)
 				}
-				if g == nil {
-					continue
-				}
-				if countOnly {
-					newTotal := atomic.AddInt64(p.estimatedCount, int64(g.Size()))
-					p.ij.job.SetTotal(int(newTotal))
-					continue
-				}
-				addToBatch(g)
 			}
-
-			// process the remaining items in the last batch
-			addToBatch(nil)
 		}(i)
 	}
 

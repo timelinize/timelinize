@@ -45,11 +45,11 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	"configuration" TEXT, -- encoded as JSON
 	"hash" BLOB, -- for preventing duplicate jobs; opaque to everything except the code creating the job
 	"state" TEXT NOT NULL DEFAULT 'queued', -- queued, started, paused, aborted, succeeded, failed
-	"hostname" TEXT, -- hostname of the machine the job was created on
-	"created" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp job was stored/enqueued in unix seconds UTC
-	"updated" INTEGER, -- timestamp of last DB sync (in unix seconds UTC)
-	"start" INTEGER, -- timestamp job was actually started in unix seconds UTC *could be future, so not called "started")
-	"ended" INTEGER, -- timestamp in unix seconds UTC (TODO: only when finalized, or paused too?)
+	"hostname" TEXT, -- hostname of the machine the job was created and configured on
+	"created" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp job was stored/enqueued in unix milliseconds UTC
+	"updated" INTEGER, -- timestamp of last DB sync (in unix milliseconds UTC)
+	"start" INTEGER, -- timestamp job was actually started in unix milliseconds UTC *could be future, so not called "started")
+	"ended" INTEGER, -- timestamp in unix milliseconds UTC (TODO: only when finalized, or paused too?)
 	"message" TEXT, -- brief message describing current status to be shown to the user, changes less frequently than log emissions
 	"total" INTEGER, -- total number of units to complete
 	"progress" INTEGER, -- number of units completed towards the total count

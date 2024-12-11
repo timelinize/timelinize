@@ -95,7 +95,14 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 	var wg sync.WaitGroup
 	const batchSize = 10
 
+	// all goroutines must be done before we return
+	defer wg.Wait()
+
 	for i := startIdx; i < len(tj.Tasks); i++ {
+		if err := job.Context().Err(); err != nil {
+			return err
+		}
+
 		// At the end of every batch, wait for all the goroutines to complete before
 		// proceeding; and once they complete, that's a good time to checkpoint
 		if i%batchSize == batchSize-1 {
@@ -134,9 +141,6 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 			job.Progress(1)
 		}(job, task)
 	}
-
-	// all goroutines must be done before we return
-	wg.Wait()
 
 	return nil
 }
@@ -276,6 +280,11 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 	// throttle expensive operation
 	cpuIntensiveThrottle <- struct{}{}
 	defer func() { <-cpuIntensiveThrottle }()
+
+	// in case task was cancelled while we waited for the throttle
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 
 	var thumbnail []byte
 	var mimeType string

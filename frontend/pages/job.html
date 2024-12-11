@@ -13,19 +13,20 @@
 				</span>
 			</div>
 			<div class="col">
-				<h2 class="page-title job-name">
-					
+				<h2 class="page-title job-title">
+
 				</h2>
 				<div class="text-secondary">
 					<ul class="list-inline list-inline-dots mb-0">
 						<li class="list-inline-item job-status"></li>
-						<li class="list-inline-item"><span class="job-time-basis"></span> <span class="job-time"></span></li>
+						<li class="list-inline-item"><span class="job-time-basis"></span> <span class="job-time"></span>
+						</li>
 					</ul>
 				</div>
 			</div>
 			<div class="col-md-auto ms-auto d-print-none">
 				<div class="btn-list">
-					<a class="btn btn-dark job-config">
+					<a class="btn btn-dark job-config" data-bs-toggle="modal" data-bs-target="#modal-job-config">
 						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
 							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 							class="icon icon-tabler icons-tabler-outline icon-tabler-settings">
@@ -83,46 +84,140 @@
 					</div>
 				</div>
 			</div>
-			<div class="col-md-4">
-				<div class="card">
-					<div class="card-body">
-						<div class="subheader">Currently up for</div>
-						<div class="h3 m-0">14 days 2 hours 54 mins 34 seconds</div>
-					</div>
-				</div>
-			</div>
-			<div class="col-md-4">
-				<div class="card">
-					<div class="card-body">
-						<div class="d-flex align-items-center">
-							<div class="subheader">Items/minute</div>
-						</div>
-						<div class="d-flex align-items-baseline">
-							<div class="h1 mb-3 me-2">31</div>
-							<div class="me-auto">
-								<span class="text-yellow d-inline-flex align-items-center lh-1">
-									0%
-									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-										fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-										stroke-linejoin="round" class="icon ms-1">
-										<path stroke="none" d="M0 0h24v24H0z" fill="none" />
-										<path d="M5 12l14 0" />
-									</svg>
-								</span>
+
+			<div class="col-md-8">
+				<div class="row row-cards">
+					<div class="col-12">
+						<div class="card">
+							<div class="card-body">
+								<div class="d-flex align-items-center">
+									<div class="subheader">Throughput</div>
+								</div>
+								<div class="d-flex align-items-baseline">
+									<div class="h1 mb-3 me-2">31</div>
+									<div class="me-auto">
+										<span class="text-yellow d-inline-flex align-items-center lh-1">
+											0%
+											<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+												fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+												stroke-linejoin="round" class="icon ms-1">
+												<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+												<path d="M5 12l14 0" />
+											</svg>
+										</span>
+									</div>
+								</div>
+								<div id="chart-active-job-throughput"></div>
 							</div>
 						</div>
-						<div id="chart-items-per-minute" class="chart-lg"></div>
 					</div>
+
+					<div class="col-12">
+						<div class="card">
+							<div class="card-header">
+								<h3 class="card-title">Recently processed</h3>
+								<div class="text-secondary ms-3">(sampled)</div>
+							</div>
+							<div class="card-body">
+								TODO
+							</div>
+						</div>
+					</div>
+
 				</div>
 			</div>
+
 			<div class="col-md-4">
-				<div class="card">
-					<div class="card-body">
-						<div class="subheader">Incidents</div>
-						<div class="h3 m-0">3</div>
+				<div class="row row-cards">
+					
+					<div class="col-12">
+						<div class="card">
+							<div class="card-body">
+								<div class="subheader">Progress</div>
+								<div class="h3 job-progress-text-detailed">n/a</div>
+
+								<div class="subheader">Duration</div>
+								<div class="h3 job-duration">n/a</div>
+							</div>
+						</div>
 					</div>
+
+					<div id="parent-job-container" class="col-12 d-none">
+						<div class="card">
+							<div class="card-header">
+								<h3 class="card-title">Parent job</h3>
+							</div>
+							<div class="card-body">
+								<div id="parent-job-list" class="divide-y">
+									
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div id="subsequent-jobs-container" class="col-12 d-none">
+						<div class="card">
+							<div class="card-header">
+								<h3 class="card-title">Subsequent jobs</h3>
+							</div>
+							<div class="card-body">
+								<div id="subsequent-jobs-list" class="divide-y">
+
+								</div>
+							</div>
+						</div>
+					</div>
+
 				</div>
 			</div>
+
 		</div>
 	</div>
 </div>
+</div>
+
+
+<template id="tpl-job-preview">
+	<div class="row align-items-center job-preview">
+		<div class="col-auto job-icon">
+
+		</div>
+		<div class="col text-truncate">
+			<a class="text-body d-block job-link">
+				<b class="job-name"></b>
+				<span class="job-name-suffix text-truncate"></span>
+			</a>
+			<div class="progress my-2 job-progress">
+				<div class="progress-bar"></div>
+			</div>
+			<div class="d-block small text-secondary">
+				<b>
+					<span class="job-progress-text"></span>
+					<span class="job-progress-units"></span>
+				</b>
+				in
+				<b class="job-duration">n/a</b>
+				<a class="pause-job mx-2">Pause</a>
+				<a class="cancel-job mx-2">Cancel</a>
+			</div>
+		</div>
+		<div class="col-auto">
+			<span class="status-dot job-status-dot"></span>
+		</div>
+	</div>
+</template>
+
+
+<div id="modal-job-config" class="modal modal-blur fade" tabindex="-1" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable" role="document">
+	  <div class="modal-content">
+		<div class="modal-header">
+		  <h5 class="modal-title">Job configuration</h5>
+		  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+		</div>
+		<div class="modal-body">
+			<pre><code class="job-config-code"></code></pre>
+		</div>
+	  </div>
+	</div>
+  </div>

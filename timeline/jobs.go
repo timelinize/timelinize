@@ -150,7 +150,7 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
 
 	var start *int64
 	if job.Start != nil {
-		startVal := job.Start.Unix()
+		startVal := job.Start.UnixMilli()
 		start = &startVal
 	}
 
@@ -169,16 +169,19 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
 
 // loadJob loads a job from the database, using tx if set. A lock MUST be obtained on the
 // timeline database when calling this function!
-func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, childJobs bool) (Job, error) {
+func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, parentAndChildJobs bool) (Job, error) {
 	q := `SELECT
-			id, name, configuration, hash, state, hostname,
-			created, updated, start, ended,
-			message, total, progress, checkpoint,
-			repeat, parent_job_id
-		FROM jobs
-		WHERE id=?`
-	if childJobs {
+	id, name, configuration, hash, state, hostname,
+	created, updated, start, ended,
+	message, total, progress, checkpoint,
+	repeat, parent_job_id
+	FROM jobs
+	WHERE id=?`
+	vals := []any{jobID}
+	if parentAndChildJobs {
+		// we can get child jobs now, parent job will be had in a second query
 		q += "OR parent_job_id=? LIMIT 100" // limit just in case, I guess
+		vals = append(vals, jobID)
 	} else {
 		q += " LIMIT 1"
 	}
@@ -186,9 +189,9 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, childJ
 	var rows *sql.Rows
 	var err error
 	if tx == nil {
-		rows, err = tl.db.QueryContext(ctx, q, jobID, jobID)
+		rows, err = tl.db.QueryContext(ctx, q, vals...)
 	} else {
-		rows, err = tx.QueryContext(ctx, q, jobID)
+		rows, err = tx.QueryContext(ctx, q, vals...)
 	}
 	if err != nil {
 		return Job{}, err
@@ -215,18 +218,18 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, childJ
 		}
 
 		if created != nil {
-			job.Created = time.Unix(*created, 0)
+			job.Created = time.UnixMilli(*created)
 		}
 		if updated != nil {
-			ts := time.Unix(*updated, 0)
+			ts := time.UnixMilli(*updated)
 			job.Updated = &ts
 		}
 		if start != nil {
-			ts := time.Unix(*start, 0)
+			ts := time.UnixMilli(*start)
 			job.Start = &ts
 		}
 		if end != nil {
-			ts := time.Unix(*end, 0)
+			ts := time.UnixMilli(*end)
 			job.Ended = &ts
 		}
 		job.RepoID = tlID
@@ -248,6 +251,15 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, childJ
 		} else {
 			parentJob.Children = append(parentJob.Children, job)
 		}
+	}
+
+	// load the parent of the parent, I guess
+	if parentAndChildJobs && parentJob.ParentJobID != nil {
+		grandparent, err := tl.loadJob(ctx, tx, *parentJob.ParentJobID, false)
+		if err != nil {
+			return Job{}, fmt.Errorf("loading parent job: %w", err)
+		}
+		parentJob.Parent = &grandparent
 	}
 
 	return parentJob, nil
@@ -287,7 +299,7 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID int64) error
 		// update the job's state to started
 		now := time.Now()
 		_, err = tx.ExecContext(ctx, `UPDATE jobs SET state=?, start=?, updated=? WHERE id=?`, // TODO: LIMIT 1
-			JobStarted, now.Unix(), now.Unix(), jobID)
+			JobStarted, now.UnixMilli(), now.UnixMilli(), jobID)
 		if err != nil {
 			return fmt.Errorf("updating job state: %w", err)
 		}
@@ -388,12 +400,17 @@ func (tl *Timeline) runJob(row Job) error {
 	// thread-safe to change that field in the struct
 	statusLog := baseLogger.Named("status")
 
+	ctx, cancel := context.WithCancel(tl.ctx)
+
 	job := &ActiveJob{
-		ctx:             tl.ctx,
+		ctx:             ctx,
+		cancel:          cancel,
+		done:            make(chan struct{}),
 		id:              row.ID,
 		tl:              tl,
 		logger:          baseLogger.Named("action"),
 		statusLog:       statusLog,
+		parentJobID:     row.ParentJobID,
 		currentState:    row.State,
 		currentProgress: row.Progress,
 		currentTotal:    row.Total,
@@ -410,6 +427,10 @@ func (tl *Timeline) runJob(row Job) error {
 		}()
 
 		statusLog.Info("running", zap.String("state", string(row.State)))
+
+		// signal to any waiters when this job action returns; we intentionally
+		// don't signal until after we've synced the job state to the DB
+		defer close(job.done)
 
 		// TODO: we should have a way of letting jobs report errors without
 		// having to terminate, but still marking it as failed when done,
@@ -462,9 +483,9 @@ func (tl *Timeline) runJob(row Job) error {
 		}
 		defer tx.Rollback()
 
-		_, err = tx.ExecContext(job.Context(),
+		_, err = tx.ExecContext(tl.ctx,
 			`UPDATE jobs SET state=?, ended=?, updated=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/802)
-			newState, end.Unix(), end.Unix(), job.id)
+			newState, end.UnixMilli(), end.UnixMilli(), job.id)
 		if err != nil {
 			logger.Error("updating job state", zap.Error(err))
 		}
@@ -485,15 +506,21 @@ func (tl *Timeline) runJob(row Job) error {
 			}
 		}
 
+		hostname, err := os.Hostname()
+		if err != nil {
+			Log.Error("unable to lookup hostname while dequeuing next job", zap.Error(err))
+		}
+
 		// see if there's another job queued up we should run
+		// (only run import jobs on the same machine they were configured from, since it uses external file paths)
 		var nextJobID int64
-		err = tx.QueryRowContext(job.Context(),
+		err = tx.QueryRowContext(tl.ctx,
 			`SELECT id
 			FROM jobs
-			WHERE state=? AND hostname=?
+			WHERE state=? AND (hostname=? OR name!=?)
 			ORDER BY start, created
 			LIMIT 1`,
-			JobQueued, row.Hostname).Scan(&nextJobID)
+			JobQueued, hostname, JobNameImport).Scan(&nextJobID)
 		if nextJobID > 0 {
 			err := tl.startJob(tl.ctx, tx, nextJobID)
 			if err != nil {
@@ -524,11 +551,14 @@ func (tl *Timeline) runJob(row Job) error {
 // what is in the DB, although this struct is updated more
 // frequently than the DB is synced.
 type ActiveJob struct {
-	ctx       context.Context
-	id        int64
-	tl        *Timeline
-	logger    *zap.Logger
-	statusLog *zap.Logger
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan (struct{}) // signaling channel that is closed when the job action returns
+	id          int64
+	tl          *Timeline
+	logger      *zap.Logger
+	statusLog   *zap.Logger
+	parentJobID *int64
 
 	mu sync.Mutex
 
@@ -570,6 +600,18 @@ func (j *ActiveJob) Logger() *zap.Logger { return j.logger }
 
 // }
 
+// Set the total size of the job in the DB. Ideally, this should only
+// be set once the total size is properly known, not accumulated as
+// you go, since progress bars rely on this to configure their display.
+// So for example, if you do a bunch of work up front to estimate the
+// size before starting the real work, don't call SetTotal() until
+// that calculation has finished (use checkpoints to preserve your
+// accumulated count). But if the total happens to change a little as
+// you go, it's okay to call this a few times if needed. But the
+// progress bar will show up as "indeterminate" as long as the total
+// in the DB is nil (or 0?), so if the real work hasn't quite started
+// yet, you don't want to disable that kind of display until you
+// have started the work.
 func (j *ActiveJob) SetTotal(total int) {
 	j.mu.Lock()
 	j.currentTotal = &total
@@ -577,6 +619,8 @@ func (j *ActiveJob) SetTotal(total int) {
 	j.mu.Unlock()
 }
 
+// FlushProgress forces a log to be written that updates the UI
+// about the job.
 func (j *ActiveJob) FlushProgress() {
 	j.mu.Lock()
 	j.flushProgress(j.statusLog)
@@ -615,7 +659,8 @@ func (j *ActiveJob) flushProgress(logger *zap.Logger) {
 			zap.Intp("progress", j.currentProgress),
 			zap.Intp("total", j.currentTotal),
 			zap.Stringp("message", j.currentMessage),
-			zap.Timep("checkpointed", j.lastCheckpoint))
+			zap.Timep("checkpointed", j.lastCheckpoint),
+			zap.Int64p("parent_job_id", j.parentJobID))
 		j.lastFlush = time.Now()
 	}
 }
@@ -685,7 +730,7 @@ func (j *ActiveJob) sync(tx *sql.Tx) error {
 	}
 
 	q := `UPDATE jobs SET progress=?, total=?, message=?, checkpoint=?, updated=? WHERE id=?` // TODO: LIMIT 1
-	vals := []any{j.currentProgress, j.currentTotal, j.currentMessage, j.currentCheckpoint, time.Now().Unix(), j.id}
+	vals := []any{j.currentProgress, j.currentTotal, j.currentMessage, j.currentCheckpoint, time.Now().UnixMilli(), j.id}
 
 	var err error
 	if tx == nil {
@@ -705,13 +750,12 @@ func (j *ActiveJob) sync(tx *sql.Tx) error {
 }
 
 func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64) ([]Job, error) {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
 	jobs := make([]Job, len(jobIDs))
 
 	for i, id := range jobIDs {
+		tl.dbMu.RLock()
 		job, err := tl.loadJob(ctx, nil, id, true)
+		tl.dbMu.RUnlock()
 		if err != nil {
 			return nil, fmt.Errorf("loading job %d: %w", id, err)
 		}
@@ -738,15 +782,27 @@ func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64) ([]Job, error) 
 	return jobs, nil
 }
 
-// func (tl *Timeline) ActiveJobIDs() ([]int64, error) {
-// 	tl.activeJobsMu.RLock()
-// 	ids := make([]int64, len(tl.activeJobs))
-// 	for i, job := range tl.activeJobs {
-// 		ids[i] = job.id
-// 	}
-// 	tl.activeJobsMu.RUnlock()
-// 	return ids
-// }
+func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
+	tl.activeJobsMu.Lock()
+	job, ok := tl.activeJobs[jobID]
+	tl.activeJobsMu.Unlock()
+	if !ok {
+		return fmt.Errorf("job %d is either inactive or does not exist", jobID)
+	}
+
+	job.cancel()
+
+	// wait for job action to return; this ensures its
+	// state has been synced to the DB and it has been
+	// removed from the map of active jobs
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-job.done:
+	}
+
+	return nil
+}
 
 // Job is only to be used for shuttling job data in and out of the DB,
 // it should not be assumed to accurately reflect the current state of the
@@ -774,6 +830,7 @@ type Job struct {
 	ParentJobID *int64         `json:"parent_job_id,omitempty"`
 
 	// only used when loading jobs from the DB for the frontend
+	Parent   *Job  `json:"parent,omitempty"`
 	Children []Job `json:"children,omitempty"`
 }
 

@@ -40,7 +40,7 @@
 
 		<!-- First vendored scripts, then Tabler, then ours -->
 		<script src="/resources/js/vendor/luxon.v3.5.0.min.js"></script>
-		<script src="/resources/js/vendor/apexcharts.js"></script>
+		<script src="/resources/js/vendor/apexcharts.min.js"></script>
 		<script src="/resources/js/vendor/nouislider.v15.6.1.min.js"></script>
 		<script src="/resources/js/vendor/air-datepicker.min.js"></script>
 		<script src="/resources/js/vendor/tom-select.base.min.js"></script>
@@ -153,7 +153,31 @@
 								</div>
 							</div>
 						</div>
-						
+
+						<!-- Jobs -->
+						<div class="nav-item dropdown d-flex me-3">
+							<a id="jobs-link" class="nav-link px-0" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+								tabindex="-1" aria-label="Show jobs">
+								<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+									stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+									class="icon icon-tabler icons-tabler-outline icon-tabler-blocks">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+									<path d="M14 4a1 1 0 0 1 1 -1h5a1 1 0 0 1 1 1v5a1 1 0 0 1 -1 1h-5a1 1 0 0 1 -1 -1z" />
+									<path d="M3 14h12a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h3a2 2 0 0 1 2 2v12" />
+								</svg>
+							</a>
+							<div class="dropdown-menu dropdown-menu-arrow dropdown-menu-end dropdown-menu-card" data-bs-theme="light">
+								<div class="card">
+									<div class="card-header">
+										<h3 class="card-title">Jobs</h3>
+									</div>
+									<div id="active-jobs" class="list-group list-group-flush list-group-hoverable">
+					
+									</div>
+								</div>
+							</div>
+						</div>
+
 						<!-- User information -->
 						<div class="nav-item dropdown">
 							<a class="nav-link d-flex lh-1 text-reset p-0" data-bs-toggle="dropdown"

@@ -55,7 +55,14 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 	var wg sync.WaitGroup
 	const batchSize = 10
 
+	// all goroutines must be done before we return
+	defer wg.Wait()
+
 	for i := startIdx; i < len(ej.ItemIDs); i++ {
+		if err := job.Context().Err(); err != nil {
+			return err
+		}
+
 		// At the end of every batch, wait for all the goroutines to complete before
 		// proceeding; and once they complete, that's a good time to checkpoint
 		if i%batchSize == batchSize-1 {
@@ -193,6 +200,11 @@ func generateEmbedding(ctx context.Context, dataType string, data []byte, filena
 	// throttle expensive operation
 	cpuIntensiveThrottle <- struct{}{}
 	defer func() { <-cpuIntensiveThrottle }()
+
+	// check here in case the job was cancelled while we waited on the throttle
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

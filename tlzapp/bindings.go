@@ -739,6 +739,14 @@ func (a App) Jobs(repo string, jobIDs []int64) ([]timeline.Job, error) {
 	return nil, errors.New("TODO: Getting jobs other than by specific IDs not yet implemented")
 }
 
+func (a App) CancelJob(ctx context.Context, repo string, jobID int64) error {
+	tl, err := getOpenTimeline(repo)
+	if err != nil {
+		return err
+	}
+	return tl.CancelJob(ctx, jobID)
+}
+
 type BuildInfo struct {
 	GoOS   string `json:"go_os"`
 	GoArch string `json:"go_arch"`

@@ -295,6 +295,12 @@ audio {
 
 
 
+.job-preview .icon {
+	--tblr-icon-size: 3rem;
+}
+
+
+
 /*
 	My own modification to make dropdown toggling smooth and pleasant.
 	TODO: This requires some work... it requires that all dropdowns are in a 'position: relative' container, and a few other nuances (like with responsive design, collapsed menubar, etc)

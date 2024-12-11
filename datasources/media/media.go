@@ -116,6 +116,13 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 	throttle := make(chan struct{}, maxGoroutines)
 	var wg sync.WaitGroup
 
+	// prevent subtle bug: we spawn goroutines which send graphs down the pipeline;
+	// if we return before they finish sending a value, they'll get deadlocked
+	// since the workers are stopped once we return, meaning their send will never
+	// get received; thus, we need to wait for the goroutines to finish before we
+	// return
+	defer wg.Wait()
+
 	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -173,6 +180,10 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				<-throttle
 				wg.Done()
 			}()
+
+			if ctx.Err() != nil {
+				return
+			}
 
 			item := &timeline.Item{
 				Classification:       class,
@@ -323,8 +334,6 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 	if err != nil {
 		return err
 	}
-
-	wg.Wait()
 
 	// TODO: process the collections too (we still need to upgrade this logic after the schema rewrite)
 

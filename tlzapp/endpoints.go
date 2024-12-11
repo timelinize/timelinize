@@ -45,11 +45,11 @@ func (a *App) registerCommands() {
 			Method:  http.MethodGet,
 			Help:    "Displays information about this build.",
 		},
-		"cancel-job": {
-			Handler: a.server.handleCancelJob,
+		"cancel-jobs": {
+			Handler: a.server.handleCancelJobs,
 			Method:  http.MethodPost,
-			Payload: "",
-			Help:    "Cancels a running task.",
+			Payload: jobsPayload{},
+			Help:    "Cancels active jobs.",
 		},
 		"close-repository": {
 			Handler: a.server.handleCloseRepo,

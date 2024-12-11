@@ -34,7 +34,7 @@ import (
 )
 
 type importJobCheckpoint struct {
-	Estimating           bool            `json:"estimating"`
+	EstimatedSize        *int64          `json:"estimated_size"` // only set if currently in the estimating phase
 	OuterIndex           int             `json:"outer_index"`
 	InnerIndex           int             `json:"inner_index"`
 	DataSourceCheckpoint json.RawMessage `json:"data_source_checkpoint,omitempty"`
@@ -53,7 +53,7 @@ type ImportJob struct {
 	EstimateTotal     bool              `json:"estimate_total,omitempty"`
 }
 
-func (ij ImportJob) checkpoint(estimating bool, outer, inner int, ds any) error {
+func (ij ImportJob) checkpoint(estimatedSize *int64, outer, inner int, ds any) error {
 	var dsChkpt json.RawMessage
 	if ds != nil {
 		var err error
@@ -63,7 +63,7 @@ func (ij ImportJob) checkpoint(estimating bool, outer, inner int, ds any) error 
 		}
 	}
 	return ij.job.Checkpoint(importJobCheckpoint{
-		Estimating:           estimating,
+		EstimatedSize:        estimatedSize,
 		OuterIndex:           outer,
 		InnerIndex:           inner,
 		DataSourceCheckpoint: dsChkpt,
@@ -114,7 +114,11 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 		if err != nil {
 			return fmt.Errorf("decoding checkpoint: %w", err)
 		}
-		estimating = chkpt.Estimating
+		// in theory, resuming a job should have the same configuration as
+		// before, so this may take us out of "estimating" mode if that had
+		// already been completed, but I don't think it should ever put us
+		// INTO "estimating" mode
+		estimating = chkpt.EstimatedSize != nil
 	}
 
 	// two iterations: first to estimate size if enabled, then to actually import items
@@ -122,12 +126,21 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 		// this should be cumulative across all the files
 		var totalSizeEstimate *int64
 		if estimating {
-			totalSizeEstimate = new(int64)
-			job.Logger().Info("estimating size; this may take a bit")
+			if chkpt.EstimatedSize == nil {
+				totalSizeEstimate = new(int64)
+				job.Logger().Info("estimating size; this may take a bit")
+			} else {
+				totalSizeEstimate = chkpt.EstimatedSize
+				job.Logger().Info("resuming size estimation; this may take a bit")
+			}
 			job.Message("Estimating total import size")
 		}
 
 		for i := chkpt.OuterIndex; i < len(ij.Plan.Files); i++ {
+			if err := job.Context().Err(); err != nil {
+				return err
+			}
+
 			fileImport := ij.Plan.Files[i]
 
 			// load data source tidbits
@@ -164,6 +177,10 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 			// process each filename one at a time
 			for j := chkpt.InnerIndex; j < len(fileImport.Filenames); j++ {
+				if err := job.Context().Err(); err != nil {
+					return err
+				}
+
 				filename := fileImport.Filenames[j]
 
 				if !estimating {
@@ -171,7 +188,7 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 				}
 
 				// create a new "outer" checkpoint when arriving at a new filename to be imported
-				if err := ij.checkpoint(estimating, i, j, nil); err != nil {
+				if err := ij.checkpoint(totalSizeEstimate, i, j, nil); err != nil {
 					job.Logger().Error("checkpointing", zap.Error(err))
 				}
 
@@ -290,8 +307,10 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 		if estimating {
 			// inform the UI of the new total count
+			total := atomic.LoadInt64(totalSizeEstimate)
+			job.SetTotal(int(total))
 			job.FlushProgress()
-			job.Logger().Info("done with size estimation", zap.Int64("estimated_size", atomic.LoadInt64(totalSizeEstimate)))
+			job.Logger().Info("done with size estimation", zap.Int64("estimated_size", total))
 
 			// loop once more to import items (don't estimate again)
 			estimating = false
@@ -300,6 +319,9 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 		// only import the data once
 		break
+	}
+	if err := job.Context().Err(); err != nil {
+		return err
 	}
 
 	job.Logger().Info("import complete; cleaning up")

@@ -96,8 +96,8 @@ const app = {
 	AddEntity(repo_id, entity) {
 		return post("/api/add-entity", { repo_id, entity });
 	},
-	CancelJob(jobID) {
-		return post("/api/cancel-job", jobID);
+	CancelJobs(jobIDs) {
+		return post("/api/cancel-jobs", jobIDs);
 	},
 	CloseRepository(repo_id) {
 		return post("/api/close-repository", repo_id);

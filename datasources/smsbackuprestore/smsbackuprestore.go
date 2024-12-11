@@ -148,17 +148,27 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 		return nil
 	}
 
-	// processing messages concurrently can be faster; but don't allow too many goroutines
-	const maxGoroutines = 100
+	// processing messages concurrently can be faster; but don't allow too
+	// many goroutines because there is still contention in the pipeline
+	const maxGoroutines = 20
 	throttle := make(chan struct{}, maxGoroutines)
 	var wg sync.WaitGroup
 
+	// prevent subtle bug: we spawn goroutines which send graphs down the pipeline;
+	// if we return before they finish sending a value, they'll get deadlocked
+	// since the workers are stopped once we return, meaning their send will never
+	// get received; thus, we need to wait for the goroutines to finish before we
+	// return
+	defer wg.Wait()
+
+	// TODO: Our concurrency could probably be improved in this data source.
+	// Right now we spawn a goroutine for every single SMS/MMS we decode... maybe
+	// batches would be better?
+
 	dec := xml.NewDecoder(xmlFile)
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		tkn, err := dec.Token()
@@ -204,8 +214,6 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			}
 		}
 	}
-
-	wg.Wait()
 
 	return nil
 }

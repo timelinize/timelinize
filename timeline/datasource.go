@@ -461,6 +461,13 @@ type FileImporter interface {
 	// find the file to open. File extensions may be a good way to avoid unnecessary Open() calls.
 	Recognize(context.Context, DirEntry, RecognizeParams) (Recognition, error)
 
+	// TODO: write godoc. It is expected that context cancellation will be honored (i.e. return
+	// if the context has an error or its done channel is closed), and that the function will not
+	// return until all sends to the pipeline channel have completed. No more sends may happen
+	// after returning, since the receiving goroutines will be terminated (sends would be
+	// deadlocked without a receiver) or the pipeline will be closed (sending would cause a
+	// panic). SUBTLETY: If spawning goroutines which send to the pipeline, they must also
+	// be waited upon to terminate before returning.
 	FileImport(context.Context, DirEntry, ImportParams) error
 }
 

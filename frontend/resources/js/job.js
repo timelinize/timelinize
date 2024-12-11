@@ -15,52 +15,67 @@ async function jobPageMain() {
 	const job = jobs[0];
 	console.log("JOB:", job);
 
-	// claim the job elements on this page for this job
-	for (elem of $$(`
-		#page-content .job-name,
-		#page-content .job-progress,
-		#page-content .job-progress-text,
-		#page-content .job-message,
-		#page-content .job-status-indicator,
-		#page-content .job-status,
-		#page-content .job-time-basis,
-		#page-content .job-time`)) {
-		elem.classList.add(`job-id-${job.id}`);
-	}
+	$('.job-config-code').innerText = JSON.stringify(JSON.parse(job.config), null, 4);
 
+	// claim the job elements on this page for this job
+	assignJobElements($('#page-content'), job);
+
+	// fill out the majority of the job UI
 	jobProgressUpdate(job);
 
+	if (job.parent) {
+		$('#parent-job-container').classList.remove('d-none');
+		renderJobPreview($('#parent-job-list'), job.parent);
+		jobProgressUpdate(job.parent);
+	}
+
+	if (job.children?.length > 0) {
+		$('#subsequent-jobs-container').classList.remove('d-none');
+		for (const child of job.children) {
+			renderJobPreview($('#subsequent-jobs-list'), child);
+			jobProgressUpdate(child);
+		}
+	}
+
+	///////
+
+	// how many points to show along the graph
+	const xRange = 60;
 
 
-	/** TODO: column chart example **/
-	new ApexCharts(document.getElementById('chart-items-per-minute'), {
+	let chart = new ApexCharts($('#chart-active-job-throughput'), {
 		chart: {
-			type: "line",
+			type: 'line',
 			fontFamily: 'inherit',
 			height: 240,
 			parentHeightOffset: 0,
 			toolbar: {
 				show: false,
 			},
+			zoom: {
+                enabled: false
+            },
 			animations: {
-				enabled: false
+				enabled: true,
+				dynamicAnimation: {
+					speed: 1000
+				}
 			},
 		},
 		fill: {
 			opacity: 1,
 		},
 		stroke: {
-			width: 2,
+			width: 3,
 			lineCap: "round",
 			curve: "smooth",
 		},
 		series: [{
-			name: "Tasks completion",
-			data: [155, 65, 465, 265, 225, 325, 80]
+			name: "Items" // TODO: should be customized based on job type
 		}],
-		tooltip: {
-			theme: 'dark'
-		},
+		// tooltip: {
+		// 	theme: 'dark'
+		// },
 		grid: {
 			padding: {
 				top: -20,
@@ -71,26 +86,59 @@ async function jobPageMain() {
 			strokeDashArray: 4,
 		},
 		xaxis: {
-			labels: {
-				padding: 0,
-			},
-			tooltip: {
-				enabled: false
-			},
-			type: 'datetime',
+			range: xRange,
+			// labels: {
+			// 	padding: 0,
+			// },
+			// tooltip: {
+			// 	enabled: false
+			// },
+			type: 'category',
 		},
 		yaxis: {
 			labels: {
 				padding: 4
 			},
+			max: 100,
 		},
-		labels: [
-			'2020-06-21', '2020-06-22', '2020-06-23', '2020-06-24', '2020-06-25', '2020-06-26', '2020-06-27'
-		],
-		colors: [tabler.getColor("primary")],
+		colors: [tabler.getColor("blue")],
 		legend: {
 			show: false,
 		},
-	}).render();
-}
+	});
 
+	chart.render();
+
+	let data = [];
+
+	let secSinceStart = 1;
+	// setInterval(function() {
+	// 	data.push({
+	// 		x: secSinceStart,
+	// 		y: Math.floor(Math.random()*(100-5)+5)
+	// 	});
+	// 	secSinceStart++;
+
+	// 	chart.updateOptions({
+	// 		series: [
+	// 			{
+	// 				data: data,
+	// 			}
+	// 		],
+	// 		xaxis: {
+	// 			range: Math.min(data.length-1, xRange)
+	// 		}
+	// 	})
+	// }, 1000);
+
+	setInterval(function() {
+		// leave some extra points off the edge of the graph just to ensure
+		// we don't accidentally chop them off while the chart is still animating
+		// on the left side; ensure all pruning happens off-screen
+		const offScreen = 5;
+		if (data.length > xRange+offScreen) {
+			data.splice(0, data.length-xRange-offScreen)
+			chart.updateSeries([{data: data}], false);
+		}
+	}, 5000);
+}

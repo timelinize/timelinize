@@ -32,6 +32,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/timelinize/timelinize/timeline"
+	"go.uber.org/zap"
 )
 
 func (s *server) handleFileSelectorRoots(w http.ResponseWriter, _ *http.Request) error {
@@ -105,10 +106,21 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) error {
 	return jsonResponse(w, jobs, err)
 }
 
-func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) error {
-	return errors.New("TODO: re-implement")
-	// jobID := r.Context().Value(ctxKeyPayload).(*string)
-	// return jsonResponse(w, nil, s.app.CancelJob(*jobID))
+func (s *server) handleCancelJobs(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*jobsPayload)
+	var firstErr error
+	for _, jobID := range payload.JobIDs {
+		err := s.app.CancelJob(r.Context(), payload.RepoID, jobID)
+		if err != nil {
+			s.log.Error("canceling job failed",
+				zap.Int64("job_id", jobID),
+				zap.Error(err))
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return jsonResponse(w, nil, firstErr)
 }
 
 func (s *server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
