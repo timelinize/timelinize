@@ -387,6 +387,9 @@ function connectLog() {
 			// update UI elements that portray this job
 			jobProgressUpdate(l);
 
+			// TODO: experimental
+			updateThroughput(l);
+
 			return;
 		}
 	};
@@ -511,7 +514,7 @@ function jobProgressUpdate(job) {
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-green');
-			elem.classList.remove('bg-yellow', 'bg-orange', 'bg-red', 'bg-secondary');
+			elem.classList.remove('bg-yellow', 'bg-orange', 'bg-red', 'bg-secondary', 'progress-bar-indeterminate');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-green');
@@ -552,7 +555,7 @@ function jobProgressUpdate(job) {
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-secondary');
-			elem.classList.remove('bg-green', 'bg-yellow', 'bg-orange', 'bg-red');
+			elem.classList.remove('bg-green', 'bg-yellow', 'bg-orange', 'bg-red', 'progress-bar-indeterminate');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-secondary', 'status-indicator-animated');
@@ -629,7 +632,7 @@ function jobProgressUpdate(job) {
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-orange');
-			elem.classList.remove('bg-green', 'bg-yellow', 'bg-secondary', 'bg-red');
+			elem.classList.remove('bg-green', 'bg-yellow', 'bg-secondary', 'bg-red', 'progress-bar-indeterminate');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-orange');
@@ -671,7 +674,7 @@ function jobProgressUpdate(job) {
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-red');
-			elem.classList.remove('bg-green', 'bg-yellow', 'bg-orange', 'bg-secondary');
+			elem.classList.remove('bg-green', 'bg-yellow', 'bg-orange', 'bg-secondary', 'progress-bar-indeterminate');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-red');
@@ -727,15 +730,15 @@ function jobProgressUpdate(job) {
 		}
 		if (job.progress != null) {
 			for (elem of $$(`.job-progress-text.job-id-${job.id}`)) {
-				elem.innerText = job.progress;
+				elem.innerText = job.progress.toLocaleString();
 			}
 		}
 		for (elem of $$(`.job-progress-text-detailed.job-id-${job.id}`)) {
 			if (job.progress == null) {
 				elem.innerText = "0";
 			} else {
-				const total = job.state == "succeeded" ? job.progress : "?";
-				elem.innerText = `${job.progress}/${total}`;
+				const total = job.state == "succeeded" ? job.progress.toLocaleString() : "?";
+				elem.innerText = `${job.progress.toLocaleString()}/${total}`;
 			}
 		}
 	}
@@ -751,7 +754,8 @@ function jobProgressUpdate(job) {
 			elem.innerText = percentDisplay;
 		}
 		for (elem of $$(`.job-progress-text-detailed.job-id-${job.id}`)) {
-			elem.innerText = `${job.progress}/${job.total}`;
+			const progress = job.progress || 0;
+			elem.innerText = `${progress.toLocaleString()}/${job.total.toLocaleString()}`;
 		}
 	}
 

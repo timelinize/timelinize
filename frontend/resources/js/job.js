@@ -1,3 +1,5 @@
+let updateThroughput = function() { }; // TODO: temporary
+
 async function jobPageMain() {
 	const {repoID, rowID} = parseURIPath()
 
@@ -37,11 +39,12 @@ async function jobPageMain() {
 		}
 	}
 
-	///////
+
+	// set up throughput chart
 
 	// how many points to show along the graph
 	const xRange = 60;
-
+	const seriesName = "Items"; // TODO: should be customized based on job type
 
 	let chart = new ApexCharts($('#chart-active-job-throughput'), {
 		chart: {
@@ -71,11 +74,9 @@ async function jobPageMain() {
 			curve: "smooth",
 		},
 		series: [{
-			name: "Items" // TODO: should be customized based on job type
+			name: seriesName,
+			data: []
 		}],
-		// tooltip: {
-		// 	theme: 'dark'
-		// },
 		grid: {
 			padding: {
 				top: -20,
@@ -87,58 +88,80 @@ async function jobPageMain() {
 		},
 		xaxis: {
 			range: xRange,
-			// labels: {
-			// 	padding: 0,
-			// },
-			// tooltip: {
-			// 	enabled: false
-			// },
 			type: 'category',
 		},
 		yaxis: {
 			labels: {
 				padding: 4
 			},
-			max: 100,
 		},
 		colors: [tabler.getColor("blue")],
 		legend: {
 			show: false,
 		},
 	});
-
 	chart.render();
 
-	let data = [];
+	let chartData = [];
 
+
+	////////////////
+	const MAX_WINDOW_SIZE = 3;
+	let window = [];
+	let latestProgress = 0, progressAtLastPaint = 0;
+	
+	updateThroughput = function(log) {
+		if (log.progress > 0) {
+			latestProgress = log.progress;			
+		}
+	};
+	
 	let secSinceStart = 1;
-	// setInterval(function() {
-	// 	data.push({
-	// 		x: secSinceStart,
-	// 		y: Math.floor(Math.random()*(100-5)+5)
-	// 	});
-	// 	secSinceStart++;
+	setInterval(function() {
+		const throughputSinceLastPaint = latestProgress - progressAtLastPaint;
+		progressAtLastPaint = latestProgress;
+		
+		$('.throughput-rate').innerText = throughputSinceLastPaint;
 
-	// 	chart.updateOptions({
-	// 		series: [
-	// 			{
-	// 				data: data,
-	// 			}
-	// 		],
-	// 		xaxis: {
-	// 			range: Math.min(data.length-1, xRange)
-	// 		}
-	// 	})
-	// }, 1000);
+		window.push(throughputSinceLastPaint);
+		if (window.length > MAX_WINDOW_SIZE) {
+			window = window.slice(window.length-MAX_WINDOW_SIZE);
+		}
 
+		chartData.push({
+			x: secSinceStart,
+			y: Math.floor(window.reduce((sum, val) => sum+val, 0) / window.length)
+		});
+		secSinceStart++;
+
+		chart.updateOptions({
+			series: [
+				{
+					name: "Items",
+					data: chartData,
+				}
+			],
+			xaxis: {
+				// allow the axis to grow (squishing the line graph) until it reaches its max size; this prevents negative x-values etc
+				range: Math.min(chartData.length-1, xRange)
+			}
+		})
+	}, 1000);
+
+	// every so often, lob off the left side of the plot, to avoid a memory leak;
+	// time it so that it occurs just as any repaint/update animation is ending,
+	// since this requires updating the chart with animation disabled and it can
+	// sometimes result in slight amount of jank if it's not perfectly synced.
+	// I've found putting it at the tail end of animation is smoother. it doesn't
+	// have to happen every second, just enough to keep the array under control.
 	setInterval(function() {
 		// leave some extra points off the edge of the graph just to ensure
 		// we don't accidentally chop them off while the chart is still animating
 		// on the left side; ensure all pruning happens off-screen
-		const offScreen = 5;
-		if (data.length > xRange+offScreen) {
-			data.splice(0, data.length-xRange-offScreen)
-			chart.updateSeries([{data: data}], false);
+		const offScreen = 2;
+		if (chartData.length > xRange+offScreen) {
+			chartData.splice(0, chartData.length-xRange-offScreen)
+			chart.updateSeries([{name: "Items", data: chartData}], false);
 		}
-	}, 5000);
+	}, 9990);
 }

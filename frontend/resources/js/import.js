@@ -399,7 +399,7 @@ on('click', '#start-import', async event => {
 
 	notify({
 		type: "success",
-		title: "Import started",
+		title: "Import queued",
 		duration: 2000
 	});
 
