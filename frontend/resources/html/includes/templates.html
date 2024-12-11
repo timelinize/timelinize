@@ -378,35 +378,31 @@
 	</tr>
 </template>
 
+<template id="tpl-job-preview">
+	<div class="row align-items-center job-preview">
+		<div class="col-auto job-icon">
 
-<template id="tpl-active-job">
-	<div class="list-group-item">
-		<div class="row align-items-center">
-			<div class="col-auto">
-				<span class="status-dot status-dot-animated bg-red d-block"></span>
+		</div>
+		<div class="col text-truncate">
+			<a class="text-body d-block job-link">
+				<b class="job-name"></b>
+				<span class="job-name-suffix text-truncate"></span>
+			</a>
+			<div class="progress my-2 job-progress">
+				<div class="progress-bar"></div>
 			</div>
-			<div class="col text-truncate">
-				<a class="text-body d-block">
-					Import from
-					<b class="data-source-title">
-
-					</b>
-				</a>
-				<div class="active-job-input d-block text-secondary text-truncate mt-n1">
-					
-				</div>
-				<div class="progress mt-2">
-					<div class="progress-bar progress-bar-indeterminate bg-blue"></div>
-				</div>
-				<div class="d-block small text-secondary mt-2">
-					<b class="import-item-count">0 items</b> in <b class="import-duration">0 min 0 sec</b>
-					&middot;
-					<a class="cancel-active-job">Cancel</a>
-				</div>
+			<div class="d-block small text-secondary">
+				<b>
+					<span class="job-progress-text"></span>
+					<span class="job-progress-units"></span>
+				</b>
+				in
+				<b class="me-2 job-duration">n/a</b>
+				<a class="pause-job mx-2">Pause</a><a class="cancel-job mx-2">Cancel</a>
 			</div>
-			<div class="col-auto">
-				<span class="data-source-icon avatar ms-1"></span>
-			</div>
+		</div>
+		<div class="col-auto">
+			<span class="status-dot job-status-dot"></span>
 		</div>
 	</div>
 </template>

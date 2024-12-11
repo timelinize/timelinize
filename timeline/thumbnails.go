@@ -367,7 +367,7 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 			// 	"-", // pipe to stdout
 			// )
 		case strings.HasPrefix(task.ThumbType, "video/"):
-			cmd = exec.Command("ffmpeg",
+			cmd = exec.CommandContext(ctx, "ffmpeg",
 				// include only the first few seconds of video; start at the beginning
 				// (putting this before -i is a fast, but inaccurate skip-to, but we know
 				// the beginning will have a keyframe)

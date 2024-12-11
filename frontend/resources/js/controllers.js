@@ -249,6 +249,7 @@ tlz.pageControllers = {
 		},
 		unload() {
 			$('.navbar').classList.remove('navbar-overlap');
+			clearInterval(jobThroughputInterval); // stop trying to update the chart
 		}
 	},
 }

@@ -276,10 +276,6 @@ audio {
 	max-height: 250px;
 }
 
-.active-job-input {
-	direction: rtl;
-}
-
 .page-num-container {
 	display: flex;
 }
@@ -300,6 +296,9 @@ audio {
 }
 
 
+.dropdown-menu .recent-jobs-list {
+	min-width: 450px;
+}
 
 /*
 	My own modification to make dropdown toggling smooth and pleasant.

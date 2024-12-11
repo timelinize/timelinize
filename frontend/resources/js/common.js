@@ -312,7 +312,8 @@ function assignJobElements(containerElem, job) {
 		.pause-job,
 		.cancel-job,
 		#subsequent-jobs-container,
-		#parent-job-container`, containerElem)) {
+		#parent-job-container,
+		#throughput-chart-container`, containerElem)) {
 		elem.classList.add(jobIDClass);
 	}
 	containerElem.classList.add(jobIDClass);
@@ -326,34 +327,10 @@ function assignJobElements(containerElem, job) {
 // Events handling (logs)
 //////////////////////////////////////////////////////
 
-// runtime.EventsOn("log", (entryJSON) => {
-// 	const l = JSON.parse(entryJSON);
-
-// 	// for now, we don't care about HTTP access logs
-// 	if (l.logger == "app.http") {
-// 		return;
-// 	}
-
-// 	if (l.logger == "processor.progress") {
-// 		const jobElem = $(`#active-job-${l.job_id}`);
-// 		if (!jobElem) return;
-// 		$('.import-item-count', jobElem).innerText = `${l.total_items.toLocaleString()} items`;
-// 		$('.import-duration', jobElem).innerText = $('.import-duration').innerText = DateTime.now().diff(DateTime.fromISO(jobElem.dataset.started)).toFormat("h 'h' m 'min' s 'sec'");
-// 		return;
-// 	}
-
-// 	if (l.logger == "job_manager" && l.msg == 'end') {
-// 		updateActiveJobs();
-// 	}
-	
-// 	console.log("LOG:", l);
-// });
-
-
 
 function renderJobPreview(containerElem, job) {
-	if (!containerElem) {
-		return;
+	if (!containerElem || $(`.job-preview.job-id-${job.id}`, containerElem)) {
+		return; // no-op if no container, or element already exists
 	}
 	const elem = cloneTemplate('#tpl-job-preview');
 	assignJobElements(elem, job);
@@ -365,12 +342,13 @@ function connectLog() {
 	logSocket = new WebSocket(`ws://${window.location.host}/api/logs`);
 	logSocket.onmessage = function(event) {
 		const l = JSON.parse(event.data);
-		console.log("LOG:", l);
-
+		
 		// for now, we don't care about HTTP access logs
 		if (l.logger == "app.http") {
 			return;
 		}
+
+		console.log("LOG:", l);
 
 		if (l.logger == "job.status") {
 			// if this job has a parent that happens to be on the screen showing
@@ -384,11 +362,45 @@ function connectLog() {
 				}
 			}
 
+			// add job preview to global nav dropdown
+			for (listElem of $$('.recent-jobs-list')) {
+				// don't duplicate job preview elements; normally, renderJobPreview()
+				// does this for us, but we are wrapping the container for the sake of
+				// display in the navbar dropdown, which is a list-group, so we have
+				// to check for duplicates ourselves
+				if ($(`.job-preview.job-id-${l.id}`, listElem)) {
+					continue;
+				}
+				const listItemWrapperElem = document.createElement('div');
+				listItemWrapperElem.classList.add('list-group-item');
+				renderJobPreview(listItemWrapperElem, l);
+				listElem.append(listItemWrapperElem);
+			}
+
+			// update live job stats (for charts, etc)
+			const seriesName = "Items"; // TODO: customize per job type
+			if (!tlz.jobStats[l.id]) {
+				// TODO: When to clear out the job stats? save to localStorage or anything for future reference?
+				tlz.jobStats[l.id] = {
+					latestProgress: 0, // will be set immediately below
+					progressAtLastPaint: l.progress || 0,
+					secondsSinceStart: 0,
+					live: l.state == "started",
+					window: [],
+					chartSeries: [
+						{
+							name: seriesName,
+							data: []
+						}
+					]
+				};
+			}
+			if (l.progress > 0) {
+				tlz.jobStats[l.id].latestProgress = l.progress;
+			}
+
 			// update UI elements that portray this job
 			jobProgressUpdate(l);
-
-			// TODO: experimental
-			updateThroughput(l);
 
 			return;
 		}
@@ -402,11 +414,56 @@ function connectLog() {
 
 connectLog();
 
+// every second, compute updated stats for active jobs
+setInterval(function() {
+	for (const jobID in tlz.jobStats) {
+		const stats = tlz.jobStats[jobID];
+		if (!stats.live) {
+			continue;
+		}
+
+		const throughputSinceLastPaint = stats.latestProgress - stats.progressAtLastPaint;
+		stats.progressAtLastPaint =  stats.latestProgress;
+		
+		const MAX_WINDOW_SIZE = 3;
+		stats.window.push(throughputSinceLastPaint);
+		if (stats.window.length > MAX_WINDOW_SIZE) {
+			stats.window = stats.window.slice(stats.window.length - MAX_WINDOW_SIZE);
+		}
+
+		const chartData = stats.chartSeries[0].data;
+
+		chartData.push({
+			x: stats.secondsSinceStart,
+			y: Math.floor(stats.window.reduce((sum, val) => sum+val, 0) / stats.window.length)
+		});
+		stats.secondsSinceStart++;
+		
+		const chartContainer = $(`#throughput-chart-container.job-id-${jobID}`);
+		if (chartContainer) {
+			$('.throughput-rate', chartContainer).innerText = throughputSinceLastPaint;
+			$('#chart-active-job-throughput', chartContainer).apexchart?.updateOptions({
+				series: stats.chartSeries,
+				xaxis: {
+					// allow the axis to grow (squishing the line graph) until it reaches its max size; this prevents negative x-values etc
+					range: Math.min(chartData.length-1, jobThroughputXRange)
+				}
+			});
+		} else if (chartData.length > jobThroughputXRange+jobThroughputOffScreen) {
+			// notice how we don't do this if the chart is rendered on the screen! causes jankiness / reanimation
+			// (a separate interval is needed for pruning when it is being rendered live)
+			chartData.splice(0, chartData.length - jobThroughputXRange - jobThroughputOffScreen);
+		}
+	}
+}, 1000);
 
 function jobProgressUpdate(job) {
 	for (elem of $$(`.job-link.job-id-${job.id}`)) {
 		elem.href = `/jobs/${job.repo_id}/${job.id}`;
 	}
+
+	// update chart(s) only if job is running
+	tlz.jobStats[job.id].live = job.state == "started";
 
 	if (job.name == "import")
 	{
@@ -478,7 +535,7 @@ function jobProgressUpdate(job) {
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-green');
-			elem.classList.remove('bg-yellow', 'bg-orange', 'bg-red', 'bg-secondary');
+			elem.classList.remove('bg-yellow', 'bg-orange', 'bg-red', 'bg-secondary', 'progress-bar-striped');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-green', 'status-indicator-animated');
@@ -514,7 +571,7 @@ function jobProgressUpdate(job) {
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-green');
-			elem.classList.remove('bg-yellow', 'bg-orange', 'bg-red', 'bg-secondary', 'progress-bar-indeterminate');
+			elem.classList.remove('bg-yellow', 'bg-orange', 'bg-red', 'bg-secondary', 'progress-bar-indeterminate', 'progress-bar-striped');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-green');
@@ -555,7 +612,7 @@ function jobProgressUpdate(job) {
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-secondary');
-			elem.classList.remove('bg-green', 'bg-yellow', 'bg-orange', 'bg-red', 'progress-bar-indeterminate');
+			elem.classList.remove('bg-green', 'bg-yellow', 'bg-orange', 'bg-red', 'progress-bar-indeterminate', 'progress-bar-striped');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-secondary', 'status-indicator-animated');
@@ -631,7 +688,7 @@ function jobProgressUpdate(job) {
 	else if (job.state == "aborted")
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
-			elem.classList.add('bg-orange');
+			elem.classList.add('bg-orange', 'progress-bar-striped');
 			elem.classList.remove('bg-green', 'bg-yellow', 'bg-secondary', 'bg-red', 'progress-bar-indeterminate');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
@@ -673,7 +730,7 @@ function jobProgressUpdate(job) {
 	else if (job.state == "failed")
 	{
 		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
-			elem.classList.add('bg-red');
+			elem.classList.add('bg-red', 'progress-bar-striped');
 			elem.classList.remove('bg-green', 'bg-yellow', 'bg-orange', 'bg-secondary', 'progress-bar-indeterminate');
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
@@ -722,7 +779,11 @@ function jobProgressUpdate(job) {
 			}
 		} else if (job.state) {
 			for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
-				elem.style.width = "0%";
+				if (job.state == "aborted" || job.state == "failed") {
+					elem.style.width = "100%"; // striped bar
+				} else {
+					elem.style.width = "0%";
+				}
 				if (job.state == "started") {
 					elem.classList.add('progress-bar-indeterminate');
 				}

@@ -137,7 +137,10 @@ const tlz = {
 	},
 
 	// counter for IDs of collapsable regions which may be dynamically created
-	collapseCounter: 0
+	collapseCounter: 0,
+
+	// keeps statistics for active jobs, keyed by job ID
+	jobStats: {}
 };
 
 get('/api/build-info').then(bi => {
