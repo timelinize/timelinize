@@ -48,13 +48,13 @@ const (
 	// not a maximum, due to the recursive and inter-related nature
 	// of item graphs -- hopefully data sources don't send graphs
 	// too big for available memory
-	batchSize = 50
+	batchSize = 10
 
 	// don't want too many workers because they can starve other
 	// imports happening at the same time, especially if one import
 	// is not very file-heavy and is more DB-heavy (after all, only
 	// 1 worker can have a write lock at the DB at a time anyway)
-	workers = 5
+	workers = 10
 )
 
 func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, countOnly bool, done <-chan struct{}) (*sync.WaitGroup, chan<- *Graph) {

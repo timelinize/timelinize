@@ -374,29 +374,7 @@ function connectLog() {
 				const listItemWrapperElem = document.createElement('div');
 				listItemWrapperElem.classList.add('list-group-item');
 				renderJobPreview(listItemWrapperElem, l);
-				listElem.append(listItemWrapperElem);
-			}
-
-			// update live job stats (for charts, etc)
-			const seriesName = "Items"; // TODO: customize per job type
-			if (!tlz.jobStats[l.id]) {
-				// TODO: When to clear out the job stats? save to localStorage or anything for future reference?
-				tlz.jobStats[l.id] = {
-					latestProgress: 0, // will be set immediately below
-					progressAtLastPaint: l.progress || 0,
-					secondsSinceStart: 0,
-					live: l.state == "started",
-					window: [],
-					chartSeries: [
-						{
-							name: seriesName,
-							data: []
-						}
-					]
-				};
-			}
-			if (l.progress > 0) {
-				tlz.jobStats[l.id].latestProgress = l.progress;
+				listElem.prepend(listItemWrapperElem);
 			}
 
 			// update UI elements that portray this job
@@ -441,6 +419,7 @@ setInterval(function() {
 		
 		const chartContainer = $(`#throughput-chart-container.job-id-${jobID}`);
 		if (chartContainer) {
+			// TODO: Maybe change this to be the total mean through the life of the job
 			$('.throughput-rate', chartContainer).innerText = throughputSinceLastPaint;
 			$('#chart-active-job-throughput', chartContainer).apexchart?.updateOptions({
 				series: stats.chartSeries,
@@ -458,6 +437,29 @@ setInterval(function() {
 }, 1000);
 
 function jobProgressUpdate(job) {
+	// update live job stats (for charts, etc)
+	const seriesName = "Items"; // TODO: customize per job type
+	if (!tlz.jobStats[job.id]) {
+		// TODO: When to clear out the job stats? save to localStorage or anything for future reference?
+		tlz.jobStats[job.id] = {
+			latestProgress: 0, // will be set immediately below
+			progressAtLastPaint: job.progress || 0,
+			secondsSinceStart: 0,
+			live: job.state == "started",
+			window: [],
+			chartSeries: [
+				{
+					name: seriesName,
+					data: []
+				}
+			]
+		};
+	}
+	if (job.progress > 0) {
+		tlz.jobStats[job.id].latestProgress = job.progress;
+	}
+
+
 	for (elem of $$(`.job-link.job-id-${job.id}`)) {
 		elem.href = `/jobs/${job.repo_id}/${job.id}`;
 	}
@@ -539,9 +541,11 @@ function jobProgressUpdate(job) {
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-green', 'status-indicator-animated');
+			elem.classList.remove('status-yellow', 'status-secondary', 'status-orange', 'status-red');
 		}
 		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-green', 'status-dot-animated');
+			elem.classList.remove('status-yellow', 'status-secondary', 'status-orange', 'status-red');
 		}
 		for (elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Running";
@@ -575,11 +579,11 @@ function jobProgressUpdate(job) {
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-green');
-			elem.classList.remove('status-indicator-animated');
+			elem.classList.remove('status-yellow', 'status-secondary', 'status-orange', 'status-indicator-animated');
 		}
 		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-green');
-			elem.classList.remove('status-dot-animated');
+			elem.classList.remove('status-yellow', 'status-secondary', 'status-orange', 'status-dot-animated');
 		}
 		for (elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Completed"
@@ -657,11 +661,11 @@ function jobProgressUpdate(job) {
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-yellow', 'status-indicator-animated');
-			elem.classList.remove('status-green');
+			elem.classList.remove('status-green', 'status-orange', 'status-red');
 		}
 		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-yellow', 'status-dot-animated');
-			elem.classList.remove('status-green');
+			elem.classList.remove('status-green', 'status-orange', 'status-red');
 		}
 		for (elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Paused"
@@ -697,7 +701,7 @@ function jobProgressUpdate(job) {
 		}
 		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-orange');
-			elem.classList.remove('status-dot-animated');
+			elem.classList.remove('status-green', 'status-yellow', 'status-dot-animated');
 		}
 		for (elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Aborted"
@@ -735,11 +739,11 @@ function jobProgressUpdate(job) {
 		}
 		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-red');
-			elem.classList.remove('status-green', 'status-yellow', 'status-indicator-animated');
+			elem.classList.remove('status-green', 'status-yellow', 'status-orange', 'status-indicator-animated');
 		}
 		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-red');
-			elem.classList.remove('status-green', 'status-dot-animated');
+			elem.classList.remove('status-green', 'status-yellow', 'status-orange', 'status-dot-animated');
 		}
 		for (elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Failed"
@@ -799,7 +803,7 @@ function jobProgressUpdate(job) {
 				elem.innerText = "0";
 			} else {
 				const total = job.state == "succeeded" ? job.progress.toLocaleString() : "?";
-				elem.innerText = `${job.progress.toLocaleString()}/${total}`;
+				elem.innerText = `${job.progress.toLocaleString()} / ${total}`;
 			}
 		}
 	}
