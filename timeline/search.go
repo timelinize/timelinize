@@ -653,6 +653,9 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		}
 	}
 
+	// TODO: seems reasonable, but let's tune this
+	const k = 50
+
 	if vectorSearch {
 		if params.QueryText != "" {
 			// search relative to an arbitrary input (TODO: support image inputs too)
@@ -664,7 +667,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 				or("embeddings.embedding MATCH ?", embedding)
 				and(func() {
 					// TODO: pull up limit calculation so we can use it early here... sigh.
-					or("k=?", 50)
+					or("k=?", k)
 				})
 			})
 		} else if len(params.SimilarTo) > 0 {
@@ -675,7 +678,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 					or("embeddings.embedding MATCH (SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)", similarItemID)
 					and(func() {
 						// TODO: pull up limit calculation so we can use it early here... sigh.
-						or("k=?", 50)
+						or("k=?", k)
 					})
 				})
 			}

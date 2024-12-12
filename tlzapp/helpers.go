@@ -49,7 +49,7 @@ func userHomeDir() string {
 	if home := os.Getenv("HOME"); home != "" {
 		return home
 	}
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		if home := os.Getenv("USERPROFILE"); home != "" {
 			return home
 		}

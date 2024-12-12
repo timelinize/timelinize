@@ -61,7 +61,7 @@ func init() {
 type FileImporter struct{}
 
 // Recognize returns whether the input file is recognized.
-func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+func (FileImporter) Recognize(_ context.Context, _ timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	return timeline.Recognition{Confidence: 1}, nil
 }
 

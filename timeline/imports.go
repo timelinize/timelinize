@@ -70,32 +70,38 @@ func (ij ImportJob) checkpoint(estimatedSize *int64, outer, inner int, ds any) e
 	})
 }
 
-// splitPathAtVolume splits an absolute filename into volume (or root)
-// and filename components. On Windows, the "root" of a filepath is the
-// volume (e.g. "C:"); on Unix-compatible systems, it is "/". Windows is
-// insane. Anyway, this is useful for constructing a fs.FS that provides
-// access to the whole file system. The returned rootOrVolume can be used
-// as the root of an os.DirFS or similar FS (such as archives.DeepFS),
-// and the relativePath is an fs.FS-compatible path that can be used to
-// access the file within the FS.
+// TODO: This was useful during the refactoring of the import flow, but
+// I ended up on a design that doesn't require rooting file systems at
+// the root of the volume. Seems like good code, since the Go standard
+// library doesn't have a way of doing this, so I hesitate to delete it
+// entirely. :)
 //
-// See https://github.com/golang/go/issues/44279.
-func splitPathAtVolume(absFilename string) (rootOrVolume string, relativePath string, err error) {
-	if !filepath.IsAbs(absFilename) {
-		err = fmt.Errorf("filename is not absolute: %s", absFilename)
-		return
-	}
-	rootOrVolume = "/" // assume non-Windows
-	if vol := filepath.VolumeName(absFilename); vol != "" {
-		rootOrVolume = vol // okay, it's actually Windows
-	}
-	relativePath, err = filepath.Rel(rootOrVolume, absFilename)
-	if err != nil {
-		return
-	}
-	relativePath = filepath.ToSlash(relativePath)
-	return
-}
+// // splitPathAtVolume splits an absolute filename into volume (or root)
+// // and filename components. On Windows, the "root" of a filepath is the
+// // volume (e.g. "C:"); on Unix-compatible systems, it is "/". Windows is
+// // insane. Anyway, this is useful for constructing a fs.FS that provides
+// // access to the whole file system. The returned rootOrVolume can be used
+// // as the root of an os.DirFS or similar FS (such as archives.DeepFS),
+// // and the relativePath is an fs.FS-compatible path that can be used to
+// // access the file within the FS.
+// //
+// // See https://github.com/golang/go/issues/44279.
+// func splitPathAtVolume(absFilename string) (rootOrVolume string, relativePath string, err error) {
+// 	if !filepath.IsAbs(absFilename) {
+// 		err = fmt.Errorf("filename is not absolute: %s", absFilename)
+// 		return
+// 	}
+// 	rootOrVolume = "/" // assume non-Windows
+// 	if vol := filepath.VolumeName(absFilename); vol != "" {
+// 		rootOrVolume = vol // okay, it's actually Windows
+// 	}
+// 	relativePath, err = filepath.Rel(rootOrVolume, absFilename)
+// 	if err != nil {
+// 		return
+// 	}
+// 	relativePath = filepath.ToSlash(relativePath)
+// 	return
+// }
 
 func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 	// TODO: are these racey?

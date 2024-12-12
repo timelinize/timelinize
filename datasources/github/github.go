@@ -106,7 +106,7 @@ func init() {
 type GitHub struct{}
 
 // Recognize returns whether the input file is recognized.
-func (GitHub) Recognize(_ context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+func (GitHub) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	isoDateRegexp := regexp.MustCompile(`^ghstars(-(\d{4}-\d{2}-\d{2}|[0-9]{10}))?.json$`)
 	// ghstars.json or ghstars-YYYY-MM-DD.json or ghstars-UNIX_TIMESTAMP.json
 	if isoDateRegexp.MatchString(dirEntry.Name()) {

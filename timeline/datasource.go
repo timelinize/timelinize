@@ -459,6 +459,8 @@ type FileImporter interface {
 	// only happen if necessary, due to the possibility that it is within a compressed tar file,
 	// which is not efficient as it requires decompressing potentially most of the archive to
 	// find the file to open. File extensions may be a good way to avoid unnecessary Open() calls.
+	//
+	//nolint:inamedparam
 	Recognize(context.Context, DirEntry, RecognizeParams) (Recognition, error)
 
 	// TODO: write godoc. It is expected that context cancellation will be honored (i.e. return
@@ -468,6 +470,8 @@ type FileImporter interface {
 	// deadlocked without a receiver) or the pipeline will be closed (sending would cause a
 	// panic). SUBTLETY: If spawning goroutines which send to the pipeline, they must also
 	// be waited upon to terminate before returning.
+	//
+	//nolint:inamedparam
 	FileImport(context.Context, DirEntry, ImportParams) error
 }
 
@@ -475,11 +479,13 @@ type FileImporter interface {
 // APIImporter is a type that can import data via a remote service API.
 type APIImporter interface {
 	Authenticate(ctx context.Context, acc Account, dsOpt any) error
-	APIImport(context.Context, Account, chan<- *Graph, ImportParams) error
+	//nolint:inamedparam
+	APIImport(context.Context, Account, ImportParams) error
 }
 
 // TODO: experimental
 type SizeEstimator interface {
+	//nolint:inamedparam
 	EstimateSize(context.Context, DirEntry, ImportParams) (int, error)
 }
 

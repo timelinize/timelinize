@@ -72,7 +72,8 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	defer file.Close()
 
 	buf := bufPool.Get().([]byte)
-	defer bufPool.Put(buf[:len(buf)]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice)
+	//nolint:gofmt,gosimple,staticcheck
+	defer bufPool.Put(buf[:len(buf)]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice) -- WOW the linters hate this one
 
 	// read the first few bytes to see if it looks like a legit vcard; ignore empty or short files
 	_, err = io.ReadFull(file, buf)

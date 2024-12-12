@@ -368,7 +368,7 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 	// for some reason, on Windows, requesting the file listing of "C:" shows
 	// the contents of C:\Windows\system32, but requesting "C:\" works fine; so
 	// let's go ahead and fix that, shall we?
-	if runtime.GOOS == "windows" && len(listingReq.Path) == 2 && listingReq.Path[1] == ':' {
+	if runtime.GOOS == osWindows && len(listingReq.Path) == 2 && listingReq.Path[1] == ':' {
 		listingReq.Path += `\`
 	}
 

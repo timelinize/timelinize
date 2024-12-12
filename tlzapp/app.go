@@ -157,14 +157,19 @@ func (a *App) MustServe(adminAddr string) error {
 
 // TODO: This is not ideal, but I'm just throwing this together temporarily to get us up and running quickly and easily.
 // We should have a less externally-dependent way of getting this running. :)
-func installPython() error {
+func installPython(ctx context.Context) error {
 	if _, err := exec.LookPath("uv"); err == nil {
 		return nil
 	}
 
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		resp, err := http.Get("https://astral.sh/uv/install.sh")
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://astral.sh/uv/install.sh", nil)
+		if err != nil {
+			return err
+		}
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return err
 		}
@@ -199,7 +204,7 @@ func installPython() error {
 		// TODO: Figure out how to update the PATH or at least get the 'uv' path so we can execute it right away;
 		// currently we have to restart the shell Timelinize is running in
 
-	case "windows":
+	case osWindows:
 		cmd := exec.Command("powershell", "-c", "irm https://astral.sh/uv/install.ps1 | iex")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -226,7 +231,7 @@ func startMLServer() error {
 
 func (a *App) serve(adminAddr string) error {
 	// TODO: Eventually this will be configurable, but seems like a good idea to do at first
-	if err := installPython(); err != nil {
+	if err := installPython(a.ctx); err != nil {
 		return fmt.Errorf("setting up ML environment: %w", err)
 	}
 
@@ -523,5 +528,7 @@ func (vrw *virtualResponseWriter) Write(data []byte) (int, error) {
 }
 
 const lowestErrorStatus = 400
+
+const osWindows = "windows"
 
 const defaultAdminAddr = "127.0.0.1:12002"

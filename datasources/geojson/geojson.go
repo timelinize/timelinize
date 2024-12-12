@@ -84,8 +84,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	}
 
 	// recognize by file extension
-	switch strings.ToLower(path.Ext(dirEntry.Name())) {
-	case ".geojson":
+	if strings.ToLower(path.Ext(dirEntry.Name())) == ".geojson" {
 		rec.Confidence = 1
 	}
 

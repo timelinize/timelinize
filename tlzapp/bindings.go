@@ -600,7 +600,8 @@ func (a App) Import(params ImportParameters) (int64, error) {
 	}
 	// queue job for a brief period to allow UI to render job page first and to help
 	// user get their bearings
-	return tl.CreateJob(params.Job, time.Now().Add(5*time.Second), 0, 0, 0)
+	const queueDuration = 5 * time.Second
+	return tl.CreateJob(params.Job, time.Now().Add(queueDuration), 0, 0, 0)
 }
 
 func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {

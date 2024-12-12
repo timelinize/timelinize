@@ -1038,41 +1038,6 @@ func DownloadData(url string) DataFunc {
 	}
 }
 
-// ctxKey is used for contexts, as recommended by
-// https://golang.org/pkg/context/#WithValue. It
-// is unexported so values stored by this package
-// can only be accessed by this package.
-type ctxKey string
-
-// processorCtxKey is how the context value is accessed.
-var processorCtxKey ctxKey = "processor"
-
-// // Checkpoint saves a checkpoint for the processing associated
-// // with the provided context. It overwrites any previous
-// // checkpoint. Any errors are logged.
-// // TODO: get proper logger
-// func checkpoint(ctx context.Context, checkpoint any) {
-// 	proc, ok := ctx.Value(processorCtxKey).(*processor)
-// 	if !ok {
-// 		log.Printf("[ERROR]Checkpoint function not available; got type %T (%#v)",
-// 			proc, proc)
-// 		return
-// 	}
-
-// 	chkpt, err := MarshalGob(Checkpoint{proc.commandParams, checkpoint})
-// 	if err != nil {
-// 		log.Printf("[ERROR] Encoding checkpoint wrapper: %w", err)
-// 		return
-// 	}
-
-// 	_, err = proc.tl.db.Exec(`UPDATE jobs SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
-// 		chkpt, proc.imp.ID)
-// 	if err != nil {
-// 		log.Printf("[ERROR] Checkpoint: %w", err)
-// 		return
-// 	}
-// }
-
 // ProcessingOptions configures how item processing is carried out.
 type ProcessingOptions struct {
 	// Whether to perform integrity checks
@@ -1095,7 +1060,7 @@ type ProcessingOptions struct {
 	ItemFieldUpdates map[string]fieldUpdatePolicy `json:"item_field_updates,omitempty"`
 
 	// TODO: WIP
-	Interactive bool
+	Interactive bool `json:"interactive,omitempty"`
 }
 
 func (po ProcessingOptions) IsEmpty() bool {

@@ -165,7 +165,6 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 
 		return nil
 	})
-
 }
 
 // NextLocation returns the next available point from the XML document.

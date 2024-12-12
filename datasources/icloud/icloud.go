@@ -69,7 +69,7 @@ const (
 )
 
 // Recognize returns whether the file or folder is supported.
-func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	if dirEntry.Name() != icloudInfoZip &&
 		dirEntry.Name() != icloudContactsZip &&
 		dirEntry.Name() != icloudPhotosZip &&

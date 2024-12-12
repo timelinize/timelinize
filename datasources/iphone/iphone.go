@@ -74,7 +74,7 @@ type FileImporter struct {
 }
 
 // Recognize returns whether the folder is recognized.
-func (FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	var found, total int
 	for _, filename := range []string{
 		"Manifest.db",

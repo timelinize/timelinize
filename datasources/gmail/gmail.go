@@ -95,7 +95,7 @@ func (c *Client) Authenticate(ctx context.Context, acc timeline.Account, _ any) 
 
 // APIImport conducts an import using the service's API.
 // opt.Timeframe precision is day-level at best.
-func (c *Client) APIImport(ctx context.Context, account timeline.Account, itemChan chan<- *timeline.Graph, opt timeline.ImportParams) error { //nolint // TODO: WIP
+func (c *Client) APIImport(ctx context.Context, _ timeline.Account, _ timeline.ImportParams) error {
 	// TODO: load any previous checkpoint
 
 	for {
