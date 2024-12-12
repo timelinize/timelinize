@@ -436,7 +436,7 @@ function connectLog() {
 			$('.import-stream-row-data-source', rowElem).innerText = l.data_source_name ? tlz.dataSources[l.data_source_name].title : "";
 			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "n/a";
 			$('.import-stream-row-entity', rowElem).innerText = l.entity || "";
-			$('.import-stream-row-content', rowElem).innerText = l.preview || "";
+			$('.import-stream-row-content', rowElem).innerText = l.preview || l.filename || "";
 			$('.import-stream-row-timestamp', rowElem).innerText = l.item_timestamp ? DateTime.fromSeconds(l.item_timestamp).toLocaleString(DateTime.DATETIME_SHORT_WITH_SECONDS) : "";
 			$('.import-stream-row-location', rowElem).innerText = location;
 			// $('.import-stream-row-content-type', rowElem).innerText = l.media_type || "";
@@ -445,7 +445,8 @@ function connectLog() {
 			
 			$('tbody', tableElem).prepend(rowElem);
 
-			for (let i = 25; i < $$('tbody tr', tableElem).length; i++) {
+			const MAX_STREAM_TABLE_ROWS = 15;
+			for (let i = MAX_STREAM_TABLE_ROWS; i < $$('tbody tr', tableElem).length; i++) {
 				$$('tbody tr', tableElem)[i].remove();
 			}
 		}

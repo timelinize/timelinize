@@ -61,7 +61,7 @@ func newLogger() *zap.Logger {
 	const firstNMsgs, everyNthMsg = 10, 100
 	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
 
-	return zap.New(&customCore{core})
+	return zap.New(&customCore{Core: core, streamCore: zapcore.NewSamplerWithOptions(core, 250*time.Millisecond, 1, 0)})
 }
 
 // multiConnWriter is like io.multiWriter from the standard lib,
@@ -138,12 +138,16 @@ func RemoveLogConn(conn *websocket.Conn) {
 // customCore wraps another zapcore.Core and prevents sampling based on logger name.
 type customCore struct {
 	zapcore.Core
+	streamCore zapcore.Core
 }
 
 func (c *customCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
 	if ent.LoggerName == "job.status" {
 		// always allow through, no sampling -- otherwise UI gets out of sync
-		return ce.AddCore(ent, c)
+		return ce.AddCore(ent, c.Core)
+	}
+	if ent.LoggerName == "job.action" && ent.Message == "finished graph" {
+		return c.streamCore.Check(ent, ce)
 	}
 	return c.Core.Check(ent, ce)
 }

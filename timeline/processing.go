@@ -334,6 +334,7 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 				zap.String("status", string(g.Item.row.howStored)),
 				zap.String("classification", g.Item.Classification.Name),
 				zap.String("preview", g.Item.dataTextPreview),
+				zap.String("filename", g.Item.dataFileName),
 				zap.Int("text_size", g.Item.contentLen),
 				zap.Int64("file_size", g.Item.dataFileSize),
 				zap.Float64p("lat", g.Item.Location.Latitude),
@@ -342,8 +343,9 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 				entityAttr(g.Item.Owner))
 		}
 		if g.Entity != nil {
-			l = l.With(zap.Int64("row_id", g.Entity.ID))
-			l = l.With(entityAttr(*g.Entity))
+			l = l.With(
+				zap.Int64("row_id", g.Entity.ID),
+				entityAttr(*g.Entity))
 		}
 		l.Info("finished graph")
 	}()
@@ -361,61 +363,8 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 		return latentID{}, fmt.Errorf("ambiguous node in graph is both an item and entity node (item_graph=%p)", ig)
 	}
 
-	var rowID latentID
-	// var howStored itemStoreResult
-
-	// start := time.Now()
-	// defer func() {
-	// 	duration := time.Since(start)
-	// 	graphType := "item"
-	// 	if ig.Entity != nil {
-	// 		graphType = "entity"
-	// 	}
-	// 	l := p.log.With(
-	// 		zap.Int("worker", state.worker),
-	// 		zap.String("graph", fmt.Sprintf("%p", ig)),
-	// 		zap.String("type", graphType),
-	// 		zap.Int64("row_id", rowID.id()),
-	// 		zap.Duration("duration", duration),
-	// 		zap.String("how_stored", string(howStored)),
-	// 		zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
-	// 		zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
-	// 		zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
-	// 		zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
-	// 		zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
-	// 	)
-	// 	if ig.Item != nil && !ig.Item.Timestamp.IsZero() {
-	// 		l = l.With(zap.Time("item_timestamp", ig.Item.Timestamp))
-	// 	}
-	// 	entityID := func(e Entity) zapcore.Field {
-	// 		if e.Name != "" {
-	// 			return zap.String("entity", e.Name)
-	// 		}
-	// 		for _, attr := range e.Attributes {
-	// 			if attr.Identifying || attr.Identity {
-	// 				return zap.Any("entity", attr.Value)
-	// 			}
-	// 		}
-	// 		return zap.Stringp("entity", nil)
-	// 	}
-	// 	if ig.Item != nil {
-	// 		l = l.With(
-	// 			zap.String("classification", ig.Item.Classification.Name),
-	// 			zap.String("preview", ig.Item.dataTextPreview),
-	// 			zap.Int("text_size", ig.Item.contentLen),
-	// 			zap.Int64("file_size", ig.Item.dataFileSize),
-	// 			zap.Float64p("lat", ig.Item.Location.Latitude),
-	// 			zap.Float64p("lon", ig.Item.Location.Longitude),
-	// 			zap.String("media_type", ig.Item.Content.MediaType),
-	// 			entityID(ig.Item.Owner))
-	// 	}
-	// 	if ig.Entity != nil {
-	// 		l = l.With(entityID(*ig.Entity))
-	// 	}
-	// 	l.Info("finished graph")
-	// }()
-
 	// process root node
+	var rowID latentID
 	switch {
 	case ig.Entity != nil:
 		var err error
@@ -425,7 +374,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 		}
 	case ig.Item != nil:
 		var err error
-		rowID, _, err = p.processItem(ctx, tx, ig.Item, state)
+		rowID, err = p.processItem(ctx, tx, ig.Item, state)
 		if err != nil {
 			return latentID{}, fmt.Errorf("processing item node: %w", err)
 		}
@@ -459,7 +408,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 	return rowID, nil
 }
 
-func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state *recursiveState) (latentID, itemStoreResult, error) {
+func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state *recursiveState) (latentID, error) {
 	// skip item if outside of timeframe (data source should do this for us, but
 	// ultimately we should enforce it: it just means the data source is being
 	// less efficient than it could be)
@@ -472,27 +421,26 @@ func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state
 				zap.Timep("tf_until", state.procOpt.Timeframe.Until),
 				zap.Time("item_timestamp", it.Timestamp),
 			)
-			return latentID{}, "", errors.New("item is outside of designated timeframe")
+			return latentID{}, errors.New("item is outside of designated timeframe")
 		}
 
 		// end time must come after start time
 		if !it.Timespan.IsZero() && !it.Timespan.After(it.Timestamp) {
-			return latentID{}, "", fmt.Errorf("item's ending timespan is not after its starting timestamp (item_id=%s timestamp=%s timespan=%s)",
+			return latentID{}, fmt.Errorf("item's ending timespan is not after its starting timestamp (item_id=%s timestamp=%s timespan=%s)",
 				it.ID, it.Timestamp, it.Timespan)
 		}
 	}
 
-	itemRowID, howStored, err := p.storeItem(ctx, tx, it)
+	itemRowID, err := p.storeItem(ctx, tx, it)
 	if err != nil {
-		return latentID{itemID: itemRowID}, howStored, err
+		return latentID{itemID: itemRowID}, err
 	}
-	it.row.howStored = howStored
 
-	return latentID{itemID: itemRowID}, howStored, nil
+	return latentID{itemID: itemRowID}, nil
 }
 
 // TODO: godoc about return value of 0, nil
-func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64, itemStoreResult, error) {
+func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64, error) {
 	// keep count of number of items processed, mainly for logging
 	defer atomic.AddInt64(p.ij.itemCount, 1)
 
@@ -503,7 +451,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	if it.Content.Data != nil {
 		rc, err := it.Content.Data(ctx)
 		if err != nil {
-			return 0, "", fmt.Errorf("getting item's data stream: %w (item_id=%s)", err, it.ID)
+			return 0, fmt.Errorf("getting item's data stream: %w (item_id=%s)", err, it.ID)
 		}
 		if rc != nil {
 			it.dataFileIn = rc
@@ -567,7 +515,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 
 				n, err := io.ReadFull(it.dataFileIn, buf)
 				if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-					return 0, "", fmt.Errorf("buffering item's data stream to peek size: %w", err)
+					return 0, fmt.Errorf("buffering item's data stream to peek size: %w", err)
 				}
 				const previewMax = 25
 				if n == len(buf) {
@@ -623,7 +571,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// if the item is already in our DB, load it
 	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true)
 	if err != nil {
-		return 0, "", fmt.Errorf("looking up item in database: %w", err)
+		return 0, fmt.Errorf("looking up item in database: %w", err)
 	}
 	if ir.ID > 0 {
 		// found it in our DB; skip it?
@@ -640,7 +588,9 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 				zap.Int64("row_id", ir.ID),
 				zap.String("filename", it.Content.Filename),
 				zap.String("item_original_id", it.ID))
-			return ir.ID, itemSkipped, nil
+			ir.howStored = itemSkipped
+			it.row = ir
+			return ir.ID, nil
 		}
 		processDataFile = reprocessDataFile
 
@@ -652,7 +602,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 			bakFile := p.tl.FullPath(*ir.DataFile + ".bak")
 			err = os.Rename(origFile, bakFile)
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return 0, "", fmt.Errorf("temporarily moving data file: %w", err)
+				return 0, fmt.Errorf("temporarily moving data file: %w", err)
 			}
 
 			// if this function returns with an error,
@@ -684,7 +634,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	if processDataFile {
 		it.dataFileOut, it.dataFileName, err = p.tl.openUniqueCanonicalItemDataFile(tx, p.log, it, p.ds.Name)
 		if err != nil {
-			return 0, "", fmt.Errorf("opening output data file: %w", err)
+			return 0, fmt.Errorf("opening output data file: %w", err)
 		}
 	}
 
@@ -693,7 +643,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 
 	err = p.fillItemRow(ctx, tx, &ir, it)
 	if err != nil {
-		return 0, "", fmt.Errorf("assembling item for storage: %w", err)
+		return 0, fmt.Errorf("assembling item for storage: %w", err)
 	}
 
 	// run the database query to insert or update the item (and clean up data file if it was changed to NULL),
@@ -701,15 +651,14 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// with its original ID, we can still link a relationship, but if the incoming item has no content we
 	// should not zero out any existing version of the item in the database; the intent by the data source is
 	// to merely link the item by ID (or create a placeholder item), not zero it out!
-	var howStored itemStoreResult
-	ir.ID, howStored, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), updateOverrides)
+	ir.ID, ir.howStored, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), updateOverrides)
 	if err != nil {
-		return 0, "", fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
+		return 0, fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
 	}
 
 	it.row = ir
 
-	return ir.ID, howStored, nil
+	return ir.ID, nil
 }
 
 type itemStoreResult string
