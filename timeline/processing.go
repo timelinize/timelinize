@@ -40,6 +40,7 @@ import (
 
 	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -48,7 +49,7 @@ const (
 	// not a maximum, due to the recursive and inter-related nature
 	// of item graphs -- hopefully data sources don't send graphs
 	// too big for available memory
-	batchSize = 10
+	batchSize = 50
 
 	// don't want too many workers because they can starve other
 	// imports happening at the same time, especially if one import
@@ -308,15 +309,22 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 	}
 
 	var rowID latentID
+	var howStored itemStoreResult
 
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
+		graphType := "item"
+		if ig.Entity != nil {
+			graphType = "entity"
+		}
 		l := p.log.With(
 			zap.Int("worker", state.worker),
 			zap.String("graph", fmt.Sprintf("%p", ig)),
+			zap.String("type", graphType),
 			zap.Int64("row_id", rowID.id()),
 			zap.Duration("duration", duration),
+			zap.String("how_stored", string(howStored)),
 			zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
 			zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
 			zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
@@ -326,10 +334,32 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 		if ig.Item != nil && !ig.Item.Timestamp.IsZero() {
 			l = l.With(zap.Time("item_timestamp", ig.Item.Timestamp))
 		}
-		if ig.Entity != nil {
-			l = l.With(zap.String("entity_name", ig.Entity.Name))
+		entityID := func(e Entity) zapcore.Field {
+			if e.Name != "" {
+				return zap.String("entity", e.Name)
+			}
+			for _, attr := range e.Attributes {
+				if attr.Identifying || attr.Identity {
+					return zap.Any("entity", attr.Value)
+				}
+			}
+			return zap.Stringp("entity", nil)
 		}
-		l.Debug("finished graph")
+		if ig.Item != nil {
+			l = l.With(
+				zap.String("classification", ig.Item.Classification.Name),
+				zap.String("preview", ig.Item.dataTextPreview),
+				zap.Int("text_size", ig.Item.contentLen),
+				zap.Int64("file_size", ig.Item.dataFileSize),
+				zap.Float64p("lat", ig.Item.Location.Latitude),
+				zap.Float64p("lon", ig.Item.Location.Longitude),
+				zap.String("media_type", ig.Item.Content.MediaType),
+				entityID(ig.Item.Owner))
+		}
+		if ig.Entity != nil {
+			l = l.With(entityID(*ig.Entity))
+		}
+		l.Info("finished graph")
 	}()
 
 	// process root node
@@ -342,7 +372,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 		}
 	case ig.Item != nil:
 		var err error
-		rowID, err = p.processItem(ctx, tx, ig.Item, state)
+		rowID, howStored, err = p.processItem(ctx, tx, ig.Item, state)
 		if err != nil {
 			return latentID{}, fmt.Errorf("processing item node: %w", err)
 		}
@@ -376,7 +406,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 	return rowID, nil
 }
 
-func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state *recursiveState) (latentID, error) {
+func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state *recursiveState) (latentID, itemStoreResult, error) {
 	// skip item if outside of timeframe (data source should do this for us, but
 	// ultimately we should enforce it: it just means the data source is being
 	// less efficient than it could be)
@@ -389,26 +419,26 @@ func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state
 				zap.Timep("tf_until", state.procOpt.Timeframe.Until),
 				zap.Time("item_timestamp", it.Timestamp),
 			)
-			return latentID{}, errors.New("item is outside of designated timeframe")
+			return latentID{}, "", errors.New("item is outside of designated timeframe")
 		}
 
 		// end time must come after start time
 		if !it.Timespan.IsZero() && !it.Timespan.After(it.Timestamp) {
-			return latentID{}, fmt.Errorf("item's ending timespan is not after its starting timestamp (item_id=%s timestamp=%s timespan=%s)",
+			return latentID{}, "", fmt.Errorf("item's ending timespan is not after its starting timestamp (item_id=%s timestamp=%s timespan=%s)",
 				it.ID, it.Timestamp, it.Timespan)
 		}
 	}
 
-	itemRowID, err := p.storeItem(ctx, tx, it)
+	itemRowID, howStored, err := p.storeItem(ctx, tx, it)
 	if err != nil {
-		return latentID{itemID: itemRowID}, err
+		return latentID{itemID: itemRowID}, howStored, err
 	}
 
-	return latentID{itemID: itemRowID}, nil
+	return latentID{itemID: itemRowID}, howStored, nil
 }
 
 // TODO: godoc about return value of 0, nil
-func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64, error) {
+func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64, itemStoreResult, error) {
 	// keep count of number of items processed, mainly for logging
 	defer atomic.AddInt64(p.ij.itemCount, 1)
 
@@ -419,7 +449,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	if it.Content.Data != nil {
 		rc, err := it.Content.Data(ctx)
 		if err != nil {
-			return 0, fmt.Errorf("getting item's data stream: %w (item_id=%s)", err, it.ID)
+			return 0, "", fmt.Errorf("getting item's data stream: %w (item_id=%s)", err, it.ID)
 		}
 		if rc != nil {
 			it.dataFileIn = rc
@@ -483,12 +513,18 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 
 				n, err := io.ReadFull(it.dataFileIn, buf)
 				if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-					return 0, fmt.Errorf("buffering item's data stream to peek size: %w", err)
+					return 0, "", fmt.Errorf("buffering item's data stream to peek size: %w", err)
 				}
+				const previewMax = 25
 				if n == len(buf) {
 					// content is at least as large as our buffer, so it probably belongs on disk;
 					// recover the bytes we already buffered when we go to write the file
 					processDataFile = true
+					if n > previewMax {
+						it.dataTextPreview = string(buf[:previewMax])
+					} else {
+						it.dataTextPreview = string(buf)
+					}
 					it.dataFileIn = io.NopCloser(io.MultiReader(bytes.NewReader(buf), it.dataFileIn))
 				} else if n > 0 {
 					// NOTE: We trim leading/trailing spaces for this because it can be hard
@@ -496,7 +532,13 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 					// especially for short text content stored in the DB
 					dataTextStr := string(buf[:n])
 					dataTextStr = strings.TrimSpace(dataTextStr)
+					if len(dataTextStr) > previewMax {
+						it.dataTextPreview = dataTextStr[:previewMax]
+					} else {
+						it.dataTextPreview = dataTextStr
+					}
 					it.dataText = &dataTextStr
+					it.contentLen = len(dataTextStr)
 				}
 			} else {
 				processDataFile = true
@@ -527,7 +569,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// if the item is already in our DB, load it
 	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true)
 	if err != nil {
-		return 0, fmt.Errorf("looking up item in database: %w", err)
+		return 0, "", fmt.Errorf("looking up item in database: %w", err)
 	}
 	if ir.ID > 0 {
 		// found it in our DB; skip it?
@@ -544,7 +586,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 				zap.Int64("row_id", ir.ID),
 				zap.String("filename", it.Content.Filename),
 				zap.String("item_original_id", it.ID))
-			return ir.ID, nil
+			return ir.ID, itemSkipped, nil
 		}
 		processDataFile = reprocessDataFile
 
@@ -556,7 +598,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 			bakFile := p.tl.FullPath(*ir.DataFile + ".bak")
 			err = os.Rename(origFile, bakFile)
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return 0, fmt.Errorf("temporarily moving data file: %w", err)
+				return 0, "", fmt.Errorf("temporarily moving data file: %w", err)
 			}
 
 			// if this function returns with an error,
@@ -588,7 +630,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	if processDataFile {
 		it.dataFileOut, it.dataFileName, err = p.tl.openUniqueCanonicalItemDataFile(tx, p.log, it, p.ds.Name)
 		if err != nil {
-			return 0, fmt.Errorf("opening output data file: %w", err)
+			return 0, "", fmt.Errorf("opening output data file: %w", err)
 		}
 	}
 
@@ -597,7 +639,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 
 	err = p.fillItemRow(ctx, tx, &ir, it)
 	if err != nil {
-		return 0, fmt.Errorf("assembling item for storage: %w", err)
+		return 0, "", fmt.Errorf("assembling item for storage: %w", err)
 	}
 
 	// run the database query to insert or update the item (and clean up data file if it was changed to NULL),
@@ -605,15 +647,24 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// with its original ID, we can still link a relationship, but if the incoming item has no content we
 	// should not zero out any existing version of the item in the database; the intent by the data source is
 	// to merely link the item by ID (or create a placeholder item), not zero it out!
-	ir.ID, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), updateOverrides)
+	var howStored itemStoreResult
+	ir.ID, howStored, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), updateOverrides)
 	if err != nil {
-		return 0, fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
+		return 0, "", fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
 	}
 
 	it.row = ir
 
-	return ir.ID, nil
+	return ir.ID, howStored, nil
 }
+
+type itemStoreResult string
+
+const (
+	itemInserted itemStoreResult = "inserted"
+	itemSkipped  itemStoreResult = "skipped"
+	itemUpdated  itemStoreResult = "updated"
+)
 
 type recursiveState struct {
 	worker  int
@@ -1283,7 +1334,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it
 }
 
 // insertOrUpdateItem inserts the fully-populated ir into the database (TODO: finish godoc)
-func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool, updateOverrides map[string]fieldUpdatePolicy) (int64, error) {
+func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool, updateOverrides map[string]fieldUpdatePolicy) (int64, itemStoreResult, error) {
 	// new item? insert it
 	if ir.ID == 0 {
 		var rowID int64
@@ -1309,14 +1360,14 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 		atomic.AddInt64(p.ij.newItemCount, 1)
 
-		return rowID, err
+		return rowID, itemInserted, err
 	}
 
 	// existing item; update it
 
 	// ...only if any fields are configured to be updated
 	if len(p.ij.ProcessingOptions.ItemFieldUpdates) == 0 && len(updateOverrides) == 0 {
-		return ir.ID, nil
+		return ir.ID, itemSkipped, nil
 	}
 
 	var sb strings.Builder
@@ -1437,7 +1488,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	// apply update overrides first
 	for field, policy := range updateOverrides {
 		if err := applyUpdatePolicy(field, policy); err != nil {
-			return 0, err
+			return 0, "", err
 		}
 	}
 
@@ -1448,7 +1499,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			continue
 		}
 		if err := applyUpdatePolicy(field, policy); err != nil {
-			return 0, err
+			return 0, "", err
 		}
 	}
 
@@ -1457,7 +1508,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 	_, err := tx.ExecContext(ctx, sb.String(), args...)
 	if err != nil {
-		return 0, fmt.Errorf("updating item row: %w", err)
+		return 0, "", fmt.Errorf("updating item row: %w", err)
 	}
 
 	// if there's a chance that we just set the data_file to NULL, check to see if the
@@ -1473,7 +1524,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 	atomic.AddInt64(p.ij.updatedItemCount, 1)
 
-	return ir.ID, nil
+	return ir.ID, itemUpdated, nil
 }
 
 // detectContentType strives to detect the media type of the item using the

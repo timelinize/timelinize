@@ -243,6 +243,10 @@ type Item struct {
 	// sources should set Content instead; NOT these!
 	dataText *string
 
+	// TODO: Experimental; used solely for logging & live updates
+	dataTextPreview string
+	contentLen      int
+
 	// state for processing pipeline phases
 	row          ItemRow
 	dataFileIn   io.ReadCloser

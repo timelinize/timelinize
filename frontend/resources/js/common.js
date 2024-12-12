@@ -267,8 +267,9 @@ setInterval(function() {
 //
 // This function wraps Luxon's toHuman() with more sensible behavior. It prints milliseconds
 // only if the duration < 1s, and only prints non-zero units. It also prints whole numbers,
-// not fractions, and passes opts through to toHuman(), which are the same as those available
-// with the standard Intl.NumberFormat constructor (see Luxon's toHuman() docs).
+// not fractions (unless the duration is <1 ms), and passes opts through to toHuman(), which
+// are the same as those available with the standard Intl.NumberFormat constructor (see Luxon's
+// toHuman() docs).
 //
 // Based on the workaround by seyeong on GitHub: https://github.com/moment/luxon/issues/1134#issuecomment-1637008762
 function betterToHuman(luxonDuration, opts) {
@@ -284,7 +285,12 @@ function betterToHuman(luxonDuration, opts) {
 		delete cleanedDuration.milliseconds;
 	}
 
-	return Duration.fromObject(cleanedDuration).toHuman({ maximumFractionDigits: 0, opts });
+	let digits = 0;
+	if (cleanedDuration.milliseconds < 1.0) {
+		digits = 3;
+	}
+
+	return Duration.fromObject(cleanedDuration).toHuman({ maximumFractionDigits: digits, ...opts });
 }
 
 // assignJobElements adds the .job-id-* class to the job-related
@@ -313,7 +319,8 @@ function assignJobElements(containerElem, job) {
 		.cancel-job,
 		#subsequent-jobs-container,
 		#parent-job-container,
-		#throughput-chart-container`, containerElem)) {
+		#throughput-chart-container,
+		.job-import-stream`, containerElem)) {
 		elem.classList.add(jobIDClass);
 	}
 	containerElem.classList.add(jobIDClass);
@@ -381,6 +388,66 @@ function connectLog() {
 			jobProgressUpdate(l);
 
 			return;
+		}
+
+		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.id}`)) {
+			const tableElem = $(`.job-import-stream.job-id-${l.id}`);
+			const rowElem = cloneTemplate('#tpl-job-import-stream-row');
+
+			let location = l?.lat?.toFixed(4) || "";
+			if (l.lon) {
+				if (location != "") location += ", ";
+				location += l.lon.toFixed(4);
+			}
+
+			let howStored = '<span class="badge bg-red me-1"></span> Interrupted';
+			if (l.how_stored == 'inserted') {
+				howStored = '<span class="badge bg-green me-1"></span> New';
+			} else if (l.how_stored == 'skipped') {
+				howStored = '<span class="badge bg-secondary me-1"></span> Skipped';
+			} else if (l.how_stored == 'updated') {
+				howStored = '<span class="badge bg-blue me-1"></span> Updated';
+			} else if (l.type == "entity") {
+				howStored = '<span class="badge bg-purple me-1"></span> Processed';
+			}
+
+			let graphType = "";
+			if (l.type == "item") {
+				graphType = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+						stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+						class="icon icon-tabler icons-tabler-outline icon-tabler-file">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+						<path d="M14 3v4a1 1 0 0 0 1 1h4" />
+						<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+					</svg> Item`;
+			} else if (l.type == "entity") {
+				graphType = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+						stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+						class="icon icon-tabler icons-tabler-outline icon-tabler-user">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+						<path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" />
+						<path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
+					</svg> Entity`;
+			}
+
+			$('.import-stream-row-id', rowElem).innerText = l.row_id || "";
+			$('.import-stream-row-type', rowElem).innerHTML = graphType;
+			$('.import-stream-row-status', rowElem).innerHTML = howStored;
+			$('.import-stream-row-data-source', rowElem).innerText = l.data_source_name ? tlz.dataSources[l.data_source_name].title : "";
+			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "n/a";
+			$('.import-stream-row-entity', rowElem).innerText = l.entity || "";
+			$('.import-stream-row-content', rowElem).innerText = l.preview || "";
+			$('.import-stream-row-timestamp', rowElem).innerText = l.item_timestamp ? DateTime.fromSeconds(l.item_timestamp).toLocaleString(DateTime.DATETIME_SHORT_WITH_SECONDS) : "";
+			$('.import-stream-row-location', rowElem).innerText = location;
+			$('.import-stream-row-content-type', rowElem).innerText = l.media_type || "";
+			$('.import-stream-row-size', rowElem).innerText = l.text_size || l.file_size || "";
+			$('.import-stream-row-duration', rowElem).innerText = l.duration ? betterToHuman(Duration.fromMillis(l.duration*1000), { unitDisplay: 'short' }) : "-";
+			
+			$('tbody', tableElem).prepend(rowElem);
+
+			for (let i = 25; i < $$('tbody tr', tableElem).length; i++) {
+				$$('tbody tr', tableElem)[i].remove();
+			}
 		}
 	};
 	logSocket.onclose = function(event) {
@@ -800,9 +867,6 @@ function jobProgressUpdate(job) {
 			}
 		}
 		for (elem of $$(`.job-progress-text-detailed.job-id-${job.id}`)) {
-			// if (job.progress == null) {
-			// 	elem.innerText = "0";
-			// } else {
 			if (job.progress != null) {
 				const total = job.state == "succeeded" ? job.progress.toLocaleString() : "?";
 				elem.innerText = `${job.progress.toLocaleString()} / ${total}`;

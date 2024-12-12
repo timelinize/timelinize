@@ -54,10 +54,10 @@ func newLogger() *zap.Logger {
 
 	core := zapcore.NewTee(
 		zapcore.NewCore(consoleEncoder, consoleOut, zap.DebugLevel), // TODO: keep at debug? make this optional?
-		zapcore.NewCore(jsonEncoder, websocketsOut, zap.InfoLevel),
+		zapcore.NewCore(jsonEncoder, websocketsOut, zap.InfoLevel),  // sent to web frontend / UI
 	)
 
-	// avoid a firehose of logs (TODO: maybe only sample for certain logs named something...?)
+	// avoid a firehose of logs
 	const firstNMsgs, everyNthMsg = 10, 100
 	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
 

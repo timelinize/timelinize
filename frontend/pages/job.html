@@ -107,19 +107,6 @@
 							</div>
 						</div>
 					</div>
-
-					<div class="col-12">
-						<div class="card">
-							<div class="card-header">
-								<h3 class="card-title">Recently processed</h3>
-								<div class="text-secondary ms-3">(sampled)</div>
-							</div>
-							<div class="card-body">
-								TODO
-							</div>
-						</div>
-					</div>
-
 				</div>
 			</div>
 
@@ -167,22 +154,71 @@
 				</div>
 			</div>
 
+			<div class="col-12">
+				<div class="card">
+					<div class="card-header">
+						<h3 class="card-title">Recently processed</h3>
+						<div class="text-secondary ms-3">(sampled)</div>
+					</div>						
+
+						<div class="table-responsive">
+							<table class="table card-table table-vcenter text-nowrap datatable job-import-stream">
+								<thead>
+									<tr>
+										<th class="w-1">ID</th>
+										<th class="w-1">Type</th>
+										<th>Status</th>
+										<th>Data source</th>
+										<th>Classification</th>
+										<th>Entity</th>
+										<th>Content</th>
+										<th>Timestamp</th>
+										<th>Location</th>
+										<th>Content type</th>
+										<th>Size</th>
+										<th>Duration</th>
+									</tr>
+								</thead>
+								<tbody>
+
+								</tbody>
+							</table>
+						</div>
+
+				</div>
+			</div>
+
 		</div>
 	</div>
 </div>
-</div>
 
+<template id="tpl-job-import-stream-row">
+	<tr>
+		<td><span class="text-secondary import-stream-row-id"></span></td>
+		<td class="import-stream-row-type"></td>
+		<td class="import-stream-row-status"></td>
+		<td class="import-stream-row-data-source"></td>
+		<td class="import-stream-row-class"></td>
+		<td class="import-stream-row-entity"></td>
+		<td class="import-stream-row-content"></td>
+		<td class="import-stream-row-timestamp"></td>
+		<td class="import-stream-row-location"></td>
+		<td class="import-stream-row-content-type"></td>
+		<td class="import-stream-row-size"></td>
+		<td class="import-stream-row-duration"></td>
+	</tr>
+</template>
 
 <div id="modal-job-config" class="modal modal-blur fade" tabindex="-1" aria-hidden="true">
 	<div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable" role="document">
-	  <div class="modal-content">
-		<div class="modal-header">
-		  <h5 class="modal-title">Job configuration</h5>
-		  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Job configuration</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body">
+				<pre><code class="job-config-code"></code></pre>
+			</div>
 		</div>
-		<div class="modal-body">
-			<pre><code class="job-config-code"></code></pre>
-		</div>
-	  </div>
 	</div>
-  </div>
+</div>
