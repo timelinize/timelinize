@@ -419,8 +419,8 @@ setInterval(function() {
 		
 		const chartContainer = $(`#throughput-chart-container.job-id-${jobID}`);
 		if (chartContainer) {
-			// TODO: Maybe change this to be the total mean through the life of the job
-			$('.throughput-rate', chartContainer).innerText = throughputSinceLastPaint;
+			// this element shows the mean throughput over the entire chart data
+			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, val) => sum+val.y, 0) / chartData.length).toFixed(1).replace(".0", "");
 			$('#chart-active-job-throughput', chartContainer).apexchart?.updateOptions({
 				series: stats.chartSeries,
 				xaxis: {
@@ -445,6 +445,7 @@ function jobProgressUpdate(job) {
 			latestProgress: 0, // will be set immediately below
 			progressAtLastPaint: job.progress || 0,
 			secondsSinceStart: 0,
+			overallMeanThroughput: 0,
 			live: job.state == "started",
 			window: [],
 			chartSeries: [
@@ -799,9 +800,10 @@ function jobProgressUpdate(job) {
 			}
 		}
 		for (elem of $$(`.job-progress-text-detailed.job-id-${job.id}`)) {
-			if (job.progress == null) {
-				elem.innerText = "0";
-			} else {
+			// if (job.progress == null) {
+			// 	elem.innerText = "0";
+			// } else {
+			if (job.progress != null) {
 				const total = job.state == "succeeded" ? job.progress.toLocaleString() : "?";
 				elem.innerText = `${job.progress.toLocaleString()} / ${total}`;
 			}
