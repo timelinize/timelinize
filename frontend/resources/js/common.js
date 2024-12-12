@@ -401,11 +401,11 @@ function connectLog() {
 			}
 
 			let howStored = '<span class="badge bg-red me-1"></span> Interrupted';
-			if (l.how_stored == 'inserted') {
+			if (l.status == 'inserted') {
 				howStored = '<span class="badge bg-green me-1"></span> New';
-			} else if (l.how_stored == 'skipped') {
+			} else if (l.status == 'skipped') {
 				howStored = '<span class="badge bg-secondary me-1"></span> Skipped';
-			} else if (l.how_stored == 'updated') {
+			} else if (l.status == 'updated') {
 				howStored = '<span class="badge bg-blue me-1"></span> Updated';
 			} else if (l.type == "entity") {
 				howStored = '<span class="badge bg-purple me-1"></span> Processed';
@@ -439,9 +439,9 @@ function connectLog() {
 			$('.import-stream-row-content', rowElem).innerText = l.preview || "";
 			$('.import-stream-row-timestamp', rowElem).innerText = l.item_timestamp ? DateTime.fromSeconds(l.item_timestamp).toLocaleString(DateTime.DATETIME_SHORT_WITH_SECONDS) : "";
 			$('.import-stream-row-location', rowElem).innerText = location;
-			$('.import-stream-row-content-type', rowElem).innerText = l.media_type || "";
+			// $('.import-stream-row-content-type', rowElem).innerText = l.media_type || "";
 			$('.import-stream-row-size', rowElem).innerText = l.text_size || l.file_size || "";
-			$('.import-stream-row-duration', rowElem).innerText = l.duration ? betterToHuman(Duration.fromMillis(l.duration*1000), { unitDisplay: 'short' }) : "-";
+			// $('.import-stream-row-duration', rowElem).innerText = l.duration ? betterToHuman(Duration.fromMillis(l.duration*1000), { unitDisplay: 'short' }) : "-";
 			
 			$('tbody', tableElem).prepend(rowElem);
 

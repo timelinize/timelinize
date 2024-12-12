@@ -49,12 +49,13 @@ const (
 	// not a maximum, due to the recursive and inter-related nature
 	// of item graphs -- hopefully data sources don't send graphs
 	// too big for available memory
-	batchSize = 50
+	batchSize = 10
 
-	// don't want too many workers because they can starve other
-	// imports happening at the same time, especially if one import
-	// is not very file-heavy and is more DB-heavy (after all, only
-	// 1 worker can have a write lock at the DB at a time anyway)
+	// concurrent processing should be faster with more workers if
+	// the import is I/O-bound, i.e. larger items (videos, etc.),
+	// but won't help if there's lots of little items, as the
+	// database can only have one writer at a time, and other
+	// import jobs can be starved if there's too many workers
 	workers = 10
 )
 
@@ -164,6 +165,7 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph, rs *recursiveS
 	// an extra parameter or return value. Phases 2 and 3 do make some allocations even if
 	// there aren't any data files, but I'd want to dig deeper (likely with a profile) to
 	// determine if avoiding these phases entirely is worth the effort.
+	// (Phase 3 has logging used for live updates by the frontend)
 	if err := p.phase2(ctx, batch); err != nil {
 		return err
 	}
@@ -295,6 +297,57 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 		}
 	}
 
+	start := time.Now()
+	defer func() {
+		duration := time.Since(start)
+		graphType := "item"
+		if g.Entity != nil {
+			graphType = "entity"
+		}
+		l := p.log.With(
+			zap.String("graph", fmt.Sprintf("%p", g)),
+			zap.String("type", graphType),
+			zap.Duration("duration", duration),
+			zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
+			zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
+			zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
+			zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
+			zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
+		)
+		if g.Item != nil && !g.Item.Timestamp.IsZero() {
+			l = l.With(zap.Time("item_timestamp", g.Item.Timestamp))
+		}
+		entityAttr := func(e Entity) zapcore.Field {
+			if e.Name != "" {
+				return zap.String("entity", e.Name)
+			}
+			for _, attr := range e.Attributes {
+				if attr.Identifying || attr.Identity {
+					return zap.Any("entity", attr.Value)
+				}
+			}
+			return zap.Stringp("entity", nil)
+		}
+		if g.Item != nil {
+			l = l.With(
+				zap.Int64("row_id", g.Item.row.ID),
+				zap.String("status", string(g.Item.row.howStored)),
+				zap.String("classification", g.Item.Classification.Name),
+				zap.String("preview", g.Item.dataTextPreview),
+				zap.Int("text_size", g.Item.contentLen),
+				zap.Int64("file_size", g.Item.dataFileSize),
+				zap.Float64p("lat", g.Item.Location.Latitude),
+				zap.Float64p("lon", g.Item.Location.Longitude),
+				zap.String("media_type", g.Item.Content.MediaType),
+				entityAttr(g.Item.Owner))
+		}
+		if g.Entity != nil {
+			l = l.With(zap.Int64("row_id", g.Entity.ID))
+			l = l.With(entityAttr(*g.Entity))
+		}
+		l.Info("finished graph")
+	}()
+
 	return nil
 }
 
@@ -309,58 +362,58 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 	}
 
 	var rowID latentID
-	var howStored itemStoreResult
+	// var howStored itemStoreResult
 
-	start := time.Now()
-	defer func() {
-		duration := time.Since(start)
-		graphType := "item"
-		if ig.Entity != nil {
-			graphType = "entity"
-		}
-		l := p.log.With(
-			zap.Int("worker", state.worker),
-			zap.String("graph", fmt.Sprintf("%p", ig)),
-			zap.String("type", graphType),
-			zap.Int64("row_id", rowID.id()),
-			zap.Duration("duration", duration),
-			zap.String("how_stored", string(howStored)),
-			zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
-			zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
-			zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
-			zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
-			zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
-		)
-		if ig.Item != nil && !ig.Item.Timestamp.IsZero() {
-			l = l.With(zap.Time("item_timestamp", ig.Item.Timestamp))
-		}
-		entityID := func(e Entity) zapcore.Field {
-			if e.Name != "" {
-				return zap.String("entity", e.Name)
-			}
-			for _, attr := range e.Attributes {
-				if attr.Identifying || attr.Identity {
-					return zap.Any("entity", attr.Value)
-				}
-			}
-			return zap.Stringp("entity", nil)
-		}
-		if ig.Item != nil {
-			l = l.With(
-				zap.String("classification", ig.Item.Classification.Name),
-				zap.String("preview", ig.Item.dataTextPreview),
-				zap.Int("text_size", ig.Item.contentLen),
-				zap.Int64("file_size", ig.Item.dataFileSize),
-				zap.Float64p("lat", ig.Item.Location.Latitude),
-				zap.Float64p("lon", ig.Item.Location.Longitude),
-				zap.String("media_type", ig.Item.Content.MediaType),
-				entityID(ig.Item.Owner))
-		}
-		if ig.Entity != nil {
-			l = l.With(entityID(*ig.Entity))
-		}
-		l.Info("finished graph")
-	}()
+	// start := time.Now()
+	// defer func() {
+	// 	duration := time.Since(start)
+	// 	graphType := "item"
+	// 	if ig.Entity != nil {
+	// 		graphType = "entity"
+	// 	}
+	// 	l := p.log.With(
+	// 		zap.Int("worker", state.worker),
+	// 		zap.String("graph", fmt.Sprintf("%p", ig)),
+	// 		zap.String("type", graphType),
+	// 		zap.Int64("row_id", rowID.id()),
+	// 		zap.Duration("duration", duration),
+	// 		zap.String("how_stored", string(howStored)),
+	// 		zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
+	// 		zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
+	// 		zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
+	// 		zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
+	// 		zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
+	// 	)
+	// 	if ig.Item != nil && !ig.Item.Timestamp.IsZero() {
+	// 		l = l.With(zap.Time("item_timestamp", ig.Item.Timestamp))
+	// 	}
+	// 	entityID := func(e Entity) zapcore.Field {
+	// 		if e.Name != "" {
+	// 			return zap.String("entity", e.Name)
+	// 		}
+	// 		for _, attr := range e.Attributes {
+	// 			if attr.Identifying || attr.Identity {
+	// 				return zap.Any("entity", attr.Value)
+	// 			}
+	// 		}
+	// 		return zap.Stringp("entity", nil)
+	// 	}
+	// 	if ig.Item != nil {
+	// 		l = l.With(
+	// 			zap.String("classification", ig.Item.Classification.Name),
+	// 			zap.String("preview", ig.Item.dataTextPreview),
+	// 			zap.Int("text_size", ig.Item.contentLen),
+	// 			zap.Int64("file_size", ig.Item.dataFileSize),
+	// 			zap.Float64p("lat", ig.Item.Location.Latitude),
+	// 			zap.Float64p("lon", ig.Item.Location.Longitude),
+	// 			zap.String("media_type", ig.Item.Content.MediaType),
+	// 			entityID(ig.Item.Owner))
+	// 	}
+	// 	if ig.Entity != nil {
+	// 		l = l.With(entityID(*ig.Entity))
+	// 	}
+	// 	l.Info("finished graph")
+	// }()
 
 	// process root node
 	switch {
@@ -372,7 +425,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 		}
 	case ig.Item != nil:
 		var err error
-		rowID, howStored, err = p.processItem(ctx, tx, ig.Item, state)
+		rowID, _, err = p.processItem(ctx, tx, ig.Item, state)
 		if err != nil {
 			return latentID{}, fmt.Errorf("processing item node: %w", err)
 		}
@@ -433,6 +486,7 @@ func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state
 	if err != nil {
 		return latentID{itemID: itemRowID}, howStored, err
 	}
+	it.row.howStored = howStored
 
 	return latentID{itemID: itemRowID}, howStored, nil
 }

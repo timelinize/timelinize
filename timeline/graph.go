@@ -715,6 +715,9 @@ type ItemRow struct {
 	// From view "extended_items"
 	DataSourceName *string `json:"data_source_name"`
 	Classification *string `json:"classification"`
+
+	// not in the DB, but attached here for logging purposes
+	howStored itemStoreResult
 }
 
 func (ir ItemRow) hasContent() bool {

@@ -93,7 +93,7 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 	//   without having to worry about some goroutines that haven't finished yet.
 	// - Batching in this way acts as a goroutine throttle, so we don't flood the CPU.
 	var wg sync.WaitGroup
-	const batchSize = 10
+	const batchSize = 5
 
 	// all goroutines must be done before we return
 	defer wg.Wait()
