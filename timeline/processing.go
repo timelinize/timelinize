@@ -56,7 +56,8 @@ const (
 	// but won't help if there's lots of little items, as the
 	// database can only have one writer at a time, and other
 	// import jobs can be starved if there's too many workers
-	workers = 10
+	// TODO: see if having workers is useful at all for performance on a variety of data sources... if not, having only 1 consumer would make checkpointing a LOT simpler...
+	workers = 1
 )
 
 func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, countOnly bool, done <-chan struct{}) (*sync.WaitGroup, chan<- *Graph) {
@@ -190,7 +191,7 @@ func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Gra
 	defer tx.Rollback()
 
 	for _, g := range batch {
-		if _, err = p.processGraph(ctx, tx, rs, g); err != nil {
+		if err = p.processGraph(ctx, tx, rs, g); err != nil {
 			p.log.Error("processing graph", zap.String("graph", g.String()), zap.Error(err))
 			g.err = err
 		}
@@ -252,6 +253,8 @@ func (p *processor) phase3(ctx context.Context, batch []*Graph) error {
 		return fmt.Errorf("committing transaction for batch phase 3: %w", err)
 	}
 
+	// TODO: update (inner) checkpoint...
+
 	return nil
 }
 
@@ -285,21 +288,9 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 		return nil
 	}
 
-	if err := p.finishDataFileProcessing(ctx, tx, g.Item); err != nil {
-		return err
-	}
-	for _, edge := range g.Edges {
-		if err := p.finishProcessingDataFiles(ctx, tx, edge.From); err != nil {
-			return err
-		}
-		if err := p.finishProcessingDataFiles(ctx, tx, edge.To); err != nil {
-			return err
-		}
-	}
-
-	start := time.Now()
+	// this whole big thing is one huge log so the UI can stream
+	// a sample of live import data
 	defer func() {
-		duration := time.Since(start)
 		graphType := "item"
 		if g.Entity != nil {
 			graphType = "entity"
@@ -307,7 +298,7 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 		l := p.log.With(
 			zap.String("graph", fmt.Sprintf("%p", g)),
 			zap.String("type", graphType),
-			zap.Duration("duration", duration),
+			zap.Int64("row_id", g.rowID.id()),
 			zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
 			zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
 			zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
@@ -328,84 +319,98 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 			}
 			return zap.Stringp("entity", nil)
 		}
+		if options, obfuscate := p.tl.obfuscationMode(); obfuscate {
+			// this kind of nukes the actual values from this point forward,
+			// but we're done with them now, so it should be okay
+			if g.Item != nil {
+				g.Item.row.Anonymize(options)
+				g.Item.Owner.Anonymize()
+			}
+			if g.Entity != nil {
+				g.Entity.ID = g.rowID.id()
+				g.Entity.Anonymize()
+			}
+		}
 		if g.Item != nil {
+			size := g.Item.dataFileSize
+			if g.Item.row.DataText != nil {
+				size = int64(len(*g.Item.row.DataText))
+			}
+			preview := g.Item.row.DataText
+			const maxPreviewLen = 30
+			if preview != nil && len(*preview) > maxPreviewLen {
+				shortPreview := (*preview)[:maxPreviewLen]
+				preview = &shortPreview
+			}
 			l = l.With(
-				zap.Int64("row_id", g.Item.row.ID),
 				zap.String("status", string(g.Item.row.howStored)),
 				zap.String("classification", g.Item.Classification.Name),
-				zap.String("preview", g.Item.dataTextPreview),
-				zap.String("filename", g.Item.dataFileName),
-				zap.Int("text_size", g.Item.contentLen),
-				zap.Int64("file_size", g.Item.dataFileSize),
-				zap.Float64p("lat", g.Item.Location.Latitude),
-				zap.Float64p("lon", g.Item.Location.Longitude),
+				zap.Stringp("preview", preview),
+				zap.Stringp("filename", g.Item.row.Filename),
+				zap.Int64("size", size),
+				zap.Float64p("lat", g.Item.row.Latitude),
+				zap.Float64p("lon", g.Item.row.Longitude),
 				zap.String("media_type", g.Item.Content.MediaType),
 				entityAttr(g.Item.Owner))
 		}
 		if g.Entity != nil {
-			l = l.With(
-				zap.Int64("row_id", g.Entity.ID),
-				entityAttr(*g.Entity))
+			l = l.With(entityAttr(*g.Entity))
 		}
 		l.Info("finished graph")
 	}()
 
+	if err := p.finishDataFileProcessing(ctx, tx, g.Item); err != nil {
+		return err
+	}
+	for _, edge := range g.Edges {
+		if err := p.finishProcessingDataFiles(ctx, tx, edge.From); err != nil {
+			return err
+		}
+		if err := p.finishProcessingDataFiles(ctx, tx, edge.To); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursiveState, ig *Graph) (latentID, error) {
+func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursiveState, ig *Graph) error {
 	if ig == nil {
-		return latentID{}, nil
+		return nil
 	}
 
 	// validate node type
 	if ig.Item != nil && ig.Entity != nil {
-		return latentID{}, fmt.Errorf("ambiguous node in graph is both an item and entity node (item_graph=%p)", ig)
+		return fmt.Errorf("ambiguous node in graph is both an item and entity node (item_graph=%p)", ig)
 	}
 
 	// process root node
-	var rowID latentID
 	switch {
 	case ig.Entity != nil:
 		var err error
-		rowID, err = p.processEntity(ctx, tx, *ig.Entity)
+		ig.rowID, err = p.processEntity(ctx, tx, *ig.Entity)
 		if err != nil {
-			return latentID{}, fmt.Errorf("processing entity node: %w", err)
+			return fmt.Errorf("processing entity node: %w", err)
 		}
 	case ig.Item != nil:
 		var err error
-		rowID, err = p.processItem(ctx, tx, ig.Item, state)
+		ig.rowID, err = p.processItem(ctx, tx, ig.Item, state)
 		if err != nil {
-			return latentID{}, fmt.Errorf("processing item node: %w", err)
+			return fmt.Errorf("processing item node: %w", err)
 		}
 	}
 
 	// process connected nodes
 	for _, r := range ig.Edges {
-		var err error
-		tx, err = p.processRelationship(ctx, tx, r, ig, rowID, state)
+		err := p.processRelationship(ctx, tx, r, ig, state)
 		if err != nil {
 			p.log.Error("processing relationship",
-				zap.Int64("item_or_attribute_row_id", rowID.id()),
+				zap.Int64("item_or_attribute_row_id", ig.rowID.id()),
 				zap.Error(err))
 		}
 	}
 
-	// successfully finished processing graph; save checkpoint, if specified
-	if ig.Checkpoint != nil {
-		chkpt, err := marshalGob(ig.Checkpoint)
-		if err != nil {
-			return latentID{}, err
-		}
-
-		_, err = tx.Exec(`UPDATE jobs SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
-			chkpt, p.ij.job.id)
-		if err != nil {
-			return latentID{}, err
-		}
-	}
-
-	return rowID, nil
+	return nil
 }
 
 func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state *recursiveState) (latentID, error) {
@@ -517,16 +522,10 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 				if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 					return 0, fmt.Errorf("buffering item's data stream to peek size: %w", err)
 				}
-				const previewMax = 25
 				if n == len(buf) {
 					// content is at least as large as our buffer, so it probably belongs on disk;
 					// recover the bytes we already buffered when we go to write the file
 					processDataFile = true
-					if n > previewMax {
-						it.dataTextPreview = string(buf[:previewMax])
-					} else {
-						it.dataTextPreview = string(buf)
-					}
 					it.dataFileIn = io.NopCloser(io.MultiReader(bytes.NewReader(buf), it.dataFileIn))
 				} else if n > 0 {
 					// NOTE: We trim leading/trailing spaces for this because it can be hard
@@ -534,13 +533,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 					// especially for short text content stored in the DB
 					dataTextStr := string(buf[:n])
 					dataTextStr = strings.TrimSpace(dataTextStr)
-					if len(dataTextStr) > previewMax {
-						it.dataTextPreview = dataTextStr[:previewMax]
-					} else {
-						it.dataTextPreview = dataTextStr
-					}
 					it.dataText = &dataTextStr
-					it.contentLen = len(dataTextStr)
 				}
 			} else {
 				processDataFile = true
@@ -674,12 +667,12 @@ type recursiveState struct {
 	procOpt ProcessingOptions
 }
 
-func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relationship, ig *Graph, rowID latentID, state *recursiveState) (*sql.Tx, error) {
+func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relationship, ig *Graph, state *recursiveState) error {
 	// both sides can be set, or if this graph has a node then just
 	// one needs to be set; but at least one of these needs always
 	// to be set since we need a node on both sides of an edge
 	if r.From == nil && r.To == nil {
-		return tx, fmt.Errorf("invalid edge: must have node on both sides: %+v", r)
+		return fmt.Errorf("invalid edge: must have node on both sides: %+v", r)
 	}
 
 	rawRel := rawRelationship{Relation: r.Relation}
@@ -700,79 +693,92 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 	if len(r.Metadata) > 0 {
 		metaJSON, err := json.Marshal(r.Metadata)
 		if err != nil {
-			return tx, fmt.Errorf("encoding relationship metadata: %w", err)
+			return fmt.Errorf("encoding relationship metadata: %w", err)
 		}
 		rawRel.metadata = metaJSON
 	}
 
 	// if the relationship explicitly has a "from" node set, use that;
 	// otherwise, assume this node is the "from" side
-	if r.From != nil {
-		connectedRowID, err := p.processGraph(ctx, tx, state, r.From)
-		if err != nil {
-			return tx, fmt.Errorf("from node: %w", err)
-		}
-		if r.From.Item != nil {
-			rawRel.fromItemID = &connectedRowID.itemID
-		} else if r.From.Entity != nil {
-			attrID, err := connectedRowID.identifyingAttributeID(ctx, tx)
-			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for connected entity (on From side): %w", err)
-			}
-			rawRel.fromAttributeID = &attrID
-		}
-	} else {
-		switch {
-		case ig.Item != nil:
-			rawRel.fromItemID = &rowID.itemID
-		case ig.Entity != nil:
-			attrID, err := rowID.identifyingAttributeID(ctx, tx)
-			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for graph entity (on From side): %w", err)
-			}
-			rawRel.fromAttributeID = &attrID
-		default:
-			return tx, fmt.Errorf("incomplete relationship: no 'from' node available: %+v (item_graph=%p %+v)", r, ig, ig)
-		}
+	if err := p.linkRelation(ctx, ig, state, tx, r, &rawRel, relationFrom); err != nil {
+		return err
 	}
+
 	// if the relationship explicitly has a "to" node set, use that;
 	// otherwise, assume this node is the "to" side
-	if r.To != nil {
-		connectedRowID, err := p.processGraph(ctx, tx, state, r.To)
-		if err != nil {
-			return tx, fmt.Errorf("to node: %w", err)
-		}
-		if r.To.Item != nil {
-			rawRel.toItemID = &connectedRowID.itemID
-		} else if r.To.Entity != nil {
-			attrID, err := connectedRowID.identifyingAttributeID(ctx, tx)
-			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for connected entity (on To side): %w", err)
-			}
-			rawRel.toAttributeID = &attrID
-		}
-	} else {
-		switch {
-		case ig.Item != nil:
-			rawRel.toItemID = &rowID.itemID
-		case ig.Entity != nil:
-			attrID, err := rowID.identifyingAttributeID(ctx, tx)
-			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for graph entity (on To side): %w", err)
-			}
-			rawRel.toAttributeID = &attrID
-		default:
-			return tx, fmt.Errorf("incomplete relationship: no 'to' node available: %+v (item_graph=%p %+v)", r, ig, ig)
-		}
+	if err := p.linkRelation(ctx, ig, state, tx, r, &rawRel, relationTo); err != nil {
+		return err
 	}
 
 	err := p.tl.storeRelationship(ctx, tx, rawRel)
 	if err != nil {
-		return tx, fmt.Errorf("storing relationship: %w", err)
+		return fmt.Errorf("storing relationship: %w", err)
 	}
 
-	return tx, nil
+	return nil
 }
+
+// I know this function is hard to read, but I initially had this inline above, and the linter complained it was duplicated code,
+// despite the whole "from-to" parts being different; it's just annoying enough to have to change what you are assigning to that
+// I didn't want to refactor this, but I did it anyway, I hope the linter is happy.
+func (p *processor) linkRelation(ctx context.Context, ig *Graph, state *recursiveState, tx *sql.Tx, r Relationship, rawRel *rawRelationship, fromOrTo string) error {
+	otherGraph := r.From
+	if fromOrTo == relationTo {
+		otherGraph = r.To
+	}
+
+	if otherGraph != nil {
+		err := p.processGraph(ctx, tx, state, otherGraph)
+		if err != nil {
+			return fmt.Errorf("%s node: %w", fromOrTo, err)
+		}
+		if otherGraph.Item != nil {
+			if fromOrTo == relationFrom {
+				rawRel.fromItemID = &otherGraph.rowID.itemID
+			} else if fromOrTo == relationTo {
+				rawRel.toItemID = &otherGraph.rowID.itemID
+			}
+		} else if otherGraph.Entity != nil {
+			attrID, err := otherGraph.rowID.identifyingAttributeID(ctx, tx)
+			if err != nil {
+				return fmt.Errorf("getting identifying attribute ID for connected entity (on %s side): %w", fromOrTo, err)
+			}
+			if fromOrTo == relationFrom {
+				rawRel.fromAttributeID = &attrID
+			} else if fromOrTo == relationTo {
+				rawRel.toAttributeID = &attrID
+			}
+		}
+	} else {
+		switch {
+		case ig.Item != nil:
+			if fromOrTo == relationFrom {
+				rawRel.fromItemID = &ig.rowID.itemID
+			} else if fromOrTo == relationTo {
+				rawRel.toItemID = &ig.rowID.itemID
+			}
+		case ig.Entity != nil:
+			attrID, err := ig.rowID.identifyingAttributeID(ctx, tx)
+			if err != nil {
+				return fmt.Errorf("getting identifying attribute ID for graph entity (on %s side): %w", fromOrTo, err)
+			}
+			if fromOrTo == relationFrom {
+				rawRel.fromAttributeID = &attrID
+			} else if fromOrTo == relationTo {
+				rawRel.toAttributeID = &attrID
+			}
+		default:
+			return fmt.Errorf("incomplete relationship: no '%s' node available: %+v (item_graph=%p %+v)", fromOrTo, r, ig, ig)
+		}
+	}
+
+	return nil
+}
+
+const (
+	relationFrom = "from"
+	relationTo   = "to"
+)
 
 func (tl *Timeline) cleanDataFile(tx *sql.Tx, dataFilePath string) error {
 	var count int

@@ -434,13 +434,13 @@ function connectLog() {
 			$('.import-stream-row-type', rowElem).innerHTML = graphType;
 			$('.import-stream-row-status', rowElem).innerHTML = howStored;
 			$('.import-stream-row-data-source', rowElem).innerText = l.data_source_name ? tlz.dataSources[l.data_source_name].title : "";
-			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "n/a";
+			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "";
 			$('.import-stream-row-entity', rowElem).innerText = l.entity || "";
-			$('.import-stream-row-content', rowElem).innerText = l.preview || l.filename || "";
+			$('.import-stream-row-content', rowElem).innerText = l.preview || maxlenStr(l.filename, 25) || "";
 			$('.import-stream-row-timestamp', rowElem).innerText = l.item_timestamp ? DateTime.fromSeconds(l.item_timestamp).toLocaleString(DateTime.DATETIME_SHORT_WITH_SECONDS) : "";
 			$('.import-stream-row-location', rowElem).innerText = location;
 			// $('.import-stream-row-content-type', rowElem).innerText = l.media_type || "";
-			$('.import-stream-row-size', rowElem).innerText = l.text_size || l.file_size || "";
+			$('.import-stream-row-size', rowElem).innerText = humanizeBytes(l.size);
 			// $('.import-stream-row-duration', rowElem).innerText = l.duration ? betterToHuman(Duration.fromMillis(l.duration*1000), { unitDisplay: 'short' }) : "-";
 			
 			$('tbody', tableElem).prepend(rowElem);

@@ -35,7 +35,7 @@ import (
 // Config describes the server configuration.
 // Config values must not be copied (i.e. use pointers).
 type Config struct {
-	sync.Mutex
+	sync.RWMutex `json:"-"`
 
 	// // The listen address to bind the socket to.
 	// Listen string `json:"listen,omitempty"`
@@ -51,6 +51,8 @@ type Config struct {
 	// program start.
 	Repositories []string `json:"repositories,omitempty"`
 
+	Obfuscation timeline.ObfuscationOptions `json:"obfuscation,omitempty"`
+
 	log *zap.Logger
 }
 
@@ -60,6 +62,7 @@ func (cfg *Config) fillDefaults() {
 	// if cfg.Listen == "" {
 	// 	cfg.Listen = defaultConfig.Listen
 	// }
+	cfg.Obfuscation.Logger = timeline.Log.Named("faker")
 	if cfg.log == nil {
 		cfg.log = timeline.Log.Named("config").With(zap.Time("loaded", time.Now()))
 	}
@@ -67,8 +70,8 @@ func (cfg *Config) fillDefaults() {
 
 // save persists the config to disk. It locks the config, so is safe for concurrent use.
 func (cfg *Config) save() error {
-	cfg.Lock()
-	defer cfg.Unlock()
+	cfg.RLock()
+	defer cfg.RUnlock()
 
 	filename := DefaultConfigFilePath()
 	err := os.MkdirAll(filepath.Dir(filename), 0755)

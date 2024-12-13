@@ -410,7 +410,6 @@ func (tl *Timeline) loadConversation(ctx context.Context, tx *sql.Tx, params Ite
 	if err != nil {
 		return nil, err
 	}
-	tl.explainQueryPlan(ctx, q, args...) // TODO: temporarily for debugging slow query
 
 	rows, err := tx.QueryContext(ctx, q, args...)
 	if err != nil {

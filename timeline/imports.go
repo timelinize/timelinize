@@ -445,7 +445,7 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 	// various frontend pages, i.e. the user will likely
 	// see thoes first
 	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.QueryContext(ij.job.tl.ctx,
+	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx,
 		`SELECT id, data_id, data_type, data_file
 		FROM items
 		WHERE job_id=? AND (data_file IS NOT NULL OR data_id IS NOT NULL)
@@ -523,7 +523,7 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 
 func (ij ImportJob) generateEmbeddingsForImportedItems() {
 	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.QueryContext(ij.job.tl.ctx, `
+	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx, `
 		SELECT id, data_id, data_type, data_file
 		FROM items
 		WHERE job_id=?

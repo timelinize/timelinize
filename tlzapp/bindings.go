@@ -32,7 +32,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/mholt/archives"
@@ -109,6 +108,15 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 		return openedTimeline{}, err
 	}
 	tlID := tl.ID().String()
+
+	// in very few places, the timeline package may emit data directly
+	// to the frontend in the form of logs, so even though obfuscation
+	// is an application concern, a timeline needs to know, in those places,
+	// whether to obfuscate the output... since the timeline package
+	// cannot import this one, we cheat and invert the dependencies
+	tl.SetObfuscationFunc(func() (timeline.ObfuscationOptions, bool) {
+		return a.ObfuscationMode(tl)
+	})
 
 	// check once more that the timeline is not already open; we only
 	// compared folder paths, now we have actual IDs to compare
@@ -613,11 +621,8 @@ func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResu
 	if err != nil {
 		return timeline.SearchResults{}, err
 	}
-	if obfuscate() {
-		// TODO: obfuscation options
-		results.Anonymize(timeline.ObfuscationOptions{
-			Logger: a.log,
-		})
+	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
+		results.Anonymize(options)
 	}
 	return results, nil
 }
@@ -633,7 +638,7 @@ func (a *App) SearchEntities(params timeline.EntitySearchParams) ([]timeline.Ent
 	if err != nil {
 		return nil, err
 	}
-	if obfuscate() {
+	if _, ok := a.ObfuscationMode(tl.Timeline); ok {
 		for i := range results {
 			results[i].Anonymize()
 		}
@@ -684,13 +689,13 @@ func (a *App) LoadRecentConversations(ctx context.Context, params timeline.ItemS
 	if err != nil {
 		return nil, err
 	}
-	if obfuscate() {
+	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
 		for _, convo := range convos {
 			for i := range convo.Entities {
 				convo.Entities[i].Anonymize()
 			}
 			for i := range convo.RecentMessages {
-				convo.RecentMessages[i].Anonymize(timeline.ObfuscationOptions{Logger: a.log})
+				convo.RecentMessages[i].Anonymize(options)
 			}
 		}
 	}
@@ -706,9 +711,8 @@ func (a App) LoadConversation(ctx context.Context, params timeline.ItemSearchPar
 	if err != nil {
 		return timeline.SearchResults{}, err
 	}
-	if obfuscate() {
-		// TODO: obfuscation options
-		convo.Anonymize(timeline.ObfuscationOptions{Logger: a.log})
+	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
+		convo.Anonymize(options)
 	}
 	return convo, nil
 }
@@ -760,17 +764,8 @@ func (a *App) BuildInfo() BuildInfo {
 	}
 }
 
-func (a *App) Obfuscation(enable bool) {
-	if enable {
-		atomic.StoreInt32(obfuscationEnabled, 1)
-	} else {
-		atomic.StoreInt32(obfuscationEnabled, 0)
-	}
+func (a App) ObfuscationMode(repo *timeline.Timeline) (timeline.ObfuscationOptions, bool) {
+	a.cfg.RLock()
+	defer a.cfg.RUnlock()
+	return a.cfg.Obfuscation, a.cfg.Obfuscation.AppliesTo(repo)
 }
-
-func obfuscate() bool {
-	return atomic.LoadInt32(obfuscationEnabled) == 1
-}
-
-// If 1, obfuscate personal or identifying information in output. (accessed atomically)
-var obfuscationEnabled = new(int32)

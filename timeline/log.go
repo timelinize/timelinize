@@ -61,7 +61,8 @@ func newLogger() *zap.Logger {
 	const firstNMsgs, everyNthMsg = 10, 100
 	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
 
-	return zap.New(&customCore{Core: core, streamCore: zapcore.NewSamplerWithOptions(core, 250*time.Millisecond, 1, 0)})
+	const streamInterval = 250 * time.Millisecond
+	return zap.New(&customCore{Core: core, streamCore: zapcore.NewSamplerWithOptions(core, streamInterval, 1, 0)})
 }
 
 // multiConnWriter is like io.multiWriter from the standard lib,

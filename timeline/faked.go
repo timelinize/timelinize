@@ -25,7 +25,10 @@ import (
 	"io"
 	"math"
 	weakrand "math/rand"
+	"mime"
 	"net/http"
+	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -397,6 +400,7 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 				lat, lon := locob.Obfuscate(*ir.Latitude, *ir.Longitude, ir.ID)
 				ir.Latitude = &lat
 				ir.Longitude = &lon
+				break
 			}
 		}
 	}
@@ -409,20 +413,47 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 		ir.DataText = &txt
 	}
 
-	if ir.DataType != nil && ir.DataFile != nil {
-		switch {
-		case strings.HasPrefix(*ir.DataType, "image/"):
-			// simply use thumbhash
-			ir.DataFile = nil
+	if ir.Filename != nil {
+		// try to preserve the file extension, but we can't be sure what it is
+		// (what if it's .tar.gz? What if there's a dot in the middle of the filename?
+		// I don't want to chance preserving sensitive parts of the filename by parsing)
+		// so try to deduce from the DataType; otherwise just use a random one
+		var extensions []string
+		var err error
+		if ir.DataType != nil {
+			extensions, err = mime.ExtensionsByType(*ir.DataType)
+		}
+		if err != nil || len(extensions) == 0 {
+			opts.Logger.Warn("no extensions for MIME type; generating a random one",
+				zap.Stringp("mime_type", ir.DataType),
+				zap.Error(err))
+			extensions = []string{"." + faker.FileExtension()}
+		}
+		fakeName := faker.Word() + faker.Password(true, true, true, false, false, weakrand.Intn(3)+2) + extensions[0] //nolint:gosec
+		ir.Filename = &fakeName
+	}
 
-			// or use a random image completely... :shrug:
-			// pic := fmt.Sprintf("https://picsum.photos/seed/%d/1024/768", ir.ID)
-			// ir.DataFile = &pic
-		case strings.HasPrefix(*ir.DataType, "video/"):
-			// let frontend request videos; frontend handler will obfuscate them
-		default:
-			// TODO: not sure how to generate/obfuscate other stuff for now
-			ir.DataFile = nil
+	if ir.DataFile != nil {
+		if opts.DataFiles {
+			// using a hard-coded string value here at least lets the frontend know that the filename is obfuscated,
+			// but if this setting is enabled, the frontend shouldn't be trying to request the data files anyway
+			fakePath := path.Join(path.Dir(*ir.DataFile), "(obfuscated)")
+			ir.DataFile = &fakePath
+		} else {
+			switch {
+			case ir.DataType != nil && strings.HasPrefix(*ir.DataType, "image/"):
+				// simply use thumbhash (TODO: if the image is requested anyways, return a blurred variant)
+				ir.DataFile = nil
+
+				// or use a random image completely... :shrug:
+				// pic := fmt.Sprintf("https://picsum.photos/seed/%d/1024/768", ir.ID)
+				// ir.DataFile = &pic
+			case ir.DataType != nil && strings.HasPrefix(*ir.DataType, "video/"):
+				// let frontend request videos; frontend handler will obfuscate them
+			default:
+				// TODO: not sure how to generate/obfuscate other stuff for now
+				ir.DataFile = nil
+			}
 		}
 	}
 
@@ -481,14 +512,35 @@ func randRune(ch rune) rune {
 // ObfuscationOptions controls how obfuscation is performed.
 // TODO: Finish implementing these
 type ObfuscationOptions struct {
-	Locations []LocationObfuscation
-	Logger    *zap.Logger
+	Logger *zap.Logger `json:"-"`
+
+	// Whether to enable obfuscation.
+	Enabled bool `json:"enabled"`
+
+	// The timeline IDs to apply obfuscation to. If nil,
+	// all timelines will be obfuscated if enabled.
+	RepoIDs []string `json:"repo_ids,omitempty"`
+
+	Locations []LocationObfuscation `json:"locations,omitempty"`
+
+	// If true, the base (last) component of data file names will be
+	// obfuscated, but this prevents the frontend from requesting the
+	// (obfuscated) data, because it won't have the filename with
+	// which to craft the request. Enable this if the data file is
+	// what is being displayed rather than the content.
+	DataFiles bool `json:"data_files,omitempty"`
+}
+
+func (obf ObfuscationOptions) AppliesTo(tl *Timeline) bool {
+	return obf.Enabled &&
+		(obf.RepoIDs == nil || slices.Contains(obf.RepoIDs, tl.id.String()))
 }
 
 // LocationObfuscation describes how to obfuscate a coordinate.
 type LocationObfuscation struct {
-	Latitude, Longitude float64
-	RadiusMeters        int
+	Latitude     float64 `json:"latitude,omitempty"`
+	Longitude    float64 `json:"longitude,omitempty"`
+	RadiusMeters int     `json:"radius_meters,omitempty"`
 }
 
 // Contains returns true if the circle approximately contains the given coordinate.

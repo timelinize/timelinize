@@ -304,6 +304,7 @@ func provisionThumbsDB(ctx context.Context, thumbsDB *sql.DB, repoID uuid.UUID) 
 	return nil
 }
 
+//nolint:unused
 func (tl *Timeline) explainQueryPlan(ctx context.Context, q string, args ...any) {
 	logger := Log.Named("query_planner")
 

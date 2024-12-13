@@ -959,6 +959,9 @@ function maxlenStr(str, maxLen) {
 
 
 function humanizeBytes(size) {
+	if (size == null) {
+		return "";
+	}
 	var i = size == 0 ? 0 : Math.floor(Math.log(size) / Math.log(1024));
 	return (size / Math.pow(1024, i)).toFixed(2) * 1 + ' ' + ['bytes', 'KB', 'MB', 'GB', 'TB', 'PB'][i];
 }

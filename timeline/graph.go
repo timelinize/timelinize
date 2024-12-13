@@ -59,6 +59,9 @@ type Graph struct {
 
 	// state needed by processing pipeline
 	err error
+
+	// represents the row ID of either the inserted/updated Item or entity/attribute
+	rowID latentID
 }
 
 // Size returns the number of nodes in the graph
@@ -242,10 +245,6 @@ type Item struct {
 	// to read when creating the data file on disk. Data
 	// sources should set Content instead; NOT these!
 	dataText *string
-
-	// TODO: Experimental; used solely for logging & live updates
-	dataTextPreview string
-	contentLen      int
 
 	// state for processing pipeline phases
 	row          ItemRow

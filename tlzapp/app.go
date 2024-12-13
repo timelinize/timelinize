@@ -419,9 +419,6 @@ func Init(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error)
 	}
 	app.registerCommands()
 
-	// TODO: for testing only for now!
-	// app.Obfuscation(true)
-
 	return app, nil
 }
 

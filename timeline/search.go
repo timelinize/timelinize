@@ -978,6 +978,8 @@ type relatedEntity struct {
 	Attribute nullableAttribute `json:"attribute,omitempty"` // TODO: experimental
 }
 
+// nullableAttribute is like Attribute but with nullable fields
+// so that it can be I/O for the database
 type nullableAttribute struct {
 	ID       *int64  `json:"id,omitempty"`
 	Name     *string `json:"name,omitempty"`

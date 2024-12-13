@@ -60,6 +60,8 @@ type Timeline struct {
 	relations       map[string]int64
 	dataSources     map[string]int64
 
+	obfuscationMode func() (ObfuscationOptions, bool)
+
 	// currently-running jobs for this timeline
 	activeJobs   map[int64]*ActiveJob
 	activeJobsMu sync.RWMutex
@@ -82,6 +84,8 @@ type Timeline struct {
 func (tl *Timeline) String() string { return fmt.Sprintf("%s:%s", tl.id, tl.repoDir) }
 func (tl *Timeline) Dir() string    { return tl.repoDir }
 func (tl *Timeline) ID() uuid.UUID  { return tl.id }
+
+func (tl *Timeline) SetObfuscationFunc(f func() (ObfuscationOptions, bool)) { tl.obfuscationMode = f }
 
 // TODO: refactor Create() and Open() to use AssessFolder() instead of duplicating logic
 

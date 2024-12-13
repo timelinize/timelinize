@@ -147,7 +147,8 @@ func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error
 		// stream video data file in a format that can be played by the browser
 		dataFile := strings.Join(parts[4:], "/")
 		inputPath := tl.FullPath(dataFile)
-		return s.transcodeVideo(r.Context(), w, inputPath, nil)
+		_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
+		return s.transcodeVideo(r.Context(), w, inputPath, nil, obfuscate)
 
 	case "motion-photo":
 		// given the data path of a photo, stream its motion photo in a format playable by the browser
@@ -187,8 +188,9 @@ func (s server) serveDataFile(w http.ResponseWriter, r *http.Request, tl openedT
 		}
 	}
 	if results.Items[0].DataType != nil {
-		if obfuscate() && strings.HasPrefix(*results.Items[0].DataType, "video/") {
-			return s.transcodeVideo(r.Context(), w, tl.FullPath(dataFile), nil)
+		_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
+		if obfuscate && strings.HasPrefix(*results.Items[0].DataType, "video/") {
+			return s.transcodeVideo(r.Context(), w, tl.FullPath(dataFile), nil, obfuscate)
 		}
 		w.Header().Set("Content-Type", *results.Items[0].DataType)
 	}
@@ -322,8 +324,9 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 	}
 
 	thumbReader := bytes.NewReader(thumb.Content)
-	if obfuscate() && strings.HasPrefix(thumbType, "video/") {
-		return s.transcodeVideo(r.Context(), w, "", thumbReader)
+	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
+	if obfuscate && strings.HasPrefix(thumbType, "video/") {
+		return s.transcodeVideo(r.Context(), w, "", thumbReader, obfuscate)
 	}
 
 	http.ServeContent(w, r, thumb.Name, thumb.ModTime, bytes.NewReader(thumb.Content))
@@ -426,8 +429,9 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 	imgExt := path.Ext(strings.ToLower(imgDataFile))
 	isGoogleMP := path.Ext(strings.ToLower(videoDataFile)) == ".mp" ||
 		path.Ext(strings.ToLower(strings.TrimSuffix(imgDataFile, imgExt))) == ".mp"
-	if videoDataFile == "" || imgExt == ".heif" || imgExt == ".heic" || isGoogleMP || obfuscate() {
-		return s.transcodeVideo(r.Context(), w, inputFile, nil)
+	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
+	if videoDataFile == "" || imgExt == ".heif" || imgExt == ".heic" || isGoogleMP || obfuscate {
+		return s.transcodeVideo(r.Context(), w, inputFile, nil, obfuscate)
 	}
 
 	r.URL.Path = "/" + path.Join("repo", tl.ID().String(), videoDataFile)
@@ -585,12 +589,12 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 	return nil
 }
 
-func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, inputVideoFilePath string, inputVideoStream io.Reader) error {
+func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, inputVideoFilePath string, inputVideoStream io.Reader, obfuscate bool) error {
 	// TODO: potentially use Accept header to make this dynamic
 	const format = "video/webm"
 	w.Header().Set("Content-Type", format)
 
-	if err := s.app.Transcode(ctx, inputVideoFilePath, inputVideoStream, format, w, obfuscate()); err != nil {
+	if err := s.app.Transcode(ctx, inputVideoFilePath, inputVideoStream, format, w, obfuscate); err != nil {
 		return fmt.Errorf("video transcode error: %#w", err)
 	}
 
