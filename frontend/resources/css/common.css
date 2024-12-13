@@ -391,6 +391,14 @@ slightly reducing the padding makes a subtle improvement IMO */
 
 
 
+/* surprised I have to say this tbh */
+a.disabled {
+	color: var(--tblr-text-secondary);
+	pointer-events: none;
+	cursor: default;
+}
+
+
 
 .message-reactions {
 	margin-top: .5em;

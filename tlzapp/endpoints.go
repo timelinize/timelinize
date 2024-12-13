@@ -144,6 +144,12 @@ func (a *App) registerCommands() {
 			Payload: openRepoPayload{},
 			Help:    "Open a timeline repository.",
 		},
+		"pause-job": {
+			Handler: a.server.handlePauseJob,
+			Method:  http.MethodPost,
+			Payload: jobPayload{},
+			Help:    "Pauses an active job.",
+		},
 		"plan-import": {
 			Handler: a.server.handlePlanImport,
 			Method:  http.MethodPost,
@@ -178,6 +184,12 @@ func (a *App) registerCommands() {
 			Handler: a.server.handleStats,
 			Method:  http.MethodGet,
 			Help:    "Returns statistics about the timeline.",
+		},
+		"unpause-job": {
+			Handler: a.server.handleUnpauseJob,
+			Method:  http.MethodPost,
+			Payload: jobPayload{},
+			Help:    "Unpauses a paused job.",
 		},
 	}
 }

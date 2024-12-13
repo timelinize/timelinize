@@ -99,7 +99,7 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 	defer wg.Wait()
 
 	for i := startIdx; i < len(tj.Tasks); i++ {
-		if err := job.Context().Err(); err != nil {
+		if err := job.Continue(); err != nil {
 			return err
 		}
 

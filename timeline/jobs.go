@@ -405,6 +405,7 @@ func (tl *Timeline) runJob(row Job) error {
 	job := &ActiveJob{
 		ctx:             ctx,
 		cancel:          cancel,
+		pause:           make(chan chan struct{}),
 		done:            make(chan struct{}),
 		id:              row.ID,
 		tl:              tl,
@@ -553,7 +554,8 @@ func (tl *Timeline) runJob(row Job) error {
 type ActiveJob struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
-	done        chan (struct{}) // signaling channel that is closed when the job action returns
+	pause       chan chan struct{} // send to the outer channel to pause, receive on the inner channel to unpause
+	done        chan struct{}      // signaling channel that is closed when the job action returns
 	id          int64
 	tl          *Timeline
 	logger      *zap.Logger
@@ -563,6 +565,7 @@ type ActiveJob struct {
 	mu sync.Mutex
 
 	// protected by mu
+	paused            chan struct{} // set by the job manager when pausing; closing this unpauses the job
 	currentState      JobState
 	currentProgress   *int
 	currentTotal      *int
@@ -586,19 +589,27 @@ func (j *ActiveJob) Timeline() *Timeline { return j.tl }
 // Logger returns a logger for the job.
 func (j *ActiveJob) Logger() *zap.Logger { return j.logger }
 
-// // TODO: What we really need is a way to block until an interactive import job is ready to resume
-// func (j *Job) Pause() error {
-// 	j.mu.Lock()
-// 	defer j.mu.Unlock()
-
-// 	j.tl.dbMu.Lock()
-// 	_, err := j.tl.db.ExecContext(j.ctx, `UPDATE jobs SET state=? WHERE id=?`, JobPaused, j.id) // TODO: LIMIT 1
-// 	j.tl.dbMu.Unlock()
-// 	if err != nil {
-// 		return err
-// 	}
-
-// }
+// Continue should be called by all job actions frequently, typically at
+// the beginning of their main loop (and any longer-running inner loops).
+// It blocks if the job is paused, until it is unpaused. It returns an
+// error if the job context has been canceled; i.e. the job is being
+// canceled and should terminate. It does not block if the job is not
+// paused or canceled.
+func (j *ActiveJob) Continue() error {
+	select {
+	case <-j.ctx.Done():
+		return j.ctx.Err()
+	case unpause := <-j.pause:
+		// block until either cancelled or unpaused
+		select {
+		case <-j.ctx.Done():
+			return j.ctx.Err()
+		case <-unpause:
+		}
+	default:
+	}
+	return nil
+}
 
 // Set the total size of the job in the DB. Ideally, this should only
 // be set once the total size is properly known, not accumulated as
@@ -804,6 +815,78 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
 	return nil
 }
 
+func (tl *Timeline) PauseJob(ctx context.Context, jobID int64) error {
+	tl.activeJobsMu.Lock()
+	job, ok := tl.activeJobs[jobID]
+	tl.activeJobsMu.Unlock()
+	if !ok {
+		return fmt.Errorf("job %d is either inactive or does not exist", jobID)
+	}
+
+	// create the channel that the job will block on; that is the pausing
+	// (closing this channel will unpause the job)
+	paused := make(chan struct{})
+
+	// store reference to the new channel so it can be closed (to unpause) later
+	job.mu.Lock()
+	if job.paused != nil {
+		// already paused (not an error, just a no-op)=
+		job.mu.Unlock()
+		return nil
+	}
+	job.paused = paused
+	job.currentState = JobPaused
+	job.flushProgress(job.statusLog) // note that the UI might get the state update before this function, and thus its HTTP request, returns
+	job.mu.Unlock()
+
+	// the job should soon select on the pause channel to receive this,
+	// then immediately try to receive from the paused channel, which is
+	// effectively the pause as it will block for now
+	job.pause <- paused
+
+	// by now, the job is paused, so we can update the DB
+	tl.dbMu.Lock()
+	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobPaused, JobStarted, job.id) // TODO: LIMIT 1
+	tl.dbMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("job paused, but error updating job state in DB: %w", err)
+	}
+
+	return nil
+}
+
+func (tl *Timeline) UnpauseJob(ctx context.Context, jobID int64) error {
+	tl.activeJobsMu.Lock()
+	job, ok := tl.activeJobs[jobID]
+	tl.activeJobsMu.Unlock()
+	if !ok {
+		return fmt.Errorf("job %d is either inactive or does not exist", jobID)
+	}
+
+	// unpause by closing the paused channel
+	job.mu.Lock()
+	defer job.mu.Unlock()
+
+	if job.paused == nil {
+		// already not paused (not an error, just a no-op)
+		return nil
+	}
+	close(job.paused)
+	job.paused = nil
+	job.currentState = JobStarted
+
+	job.flushProgress(job.statusLog)
+
+	tl.dbMu.Lock()
+	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
+	tl.dbMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("job unpaused, but error updating job state in DB: %w", err)
+	}
+
+	return nil
+}
+
 // Job is only to be used for shuttling job data in and out of the DB,
 // it should not be assumed to accurately reflect the current state of the
 // job. Mainly used for inserting a job row, and getting a job row for the
@@ -872,7 +955,7 @@ type JobState string
 const (
 	JobQueued    JobState = "queued"    // on deck
 	JobStarted   JobState = "started"   // currently running
-	JobPaused    JobState = "paused"    // intentional, graceful (don't auto-restart)
+	JobPaused    JobState = "paused"    // intentional, graceful (don't auto-restart) (still considered "active" since its action remains blocked in memory)
 	JobAborted   JobState = "aborted"   // unintentional, forced, interrupted (may be auto-restarted)
 	JobSucceeded JobState = "succeeded" // final (cannot be restarted) // TODO: what if units of work fail, though? maybe this should be "done" or "completed"
 	JobFailed    JobState = "failed"    // final (can be manually restarted)

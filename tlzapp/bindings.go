@@ -752,6 +752,22 @@ func (a App) CancelJob(ctx context.Context, repo string, jobID int64) error {
 	return tl.CancelJob(ctx, jobID)
 }
 
+func (a App) PauseJob(ctx context.Context, repo string, jobID int64) error {
+	tl, err := getOpenTimeline(repo)
+	if err != nil {
+		return err
+	}
+	return tl.PauseJob(ctx, jobID)
+}
+
+func (a App) UnpauseJob(ctx context.Context, repo string, jobID int64) error {
+	tl, err := getOpenTimeline(repo)
+	if err != nil {
+		return err
+	}
+	return tl.UnpauseJob(ctx, jobID)
+}
+
 type BuildInfo struct {
 	GoOS   string `json:"go_os"`
 	GoArch string `json:"go_arch"`

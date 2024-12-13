@@ -148,6 +148,9 @@ const app = {
 	OpenRepositories() {
 		return get("/api/open-repositories");
 	},
+	PauseJob(jobID) {
+		return post("/api/pause-job", jobID);
+	},
 	PlanImport(params) {
 		return post("/api/plan-import", params);
 	},
@@ -162,6 +165,9 @@ const app = {
 	},
 	SearchEntities(params) {
 		return post("/api/search-entities", params);
+	},
+	UnpauseJob(jobID) {
+		return post("/api/unpause-job", jobID);
 	},
 };
 

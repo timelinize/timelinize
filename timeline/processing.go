@@ -115,6 +115,10 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 			// read all incoming graphs and add them to a batch, and'
 			// process the batch if it is full
 			for {
+				// block here if job is paused; but don't return if canceled
+				// (non-nil error) for the reason described just below
+				_ = p.ij.job.Continue()
+
 				// it may seem weird that we don't select on ctx.Done()
 				// here, and that's because we expect data sources to
 				// honor context cancellation; once they return, the

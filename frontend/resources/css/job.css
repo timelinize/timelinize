@@ -17,3 +17,10 @@
 	--tblr-progress-height: 2.5rem;
 	--tblr-progress-border-radius: var(--tblr-progress-height);
 }
+
+/* changing with the height messes with the loop animation */
+@keyframes progress-bar-stripes {
+	0% {
+		background-position-x: var(--tblr-progress-height);
+	}
+}
