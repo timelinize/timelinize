@@ -768,6 +768,14 @@ func (a App) UnpauseJob(ctx context.Context, repo string, jobID int64) error {
 	return tl.UnpauseJob(ctx, jobID)
 }
 
+func (a App) StartJob(ctx context.Context, repo string, jobID int64, startOver bool) error {
+	tl, err := getOpenTimeline(repo)
+	if err != nil {
+		return err
+	}
+	return tl.StartJob(ctx, jobID, startOver)
+}
+
 type BuildInfo struct {
 	GoOS   string `json:"go_os"`
 	GoArch string `json:"go_arch"`

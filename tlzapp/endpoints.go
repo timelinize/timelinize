@@ -180,6 +180,12 @@ func (a *App) registerCommands() {
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Finds and filters items in a timeline.",
 		},
+		"start-job": {
+			Handler: a.server.handleStartJob,
+			Method:  http.MethodPost,
+			Payload: jobPayload{},
+			Help:    "Starts a job.",
+		},
 		"stats": {
 			Handler: a.server.handleStats,
 			Method:  http.MethodGet,

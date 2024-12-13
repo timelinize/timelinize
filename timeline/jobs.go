@@ -276,9 +276,9 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID int64) error
 		FROM jobs
 		WHERE id!=?
 			AND hash=(SELECT hash FROM jobs WHERE id=? LIMIT 1)
-			AND state=?
+			AND (state=? OR state=?)
 		LIMIT 1`,
-		jobID, jobID, JobStarted).Scan(&count)
+		jobID, jobID, JobStarted, JobPaused).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("checking for duplicate running job: %w", err)
 	}
@@ -286,12 +286,21 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID int64) error
 		return errors.New("identical job is already running")
 	}
 
-	// load the job and verify it is in a startable state
+	// verify the job is not already loaded (using UnpauseJob is suitable in that case, so we don't
+	// double-load it) and then load the job to verify it is in a startable state
+	tl.activeJobsMu.RLock()
+	_, runningOrPaused := tl.activeJobs[jobID]
+	tl.activeJobsMu.RUnlock()
+	if runningOrPaused {
+		return fmt.Errorf("job %d is already active/loaded and cannot be loaded and started again", jobID)
+	}
 	job, err := tl.loadJob(tl.ctx, tx, jobID, false)
 	if err != nil {
 		return fmt.Errorf("loading job %d: %w", jobID, err)
 	}
 	if job.State == JobStarted || job.State == JobSucceeded {
+		// paused is an allowed state to start from, as long as it's not already loaded/active (checked above),
+		// because the process could have stopped while the job was paused
 		return fmt.Errorf("job %d has already %s and is not startable in this state", jobID, job.State)
 	}
 
@@ -830,7 +839,7 @@ func (tl *Timeline) PauseJob(ctx context.Context, jobID int64) error {
 	// store reference to the new channel so it can be closed (to unpause) later
 	job.mu.Lock()
 	if job.paused != nil {
-		// already paused (not an error, just a no-op)=
+		// already paused (not an error, just a no-op)
 		job.mu.Unlock()
 		return nil
 	}
@@ -860,7 +869,21 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID int64) error {
 	job, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.Unlock()
 	if !ok {
-		return fmt.Errorf("job %d is either inactive or does not exist", jobID)
+		// not active; see if it's in the DB... if so, it's the same as starting the job
+		var state JobState
+		tl.dbMu.Lock()
+		err := tl.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id=? LIMIT 1`, jobID).Scan(&state)
+		tl.dbMu.Unlock()
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("job %d not found", jobID)
+		}
+		if err != nil {
+			return err
+		}
+		if state != JobStarted && state != JobPaused {
+			return fmt.Errorf("job %d is in %s state and cannot be unpaused", jobID, state)
+		}
+		return tl.StartJob(ctx, jobID, false)
 	}
 
 	// unpause by closing the paused channel
@@ -887,9 +910,33 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID int64) error {
 	return nil
 }
 
+func (tl *Timeline) StartJob(ctx context.Context, jobID int64, startOver bool) error {
+	tl.dbMu.Lock()
+	defer tl.dbMu.Unlock()
+
+	tx, err := tl.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if startOver {
+		_, err = tx.ExecContext(ctx, `UPDATE jobs SET checkpoint=NULL WHERE id=?`, jobID) // TODO: LIMIT 1
+		if err != nil {
+			return fmt.Errorf("clearing checkpoint to start over: %w", err)
+		}
+	}
+
+	if err = tl.startJob(ctx, tx, jobID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 // Job is only to be used for shuttling job data in and out of the DB,
 // it should not be assumed to accurately reflect the current state of the
-// job. Mainly used for inserting a job row, and getting a job row for the
+// job. Mainly used for inserting a job row and getting a job row for the
 // frontend.
 type Job struct {
 	// not a field in the DB, but useful for bookkeeping where multiple timelines are open

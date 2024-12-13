@@ -124,8 +124,9 @@ func (s *server) handleCancelJobs(w http.ResponseWriter, r *http.Request) error 
 }
 
 type jobPayload struct {
-	RepoID string `json:"repo_id"`
-	JobID  int64  `json:"job_id"`
+	RepoID    string `json:"repo_id"`
+	JobID     int64  `json:"job_id"`
+	StartOver bool   `json:"start_over,omitempty"` // only used with StartJob
 }
 
 func (s *server) handlePauseJob(w http.ResponseWriter, r *http.Request) error {
@@ -137,6 +138,12 @@ func (s *server) handlePauseJob(w http.ResponseWriter, r *http.Request) error {
 func (s *server) handleUnpauseJob(w http.ResponseWriter, r *http.Request) error {
 	payload := r.Context().Value(ctxKeyPayload).(*jobPayload)
 	err := s.app.UnpauseJob(r.Context(), payload.RepoID, payload.JobID)
+	return jsonResponse(w, nil, err)
+}
+
+func (s *server) handleStartJob(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*jobPayload)
+	err := s.app.StartJob(r.Context(), payload.RepoID, payload.JobID, payload.StartOver)
 	return jsonResponse(w, nil, err)
 }
 

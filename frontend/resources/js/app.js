@@ -96,8 +96,8 @@ const app = {
 	AddEntity(repo_id, entity) {
 		return post("/api/add-entity", { repo_id, entity });
 	},
-	CancelJobs(jobIDs) {
-		return post("/api/cancel-jobs", jobIDs);
+	CancelJobs(repo_id, job_ids) {
+		return post("/api/cancel-jobs", { repo_id, job_ids });
 	},
 	CloseRepository(repo_id) {
 		return post("/api/close-repository", repo_id);
@@ -148,8 +148,8 @@ const app = {
 	OpenRepositories() {
 		return get("/api/open-repositories");
 	},
-	PauseJob(jobID) {
-		return post("/api/pause-job", jobID);
+	PauseJob(repo_id, job_id) {
+		return post("/api/pause-job", { repo_id, job_id });
 	},
 	PlanImport(params) {
 		return post("/api/plan-import", params);
@@ -166,8 +166,11 @@ const app = {
 	SearchEntities(params) {
 		return post("/api/search-entities", params);
 	},
-	UnpauseJob(jobID) {
-		return post("/api/unpause-job", jobID);
+	StartJob(repo_id, job_id, start_over) {
+		return post("/api/start-job", { repo_id, job_id, start_over });
+	},
+	UnpauseJob(repo_id, job_id) {
+		return post("/api/unpause-job", { repo_id, job_id });
 	},
 };
 
