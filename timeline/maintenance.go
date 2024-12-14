@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -36,30 +37,60 @@ import (
 func (tl *Timeline) maintenanceLoop() {
 	logger := Log.Named("maintenance")
 
-	err := tl.deleteExpiredItems(tl.ctx, logger)
+	err := tl.deleteExpiredItems(logger)
 	if err != nil {
 		logger.Error("problem deleting expired items at startup", zap.Error(err))
 	}
 
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
+	// optimize database at open for good measure
+	go tl.optimizeDB(logger)
+
+	deletionTicker := time.NewTicker(time.Minute)
+	defer deletionTicker.Stop()
+
+	const analyzeInterval = 2 * time.Hour
+	analyzeTicker := time.NewTicker(analyzeInterval)
+	defer analyzeTicker.Stop()
 
 	for {
 		select {
 		case <-tl.ctx.Done():
 			return
-		case <-ticker.C:
-			err := tl.deleteExpiredItems(tl.ctx, logger)
+		case <-deletionTicker.C:
+			err := tl.deleteExpiredItems(logger)
 			if err != nil {
 				logger.Error("problem deleting expired items", zap.Error(err))
 			}
+		case <-analyzeTicker.C:
+			go tl.optimizeDB(logger)
 		}
 	}
 }
 
+// optimizeDB runs ANALYZE on the database. It can be very slow.
+// Recommended to run in a goroutine.
+func (tl *Timeline) optimizeDB(logger *zap.Logger) {
+	// don't overlap if optimization is already running
+	if !atomic.CompareAndSwapInt64(tl.optimizing, 0, 1) {
+		return
+	}
+	defer atomic.StoreInt64(tl.optimizing, 0)
+
+	// TODO: is a lock necessary?
+	// tl.dbMu.RLock()
+	// defer tl.dbMu.RUnlock()
+	logger.Info("optimizing database for performance")
+	start := time.Now()
+	_, err := tl.db.ExecContext(tl.ctx, "ANALYZE")
+	if err != nil {
+		logger.Error("analyzing database: %w", zap.Error(err))
+	}
+	logger.Info("finished optimizing database", zap.Duration("duration", time.Since(start)))
+}
+
 // deleteExpiredItems finds items marked as deleted that have passed their retention period
 // and actually erases them.
-func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) error {
+func (tl *Timeline) deleteExpiredItems(logger *zap.Logger) error {
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
@@ -72,7 +103,7 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 	// first identify which items are ready to be erased; we need their row
 	// IDs and data files (we could do the erasure in a single UPDATE query,
 	// but we do need to get their data files first so we can delete those after)
-	rowIDsToEmpty, dataFilesToDelete, err := tl.findExpiredDeletedItems(ctx, tx)
+	rowIDsToEmpty, dataFilesToDelete, err := tl.findExpiredDeletedItems(tl.ctx, tx)
 	if err != nil {
 		return fmt.Errorf("finding expired deleted items: %w", err)
 	}
@@ -81,7 +112,7 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 	}
 
 	// clear out their rows
-	err = tl.deleteDataInItemRows(ctx, tx, rowIDsToEmpty, false)
+	err = tl.deleteDataInItemRows(tl.ctx, tx, rowIDsToEmpty, false)
 	if err != nil {
 		return fmt.Errorf("erasing deleted items (before deleting data files): %w", err)
 	}

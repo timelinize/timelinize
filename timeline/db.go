@@ -79,7 +79,22 @@ func openDB(ctx context.Context, repoDir string) (*sql.DB, error) {
 		Log.Info("using sqlite", zap.String("version", version))
 	}
 
-	// Best practice, according to the SQLite docs.
+	// Best practice, according to the SQLite docs:
+	//
+	// "Applications with long-lived database connections should run "PRAGMA
+	// optimize=0x10002" when the database connection first opens, then run
+	// "PRAGMA optimize" again at periodic intervals - perhaps once per day.
+	// All applications should run "PRAGMA optimize" after schema changes,
+	// especially CREATE INDEX."
+	// - https://www.sqlite.org/pragma.html#pragma_optimize
+	//
+	// We stray slightly from this guidance and just run ANALYZE in the
+	// background on a ticker or after large imports, for example.
+	// I found occasions where PRAGMA optimize did not fix a slow query
+	// when ANALYZE did.
+	//
+	// https://x.com/mholt6/status/1865169910940471492
+	// --> https://x.com/carlsverre/status/1865185078067835167 (whole thread)
 	_, err = db.ExecContext(ctx, `PRAGMA optimize=0x10002`)
 	if err != nil {
 		Log.Error("optimizing database: %w", zap.Error(err))
@@ -121,34 +136,6 @@ func provisionDB(ctx context.Context, db *sql.DB) error {
 	err = saveAllStandardEntityTypes(ctx, db)
 	if err != nil {
 		return fmt.Errorf("saving standard entity types to database: %w", err)
-	}
-
-	// "Applications with long-lived database connections should run "PRAGMA
-	// optimize=0x10002" when the database connection first opens, then run
-	// "PRAGMA optimize" again at periodic intervals - perhaps once per day.
-	// All applications should run "PRAGMA optimize" after schema changes,
-	// especially CREATE INDEX."
-	// - https://www.sqlite.org/pragma.html#pragma_optimize
-	//
-	// I noticed a situation where running ANALYZE (which PRAGMA optimize does
-	// if needed, apparently) solved a major performance issue by helping the
-	// query planner choose the right optimizer for searching items.
-	// https://x.com/mholt6/status/1865169910940471492
-	// --> https://x.com/carlsverre/status/1865185078067835167 (whole thread)
-	//
-	// TODO: The docs recommend doing this about once per day (we run it
-	// here since we just ran CREATE INDEX a lot if this is a new DB) --
-	// I dunno if we'd need it that often, but maybe set up a timer?
-	// TODO: I also encountered an issue where `PRAGMA optimize` did not
-	// fix the performance, but running `ANALYZE` did. Hence I run both here.
-	Log.Debug("optimizing DB")
-	_, err = db.ExecContext(ctx, `ANALYZE`)
-	if err != nil {
-		Log.Error("analyzing database: %w", zap.Error(err))
-	}
-	_, err = db.ExecContext(ctx, `PRAGMA optimize`)
-	if err != nil {
-		Log.Error("optimizing database: %w", zap.Error(err))
 	}
 
 	return nil

@@ -521,7 +521,7 @@ type ObfuscationOptions struct {
 	// all timelines will be obfuscated if enabled.
 	RepoIDs []string `json:"repo_ids,omitempty"`
 
-	Locations []LocationObfuscation `json:"locations,omitempty"`
+	Locations []ObfuscatedLocation `json:"locations,omitempty"`
 
 	// If true, the base (last) component of data file names will be
 	// obfuscated, but this prevents the frontend from requesting the
@@ -536,25 +536,26 @@ func (obf ObfuscationOptions) AppliesTo(tl *Timeline) bool {
 		(obf.RepoIDs == nil || slices.Contains(obf.RepoIDs, tl.id.String()))
 }
 
-// LocationObfuscation describes how to obfuscate a coordinate.
-type LocationObfuscation struct {
-	Latitude     float64 `json:"latitude,omitempty"`
-	Longitude    float64 `json:"longitude,omitempty"`
+// ObfuscatedLocation describes how to obfuscate a coordinate.
+type ObfuscatedLocation struct {
+	Description  string  `json:"description,omitempty"` // for convenience with managing
+	Lat          float64 `json:"lat,omitempty"`         // latitude
+	Lon          float64 `json:"lon,omitempty"`         // longitude
 	RadiusMeters int     `json:"radius_meters,omitempty"`
 }
 
 // Contains returns true if the circle approximately contains the given coordinate.
-func (l LocationObfuscation) Contains(lat, lon float64) bool {
-	return haversineDistanceMeters(l.Latitude, l.Longitude, lat, lon) < float64(l.RadiusMeters)
+func (l ObfuscatedLocation) Contains(lat, lon float64) bool {
+	return haversineDistanceMeters(l.Lat, l.Lon, lat, lon) < float64(l.RadiusMeters)
 }
 
 // Obfuscate returns obfuscated lat/lon values.
-func (l LocationObfuscation) Obfuscate(lat, lon float64, rowID int64) (float64, float64) {
+func (l ObfuscatedLocation) Obfuscate(lat, lon float64, rowID int64) (float64, float64) {
 	faker := gofakeit.New(rowID)
 
 	// translate all points within the circle a fixed vector; necessary to prevent
 	// averaging the smattering of points to find the original center(s)
-	circleFaker := gofakeit.New(int64((l.Latitude + l.Longitude) * 1e7))
+	circleFaker := gofakeit.New(int64((l.Lat + l.Lon) * 1e7))
 
 	// then shift each point a little bit individually to prevent map overlay attacks
 	// where you estimate the initial translation by seeing what map features the

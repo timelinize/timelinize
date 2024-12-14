@@ -154,8 +154,8 @@ type ItemSearchParams struct {
 	// multiple structs and performing various other computations.
 	// Instead it efficiently builds a string containing only the
 	// coordinate data. Non-spatial data will be excluded.
-	GeoJSON           bool                  `json:"geojson,omitempty"`
-	ObfuscatedGeoJSON []LocationObfuscation `json:"-"` // TODO: this is kind of a hack since it's the only data we encode before returning (for efficiency)
+	GeoJSON           bool                 `json:"geojson,omitempty"`
+	ObfuscatedGeoJSON []ObfuscatedLocation `json:"-"` // TODO: this is kind of a hack since it's the only data we encode before returning (for efficiency)
 
 	// Include the size of the item content with the results.
 	// For data files, this involves calling stat() on the file.

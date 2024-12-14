@@ -74,8 +74,9 @@ type Timeline struct {
 	// and this is totally possible since we run our DB ops concurrently.
 	// It's unfortunate that DB locking doesn't handle this for us, but by
 	// wrapping DB calls in this mutex I've noticed the problem disappear.
-	db   *sql.DB
-	dbMu sync.RWMutex
+	db         *sql.DB
+	dbMu       sync.RWMutex
+	optimizing *int64 // accessed atomically; drops overlapping ANALYZE calls
 
 	thumbs   *sql.DB
 	thumbsMu sync.RWMutex
@@ -386,6 +387,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		id:              id,
 		db:              db,
 		thumbs:          thumbsDB,
+		optimizing:      new(int64),
 		dataSources:     dbDataSources,
 		classifications: classes,
 		entityTypes:     entityTypes,
@@ -407,7 +409,8 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	// }
 
 	// start maintenance goroutine; this erases items that have been
-	// deleted and have fulfilled their retention period
+	// deleted and have fulfilled their retention period, and optimizes
+	// the DB occasionally
 	go tl.maintenanceLoop()
 
 	return tl, nil

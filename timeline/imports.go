@@ -339,15 +339,9 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 	ij.generateThumbnailsForImportedItems()
 	ij.generateEmbeddingsForImportedItems()
 
-	// TODO: I had a performance issue that was solved by running ANALYZE after a large import.
-	// (`PRAGMA optimize` did not fix it.) Hence doing it here. Hopefully this is fine?
-	Log.Debug("optimizing DB")
-	job.tl.dbMu.RLock()
-	_, err := job.tl.db.ExecContext(job.ctx, `ANALYZE`)
-	job.tl.dbMu.RUnlock()
-	if err != nil {
-		Log.Error("analyzing database: %w", zap.Error(err))
-	}
+	// this can prevent/resolve slow queries, especially useful after (large) imports
+	// TODO: maybe only necessary after *large* imports
+	go job.tl.optimizeDB(job.Logger())
 
 	return nil
 }
