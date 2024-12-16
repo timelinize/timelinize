@@ -63,7 +63,7 @@ func (tl *Timeline) maintenanceLoop() {
 	deletionTicker := time.NewTicker(time.Minute)
 	defer deletionTicker.Stop()
 
-	const analyzeInterval = 2 * time.Hour
+	const analyzeInterval = 8 * time.Hour
 	analyzeTicker := time.NewTicker(analyzeInterval)
 	defer analyzeTicker.Stop()
 
@@ -91,9 +91,9 @@ func (tl *Timeline) optimizeDB(logger *zap.Logger) {
 	}
 	defer atomic.StoreInt64(tl.optimizing, 0)
 
-	// TODO: is a lock necessary?
-	// tl.dbMu.RLock()
-	// defer tl.dbMu.RUnlock()
+	// TODO: I assume a read lock is all we need for ANALYZE...
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
 	logger.Info("optimizing database for performance")
 	start := time.Now()
 	_, err := tl.db.ExecContext(tl.ctx, "ANALYZE")

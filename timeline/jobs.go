@@ -421,6 +421,7 @@ func (tl *Timeline) runJob(row Job) error {
 		logger:          baseLogger.Named("action"),
 		statusLog:       statusLog,
 		parentJobID:     row.ParentJobID,
+		action:          action,
 		currentState:    row.State,
 		currentProgress: row.Progress,
 		currentTotal:    row.Total,
@@ -501,16 +502,17 @@ func (tl *Timeline) runJob(row Job) error {
 		}
 
 		if newState == JobSucceeded {
-			// clear message and checkpoint in the DB if job succeeds (calling checkpoint() causes a sync to the DB)
+			// clear message and checkpoint in the DB if job succeeds
 			job.Message("")
-			if err = job.checkpoint(tx, nil); err != nil {
+			if err = job.sync(tx, nil); err != nil {
 				logger.Error("clearing job checkpoint and message from successful job", zap.Error(err))
 			}
 		} else {
-			// for any other termination, just sync the job state to the DB
+			// for any other termination, sync only the job state to the DB
 			job.mu.Lock()
-			err := job.sync(tx)
+			checkpoint := job.currentCheckpoint
 			job.mu.Unlock()
+			err := job.sync(tx, checkpoint)
 			if err != nil {
 				logger.Error("syncing job state with DB", zap.Error(err))
 			}
@@ -527,10 +529,10 @@ func (tl *Timeline) runJob(row Job) error {
 		err = tx.QueryRowContext(tl.ctx,
 			`SELECT id
 			FROM jobs
-			WHERE state=? AND (hostname=? OR name!=?)
+			WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
 			ORDER BY start, created
 			LIMIT 1`,
-			JobQueued, hostname, JobNameImport).Scan(&nextJobID)
+			JobQueued, JobInterrupted, hostname, JobNameImport).Scan(&nextJobID)
 		if nextJobID > 0 {
 			err := tl.startJob(tl.ctx, tx, nextJobID)
 			if err != nil {
@@ -570,6 +572,7 @@ type ActiveJob struct {
 	logger      *zap.Logger
 	statusLog   *zap.Logger
 	parentJobID *int64
+	action      JobAction
 
 	mu sync.Mutex
 
@@ -579,7 +582,7 @@ type ActiveJob struct {
 	currentProgress   *int
 	currentTotal      *int
 	currentMessage    *string // nil => unchanged, "" => clear
-	currentCheckpoint []byte
+	currentCheckpoint any
 	lastCheckpoint    *time.Time // when last checkpoint was created (may be more recent than last DB sync, which is throttled)
 	lastSync          time.Time  // last DB update
 	lastFlush         time.Time  // last frontend update
@@ -686,7 +689,6 @@ func (j *ActiveJob) flushProgress(logger *zap.Logger) {
 }
 
 // Message updates the current job message or status to show the user.
-// TODO: rename to Status?
 func (j *ActiveJob) Message(message string) {
 	j.mu.Lock()
 	if message == "" {
@@ -710,30 +712,8 @@ func (j *ActiveJob) Message(message string) {
 // Checkpoint values are opaque and MUST be JSON-marshallable. They will be
 // returned to the job action in the form of JSON bytes.
 func (j *ActiveJob) Checkpoint(newCheckpoint any) error {
-	return j.checkpoint(nil, newCheckpoint)
+	return j.sync(nil, newCheckpoint)
 	// TODO: emit log for the frontend to update the UI?
-}
-
-func (j *ActiveJob) checkpoint(tx *sql.Tx, newCheckpoint any) error {
-	var chkpt []byte
-	if newCheckpoint != nil {
-		var err error
-		chkpt, err = json.Marshal(newCheckpoint)
-		if err != nil {
-			return fmt.Errorf("JSON-encoding checkpoint %#v: %w", newCheckpoint, err)
-		}
-	}
-
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	j.currentCheckpoint = chkpt
-	if chkpt != nil {
-		now := time.Now()
-		j.lastCheckpoint = &now
-	}
-
-	return j.sync(tx)
 }
 
 // sync writes changes/updates to the DB. In case of rapid job progression, we avoid
@@ -742,15 +722,37 @@ func (j *ActiveJob) checkpoint(tx *sql.Tx, newCheckpoint any) error {
 // no longer holds true, we can change the signature of this method). In other words,
 // passing in a tx forces a flush/sync to the DB.
 //
-// MUST BE CALLED IN A LOCK ON THE JOB MUTEX.
-func (j *ActiveJob) sync(tx *sql.Tx) error {
+// This is how a checkpoint is stored as well, since it doesn't make sense to only
+// have a checkpoint in memory (pausing a job does not use a checkpoint since it
+// remains in memory) -- only resuming a job after it has been removed from memory
+// (usually by program exit or intentional abort, etc.) needs a checkpoint, so
+// creating a checkpoint and syncing to the DB are the same operation. By the same
+// token, the progress, message, and total fields in the DB row must also correspond
+// with the checkpoint, otherwise resuming a job will be out of whack. So it is
+// important that syncing to the DB only happens with a checkpoint to go with it
+// (if there is a checkpoint at all). Passing a nil checkpoint here will clear it.
+func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
 	// no-op if last sync was too recent and the job isn't done yet (job done <==> tx!=nil)
 	if time.Since(j.lastSync) < jobSyncInterval && tx == nil {
 		return nil
 	}
 
+	var chkpt []byte
+	if checkpoint != nil {
+		var err error
+		chkpt, err = json.Marshal(checkpoint)
+		if err != nil {
+			return fmt.Errorf("JSON-encoding checkpoint %#v: %w", checkpoint, err)
+		}
+		now := time.Now()
+		j.lastCheckpoint = &now
+	}
+
 	q := `UPDATE jobs SET progress=?, total=?, message=?, checkpoint=?, updated=? WHERE id=?` // TODO: LIMIT 1
-	vals := []any{j.currentProgress, j.currentTotal, j.currentMessage, j.currentCheckpoint, time.Now().UnixMilli(), j.id}
+	vals := []any{j.currentProgress, j.currentTotal, j.currentMessage, chkpt, time.Now().UnixMilli(), j.id}
 
 	var err error
 	if tx == nil {
@@ -1000,12 +1002,13 @@ const (
 type JobState string
 
 const (
-	JobQueued    JobState = "queued"    // on deck
-	JobStarted   JobState = "started"   // currently running
-	JobPaused    JobState = "paused"    // intentional, graceful (don't auto-restart) (still considered "active" since its action remains blocked in memory)
-	JobAborted   JobState = "aborted"   // unintentional, forced, interrupted (may be auto-restarted)
-	JobSucceeded JobState = "succeeded" // final (cannot be restarted) // TODO: what if units of work fail, though? maybe this should be "done" or "completed"
-	JobFailed    JobState = "failed"    // final (can be manually restarted)
+	JobQueued      JobState = "queued"      // on deck
+	JobStarted     JobState = "started"     // currently running
+	JobPaused      JobState = "paused"      // intentional suspension (don't auto-resume) (still considered "active" since its action remains blocked in memory)
+	JobAborted     JobState = "aborted"     // intentional termination (don't auto-resume) (job unloaded from memory)
+	JobInterrupted JobState = "interrupted" // unintentional, forced interruption (may be auto-resumed)
+	JobSucceeded   JobState = "succeeded"   // final (cannot be restarted) // TODO: what if units of work fail, though? maybe this should be "done" or "completed"
+	JobFailed      JobState = "failed"      // final (can be manually restarted)
 )
 
 const (

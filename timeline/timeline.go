@@ -366,9 +366,9 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 
 	// in case of unclean shutdown last time, set all jobs that are on "started" status to "aborted"
 	// (no jobs can be currently running, since we haven't even finished opening the timeline yet)
-	_, err = db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=?`, JobAborted, JobStarted)
+	_, err = db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=?`, JobInterrupted, JobStarted)
 	if err != nil {
-		return nil, fmt.Errorf("resetting all uncleanly-stopped jobs to 'aborted' state: %w", err)
+		return nil, fmt.Errorf("resetting all uncleanly-stopped jobs to 'interrupted' state: %w", err)
 	}
 
 	thumbsDB, err := openAndProvisionThumbsDB(ctx, repoDir, id)
@@ -395,23 +395,48 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		activeJobs:      make(map[int64]*ActiveJob),
 	}
 
-	// TODO: should we do this if the new thumbnails DB is missing too?
-	// // if thumbnail cache does not exist, start building cache
-	// // (this is useful after clearing cache or opening the repo on
-	// // a different file system for the first time)
-	// if _, err := os.Stat(thumbnailDir(cacheDir, id.String())); errors.Is(err, fs.ErrNotExist) {
-	// 	go func() {
-	// 		Log.Info("thumbnail cache not found; regenerating")
-	// 		if err := tl.regenerateAllThumbnails(); err != nil {
-	// 			Log.Error("generating thumbnails", zap.Error(err))
-	// 		}
-	// 	}()
-	// }
-
 	// start maintenance goroutine; this erases items that have been
 	// deleted and have fulfilled their retention period, and optimizes
 	// the DB occasionally
 	go tl.maintenanceLoop()
+
+	// start any jobs that were interrupted or which are queued; import jobs
+	// in particular should only be run if they're on the same machine, since
+	// it's likely that filepaths change or don't exist on different machines
+	// (we use a DB lock now because we've started a maintenance loop, and also
+	// starting jobs involve DB concurrency)
+	hostname, err := os.Hostname()
+	if err != nil {
+		Log.Error("unable to lookup hostname for resuming jobs", zap.Error(err))
+	}
+	tl.dbMu.RLock()
+	rows, err := db.QueryContext(ctx,
+		`SELECT id
+		FROM jobs
+		WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
+		ORDER BY start, created
+		LIMIT 3`, JobQueued, JobInterrupted, hostname, JobNameImport)
+	if err != nil {
+		return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
+	}
+	tl.dbMu.RUnlock()
+	if err != nil {
+		return nil, fmt.Errorf("could not query jobs to resume: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var jobID int64
+		err := rows.Scan(&jobID)
+		if err != nil {
+			return nil, fmt.Errorf("scanning row for resuming job: %w", err)
+		}
+		if err = tl.StartJob(ctx, jobID, false); err != nil {
+			return nil, fmt.Errorf("starting job %d from last open: %w", jobID, err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows for resuming jobs: %w", err)
+	}
 
 	return tl, nil
 }

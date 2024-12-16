@@ -203,7 +203,7 @@ function jobProgressUpdate(job) {
 			elem.classList.add('status-secondary', 'status-dot-animated');
 		}
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
-			elem.innerText = "Queued"
+			elem.innerText = "Queued";
 			elem.classList.add("text-secondary");
 		}
 		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
@@ -298,7 +298,7 @@ function jobProgressUpdate(job) {
 			elem.classList.remove('status-azure', 'status-secondary', 'status-orange', 'status-dot-animated');
 		}
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
-			elem.innerText = "Completed"
+			elem.innerText = "Completed";
 			elem.classList.add("text-green");
 		}
 		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
@@ -346,7 +346,7 @@ function jobProgressUpdate(job) {
 			elem.classList.remove('status-green', 'status-orange', 'status-red');
 		}
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
-			elem.innerText = "Paused"
+			elem.innerText = "Paused";
 			elem.classList.add('text-azure');
 			elem.classList.remove('text-green', 'text-secondary');
 		}
@@ -374,7 +374,7 @@ function jobProgressUpdate(job) {
 			elem.classList.add('d-none');
 		}
 	}
-	else if (job.state == "aborted")
+	else if (job.state == "aborted" || job.state == "interrupted")
 	{
 		for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-orange', 'progress-bar-striped');
@@ -389,7 +389,7 @@ function jobProgressUpdate(job) {
 			elem.classList.remove('status-green', 'status-azure', 'status-dot-animated');
 		}
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
-			elem.innerText = "Aborted"
+			elem.innerText = job.state == "aborted" ? "Aborted" : "Interrupted";
 			elem.classList.add("text-orange");
 			elem.classList.remove('text-green', 'text-azure', 'text-secondary');
 		}
@@ -421,6 +421,7 @@ function jobProgressUpdate(job) {
 			elem.classList.add('d-none');
 		}
 		for (const elem of $$(`.restart-job.job-id-${job.id}`)) {
+			// TODO: interrupted jobs can be resumed, but right now our handler for this link's click event tells the server to start the job over
 			elem.classList.remove('d-none');
 		}
 	}
@@ -439,7 +440,7 @@ function jobProgressUpdate(job) {
 			elem.classList.remove('status-green', 'status-azure', 'status-orange', 'status-dot-animated');
 		}
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
-			elem.innerText = "Failed"
+			elem.innerText = "Failed";
 			elem.classList.add('text-red');
 			elem.classList.remove('text-green', 'text-azure', 'text-secondary');
 		}

@@ -87,9 +87,8 @@ type FileImporter struct {
 	seenDevices   map[int64]struct{}
 	seenDevicesMu *sync.Mutex
 
-	checkpoint  checkpoint
-	positions   map[int64]int
-	positionsMu *sync.Mutex
+	checkpoint checkpoint       // incoming checkpoint (from the DB)
+	positions  safePositionsMap // for outgoing checkpoints (to the DB)
 
 	wg       *sync.WaitGroup
 	throttle chan struct{}
@@ -175,8 +174,10 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		fi.seenDevices = make(map[int64]struct{})
 		fi.seenDevicesMu = new(sync.Mutex)
 
-		fi.positions = make(map[int64]int)
-		fi.positionsMu = new(sync.Mutex)
+		fi.positions = safePositionsMap{
+			Mutex:     new(sync.Mutex),
+			positions: make(map[int64]int),
+		}
 
 		const maxGoroutines = 128
 		fi.wg = new(sync.WaitGroup)
@@ -251,8 +252,8 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 }
 
 type checkpoint struct {
-	Legacy     map[int64]int `json:"legacy,omitempty"` // map of device tag to position/index
-	Format2024 int           `json:"format_2024,omitempty"`
+	Legacy     safePositionsMap `json:"legacy,omitempty"` // map of device tag to position/index
+	Format2024 int              `json:"format_2024,omitempty"`
 }
 
 type decoder struct {
@@ -334,15 +335,15 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 		}
 		dec.fi.seenDevicesMu.Unlock()
 
-		dec.fi.positionsMu.Lock()
-		dec.fi.positions[dec.deviceTag]++
+		dec.fi.positions.Lock()
+		dec.fi.positions.positions[dec.deviceTag]++
 
 		// fast forward to checkpoint, if set
-		if leftOffAt, ok := dec.fi.checkpoint.Legacy[dec.deviceTag]; ok && dec.fi.positions[dec.deviceTag] < leftOffAt {
-			dec.fi.positionsMu.Unlock()
+		if leftOffAt, ok := dec.fi.checkpoint.Legacy.positions[dec.deviceTag]; ok && dec.fi.positions.positions[dec.deviceTag] < leftOffAt {
+			dec.fi.positions.Unlock()
 			continue
 		}
-		dec.fi.positionsMu.Unlock()
+		dec.fi.positions.Unlock()
 
 		return &Location{
 			Original:    newLoc,
@@ -424,6 +425,21 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 	}
 
 	return nil
+}
+
+// safePositionsMap makes it safe to give a map of each goroutine's position
+// in the location history file to the processor to create a checkpoint, which
+// happens concurrently with us; so it implements MarshalJSON() to obtains the
+// same lock we use.
+type safePositionsMap struct {
+	*sync.Mutex
+	positions map[int64]int
+}
+
+func (spm safePositionsMap) MarshalJSON() ([]byte, error) {
+	spm.Lock()
+	defer spm.Unlock()
+	return json.Marshal(spm.positions)
 }
 
 // // timeDelta returns the difference between times a and b,

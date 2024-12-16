@@ -64,6 +64,20 @@ type Graph struct {
 	// list and starts creating graphs at that point.
 	// It must be JSON-serializable. To resume from a
 	// checkpoint, JSON-deserialize the incoming checkpoint.
+	//
+	// Note that persisting the checkpoint in the DB is done
+	// by the processor concurrently with your data source,
+	// so checkpoint values that are pointers (including
+	// maps) can be problematic -- causing either a race or
+	// a panic, when the JSON serializer accesses it. If
+	// pointer values are needed, consider having the type
+	// implement json.Marshaler such that MarshalJSON()
+	// obtains a lock on the same mutex the data source does.
+	// Either that, or make the checkpoint type a json.RawMessage
+	// that the data source marshals itself before sending it
+	// down the pipeline (this is less efficient, though, since
+	// a checkpoint is only persisted to the DB once every so
+	// often, so not every graph needs a serialized checkpoint).
 	Checkpoint any
 
 	// state needed by processing pipeline

@@ -33,10 +33,23 @@ import (
 )
 
 type importJobCheckpoint struct {
-	EstimatedSize        *int64          `json:"estimated_size"` // only set if currently in the estimating phase
-	OuterIndex           int             `json:"outer_index"`
-	InnerIndex           int             `json:"inner_index"`
-	DataSourceCheckpoint json.RawMessage `json:"data_source_checkpoint,omitempty"`
+	EstimatedSize *int64 `json:"estimated_size"` // only set if currently in the estimating phase
+	OuterIndex    int    `json:"outer_index"`
+	InnerIndex    int    `json:"inner_index"`
+
+	// This is passed through to the data source; and we would be using
+	// json.RawMessage here so that, when loading a checkpoint, the
+	// raw bytes are returned to the data source, but this would mean
+	// that we have to JSON-encode the data source's checkpoint for
+	// every graph that it sends with a checkpoint -- which is often all
+	// of them -- even though checkpoints only get persisted every so
+	// often... in other words, lots of unnecessary json.Marshal() calls;
+	// anyway, we let the job manager encode the whole checkpoint together
+	// in one call when it actually persists it to the DB; it just means
+	// that when we restore the checkpoint, we have to do one call to
+	// json.Marshal into bytes to give to the data source, but that is
+	// still way more efficient than marshaling for every item.
+	DataSourceCheckpoint any `json:"data_source_checkpoint,omitempty"`
 }
 
 type ImportJob struct {
@@ -53,19 +66,11 @@ type ImportJob struct {
 }
 
 func (ij ImportJob) checkpoint(estimatedSize *int64, outer, inner int, ds any) error {
-	var dsChkpt json.RawMessage
-	if ds != nil {
-		var err error
-		dsChkpt, err = json.Marshal(ds)
-		if err != nil {
-			return fmt.Errorf("marshaling data source checkpoint %#v: %w", ds, err)
-		}
-	}
 	return ij.job.Checkpoint(importJobCheckpoint{
 		EstimatedSize:        estimatedSize,
 		OuterIndex:           outer,
 		InnerIndex:           inner,
-		DataSourceCheckpoint: dsChkpt,
+		DataSourceCheckpoint: ds,
 	})
 }
 
@@ -304,7 +309,16 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 					Filename: filenameInsideFS,
 				}
 
-				if err := p.process(job.Context(), dirEntry, chkpt.DataSourceCheckpoint); err != nil {
+				// the data source decodes its own checkpoint, so we give it its checkpoint as bytes
+				var dsCheckpoint json.RawMessage
+				if chkpt.DataSourceCheckpoint != nil {
+					dsCheckpoint, err = json.Marshal(chkpt.DataSourceCheckpoint)
+					if err != nil {
+						return fmt.Errorf("re-encoding data source checkpoint to pass to DS to resume: %w", err)
+					}
+				}
+
+				if err := p.process(job.Context(), dirEntry, dsCheckpoint); err != nil {
 					return fmt.Errorf("processing %s: %w", filename, err)
 				}
 
