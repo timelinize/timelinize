@@ -60,7 +60,7 @@ function renderJobPreview(containerElem, job) {
 // log messages.
 function assignJobElements(containerElem, job) {
 	const jobIDClass = `job-id-${job.id}`;
-	for (elem of $$(`
+	for (const elem of $$(`
 		.job-title,
 		.job-icon,
 		.job-name,
@@ -117,7 +117,7 @@ function jobProgressUpdate(job) {
 	}
 
 
-	for (elem of $$(`.job-link.job-id-${job.id}`)) {
+	for (const elem of $$(`.job-link.job-id-${job.id}`)) {
 		elem.href = `/jobs/${job.repo_id}/${job.id}`;
 	}
 
@@ -126,13 +126,13 @@ function jobProgressUpdate(job) {
 
 	if (job.name == "import")
 	{
-		for (elem of $$(`.job-title.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-title.job-id-${job.id}`)) {
 			elem.innerText = "Import job";
 		}
-		for (elem of $$(`.job-name.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-name.job-id-${job.id}`)) {
 			elem.innerText = "Import";
 		}
-		for (elem of $$(`.job-icon.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-icon.job-id-${job.id}`)) {
 			elem.innerHTML = `
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -148,13 +148,13 @@ function jobProgressUpdate(job) {
 	}
 	else if (job.name == "thumbnails")
 	{
-		for (elem of $$(`.job-title.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-title.job-id-${job.id}`)) {
 			elem.innerText = "Generate thumbnails";
 		}
-		for (elem of $$(`.job-name.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-name.job-id-${job.id}`)) {
 			elem.innerText = "Thumbnails";
 		}
-		for (elem of $$(`.job-icon.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-icon.job-id-${job.id}`)) {
 			elem.innerHTML = `
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -172,13 +172,13 @@ function jobProgressUpdate(job) {
 	}
 	else if (job.name == "embeddings")
 	{
-		for (elem of $$(`.job-title.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-title.job-id-${job.id}`)) {
 			elem.innerText = "Generate embeddings";
 		}
-		for (elem of $$(`.job-name.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-name.job-id-${job.id}`)) {
 			elem.innerText = "Embeddings";
 		}
-		for (elem of $$(`.job-icon.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-icon.job-id-${job.id}`)) {
 			elem.innerHTML = `
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -192,28 +192,28 @@ function jobProgressUpdate(job) {
 
 	if (job.state == "queued")
 	{
-		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+		for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-secondary', 'progress-bar-striped');
 			elem.classList.remove('bg-green', 'bg-azure', 'bg-orange', 'bg-red', 'progress-bar-indeterminate', 'progress-bar-animated');
 		}
-		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-secondary', 'status-indicator-animated');
 		}
-		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-secondary', 'status-dot-animated');
 		}
-		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Queued"
 			elem.classList.add("text-secondary");
 		}
-		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			if (job.start) {
 				elem.innerText = "Starting";
 			} else {
 				elem.innerText = "Created";
 			}
 		}
-		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time.job-id-${job.id}`)) {
 			if (job.start) {
 				setDynamicTimestamp(elem, job.start);
 			} else {
@@ -222,92 +222,92 @@ function jobProgressUpdate(job) {
 		}
 
 		// buttons
-		for (elem of $$(`.pause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.pause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.unpause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.unpause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.cancel-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.cancel-job.job-id-${job.id}`)) {
 			elem.classList.remove('d-none');
 		}
-		for (elem of $$(`.start-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.start-job.job-id-${job.id}`)) {
 			elem.classList.remove('d-none');
 		}
-		for (elem of $$(`.restart-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.restart-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
 	}
 	else if (job.state == "started")
 	{
-		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+		for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-green');
 			elem.classList.remove('bg-azure', 'bg-orange', 'bg-red', 'bg-secondary', 'progress-bar-striped');
 		}
-		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-green', 'status-indicator-animated');
 			elem.classList.remove('status-azure', 'status-secondary', 'status-orange', 'status-red');
 		}
-		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-green', 'status-dot-animated');
 			elem.classList.remove('status-azure', 'status-secondary', 'status-orange', 'status-red');
 		}
-		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Running";
 			elem.classList.add("text-green");
 		}
-		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			elem.innerText = "Started";
 		}
-		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time.job-id-${job.id}`)) {
 			setDynamicTimestamp(elem, job.start);
 		}
-		for (elem of $$(`.job-duration:not(.dynamic-duration).job-id-${job.id}`)) {
+		for (const elem of $$(`.job-duration:not(.dynamic-duration).job-id-${job.id}`)) {
 			setDynamicTimestamp(elem, job.start, true);
 		}
 		
 		// buttons
-		for (elem of $$(`.pause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.pause-job.job-id-${job.id}`)) {
 			elem.classList.remove('d-none');
 		}
-		for (elem of $$(`.unpause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.unpause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.cancel-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.cancel-job.job-id-${job.id}`)) {
 			elem.classList.remove('d-none');
 		}
-		for (elem of $$(`.start-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.start-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.restart-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.restart-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
 	}
 	else if (job.state == "succeeded")
 	{
-		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+		for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-green');
 			elem.classList.remove('bg-azure', 'bg-orange', 'bg-red', 'bg-secondary', 'progress-bar-indeterminate', 'progress-bar-striped');
 		}
-		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-green');
 			elem.classList.remove('status-azure', 'status-secondary', 'status-orange', 'status-indicator-animated');
 		}
-		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-green');
 			elem.classList.remove('status-azure', 'status-secondary', 'status-orange', 'status-dot-animated');
 		}
-		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Completed"
 			elem.classList.add("text-green");
 		}
-		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			elem.innerText = "Finished";
 		}
-		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time.job-id-${job.id}`)) {
 			setDynamicTimestamp(elem, job.ended);
 		}
-		for (elem of $$(`.job-duration.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-duration.job-id-${job.id}`)) {
 			const start = typeof job.start === 'number' ? DateTime.fromSeconds(job.start) : DateTime.fromISO(job.start);
 			const ended = typeof job.ended === 'number' ? DateTime.fromSeconds(job.ended) : DateTime.fromISO(job.ended);
 			elem.innerText = betterToHuman(ended.diff(start));
@@ -315,91 +315,91 @@ function jobProgressUpdate(job) {
 		}
 
 		// buttons
-		for (elem of $$(`.pause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.pause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.unpause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.unpause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.cancel-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.cancel-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.start-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.start-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.restart-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.restart-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
 	}
 	else if (job.state == "paused")
 	{
-		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+		for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-azure', 'progress-bar-striped', 'progress-bar-animated');
 			elem.classList.remove('bg-green', 'bg-secondary', 'bg-orange', 'bg-red', 'progress-bar-indeterminate');
 		}
-		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-azure', 'status-indicator-animated');
 			elem.classList.remove('status-green', 'status-orange', 'status-red');
 		}
-		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-azure', 'status-dot-animated');
 			elem.classList.remove('status-green', 'status-orange', 'status-red');
 		}
-		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Paused"
 			elem.classList.add('text-azure');
 			elem.classList.remove('text-green', 'text-secondary');
 		}
-		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			elem.innerText = "Paused";
 		}
-		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time.job-id-${job.id}`)) {
 			setDynamicTimestamp(elem, job.updated);
 		}
 
 		// buttons
-		for (elem of $$(`.pause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.pause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.unpause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.unpause-job.job-id-${job.id}`)) {
 			elem.classList.remove('d-none');
 		}
-		for (elem of $$(`.cancel-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.cancel-job.job-id-${job.id}`)) {
 			elem.classList.remove('d-none');
 		}
-		for (elem of $$(`.start-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.start-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.restart-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.restart-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
 	}
 	else if (job.state == "aborted")
 	{
-		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+		for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-orange', 'progress-bar-striped');
 			elem.classList.remove('bg-green', 'bg-azure', 'bg-secondary', 'bg-red', 'progress-bar-indeterminate', 'progress-bar-animated');
 		}
-		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-orange');
 			elem.classList.remove('status-green', 'status-azure', 'status-indicator-animated');
 		}
-		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-orange');
 			elem.classList.remove('status-green', 'status-azure', 'status-dot-animated');
 		}
-		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Aborted"
 			elem.classList.add("text-orange");
 			elem.classList.remove('text-green', 'text-azure', 'text-secondary');
 		}
-		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			elem.innerText = "Ended";
 		}
-		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time.job-id-${job.id}`)) {
 			setDynamicTimestamp(elem, job.ended);
 		}
-		for (elem of $$(`.job-duration.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-duration.job-id-${job.id}`)) {
 			const start = typeof job.start === 'number' ? DateTime.fromSeconds(job.start) : DateTime.fromISO(job.start);
 			const ended = typeof job.ended === 'number' ? DateTime.fromSeconds(job.ended) : DateTime.fromISO(job.ended);
 			elem.innerText = betterToHuman(ended.diff(start));
@@ -407,49 +407,49 @@ function jobProgressUpdate(job) {
 		}
 
 		// buttons
-		for (elem of $$(`.pause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.pause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.unpause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.unpause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.cancel-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.cancel-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.start-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.start-job.job-id-${job.id}`)) {
 			// technically, aborted jobs can be resumed; but a button that says "Start" might be confusing, and "Resume" is what the unpause button says...
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.restart-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.restart-job.job-id-${job.id}`)) {
 			elem.classList.remove('d-none');
 		}
 	}
 	else if (job.state == "failed")
 	{
-		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+		for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.classList.add('bg-red', 'progress-bar-striped');
 			elem.classList.remove('bg-green', 'bg-azure', 'bg-orange', 'bg-secondary', 'progress-bar-indeterminate', 'progress-bar-animated');
 		}
-		for (elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-indicator.job-id-${job.id}`)) {
 			elem.classList.add('status-red');
 			elem.classList.remove('status-green', 'status-azure', 'status-orange', 'status-indicator-animated');
 		}
-		for (elem of $$(`.job-status-dot.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status-dot.job-id-${job.id}`)) {
 			elem.classList.add('status-red');
 			elem.classList.remove('status-green', 'status-azure', 'status-orange', 'status-dot-animated');
 		}
-		for (elem of $$(`.job-status.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Failed"
 			elem.classList.add('text-red');
 			elem.classList.remove('text-green', 'text-azure', 'text-secondary');
 		}
-		for (elem of $$(`.job-time-basis.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			elem.innerText = "Ended";
 		}
-		for (elem of $$(`.job-time.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-time.job-id-${job.id}`)) {
 			setDynamicTimestamp(elem, job.ended);
 		}
-		for (elem of $$(`.job-duration.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-duration.job-id-${job.id}`)) {
 			const start = typeof job.start === 'number' ? DateTime.fromSeconds(job.start) : DateTime.fromISO(job.start);
 			const ended = typeof job.ended === 'number' ? DateTime.fromSeconds(job.ended) : DateTime.fromISO(job.ended);
 			elem.innerText = betterToHuman(ended.diff(start));
@@ -457,19 +457,19 @@ function jobProgressUpdate(job) {
 		}
 
 		// buttons
-		for (elem of $$(`.pause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.pause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.unpause-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.unpause-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.cancel-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.cancel-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.start-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.start-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');
 		}
-		for (elem of $$(`.restart-job.job-id-${job.id}`)) {
+		for (const elem of $$(`.restart-job.job-id-${job.id}`)) {
 			elem.classList.remove('d-none');
 		}
 	}
@@ -478,11 +478,11 @@ function jobProgressUpdate(job) {
 	if (job.total == null) {
 		// indeterminate maximum; but if job is successful, just max out the progress bar
 		if (job.state == "succeeded") {
-			for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+			for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 				elem.style.width = "100%";
 			}
 		} else if (job.state) {
-			for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+			for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 				if (job.state == "queued" || job.state == "paused" || job.state == "aborted" || job.state == "failed") {
 					elem.style.width = "100%"; // striped bar
 				} else {
@@ -494,11 +494,11 @@ function jobProgressUpdate(job) {
 			}
 		}
 		if (job.progress != null) {
-			for (elem of $$(`.job-progress-text.job-id-${job.id}`)) {
+			for (const elem of $$(`.job-progress-text.job-id-${job.id}`)) {
 				elem.innerText = job.progress.toLocaleString();
 			}
 		}
-		for (elem of $$(`.job-progress-text-detailed.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-progress-text-detailed.job-id-${job.id}`)) {
 			if (job.progress != null) {
 				const total = job.state == "succeeded" ? job.progress.toLocaleString() : "?";
 				elem.innerText = `${job.progress.toLocaleString()} / ${total}`;
@@ -508,22 +508,22 @@ function jobProgressUpdate(job) {
 	if (job.total > 0) {
 		// known maximum; show progress
 		const percent = (job.progress || 0)/job.total * 100;
-		for (elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
+		for (const elem of $$(`.job-progress.job-id-${job.id} .progress-bar`)) {
 			elem.style.width = `${percent}%`;
 			elem.classList.remove('progress-bar-indeterminate');
 		}
 		const percentDisplay = `${percent.toFixed(2).replace(".00", "")}%`;
-		for (elem of $$(`.job-progress-text.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-progress-text.job-id-${job.id}`)) {
 			elem.innerText = percentDisplay;
 		}
-		for (elem of $$(`.job-progress-text-detailed.job-id-${job.id}`)) {
+		for (const elem of $$(`.job-progress-text-detailed.job-id-${job.id}`)) {
 			const progress = job.progress || 0;
 			elem.innerText = `${progress.toLocaleString()}/${job.total.toLocaleString()}`;
 		}
 	}
 
 	// message
-	for (elem of $$(`.job-message.job-id-${job.id}`)) {
+	for (const elem of $$(`.job-message.job-id-${job.id}`)) {
 		elem.innerText = job.message || "";
 	}
 }
@@ -539,7 +539,7 @@ on('click', '.cancel-job', async e => {
 	const target = e.target.closest('.cancel-job');
 	const jobID = Number(target.dataset.jobId);
 
-	for (elem of $$(`.cancel-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.cancel-job.job-id-${jobID}`)) {
 		elem.classList.add('disabled');
 		let textElem = $('.cancel-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
@@ -551,7 +551,7 @@ on('click', '.cancel-job', async e => {
 
 	await app.CancelJobs(tlz.openRepos[0].instance_id, [jobID]);
 
-	for (elem of $$(`.cancel-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.cancel-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
 		let textElem = $('.cancel-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
@@ -566,7 +566,7 @@ on('click', '.pause-job', async e => {
 	const target = e.target.closest('.pause-job');
 	const jobID = Number(target.dataset.jobId);
 
-	for (elem of $$(`.pause-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.pause-job.job-id-${jobID}`)) {
 		elem.classList.add('disabled');
 		let textElem = $('.pause-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
@@ -578,7 +578,7 @@ on('click', '.pause-job', async e => {
 
 	await app.PauseJob(tlz.openRepos[0].instance_id, jobID);
 
-	for (elem of $$(`.pause-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.pause-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
 		let textElem = $('.pause-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
@@ -594,26 +594,32 @@ on('click', '.unpause-job', async e => {
 	const target = e.target.closest('.unpause-job');
 	const jobID = Number(target.dataset.jobId);
 
-	for (elem of $$(`.unpause-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.unpause-job.job-id-${jobID}`)) {
 		elem.classList.add('disabled');
 		let textElem = $('.unpause-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
 			textElem = elem;
 		}
-		textElem.dataset.startingText = textElem.innerText;
-		textElem.innerText = "Resuming...";
+		textElem.dataset.startingText = textElem.textContent;
+		textElem.textContent = "Resuming...";
 	}
 
 	await app.UnpauseJob(tlz.openRepos[0].instance_id, jobID);
 
-	for (elem of $$(`.unpause-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.unpause-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
 		let textElem = $('.unpause-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
 			textElem = elem;
 		}
-		textElem.innerText = textElem.dataset.startingText;
-		delete textElem.dataset.startingText;
+		// it is possible for this element to be rendered while waiting for UnpauseJob to return,
+		// meaning that we never changed its text content, so we never set startingText, and
+		// if we did this without checking we would essentially empty its text contents each
+		// time it is pressed
+		if (textElem.dataset.startingText) {
+			textElem.textContent = textElem.dataset.startingText;
+			delete textElem.dataset.startingText;
+		}
 	}
 });
 
@@ -621,7 +627,7 @@ on('click', '.start-job', async e => {
 	const target = e.target.closest('.start-job');
 	const jobID = Number(target.dataset.jobId);
 
-	for (elem of $$(`.start-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.start-job.job-id-${jobID}`)) {
 		elem.classList.add('disabled');
 		let textElem = $('.start-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
@@ -633,7 +639,7 @@ on('click', '.start-job', async e => {
 
 	await app.StartJob(tlz.openRepos[0].instance_id, jobID, false);
 
-	for (elem of $$(`.start-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.start-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
 		let textElem = $('.start-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
@@ -648,7 +654,7 @@ on('click', '.restart-job', async e => {
 	const target = e.target.closest('.restart-job');
 	const jobID = Number(target.dataset.jobId);
 
-	for (elem of $$(`.restart-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.restart-job.job-id-${jobID}`)) {
 		elem.classList.add('disabled');
 		let textElem = $('.restart-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {
@@ -660,7 +666,7 @@ on('click', '.restart-job', async e => {
 
 	await app.StartJob(tlz.openRepos[0].instance_id, jobID, true);
 
-	for (elem of $$(`.restart-job.job-id-${jobID}`)) {
+	for (const elem of $$(`.restart-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
 		let textElem = $('.restart-job-text', elem); // for links that have more than just the text in it
 		if (!textElem) {

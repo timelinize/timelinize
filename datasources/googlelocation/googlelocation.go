@@ -87,6 +87,10 @@ type FileImporter struct {
 	seenDevices   map[int64]struct{}
 	seenDevicesMu *sync.Mutex
 
+	checkpoint  checkpoint
+	positions   map[int64]int
+	positionsMu *sync.Mutex
+
 	wg       *sync.WaitGroup
 	throttle chan struct{}
 }
@@ -133,6 +137,14 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		return fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", fi.dsOpt.Simplification)
 	}
 
+	// load prior checkpoint, if set
+	if params.Checkpoint != nil {
+		err := json.Unmarshal(params.Checkpoint, &fi.checkpoint)
+		if err != nil {
+			return fmt.Errorf("decoding checkpoint: %w", err)
+		}
+	}
+
 	// see if this is a (now-legacy) Takeout archive of location history
 	if dirEntry.IsDir() {
 		// try to load settings file; this helps us identify devices; however
@@ -162,6 +174,9 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		// unbounded memory growth.
 		fi.seenDevices = make(map[int64]struct{})
 		fi.seenDevicesMu = new(sync.Mutex)
+
+		fi.positions = make(map[int64]int)
+		fi.positionsMu = new(sync.Mutex)
 
 		const maxGoroutines = 128
 		fi.wg = new(sync.WaitGroup)
@@ -203,6 +218,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		return err
 	}
 
+	var i int
 	for {
 		if err := fi.ctx.Err(); err != nil {
 			return err
@@ -216,14 +232,27 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 			break
 		}
 
+		// fast-forward to checkpoint, if set
+		if fi.checkpoint.Format2024 > 0 && i < fi.checkpoint.Format2024 {
+			i++
+			continue
+		}
+
 		item := result.Original.(*onDeviceLocation).toItem(result, fi.dsOpt)
 
 		if fi.opt.Timeframe.ContainsItem(item, false) {
-			params.Pipeline <- &timeline.Graph{Item: item}
+			params.Pipeline <- &timeline.Graph{Item: item, Checkpoint: checkpoint{Format2024: i}}
 		}
+
+		i++
 	}
 
 	return nil
+}
+
+type checkpoint struct {
+	Legacy     map[int64]int `json:"legacy,omitempty"` // map of device tag to position/index
+	Format2024 int           `json:"format_2024,omitempty"`
 }
 
 type decoder struct {
@@ -305,6 +334,16 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 		}
 		dec.fi.seenDevicesMu.Unlock()
 
+		dec.fi.positionsMu.Lock()
+		dec.fi.positions[dec.deviceTag]++
+
+		// fast forward to checkpoint, if set
+		if leftOffAt, ok := dec.fi.checkpoint.Legacy[dec.deviceTag]; ok && dec.fi.positions[dec.deviceTag] < leftOffAt {
+			dec.fi.positionsMu.Unlock()
+			continue
+		}
+		dec.fi.positionsMu.Unlock()
+
 		return &Location{
 			Original:    newLoc,
 			LatitudeE7:  newLoc.LatitudeE7,
@@ -380,7 +419,7 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 
 		item := l.toItem(fi.dsOpt)
 		if fi.opt.Timeframe.ContainsItem(item, false) {
-			fi.opt.Pipeline <- &timeline.Graph{Item: item}
+			fi.opt.Pipeline <- &timeline.Graph{Item: item, Checkpoint: checkpoint{Legacy: fi.positions}}
 		}
 	}
 

@@ -36,7 +36,7 @@ async function galleryPageMain() {
 
 	// configure pagination links: enable next if we overflowed the search results limit,
 	// and enable prev if we are not on page 1; otherwise disable prev/next link(s)
-	for (elem of $$('.pagination .page-next')) {
+	for (const elem of $$('.pagination .page-next')) {
 		if (results.items.length > galleryLimit) {
 			elem.classList.remove('disabled');
 			let newQS = new URLSearchParams(window.location.search);
@@ -47,7 +47,7 @@ async function galleryPageMain() {
 			elem.href = '';
 		}
 	}
-	for (elem of $$('.pagination .page-prev')) {
+	for (const elem of $$('.pagination .page-prev')) {
 		if (currentPageNum() > 1) {
 			elem.classList.remove('disabled');
 			let newQS = new URLSearchParams(window.location.search);

@@ -244,10 +244,10 @@ function setDynamicTimestamp(elem, isoOrUnixSecTime, forDuration) {
 
 // Update the dynamic timestamps (and durations) every second to keep them accurate
 setInterval(function() {
-	for (elem of $$('.dynamic-time')) {
+	for (const elem of $$('.dynamic-time')) {
 		elem.innerText = elem._timestamp.toRelative();
 	}
-	for (elem of $$('.dynamic-duration')) {
+	for (const elem of $$('.dynamic-duration')) {
 		// don't use diffNow() because it's implemented backwards (durations are always negative)!
 		elem.innerText = betterToHuman(DateTime.now().diff(elem._timestamp));
 	}
