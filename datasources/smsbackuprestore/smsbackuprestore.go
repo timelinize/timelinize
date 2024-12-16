@@ -22,6 +22,7 @@ package smsbackuprestore
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -30,7 +31,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/timelinize/timelinize/timeline"
@@ -148,22 +148,16 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 		return nil
 	}
 
-	// processing messages concurrently can be faster; but don't allow too
-	// many goroutines because there is still contention in the pipeline
-	const maxGoroutines = 20
-	throttle := make(chan struct{}, maxGoroutines)
-	var wg sync.WaitGroup
+	// load prior checkpoint, if set
+	var line, checkpoint int
+	if params.Checkpoint != nil {
+		err := json.Unmarshal(params.Checkpoint, &checkpoint)
+		if err != nil {
+			return fmt.Errorf("decoding checkpoint: %w", err)
+		}
+	}
 
-	// prevent subtle bug: we spawn goroutines which send graphs down the pipeline;
-	// if we return before they finish sending a value, they'll get deadlocked
-	// since the workers are stopped once we return, meaning their send will never
-	// get received; thus, we need to wait for the goroutines to finish before we
-	// return
-	defer wg.Wait()
-
-	// TODO: Our concurrency could probably be improved in this data source.
-	// Right now we spawn a goroutine for every single SMS/MMS we decode... maybe
-	// batches would be better?
+	// processing messages concurrently is not faster, based on my testing
 
 	dec := xml.NewDecoder(xmlFile)
 	for {
@@ -179,6 +173,12 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			return fmt.Errorf("decoding next XML token: %w", err)
 		}
 
+		// restore from checkpoint, if set
+		if checkpoint > 0 && line < checkpoint {
+			line++
+			continue
+		}
+
 		if startElem, ok := tkn.(xml.StartElement); ok {
 			switch startElem.Name.Local {
 			case "sms":
@@ -186,38 +186,22 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				if err := dec.DecodeElement(&sms, &startElem); err != nil {
 					return fmt.Errorf("decoding XML element as SMS: %w", err)
 				}
-
-				throttle <- struct{}{}
-				wg.Add(1)
-				go func() {
-					defer func() {
-						<-throttle
-						wg.Done()
-					}()
-					imp.processSMS(sms, params, dsOpt)
-				}()
+				imp.processSMS(line, sms, params, dsOpt)
 			case "mms":
 				var mms MMS
 				if err := dec.DecodeElement(&mms, &startElem); err != nil {
 					return fmt.Errorf("decoding XML element as MMS: %w", err)
 				}
-
-				throttle <- struct{}{}
-				wg.Add(1)
-				go func() {
-					defer func() {
-						<-throttle
-						wg.Done()
-					}()
-					imp.processMMS(mms, params, dsOpt)
-				}()
+				imp.processMMS(line, mms, params, dsOpt)
 			}
 		}
+
+		line++
 	}
 
 	return nil
 }
-func (imp *FileImporter) processSMS(sms SMS, opt timeline.ImportParams, dsOpt Options) {
+func (imp *FileImporter) processSMS(line int, sms SMS, opt timeline.ImportParams, dsOpt Options) {
 	if !sms.within(opt.Timeframe) {
 		return
 	}
@@ -235,6 +219,7 @@ func (imp *FileImporter) processSMS(sms SMS, opt timeline.ImportParams, dsOpt Op
 			},
 			Metadata: sms.metadata(),
 		},
+		Checkpoint: line,
 	}
 
 	ig.ToEntity(timeline.RelSent, &receiver)
@@ -242,7 +227,7 @@ func (imp *FileImporter) processSMS(sms SMS, opt timeline.ImportParams, dsOpt Op
 	opt.Pipeline <- ig
 }
 
-func (imp *FileImporter) processMMS(mms MMS, opt timeline.ImportParams, dsOpt Options) {
+func (imp *FileImporter) processMMS(line int, mms MMS, opt timeline.ImportParams, dsOpt Options) {
 	if !mms.within(opt.Timeframe) {
 		return
 	}
@@ -274,9 +259,8 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ImportParams, dsOpt Op
 
 		node := &timeline.Item{
 			Classification: timeline.ClassMessage,
-			//Timestamp:      time.Unix(0, mms.Date*int64(time.Millisecond)),
-			Timestamp: time.UnixMilli(mms.Date),
-			Owner:     sender,
+			Timestamp:      time.UnixMilli(mms.Date),
+			Owner:          sender,
 			Content: timeline.ItemData{
 				MediaType: part.ContentType,
 				Filename:  filename,
@@ -286,7 +270,7 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ImportParams, dsOpt Op
 		}
 
 		if ig == nil {
-			ig = &timeline.Graph{Item: node}
+			ig = &timeline.Graph{Item: node, Checkpoint: line}
 		} else {
 			// TODO: this does not add a "sent" relation for the attachments,
 			// we'd have to traverse up to the root of the graph (usually the text

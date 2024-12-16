@@ -74,30 +74,9 @@ func openDB(ctx context.Context, repoDir string) (*sql.DB, error) {
 
 	// print version, because I keep losing track of it :)
 	var version string
-	err = db.QueryRow("SELECT sqlite_version() AS version").Scan(&version)
+	err = db.QueryRowContext(ctx, "SELECT sqlite_version() AS version").Scan(&version)
 	if err == nil {
 		Log.Info("using sqlite", zap.String("version", version))
-	}
-
-	// Best practice, according to the SQLite docs:
-	//
-	// "Applications with long-lived database connections should run "PRAGMA
-	// optimize=0x10002" when the database connection first opens, then run
-	// "PRAGMA optimize" again at periodic intervals - perhaps once per day.
-	// All applications should run "PRAGMA optimize" after schema changes,
-	// especially CREATE INDEX."
-	// - https://www.sqlite.org/pragma.html#pragma_optimize
-	//
-	// We stray slightly from this guidance and just run ANALYZE in the
-	// background on a ticker or after large imports, for example.
-	// I found occasions where PRAGMA optimize did not fix a slow query
-	// when ANALYZE did.
-	//
-	// https://x.com/mholt6/status/1865169910940471492
-	// --> https://x.com/carlsverre/status/1865185078067835167 (whole thread)
-	_, err = db.ExecContext(ctx, `PRAGMA optimize=0x10002`)
-	if err != nil {
-		Log.Error("optimizing database: %w", zap.Error(err))
 	}
 
 	return db, nil

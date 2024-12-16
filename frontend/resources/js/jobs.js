@@ -417,6 +417,7 @@ function jobProgressUpdate(job) {
 			elem.classList.add('d-none');
 		}
 		for (elem of $$(`.start-job.job-id-${job.id}`)) {
+			// technically, aborted jobs can be resumed; but a button that says "Start" might be confusing, and "Resume" is what the unpause button says...
 			elem.classList.add('d-none');
 		}
 		for (elem of $$(`.restart-job.job-id-${job.id}`)) {

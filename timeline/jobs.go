@@ -921,9 +921,9 @@ func (tl *Timeline) StartJob(ctx context.Context, jobID int64, startOver bool) e
 	defer tx.Rollback()
 
 	if startOver {
-		_, err = tx.ExecContext(ctx, `UPDATE jobs SET checkpoint=NULL WHERE id=?`, jobID) // TODO: LIMIT 1
+		_, err = tx.ExecContext(ctx, `UPDATE jobs SET checkpoint=NULL, progress=NULL, message=NULL WHERE id=?`, jobID) // TODO: LIMIT 1
 		if err != nil {
-			return fmt.Errorf("clearing checkpoint to start over: %w", err)
+			return fmt.Errorf("clearing checkpoint, progress, and message to start over: %w", err)
 		}
 	}
 
@@ -1009,6 +1009,6 @@ const (
 )
 
 const (
-	jobSyncInterval  = 2 * time.Second        // how often to update the DB
-	jobFlushInterval = 250 * time.Millisecond // how often to update the frontend
+	jobSyncInterval  = 5 * time.Second        // how often to update the DB
+	jobFlushInterval = 100 * time.Millisecond // how often to update the frontend
 )

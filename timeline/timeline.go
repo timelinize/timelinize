@@ -1067,12 +1067,21 @@ type ProcessingOptions struct {
 	ItemFieldUpdates map[string]fieldUpdatePolicy `json:"item_field_updates,omitempty"`
 
 	// TODO: WIP
-	Interactive bool `json:"interactive,omitempty"`
+	Interactive *InteractiveImport `json:"interactive,omitempty"`
+
+	// How many items to process in one database transaction. This is a minimum value,
+	// not a maximum, due to the recursive nature of graphs. (Hopefully data sources
+	// do not build out graphs that are too big for available memory. Most graphs
+	// just have 1-2 things on it). This setting is sensitive. Smaller batches can
+	// reduce performance, slowing down imports. Larger batches can be faster, allowing
+	// for more throughput especially when data files are large, but reduces the
+	// granularity of the live progress updates, and the performance benefit gets
+	// smaller as the database gets larger and the items get smaller.
+	BatchSize int `json:"batch_size,omitempty"`
 }
 
-func (po ProcessingOptions) IsEmpty() bool {
-	return !po.Integrity && po.Timeframe.IsEmpty() &&
-		po.ItemUniqueConstraints == nil && po.ItemFieldUpdates == nil
+type InteractiveImport struct {
+	Graphs chan<- *Graph `json:"-"`
 }
 
 // fieldUpdatePolicy values specify how to update a field/column of an item in the DB.
@@ -1091,52 +1100,6 @@ const (
 
 	// TODO: choose one based on properties of the item? like larger or smaller one, etc... (e.g. if we want to prefer the higher-quality photo...)
 )
-
-// ImportParams specifies parameters for listing items
-// from a data source. Some data sources might not be
-// able to honor all fields.
-type ImportParams struct {
-	// Send graphs on this channel to put them through the
-	// processing pipeline and add them to the timeline.
-	Pipeline chan<- *Graph `json:"-"`
-
-	// The logger to use.
-	Log *zap.Logger `json:"-"`
-
-	// Time bounds on which data to retrieve.
-	// The respective time and item ID fields
-	// which are set must never conflict if
-	// both are set.
-	Timeframe Timeframe `json:"timeframe,omitempty"`
-
-	// A checkpoint from which to resume the import.
-	Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
-
-	// Options specific to the data source,
-	// as provided by NewOptions.
-	DataSourceOptions any `json:"data_source_options,omitempty"`
-
-	// TODO: WIP...
-	// // Maximum number of items to list; useful
-	// // for previews. Data sources should not
-	// // checkpoint previews.
-	// // TODO: still should enforce this in the processor... but this is good for the DS to know too, so it can limit its API calls, for example
-	// MaxItems int `json:"max_items,omitempty"`
-
-	// TODO: WIP...
-	// // Whether the data source should prioritize precise
-	// // checkpoints for fast resumption over performance.
-	// // Typically, this implies that the data source
-	// // operates in single-threaded mode, and processes
-	// // its input linearly, rather than concurrently,
-	// // which can be difficult to checkpoint; whereas a
-	// // checkpoint during a linear traversal of the data
-	// // can be as simple as an integer index or count.
-	// // User can enable this if they are okay with
-	// // potentially slower processing time, but want
-	// // faster job resumption.
-	// PrioritizeCheckpoints bool
-}
 
 // Files belonging at the root within the timeline repository.
 const (

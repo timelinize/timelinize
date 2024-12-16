@@ -25,7 +25,6 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -165,22 +164,6 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 			logger := job.Logger().With(zap.String("data_source_name", ds.Name))
 
-			// batchSize is a minimum, so multiplier speeds up larger batches
-			const dlMultiplier = 2
-
-			p := processor{
-				estimatedCount:   totalSizeEstimate,
-				ij:               ij,
-				ds:               ds,
-				dsRowID:          dsRowID,
-				dsOpt:            dsOpt,
-				tl:               job.Timeline(),
-				log:              logger,
-				progress:         logger.Named("progress"),
-				batchMu:          new(sync.Mutex),
-				downloadThrottle: make(chan struct{}, batchSize*workers*dlMultiplier),
-			}
-
 			// process each filename one at a time
 			for j := chkpt.InnerIndex; j < len(fileImport.Filenames); j++ {
 				if err := job.Context().Err(); err != nil {
@@ -194,13 +177,32 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 				}
 
 				// create a new "outer" checkpoint when arriving at a new filename to be imported
-				if err := ij.checkpoint(totalSizeEstimate, i, j, nil); err != nil {
-					job.Logger().Error("checkpointing", zap.Error(err))
+				// as long as we are not resuming from a data source checkpoint (if the data
+				// source has a checkpoint, we should not overwrite it / clear it out, in case
+				// the job stops before it has a chance to checkpoint again)
+				if chkpt.DataSourceCheckpoint == nil {
+					if err := ij.checkpoint(totalSizeEstimate, i, j, nil); err != nil {
+						job.Logger().Error("checkpointing", zap.Error(err))
+					}
 				}
 
 				// check for job cancellation
 				if err := job.Context().Err(); err != nil {
 					return err
+				}
+
+				p := processor{
+					outerLoopIdx:   i,
+					innerLoopIdx:   j,
+					estimatedCount: totalSizeEstimate,
+
+					ij:       ij,
+					ds:       ds,
+					dsRowID:  dsRowID,
+					dsOpt:    dsOpt,
+					tl:       job.Timeline(),
+					log:      logger,
+					progress: logger.Named("progress"),
 				}
 
 				// Create the file system from which this file/dir will be accessed. It must be
@@ -344,6 +346,52 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 	go job.tl.optimizeDB(job.Logger())
 
 	return nil
+}
+
+// ImportParams specifies parameters for listing items
+// from a data source. Some data sources might not be
+// able to honor all fields.
+type ImportParams struct {
+	// Send graphs on this channel to put them through the
+	// processing pipeline and add them to the timeline.
+	Pipeline chan<- *Graph `json:"-"`
+
+	// The logger to use.
+	Log *zap.Logger `json:"-"`
+
+	// Time bounds on which data to retrieve.
+	// The respective time and item ID fields
+	// which are set must never conflict if
+	// both are set.
+	Timeframe Timeframe `json:"timeframe,omitempty"`
+
+	// A checkpoint from which to resume the import.
+	Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
+
+	// Options specific to the data source,
+	// as provided by NewOptions.
+	DataSourceOptions any `json:"data_source_options,omitempty"`
+
+	// TODO: WIP...
+	// // Maximum number of items to list; useful
+	// // for previews. Data sources should not
+	// // checkpoint previews.
+	// // TODO: still should enforce this in the processor... but this is good for the DS to know too, so it can limit its API calls, for example
+	// MaxItems int `json:"max_items,omitempty"`
+
+	// TODO: WIP...
+	// // Whether the data source should prioritize precise
+	// // checkpoints for fast resumption over performance.
+	// // Typically, this implies that the data source
+	// // operates in single-threaded mode, and processes
+	// // its input linearly, rather than concurrently,
+	// // which can be difficult to checkpoint; whereas a
+	// // checkpoint during a linear traversal of the data
+	// // can be as simple as an integer index or count.
+	// // User can enable this if they are okay with
+	// // potentially slower processing time, but want
+	// // faster job resumption.
+	// PrioritizeCheckpoints bool
 }
 
 func (ij ImportJob) successCleanup() error {

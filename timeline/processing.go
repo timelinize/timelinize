@@ -43,118 +43,114 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-const (
-	// batchSize is how many items to process in one transaction;
-	// except for the final remainder, this is a minimum count,
-	// not a maximum, due to the recursive and inter-related nature
-	// of item graphs -- hopefully data sources don't send graphs
-	// too big for available memory
-	batchSize = 10
-
-	// concurrent processing should be faster with more workers if
-	// the import is I/O-bound, i.e. larger items (videos, etc.),
-	// but won't help if there's lots of little items, as the
-	// database can only have one writer at a time, and other
-	// import jobs can be starved if there's too many workers
-	// TODO: see if having workers is useful at all for performance on a variety of data sources... if not, having only 1 consumer would make checkpointing a LOT simpler...
-	workers = 1
-)
+// defaultBatchSize is how many items/entities (approximately) to process per transaction
+// if not specified by the user. See the docs for batch size on ProcessingOoptions.
+const defaultBatchSize = 10
 
 func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, countOnly bool, done <-chan struct{}) (*sync.WaitGroup, chan<- *Graph) {
 	wg := new(sync.WaitGroup)
 	ch := make(chan *Graph)
 
-	for i := range workers {
-		wg.Add(1)
-		go func(workerNum int) {
-			defer wg.Done()
-
-			// addToBatch adds g to the batch, and if the batch is full, it
-			// sends it for processing and resets the batch. If g is nil,
-			// the batch is processed regardless of its size.
-			addToBatch := func(g *Graph) {
-				var batch []*Graph
-
-				// TODO: do we want/need to prevent infinite recursion (avoid visiting same graph twice)?
-
-				// add the new graph to the batch, keeping track of its actual
-				// nested size; and if the batch is now large enough to process,
-				// copy it (just the slice header) then reset the batch
-				p.batchMu.Lock()
-				if g != nil {
-					p.batch = append(p.batch, g)
-					p.batchSize += g.Size()
-				}
-				if p.batchSize >= batchSize || (g == nil && len(p.batch) > 0) {
-					batch = p.batch
-					p.batch = make([]*Graph, 0, batchSize)
-					p.batchSize = 0
-				}
-				p.batchMu.Unlock()
-
-				if len(batch) > 0 {
-					err := p.pipeline(ctx, batch, &recursiveState{
-						worker:  workerNum,
-						procOpt: po,
-					})
-					if err != nil {
-						p.log.Error("batch pipeline",
-							zap.Int("worker", workerNum),
-							zap.Error(err))
-					}
-
-					// update job progress
-					var batchSize int
-					for _, g := range batch {
-						batchSize += g.Size()
-					}
-					p.ij.job.Progress(batchSize)
-				}
-			}
-
-			// read all incoming graphs and add them to a batch, and'
-			// process the batch if it is full
-			for {
-				// block here if job is paused; but don't return if canceled
-				// (non-nil error) for the reason described just below
-				_ = p.ij.job.Continue()
-
-				// it may seem weird that we don't select on ctx.Done()
-				// here, and that's because we expect data sources to
-				// honor context cancellation; once they return, the
-				// done channel will be closed, and that's what we
-				// terminate on; if we return of our own accord when
-				// the context is canceled, we may leave data source
-				// goroutines hanging if they're trying to send on
-				// the pipeline channel... they can't know the context
-				// has canceled because they're blocked on a send,
-				// so we need to receive their sends until they
-				// are done (and data sources are expected to wait
-				// for their own goroutines to finish before they
-				// return completely)
-				select {
-				case <-done:
-					// process the remaining items in the last batch
-					// if the context hasn't been cancelled
-					if ctx.Err() == nil {
-						addToBatch(nil)
-					}
-					return
-				case g := <-ch:
-					if g == nil {
-						continue
-					}
-					if countOnly {
-						// don't call SetTotal() yet -- wait until we're done counting,
-						// so progress bars don't think we are done with the estimate
-						atomic.AddInt64(p.estimatedCount, int64(g.Size()))
-						continue
-					}
-					addToBatch(g)
-				}
-			}
-		}(i)
+	if po.BatchSize <= 0 {
+		po.BatchSize = defaultBatchSize
 	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// addToBatch adds g to the batch, and if the batch is full, it
+		// sends it for processing and resets the batch. If g is nil,
+		// the batch is processed regardless of its size.
+		addToBatch := func(g *Graph) {
+			var batch []*Graph
+
+			// TODO: do we want/need to prevent infinite recursion (avoid visiting same graph twice)?
+
+			// add the new graph to the batch, keeping track of its actual
+			// nested size; and if the batch is now large enough to process,
+			// copy it (just the slice header) then reset the batch
+			if g != nil {
+				p.batch = append(p.batch, g)
+				p.batchSize += g.Size()
+			}
+			if p.batchSize >= po.BatchSize || (g == nil && len(p.batch) > 0) {
+				batch = p.batch
+				p.batch = make([]*Graph, 0, po.BatchSize)
+				p.batchSize = 0
+			}
+
+			if len(batch) > 0 {
+				err := p.pipeline(ctx, batch, &recursiveState{
+					procOpt: po,
+				})
+				if err != nil {
+					p.log.Error("batch pipeline", zap.Error(err))
+				}
+
+				// update job progress
+				var batchSize int
+				for _, g := range batch {
+					batchSize += g.Size()
+				}
+				p.ij.job.Progress(batchSize)
+
+				// persist the last (most recent) checkpoint in the batch
+				for i := len(batch) - 1; i >= 0; i-- {
+					if batch[i].Checkpoint != nil {
+						if err := p.ij.checkpoint(p.estimatedCount, p.outerLoopIdx, p.innerLoopIdx, batch[i].Checkpoint); err != nil {
+							p.log.Error("checkpointing", zap.Error(err))
+						}
+					}
+				}
+			}
+		}
+
+		// read all incoming graphs and add them to a batch, and'
+		// process the batch if it is full
+		for {
+			// block here if job is paused; but don't return if canceled
+			// (non-nil error) for the reason described just below
+			_ = p.ij.job.Continue()
+
+			// it may seem weird that we don't select on ctx.Done()
+			// here, and that's because we expect data sources to
+			// honor context cancellation; once they return, the
+			// done channel will be closed, and that's what we
+			// terminate on; if we return of our own accord when
+			// the context is canceled, we may leave data source
+			// goroutines hanging if they're trying to send on
+			// the pipeline channel... they can't know the context
+			// has canceled because they're blocked on a send,
+			// so we need to receive their sends until they
+			// are done (and data sources are expected to wait
+			// for their own goroutines to finish before they
+			// return completely)
+			select {
+			case <-done:
+				// process the remaining items in the last batch
+				// if the context hasn't been cancelled
+				if ctx.Err() == nil {
+					addToBatch(nil)
+				}
+				return
+			case g := <-ch:
+				if g == nil {
+					continue
+				}
+				if countOnly {
+					// don't call SetTotal() yet -- wait until we're done counting,
+					// so progress bars don't think we are done with the estimate
+					atomic.AddInt64(p.estimatedCount, int64(g.Size()))
+					continue
+				}
+				// if po.Interactive != nil {
+				// 	po.Interactive <- g
+				// }
+				addToBatch(g)
+			}
+		}
+	}()
 
 	return wg, ch
 }
@@ -208,20 +204,17 @@ func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Gra
 	return nil
 }
 
-// phase2 downloads data files.
+// phase2 downloads data files. Significantly, there is no lock on the DB in this phase,
+// so it can be run in parallel.
 func (p *processor) phase2(ctx context.Context, batch []*Graph) error {
 	var wg sync.WaitGroup
 	for _, g := range batch {
 		if g.err != nil {
 			continue
 		}
-		p.downloadThrottle <- struct{}{}
 		wg.Add(1)
 		go func(g *Graph) {
-			defer func() {
-				wg.Done()
-				<-p.downloadThrottle
-			}()
+			defer wg.Done()
 			if err := p.downloadDataFilesInGraph(ctx, g); err != nil {
 				p.log.Error("downloading data files in graph", zap.Error(err))
 				g.err = err
@@ -256,8 +249,6 @@ func (p *processor) phase3(ctx context.Context, batch []*Graph) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("committing transaction for batch phase 3: %w", err)
 	}
-
-	// TODO: update (inner) checkpoint...
 
 	return nil
 }
@@ -667,7 +658,6 @@ const (
 )
 
 type recursiveState struct {
-	worker  int
 	procOpt ProcessingOptions
 }
 
@@ -911,8 +901,30 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		if dbItem.OriginalID == nil && it.ID != "" {
 			updateOverrides["original_id"] = updatePolicyPreferIncoming
 		}
-		if len(it.Metadata) > 0 {
+
+		// metadata is a little tricky, especially to decide efficiently, unless
+		// the incoming item obiously has some and the existing one does not...
+		if len(it.Metadata) > 0 && len(dbItem.Metadata) == 0 {
 			updateOverrides["metadata"] = updatePolicyOverwriteExisting
+		} else if len(it.Metadata) > 0 {
+			var decoded Metadata
+			err := json.Unmarshal(dbItem.Metadata, &decoded)
+			if err == nil {
+				for k, incomingVal := range it.Metadata {
+					// this is not perfect, since the value could be any type, but string seems most common
+					if incomingVal == nil || incomingVal == "" {
+						continue
+					}
+					if _, ok := decoded[k]; !ok {
+						// incoming item has metadata field that DB does not; we should strive to be additive
+						// so I guess we take this as a hint to replace the existing... but obviously, there
+						// could be fields that DB has that the incoming item does not...
+						// TODO: we may need a way to apply metadata merge policy ?
+						updateOverrides["metadata"] = updatePolicyOverwriteExisting
+						break
+					}
+				}
+			}
 		}
 
 		item = len(updateOverrides) > 0

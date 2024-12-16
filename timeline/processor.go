@@ -21,15 +21,17 @@ package timeline
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"sync/atomic"
 
 	"go.uber.org/zap"
 )
 
 type processor struct {
-	// accessed atomically and 64-bit aligned; used by workers for estimating total size before running
-	estimatedCount *int64
+	// these three fields are used for checkpointing; the first is
+	// accessed atomically and 64-bit aligned; also used for estimating
+	// total size before running
+	estimatedCount             *int64
+	outerLoopIdx, innerLoopIdx int
 
 	ij ImportJob
 
@@ -45,10 +47,6 @@ type processor struct {
 	// batching inserts can greatly increase speed
 	batch     []*Graph
 	batchSize int // size is at least len(batch) but edges on a graph can add to it
-	batchMu   *sync.Mutex
-
-	// allow many concurrent file downloads as they can be massively parallel
-	downloadThrottle chan struct{}
 }
 
 func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint json.RawMessage) error {

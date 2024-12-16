@@ -42,7 +42,22 @@ func (tl *Timeline) maintenanceLoop() {
 		logger.Error("problem deleting expired items at startup", zap.Error(err))
 	}
 
-	// optimize database at open for good measure
+	// Best practice, according to the SQLite docs:
+	//
+	// "Applications with long-lived database connections should run "PRAGMA
+	// optimize=0x10002" when the database connection first opens, then run
+	// "PRAGMA optimize" again at periodic intervals - perhaps once per day.
+	// All applications should run "PRAGMA optimize" after schema changes,
+	// especially CREATE INDEX."
+	// - https://www.sqlite.org/pragma.html#pragma_optimize
+	//
+	// We stray slightly from this guidance and just run ANALYZE in the
+	// background at startup, and on a ticker or after large imports.
+	// I found occasions where 'PRAGMA optimize' did not fix a slow query
+	// when ANALYZE did. Maybe it was just under a threshold, I dunno.
+	//
+	// https://x.com/mholt6/status/1865169910940471492
+	// --> https://x.com/carlsverre/status/1865185078067835167 (whole thread)
 	go tl.optimizeDB(logger)
 
 	deletionTicker := time.NewTicker(time.Minute)
