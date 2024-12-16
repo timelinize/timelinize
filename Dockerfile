@@ -42,5 +42,6 @@ EXPOSE 12002
 VOLUME /app/.config/timelinize
 VOLUME /repo
 USER timelinize
+ENV PATH="$PATH:/app/.local/bin/"
 
 CMD ["/app/timelinize", "serve"]
