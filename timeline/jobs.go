@@ -1012,6 +1012,6 @@ const (
 )
 
 const (
-	jobSyncInterval  = 5 * time.Second        // how often to update the DB
+	jobSyncInterval  = 2 * time.Second        // how often to update the DB and save checkpoints
 	jobFlushInterval = 100 * time.Millisecond // how often to update the frontend
 )

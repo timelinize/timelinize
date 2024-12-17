@@ -87,8 +87,7 @@ type FileImporter struct {
 	seenDevices   map[int64]struct{}
 	seenDevicesMu *sync.Mutex
 
-	checkpoint checkpoint       // incoming checkpoint (from the DB)
-	positions  safePositionsMap // for outgoing checkpoints (to the DB)
+	checkpoint checkpoint
 
 	wg       *sync.WaitGroup
 	throttle chan struct{}
@@ -136,13 +135,16 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		return fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", fi.dsOpt.Simplification)
 	}
 
-	// load prior checkpoint, if set
-	if params.Checkpoint != nil {
+	// load prior checkpoint, if set, or if not, prepare an empty checkpoint
+	if params.Checkpoint == nil {
+		fi.checkpoint.Legacy.Positions = make(map[int64]int)
+	} else {
 		err := json.Unmarshal(params.Checkpoint, &fi.checkpoint)
 		if err != nil {
 			return fmt.Errorf("decoding checkpoint: %w", err)
 		}
 	}
+	fi.checkpoint.Legacy.Mutex = new(sync.Mutex)
 
 	// see if this is a (now-legacy) Takeout archive of location history
 	if dirEntry.IsDir() {
@@ -173,11 +175,6 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		// unbounded memory growth.
 		fi.seenDevices = make(map[int64]struct{})
 		fi.seenDevicesMu = new(sync.Mutex)
-
-		fi.positions = safePositionsMap{
-			Mutex:     new(sync.Mutex),
-			positions: make(map[int64]int),
-		}
 
 		const maxGoroutines = 128
 		fi.wg = new(sync.WaitGroup)
@@ -263,6 +260,10 @@ type decoder struct {
 
 	// if non-zero, the device we're supposed to look for
 	deviceTag int64
+
+	// for resuming from checkpoints and marking checkpoints
+	fastForwardTo int
+	position      int
 }
 
 // NextLocation decodes the next unique location; it returns nil, nil
@@ -279,6 +280,10 @@ type decoder struct {
 // When a new device is discovered, a new goroutine is spawned to process it.
 func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 	for dec.More() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		var newLoc *location
 		if err := dec.Decode(&newLoc); err != nil {
 			return nil, fmt.Errorf("decoding location element: %w", err)
@@ -304,6 +309,10 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 				if dec.deviceTag == 0 {
 					// this goroutine has no assignment yet, so we'll claim this one
 					dec.deviceTag = newLoc.DeviceTag
+
+					dec.fi.checkpoint.Legacy.Lock()
+					dec.fastForwardTo = dec.fi.checkpoint.Legacy.Positions[dec.deviceTag]
+					dec.fi.checkpoint.Legacy.Unlock()
 				} else {
 					// we are assigned a different one, but we can start a new goroutine to work on this one
 
@@ -317,9 +326,15 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 						}()
 
 						// assign the new goroutine this device tag
+
+						dec.fi.checkpoint.Legacy.Lock()
+						fastForwardTo := dec.fi.checkpoint.Legacy.Positions[deviceTag]
+						dec.fi.checkpoint.Legacy.Unlock()
+
 						err := dec.fi.processFile(ctx, &decoder{
-							fi:        dec.fi,
-							deviceTag: deviceTag,
+							fi:            dec.fi,
+							deviceTag:     deviceTag,
+							fastForwardTo: fastForwardTo,
 						})
 						if err != nil {
 							dec.fi.opt.Log.Error("processing file for specific device",
@@ -335,15 +350,14 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 		}
 		dec.fi.seenDevicesMu.Unlock()
 
-		dec.fi.positions.Lock()
-		dec.fi.positions.positions[dec.deviceTag]++
-
-		// fast forward to checkpoint, if set
-		if leftOffAt, ok := dec.fi.checkpoint.Legacy.positions[dec.deviceTag]; ok && dec.fi.positions.positions[dec.deviceTag] < leftOffAt {
-			dec.fi.positions.Unlock()
+		// fast-forward to checkpoint, if set; otherwise, mark current position for next checkpoint
+		dec.position++
+		if dec.fastForwardTo > 0 && dec.position < dec.fastForwardTo {
 			continue
 		}
-		dec.fi.positions.Unlock()
+		dec.fi.checkpoint.Legacy.Lock()
+		dec.fi.checkpoint.Legacy.Positions[dec.deviceTag] = dec.position
+		dec.fi.checkpoint.Legacy.Unlock()
 
 		return &Location{
 			Original:    newLoc,
@@ -420,7 +434,7 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 
 		item := l.toItem(fi.dsOpt)
 		if fi.opt.Timeframe.ContainsItem(item, false) {
-			fi.opt.Pipeline <- &timeline.Graph{Item: item, Checkpoint: checkpoint{Legacy: fi.positions}}
+			fi.opt.Pipeline <- &timeline.Graph{Item: item, Checkpoint: fi.checkpoint}
 		}
 	}
 
@@ -432,14 +446,29 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 // happens concurrently with us; so it implements MarshalJSON() to obtains the
 // same lock we use.
 type safePositionsMap struct {
-	*sync.Mutex
-	positions map[int64]int
+	*sync.Mutex `json:"-"`
+	Positions   map[int64]int `json:"positions,omitempty"` // used for unmarshaling/restoring the checkpoint, since we custom-marshal this struct
 }
 
 func (spm safePositionsMap) MarshalJSON() ([]byte, error) {
+	// can't marshal the whole struct itself since this method gets called and
+	// deadlocks, so we marshal the positions map and then craft the JSON manually
+
 	spm.Lock()
-	defer spm.Unlock()
-	return json.Marshal(spm.positions)
+	mapBytes, err := json.Marshal(spm.Positions)
+	spm.Unlock()
+	if err != nil {
+		return mapBytes, err
+	}
+
+	prefix, suffix := []byte(`{"positions":`), []byte("}")
+	result := make([]byte, 0, len(prefix)+len(mapBytes)+len(suffix))
+
+	result = append(result, prefix...)
+	result = append(result, mapBytes...)
+	result = append(result, suffix...)
+
+	return result, nil
 }
 
 // // timeDelta returns the difference between times a and b,
