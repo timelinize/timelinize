@@ -49,6 +49,9 @@ type importJobCheckpoint struct {
 	// that when we restore the checkpoint, we have to do one call to
 	// json.Marshal into bytes to give to the data source, but that is
 	// still way more efficient than marshaling for every item.
+	//
+	// As a general rule of thumb, no graphs should be sent down the
+	// pipeline while resuming from a checkpoint.
 	DataSourceCheckpoint any `json:"data_source_checkpoint,omitempty"`
 }
 

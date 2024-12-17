@@ -173,13 +173,17 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			return fmt.Errorf("decoding next XML token: %w", err)
 		}
 
-		// restore from checkpoint, if set
-		if checkpoint > 0 && line < checkpoint {
-			line++
-			continue
-		}
-
 		if startElem, ok := tkn.(xml.StartElement); ok {
+			if startElem.Name.Local != "sms" && startElem.Name.Local != "mms" {
+				continue
+			}
+
+			// fast-forward to checkpoint if set and we haven't reached it already
+			if checkpoint > 0 && line <= checkpoint {
+				line++
+				continue
+			}
+
 			switch startElem.Name.Local {
 			case "sms":
 				var sms SMS
@@ -194,9 +198,9 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				}
 				imp.processMMS(line, mms, params, dsOpt)
 			}
-		}
 
-		line++
+			line++
+		}
 	}
 
 	return nil

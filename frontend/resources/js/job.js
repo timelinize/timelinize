@@ -20,7 +20,7 @@ async function jobPageMain() {
 	const job = jobs[0];
 	console.log("JOB:", job);
 
-	$('.job-config-code').innerText = maxlenStr(JSON.stringify(JSON.parse(job.config), null, 4), 1024*128);
+	$('.job-config-code').innerText = maxlenStr(JSON.stringify(JSON.parse(job.config), null, 4), 1024*10);
 
 	// claim the job elements on this page for this job
 	assignJobElements($('#page-content'), job);

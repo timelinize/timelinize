@@ -269,7 +269,35 @@
 
 
 
-
+<div class="modal modal-blur fade" id="modal-disconnected" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+		<div class="modal-content">
+			<div class="modal-status bg-danger"></div>
+			<div class="modal-body py-4">
+				<div class="text-center">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+						stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+						class="icon mb-2 text-danger icon-lg">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+						<path d="M12 9v4" />
+						<path
+							d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z" />
+						<path d="M12 16h.01" />
+					</svg>
+					<h3 class="text-danger">Reconnecting...</h3>
+				</div>
+				<p class="mb-0">
+					The connection with the server has been lost. Ensure the application is running (at the same address in the URL bar).
+				</p>
+			</div>
+			<div class="modal-footer text-secondary justify-content-center text-center">
+				<p>
+					This message will disappear when the server is working again.
+				</p>
+			</div>
+		</div>
+	</div>
+</div>
 
 
 

@@ -56,14 +56,21 @@ type Graph struct {
 
 	// Any state required by the data source to resume an
 	// identical import at this graph. It should represent
-	// the point whereat this graph is processed. For example,
-	// if a data source iterates a list where each element
-	// is a graph, and this graph is position 5, the
-	// checkpoint could be the integer 5. Then to resume,
-	// the data source fast-forwards to position 5 in the
-	// list and starts creating graphs at that point.
-	// It must be JSON-serializable. To resume from a
-	// checkpoint, JSON-deserialize the incoming checkpoint.
+	// the point whereat this graph including its connected
+	// nodes/graphs are processed. For example, if a data
+	// source iterates a list where each element is a graph,
+	// and this graph is position 5, the checkpoint could be
+	// the integer 5. Then to resume, the data source
+	// fast-forwards to position 5 in the list and starts
+	// creating graphs at that point. It must be
+	// JSON-serializable. To resume from a checkpoint,
+	// JSON-deserialize the incoming checkpoint.
+	//
+	// The processor does NOT traverse graphs to find
+	// checkpoints; it only looks at the "root" graph
+	// sent down the pipeline. The checkpoint on a root
+	// node should represent the progress of the entire
+	// graph including its connected nodes.
 	//
 	// Note that persisting the checkpoint in the DB is done
 	// by the processor concurrently with your data source,

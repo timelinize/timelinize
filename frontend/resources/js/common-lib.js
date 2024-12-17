@@ -140,8 +140,38 @@ const tlz = {
 	collapseCounter: 0,
 
 	// keeps statistics for active jobs, keyed by job ID
-	jobStats: {}
+	jobStats: {},
+
+	// this will hold the connection to the server's real-time logger WebSocket and related state
+	loggerSocket: {},
+
+	// These intervals are cleared when the page freezes, and restarted when the page unfreezes.
+	// The values in this object are objects with this structure:
+	//   { set(), interval }
+	// where set() returns the result of setInterval(), and interval is the
+	// returned interval that can be cleared.
+	intervals: {
+		// Update the dynamic timestamps (and durations) every second to keep them accurate
+		dynamicTime: {
+			set() {
+				return setInterval(function() {
+					for (const elem of $$('.dynamic-time')) {
+						elem.innerText = elem._timestamp.toRelative();
+					}
+					for (const elem of $$('.dynamic-duration')) {
+						// don't use diffNow() because it's implemented backwards (durations are always negative)!
+						elem.innerText = betterToHuman(DateTime.now().diff(elem._timestamp));
+					}
+				}, 1000);
+			}
+		}
+	}
 };
+
+// set all the predefined intervals
+for (const key in tlz.intervals) {
+	tlz.intervals[key].interval = tlz.intervals[key].set();
+}
 
 get('/api/build-info').then(bi => {
 	tlz.buildInfo = bi;

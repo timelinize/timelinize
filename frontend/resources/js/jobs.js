@@ -1,5 +1,12 @@
-// every second, compute updated stats for active jobs
-setInterval(function() {
+// create interval that updates job charts every second
+tlz.intervals.activeJobStats = {
+	set() {
+		return setInterval(updateActiveJobStats, 1000);
+	}
+};
+tlz.intervals.activeJobStats.interval = tlz.intervals.activeJobStats.set();
+
+function updateActiveJobStats() {
 	for (const jobID in tlz.jobStats) {
 		const stats = tlz.jobStats[jobID];
 		if (!stats.live) {
@@ -40,8 +47,7 @@ setInterval(function() {
 			chartData.splice(0, chartData.length - jobThroughputXRange - jobThroughputOffScreen);
 		}
 	}
-}, 1000);
-
+}
 
 function renderJobPreview(containerElem, job) {
 	if (!containerElem || $(`.job-preview.job-id-${job.id}`, containerElem)) {

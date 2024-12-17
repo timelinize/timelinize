@@ -65,8 +65,6 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 		addToBatch := func(g *Graph) {
 			var batch []*Graph
 
-			// TODO: do we want/need to prevent infinite recursion (avoid visiting same graph twice)?
-
 			// add the new graph to the batch, keeping track of its actual
 			// nested size; and if the batch is now large enough to process,
 			// copy it (just the slice header) then reset the batch
@@ -88,19 +86,25 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 					p.log.Error("batch pipeline", zap.Error(err))
 				}
 
-				// update job progress
-				var batchSize int
-				for _, g := range batch {
-					batchSize += g.Size()
-				}
-				p.ij.job.Progress(batchSize)
-
-				// persist the last (most recent) checkpoint in the batch
+				lastChkptIdx := len(batch) - 1
 				for i := len(batch) - 1; i >= 0; i-- {
 					if batch[i].Checkpoint != nil {
-						if err := p.ij.checkpoint(p.estimatedCount, p.outerLoopIdx, p.innerLoopIdx, batch[i].Checkpoint); err != nil {
-							p.log.Error("checkpointing", zap.Error(err))
-						}
+						lastChkptIdx = i
+						break
+					}
+				}
+
+				var batchSizeToCheckpoint int
+				for i := 0; i <= lastChkptIdx; i++ {
+					batchSizeToCheckpoint += batch[i].Size()
+				}
+
+				p.ij.job.Progress(batchSizeToCheckpoint)
+
+				// persist the last (most recent) checkpoint in the batch
+				if batch[lastChkptIdx].Checkpoint != nil {
+					if err := p.ij.checkpoint(p.estimatedCount, p.outerLoopIdx, p.innerLoopIdx, batch[lastChkptIdx].Checkpoint); err != nil {
+						p.log.Error("checkpointing", zap.Error(err))
 					}
 				}
 			}
@@ -144,9 +148,13 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 					atomic.AddInt64(p.estimatedCount, int64(g.Size()))
 					continue
 				}
-				// if po.Interactive != nil {
-				// 	po.Interactive <- g
-				// }
+				if po.Interactive != nil {
+					// TODO: emit log indicating to frontend that we have a graph ready
+					// po.Interactive.Graphs <- &InteractiveGraph{
+					// 	Graph:         g,
+					// 	DataFileReady: make(chan struct{}),
+					// }
+				}
 				addToBatch(g)
 			}
 		}

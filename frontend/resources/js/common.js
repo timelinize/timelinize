@@ -242,18 +242,6 @@ function setDynamicTimestamp(elem, isoOrUnixSecTime, forDuration) {
 	elem.classList.add(forDuration ? "dynamic-duration" : "dynamic-time");
 }
 
-// Update the dynamic timestamps (and durations) every second to keep them accurate
-setInterval(function() {
-	for (const elem of $$('.dynamic-time')) {
-		elem.innerText = elem._timestamp.toRelative();
-	}
-	for (const elem of $$('.dynamic-duration')) {
-		// don't use diffNow() because it's implemented backwards (durations are always negative)!
-		elem.innerText = betterToHuman(DateTime.now().diff(elem._timestamp));
-	}
-}, 1000);
-
-
 // Luxon (as of v3.5.0) does not have a good toHuman() function for Duration objects.
 // It naively prints all the units of the duration even if they are 0, and the default
 // units used by diff() is only milliseconds, which is not human readable at all. In
@@ -294,10 +282,46 @@ function betterToHuman(luxonDuration, opts) {
 // Events handling (logs)
 //////////////////////////////////////////////////////
 
+function freezePage(modal) {
+	if (modal) {
+		tlz.loggerSocket.modal.show();
+	}
+	for (const [key, itvl] of Object.entries(tlz.intervals)) {
+		if (itvl.interval) {
+			console.info("Clearing interval:", key);
+			clearInterval(itvl.interval);
+		}
+	}
+}
+
+function unfreezePage(modal) {
+	if (modal) {
+		tlz.loggerSocket.modal.hide();
+	}
+	for (const [key, itvl] of Object.entries(tlz.intervals)) {
+		if (itvl.interval) {
+			console.info("Setting interval:", key);
+			tlz.intervals[key].interval = itvl.set();
+		}
+	}
+}
 
 function connectLog() {
-	logSocket = new WebSocket(`ws://${window.location.host}/api/logs`);
-	logSocket.onmessage = function(event) {
+	// this sentinel value is used to avoid overlapping setTimeouts, and thus
+	// extra calls to connectLog, by both onerror and onclose being invoked
+	// (and since we are now trying to connect, we can clear the sentinel)
+	tlz.loggerSocket.retrying = false;
+
+	tlz.loggerSocket.socket = new WebSocket(`ws://${window.location.host}/api/logs`);
+
+	tlz.loggerSocket.socket.onopen = function(event) {
+		console.info("Established connection to logger socket", event, tlz.loggerSocket.socket);
+		if (tlz.loggerSocket.modal) {
+			unfreezePage(tlz.loggerSocket.modal);
+			delete tlz.loggerSocket.modal;
+		}
+	};
+	tlz.loggerSocket.socket.onmessage = function(event) {
 		const l = JSON.parse(event.data);
 		
 		// for now, we don't care about HTTP access logs
@@ -401,13 +425,25 @@ function connectLog() {
 			}
 		}
 	};
-	logSocket.onclose = function(event) {
-		console.error("Lost connection to logger socket:", event);
-		// TODO: put UI into frozen state
-		// connect(false);
+	function lostConnection(event) {
+		// don't repeat what has already been done for this connection failure
+		if (tlz.loggerSocket.retrying) {
+			return;
+		}
+		// if a disconnect message isn't showing already, display it
+		if (!tlz.loggerSocket.modal) {
+			tlz.loggerSocket.modal = new bootstrap.Modal($('#modal-disconnected'));
+			freezePage(tlz.loggerSocket.modal);
+		}
+		// log this event, then retry after a moment
+		const logFn = event.type == "error" ? console.error : console.warn;
+		logFn("Lost connection to logger socket; retrying:", event);
+		tlz.loggerSocket.retrying = true;
+		setTimeout(connectLog, 500);
 	}
+	tlz.loggerSocket.socket.onerror = lostConnection;
+	tlz.loggerSocket.socket.onclose = lostConnection;
 }
-
 connectLog();
 
 
