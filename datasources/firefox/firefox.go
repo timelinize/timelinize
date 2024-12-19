@@ -74,7 +74,7 @@ func (Firefox) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeli
 // FileImport conducts an import of the data using this data source.
 func (f *Firefox) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	return fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
-		return f.process(ctx, fpath, params.Pipeline)
+		return f.process(ctx, dirEntry.FullPath(), params.Pipeline)
 	})
 }
 
