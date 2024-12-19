@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -55,24 +56,26 @@ func init() {
 type Firefox struct{}
 
 // Recognize returns whether the input file is recognized.
-func (Firefox) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
-	for _, filename := range filenames {
-		if filepath.Base(filename) == "places.sqlite" {
-			return timeline.Recognition{Confidence: 1}, nil
-		}
+func (Firefox) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	rec := timeline.Recognition{DirThreshold: .9}
+
+	// we can import directories, but let the import planner figure that out; only recognize files
+	if dirEntry.IsDir() {
+		return rec, nil
 	}
+
+	if filepath.Base(dirEntry.Name()) == "places.sqlite" {
+		return timeline.Recognition{Confidence: 1}, nil
+	}
+
 	return timeline.Recognition{}, nil
 }
 
 // FileImport conducts an import of the data using this data source.
-func (f *Firefox) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
-	for _, filename := range filenames {
-		err := f.process(ctx, filename, itemChan)
-		if err != nil {
-			return fmt.Errorf("processing %s: %w", filename, err)
-		}
-	}
-	return nil
+func (f *Firefox) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	return fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
+		return f.process(ctx, fpath, params.Pipeline)
+	})
 }
 
 // process reads the places.sqlite database and sends the items to the channel.
