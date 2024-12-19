@@ -22,17 +22,17 @@ package smsbackuprestore
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -54,37 +54,24 @@ func init() {
 type FileImporter struct{}
 
 // Recognize returns whether this input is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	for _, filename := range filenames {
-		result, err := recognizeFile(ctx, filename)
-		if err != nil {
-			return result, err
-		}
-		if result.Confidence == 0 {
-			return result, nil
-		}
-	}
-	return timeline.Recognition{Confidence: 1}, nil
-}
-
-func recognizeFile(ctx context.Context, filename string) (timeline.Recognition, error) {
-	file, err := openFile(ctx, filename)
-	if errors.Is(err, fs.ErrNotExist) {
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	// not a match if the file is a directory
+	if dirEntry.IsDir() {
 		return timeline.Recognition{}, nil
 	}
+
+	// skip unsupported file types
+	switch strings.ToLower(path.Ext(dirEntry.Name())) {
+	case ".xml", ".zip":
+	default:
+		return timeline.Recognition{}, nil
+	}
+
+	file, err := dirEntry.Open()
 	if err != nil {
 		return timeline.Recognition{}, fmt.Errorf("opening file: %w", err)
 	}
 	defer file.Close()
-
-	// not a match if the file is a directory
-	info, err := file.Stat()
-	if err != nil {
-		return timeline.Recognition{}, err
-	}
-	if info.IsDir() {
-		return timeline.Recognition{}, nil
-	}
 
 	dec := xml.NewDecoder(file)
 
@@ -132,8 +119,8 @@ type Options struct {
 }
 
 // FileImport imports data from the input file.
-func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	dsOpt := *opt.DataSourceOptions.(*Options)
+func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	dsOpt := *params.DataSourceOptions.(*Options)
 
 	if dsOpt.OwnerPhoneNumber == "" {
 		return errors.New("owner phone number cannot be empty")
@@ -146,17 +133,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, filenames []string, ite
 	}
 	dsOpt.OwnerPhoneNumber = standardizedPhoneNum
 
-	for _, filename := range filenames {
-		if err := imp.importFile(ctx, filename, opt, dsOpt, itemChan); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (imp *FileImporter) importFile(ctx context.Context, filename string, opt timeline.ListingOptions, dsOpt Options, itemChan chan<- *timeline.Graph) error {
-	xmlFile, err := openFile(ctx, filename)
+	xmlFile, err := openFile(ctx, dirEntry)
 	if err != nil {
 		return err
 	}
@@ -171,17 +148,21 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, opt ti
 		return nil
 	}
 
-	// processing messages concurrently can be faster; but don't allow too many goroutines
-	const maxGoroutines = 100
-	throttle := make(chan struct{}, maxGoroutines)
-	var wg sync.WaitGroup
+	// load prior checkpoint, if set
+	var line, checkpoint int
+	if params.Checkpoint != nil {
+		err := json.Unmarshal(params.Checkpoint, &checkpoint)
+		if err != nil {
+			return fmt.Errorf("decoding checkpoint: %w", err)
+		}
+	}
+
+	// processing messages concurrently is not faster, based on my testing
 
 	dec := xml.NewDecoder(xmlFile)
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		tkn, err := dec.Token()
@@ -193,47 +174,38 @@ func (imp *FileImporter) importFile(ctx context.Context, filename string, opt ti
 		}
 
 		if startElem, ok := tkn.(xml.StartElement); ok {
+			if startElem.Name.Local != "sms" && startElem.Name.Local != "mms" {
+				continue
+			}
+
+			// fast-forward to checkpoint if set and we haven't reached it already
+			if checkpoint > 0 && line <= checkpoint {
+				line++
+				continue
+			}
+
 			switch startElem.Name.Local {
 			case "sms":
 				var sms SMS
 				if err := dec.DecodeElement(&sms, &startElem); err != nil {
 					return fmt.Errorf("decoding XML element as SMS: %w", err)
 				}
-
-				throttle <- struct{}{}
-				wg.Add(1)
-				go func() {
-					defer func() {
-						<-throttle
-						wg.Done()
-					}()
-					imp.processSMS(sms, opt, dsOpt, itemChan)
-				}()
+				imp.processSMS(line, sms, params, dsOpt)
 			case "mms":
 				var mms MMS
 				if err := dec.DecodeElement(&mms, &startElem); err != nil {
 					return fmt.Errorf("decoding XML element as MMS: %w", err)
 				}
-
-				throttle <- struct{}{}
-				wg.Add(1)
-				go func() {
-					defer func() {
-						<-throttle
-						wg.Done()
-					}()
-					imp.processMMS(mms, opt, dsOpt, itemChan)
-				}()
+				imp.processMMS(line, mms, params, dsOpt)
 			}
+
+			line++
 		}
 	}
 
-	wg.Wait()
-
 	return nil
 }
-
-func (imp *FileImporter) processSMS(sms SMS, opt timeline.ListingOptions, dsOpt Options, itemChan chan<- *timeline.Graph) {
+func (imp *FileImporter) processSMS(line int, sms SMS, opt timeline.ImportParams, dsOpt Options) {
 	if !sms.within(opt.Timeframe) {
 		return
 	}
@@ -251,14 +223,15 @@ func (imp *FileImporter) processSMS(sms SMS, opt timeline.ListingOptions, dsOpt 
 			},
 			Metadata: sms.metadata(),
 		},
+		Checkpoint: line,
 	}
 
 	ig.ToEntity(timeline.RelSent, &receiver)
 
-	itemChan <- ig
+	opt.Pipeline <- ig
 }
 
-func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt Options, itemChan chan<- *timeline.Graph) {
+func (imp *FileImporter) processMMS(line int, mms MMS, opt timeline.ImportParams, dsOpt Options) {
 	if !mms.within(opt.Timeframe) {
 		return
 	}
@@ -290,9 +263,8 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt 
 
 		node := &timeline.Item{
 			Classification: timeline.ClassMessage,
-			//Timestamp:      time.Unix(0, mms.Date*int64(time.Millisecond)),
-			Timestamp: time.UnixMilli(mms.Date),
-			Owner:     sender,
+			Timestamp:      time.UnixMilli(mms.Date),
+			Owner:          sender,
 			Content: timeline.ItemData{
 				MediaType: part.ContentType,
 				Filename:  filename,
@@ -302,7 +274,7 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt 
 		}
 
 		if ig == nil {
-			ig = &timeline.Graph{Item: node}
+			ig = &timeline.Graph{Item: node, Checkpoint: line}
 		} else {
 			// TODO: this does not add a "sent" relation for the attachments,
 			// we'd have to traverse up to the root of the graph (usually the text
@@ -323,26 +295,22 @@ func (imp *FileImporter) processMMS(mms MMS, opt timeline.ListingOptions, dsOpt 
 		ig.ToEntity(timeline.RelSent, &recipients[i])
 	}
 
-	itemChan <- ig
+	opt.Pipeline <- ig
 }
 
+// TODO: update godoc etc...
 // openFile opens the XML file at filename. However, as the Pro version
 // of SMS Backup & Restore can compress them as .zip files, we also
 // support that if the filename is a zip file. (The filename in the
 // archive must be the same as the input filename without the .zip
 // extension.)
-func openFile(ctx context.Context, filename string) (fs.File, error) {
-	fsys, err := archiver.FileSystem(ctx, filename)
-	if err != nil {
-		return nil, err
-	}
-
-	baseFilename := filepath.Base(filename)
+func openFile(_ context.Context, dirEntry timeline.DirEntry) (fs.File, error) {
+	baseFilename := filepath.Base(dirEntry.Name())
 
 	// the pro version of the app can compress the .xml file into a .zip file
 	baseFilename = strings.TrimSuffix(baseFilename, ".zip")
 
-	return fsys.Open(baseFilename)
+	return dirEntry.FS.Open(baseFilename)
 }
 
 // These filenames give us no information and waste space in the DB.

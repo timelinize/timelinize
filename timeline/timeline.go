@@ -60,6 +60,12 @@ type Timeline struct {
 	relations       map[string]int64
 	dataSources     map[string]int64
 
+	obfuscationMode func() (ObfuscationOptions, bool)
+
+	// currently-running jobs for this timeline
+	activeJobs   map[int64]*ActiveJob
+	activeJobsMu sync.RWMutex
+
 	// The database handle and its mutex. Why a mutex for a DB handle? Because
 	// high-volume imports can sometimes yield "database is locked" errors,
 	// presumably because of scanning rows (`for rows.Next()`) while trying
@@ -68,13 +74,19 @@ type Timeline struct {
 	// and this is totally possible since we run our DB ops concurrently.
 	// It's unfortunate that DB locking doesn't handle this for us, but by
 	// wrapping DB calls in this mutex I've noticed the problem disappear.
-	db   *sql.DB
-	dbMu sync.RWMutex
+	db         *sql.DB
+	dbMu       sync.RWMutex
+	optimizing *int64 // accessed atomically; drops overlapping ANALYZE calls
+
+	thumbs   *sql.DB
+	thumbsMu sync.RWMutex
 }
 
 func (tl *Timeline) String() string { return fmt.Sprintf("%s:%s", tl.id, tl.repoDir) }
 func (tl *Timeline) Dir() string    { return tl.repoDir }
 func (tl *Timeline) ID() uuid.UUID  { return tl.id }
+
+func (tl *Timeline) SetObfuscationFunc(f func() (ObfuscationOptions, bool)) { tl.obfuscationMode = f }
 
 // TODO: refactor Create() and Open() to use AssessFolder() instead of duplicating logic
 
@@ -87,7 +99,7 @@ func (tl *Timeline) ID() uuid.UUID  { return tl.id }
 // path is already a Timelinize repo, then fs.ErrExist is returned.
 //
 // Timelines should always be Close()'d for a clean shutdown when done.
-func Create(repoPath, cacheDir string) (*Timeline, error) {
+func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
 	// ensure the directory exists
 	err := os.MkdirAll(repoPath, 0755)
 	if err != nil {
@@ -133,12 +145,7 @@ func Create(repoPath, cacheDir string) (*Timeline, error) {
 		}
 	}
 
-	db, err := openAndProvisionDB(repoPath)
-	if err != nil {
-		return nil, fmt.Errorf("opening database: %w", err)
-	}
-
-	return openTimeline(repoPath, cacheDir, db)
+	return openAndProvisionTimeline(ctx, repoPath, cacheDir)
 }
 
 // directoryEmpty returns true if dirPath is an empty directory. If false,
@@ -284,7 +291,7 @@ func AssessFolder(fpath string) FolderAssessment {
 // it does not attempt to create one if it does not already exist.
 // Timelines should always be Close()'d for a clean shutdown when done.
 // TODO: what happens if a timeline folder is (re)moved while it is open?
-func Open(repo, cache string) (*Timeline, error) {
+func Open(ctx context.Context, repo, cache string) (*Timeline, error) {
 	// construct filenames within this repo folder specifically
 	repoDBFile := filepath.Join(repo, DBFilename)
 	repoDataFolder := filepath.Join(repo, DataFolderName)
@@ -303,16 +310,19 @@ func Open(repo, cache string) (*Timeline, error) {
 		return nil, fmt.Errorf("data folder exists but database is missing within %s - please choose a folder that is either empty or a fully-initialized timeline", repo)
 	}
 
-	db, err := openAndProvisionDB(repo)
+	return openAndProvisionTimeline(ctx, repo, cache)
+}
+
+func openAndProvisionTimeline(ctx context.Context, repoDir, cacheDir string) (*Timeline, error) {
+	db, err := openAndProvisionDB(ctx, repoDir)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
-
-	return openTimeline(repo, cache, db)
+	return openTimeline(ctx, repoDir, cacheDir, db)
 }
 
-func openTimeline(repo, cache string, db *sql.DB) (*Timeline, error) {
-	repoMarkerFile := filepath.Join(repo, MarkerFilename)
+func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*Timeline, error) {
+	repoMarkerFile := filepath.Join(repoDir, MarkerFilename)
 
 	var err error
 	defer func() {
@@ -322,7 +332,7 @@ func openTimeline(repo, cache string, db *sql.DB) (*Timeline, error) {
 		}
 	}()
 
-	id, err := loadRepoID(db)
+	id, err := loadRepoID(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("loading repo ID: %w", err)
 	}
@@ -337,28 +347,33 @@ func openTimeline(repo, cache string, db *sql.DB) (*Timeline, error) {
 	}
 
 	// load data source IDs, item classification IDs, and entity type IDs into map by name; we use these often
-	dbDataSources, err := mapNamesToIDs(db, "data_sources")
+	dbDataSources, err := mapNamesToIDs(ctx, db, "data_sources")
 	if err != nil {
 		return nil, fmt.Errorf("mapping entity types names to IDs: %w", err)
 	}
-	classes, err := mapNamesToIDs(db, "classifications")
+	classes, err := mapNamesToIDs(ctx, db, "classifications")
 	if err != nil {
 		return nil, fmt.Errorf("mapping classification names to IDs: %w", err)
 	}
-	entityTypes, err := mapNamesToIDs(db, "entity_types")
+	entityTypes, err := mapNamesToIDs(ctx, db, "entity_types")
 	if err != nil {
 		return nil, fmt.Errorf("mapping entity types names to IDs: %w", err)
 	}
-	relations, err := mapNamesToIDs(db, "relations")
+	relations, err := mapNamesToIDs(ctx, db, "relations")
 	if err != nil {
 		return nil, fmt.Errorf("mapping entity types names to IDs: %w", err)
 	}
 
-	// in case of unclean shutdown last time, set all imports that are on "started" status to "aborted"
-	// (no imports can be running currently since we haven't finished opening the timeline yet)
-	_, err = db.Exec(`UPDATE imports SET status='abort' WHERE status='started'`)
+	// in case of unclean shutdown last time, set all jobs that are on "started" status to "aborted"
+	// (no jobs can be currently running, since we haven't even finished opening the timeline yet)
+	_, err = db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=?`, JobInterrupted, JobStarted)
 	if err != nil {
-		return nil, fmt.Errorf("resetting all uncleanly-stopped imports to 'abort' status: %w", err)
+		return nil, fmt.Errorf("resetting all uncleanly-stopped jobs to 'interrupted' state: %w", err)
+	}
+
+	thumbsDB, err := openAndProvisionThumbsDB(ctx, repoDir, id)
+	if err != nil {
+		return nil, fmt.Errorf("opening thumbnail database: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -366,42 +381,72 @@ func openTimeline(repo, cache string, db *sql.DB) (*Timeline, error) {
 	tl := &Timeline{
 		ctx:             ctx,
 		cancel:          cancel,
-		repoDir:         repo,
-		cacheDir:        cache,
+		repoDir:         repoDir,
+		cacheDir:        cacheDir,
 		rateLimiters:    make(map[int64]RateLimit),
 		id:              id,
 		db:              db,
+		thumbs:          thumbsDB,
+		optimizing:      new(int64),
 		dataSources:     dbDataSources,
 		classifications: classes,
 		entityTypes:     entityTypes,
 		relations:       relations,
-	}
-
-	// if thumbnail cache does not exist, start building cache
-	// (this is useful after clearing cache or opening the repo on
-	// a different file system for the first time)
-	if _, err := os.Stat(thumbnailDir(cache, id.String())); errors.Is(err, fs.ErrNotExist) {
-		go func() {
-			Log.Info("thumbnail cache not found; regenerating")
-			if err := tl.regenerateAllThumbnails(); err != nil {
-				Log.Error("generating thumbnails", zap.Error(err))
-			}
-		}()
+		activeJobs:      make(map[int64]*ActiveJob),
 	}
 
 	// start maintenance goroutine; this erases items that have been
-	// deleted and have fulfilled their retention period
+	// deleted and have fulfilled their retention period, and optimizes
+	// the DB occasionally
 	go tl.maintenanceLoop()
+
+	// start any jobs that were interrupted or which are queued; import jobs
+	// in particular should only be run if they're on the same machine, since
+	// it's likely that filepaths change or don't exist on different machines
+	// (we use a DB lock now because we've started a maintenance loop, and also
+	// starting jobs involve DB concurrency)
+	hostname, err := os.Hostname()
+	if err != nil {
+		Log.Error("unable to lookup hostname for resuming jobs", zap.Error(err))
+	}
+	tl.dbMu.RLock()
+	rows, err := db.QueryContext(ctx,
+		`SELECT id
+		FROM jobs
+		WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
+		ORDER BY start, created
+		LIMIT 3`, JobQueued, JobInterrupted, hostname, JobNameImport)
+	if err != nil {
+		return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
+	}
+	tl.dbMu.RUnlock()
+	if err != nil {
+		return nil, fmt.Errorf("could not query jobs to resume: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var jobID int64
+		err := rows.Scan(&jobID)
+		if err != nil {
+			return nil, fmt.Errorf("scanning row for resuming job: %w", err)
+		}
+		if err = tl.StartJob(ctx, jobID, false); err != nil {
+			return nil, fmt.Errorf("starting job %d from last open: %w", jobID, err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating rows for resuming jobs: %w", err)
+	}
 
 	return tl, nil
 }
 
-func mapNamesToIDs(db *sql.DB, table string) (map[string]int64, error) {
+func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]int64, error) {
 	nameCol := "name"
 	if table == "relations" {
 		nameCol = "label" // TODO: this is annoying... right?
 	}
-	rows, err := db.Query(`SELECT id, ` + nameCol + ` FROM ` + table) //nolint:gosec
+	rows, err := db.QueryContext(ctx, `SELECT id, `+nameCol+` FROM `+table) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("querying %s table: %w", table, err)
 	}
@@ -409,6 +454,9 @@ func mapNamesToIDs(db *sql.DB, table string) (map[string]int64, error) {
 
 	namesToIDs := make(map[string]int64)
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var rowID int64
 		var name string
 		err := rows.Scan(&rowID, &name)
@@ -434,6 +482,11 @@ func (tl *Timeline) Close() error {
 		delete(tl.rateLimiters, key) // TODO: maybe racey?
 	}
 	tl.cancel() // cancel this timeline's context, so anything waiting on it knows we're closing
+	if tl.thumbs != nil {
+		tl.thumbsMu.Lock()
+		defer tl.thumbsMu.Unlock()
+		_ = tl.thumbs.Close()
+	}
 	if tl.db != nil {
 		tl.dbMu.Lock()
 		defer tl.dbMu.Unlock()
@@ -790,17 +843,8 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 		}
 
 		// delete thumbnails, if present
-		for _, itemID := range itemRowIDs {
-			for _, format := range []ThumbnailType{ImageThumbnail, VideoThumbnail} {
-				thumbPath := tl.ThumbnailPath(itemID, format)
-				err = os.Remove(thumbPath)
-				if err != nil && !errors.Is(err, fs.ErrNotExist) {
-					Log.Error("unable to delete thumbnail file for immediately-erased item",
-						zap.Int64("item_id", itemID),
-						zap.String("thumbnail_file", thumbPath),
-						zap.Error(err))
-				}
-			}
+		if err := tl.deleteThumbnails(ctx, itemRowIDs, dataFilesToDelete); err != nil {
+			Log.Error("unable to delete thumbnails", zap.Error(err))
 		}
 
 		Log.Info("erased deleted items",
@@ -830,6 +874,72 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 		zap.Int64s("ids", itemRowIDs),
 		zap.String("retention_period", retention.String()),
 		zap.Time("deletion_scheduled", deleteAt))
+
+	return nil
+}
+
+// deleteItemRows deletes the item rows specified by their row IDs. If remember is true, the item rows will
+// be hashed, and the hash will be stored with the row; if retention is non-zero, the items will be marked
+// for deletion and then only deleted later after the retention period.
+// TODO: WIP: remember and retention are not yet implemented
+func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember bool, retention *time.Duration) error {
+	if len(rowIDs) == 0 {
+		return nil
+	}
+
+	Log.Info("deleting item rows",
+		zap.Int64s("item_ids", rowIDs),
+		zap.Bool("remember", remember),
+		zap.Durationp("retention", retention))
+
+	tl.dbMu.Lock()
+	defer tl.dbMu.Unlock()
+
+	tx, err := tl.db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var dataFilesToDelete []string
+	for _, rowID := range rowIDs {
+		// before deleting the row, find out whether this item
+		// has a data file and is the only one referencing it
+		var count int
+		var dataFile *string
+		err = tx.QueryRow(`SELECT count(), data_file FROM items
+		WHERE data_file = (SELECT data_file FROM items
+							WHERE id=? AND data_file IS NOT NULL
+							AND data_file != "" LIMIT 1)`,
+			rowID).Scan(&count, &dataFile)
+		if err != nil {
+			return fmt.Errorf("querying count of rows sharing data file: %w", err)
+		}
+
+		_, err = tx.Exec(`DELETE FROM items WHERE id=?`, rowID) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
+		if err != nil {
+			return fmt.Errorf("deleting item %d from DB: %w", rowID, err)
+		}
+
+		// if this row is the only one that references the data file, we can delete it
+		if count == 1 && dataFile != nil {
+			dataFilesToDelete = append(dataFilesToDelete, *dataFile)
+		}
+	}
+
+	// commit to delete the item from the DB first; even if deleting the data file fails, stray
+	// data files can be cleaned up with a sweep later, whereas if we delete that file first and
+	// then fail to delete from DB, the DB being the ultimate source of truth is now missing data
+	// and we aren't sure whether we need to recover it or finish deleting it... by deleting the
+	// DB row first we can know that we just need to delete the file if there's no row using it
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing deletion transaction: %w", err)
+	}
+
+	_, err = tl.deleteDataFiles(ctx, Log, dataFilesToDelete)
+	if err != nil {
+		return fmt.Errorf("deleting data files (after deleting associated item rows from DB): %w", err)
+	}
 
 	return nil
 }
@@ -900,8 +1010,8 @@ func sqlArray(rowIDs []int64) (string, []any) {
 // super-thorough check, but it does look for a couple of key factors: database
 // file existence, and a table and value within the database.It returns an
 // error only if it is unable to assess whether a valid timeline exists.
-func Valid(repo string) (bool, error) {
-	db, err := openDB(repo)
+func Valid(ctx context.Context, repo string) (bool, error) {
+	db, err := openDB(ctx, repo)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
@@ -909,7 +1019,7 @@ func Valid(repo string) (bool, error) {
 		return false, fmt.Errorf("opening database: %w", err)
 	}
 	// load and parse the timeline's UUID as a sanity check
-	_, err = loadRepoID(db)
+	_, err = loadRepoID(ctx, db)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -960,61 +1070,13 @@ func DownloadData(url string) DataFunc {
 	}
 }
 
-// ctxKey is used for contexts, as recommended by
-// https://golang.org/pkg/context/#WithValue. It
-// is unexported so values stored by this package
-// can only be accessed by this package.
-type ctxKey string
-
-// processorCtxKey is how the context value is accessed.
-var processorCtxKey ctxKey = "processor"
-
-// // Checkpoint saves a checkpoint for the processing associated
-// // with the provided context. It overwrites any previous
-// // checkpoint. Any errors are logged.
-// // TODO: get proper logger
-// func checkpoint(ctx context.Context, checkpoint any) {
-// 	proc, ok := ctx.Value(processorCtxKey).(*processor)
-// 	if !ok {
-// 		log.Printf("[ERROR]Checkpoint function not available; got type %T (%#v)",
-// 			proc, proc)
-// 		return
-// 	}
-
-// 	chkpt, err := MarshalGob(Checkpoint{proc.commandParams, checkpoint})
-// 	if err != nil {
-// 		log.Printf("[ERROR] Encoding checkpoint wrapper: %w", err)
-// 		return
-// 	}
-
-// 	_, err = proc.tl.db.Exec(`UPDATE imports SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
-// 		chkpt, proc.imp.ID)
-// 	if err != nil {
-// 		log.Printf("[ERROR] Checkpoint: %w", err)
-// 		return
-// 	}
-// }
-
-// TODO: update godoc
-// checkpointWrapper stores a provider's checkpoint along with the
-// parameters of the command that initiated the process; the checkpoint
-// will only be loaded and restored to the provider on next run if
-// the parameters match, because it doesn't make sense to restore a
-// process that has different, potentially conflicting, parameters,
-// such as timeframe.
-type checkpoint struct {
-	Filenames []string
-	ProcOpt   ProcessingOptions
-	Data      any // provided by, and passed back into, the data source
-}
-
 // ProcessingOptions configures how item processing is carried out.
 type ProcessingOptions struct {
-	GetLatest      bool      `json:"get_latest,omitempty"`
-	Prune          bool      `json:"prune,omitempty"`
-	Integrity      bool      `json:"integrity,omitempty"`
-	Timeframe      Timeframe `json:"timeframe,omitempty"`
-	KeepEmptyItems bool      `json:"keep_empty_items,omitempty"` // TODO: not used?
+	// Whether to perform integrity checks
+	Integrity bool `json:"integrity,omitempty"`
+
+	// Constrain processed items to within a timeframe
+	Timeframe Timeframe `json:"timeframe,omitempty"`
 
 	// If true, items with manual modifications may be updated, overwriting local changes.
 	OverwriteModifications bool `json:"overwrite_modifications,omitempty"`
@@ -1028,12 +1090,23 @@ type ProcessingOptions struct {
 	// The policies to apply when updating an item in the DB, specified per-field.
 	// Note: Some fields are described in aggregate, such as data and location.
 	ItemFieldUpdates map[string]fieldUpdatePolicy `json:"item_field_updates,omitempty"`
+
+	// TODO: WIP
+	Interactive *InteractiveImport `json:"interactive,omitempty"`
+
+	// How many items to process in one database transaction. This is a minimum value,
+	// not a maximum, due to the recursive nature of graphs. (Hopefully data sources
+	// do not build out graphs that are too big for available memory. Most graphs
+	// just have 1-2 things on it). This setting is sensitive. Smaller batches can
+	// reduce performance, slowing down imports. Larger batches can be faster, allowing
+	// for more throughput especially when data files are large, but reduces the
+	// granularity of the live progress updates, and the performance benefit gets
+	// smaller as the database gets larger and the items get smaller.
+	BatchSize int `json:"batch_size,omitempty"`
 }
 
-func (po ProcessingOptions) IsEmpty() bool {
-	return !po.GetLatest && !po.Prune && !po.Integrity &&
-		po.Timeframe.IsEmpty() && !po.KeepEmptyItems &&
-		po.ItemUniqueConstraints == nil && po.ItemFieldUpdates == nil
+type InteractiveImport struct {
+	Graphs chan<- *Graph `json:"-"`
 }
 
 // fieldUpdatePolicy values specify how to update a field/column of an item in the DB.
@@ -1053,48 +1126,23 @@ const (
 	// TODO: choose one based on properties of the item? like larger or smaller one, etc... (e.g. if we want to prefer the higher-quality photo...)
 )
 
-// ListingOptions specifies parameters for listing items
-// from a data source. Some data sources might not be
-// able to honor all fields.
-// TODO: rename to ImportOptions probably?
-type ListingOptions struct {
-	// The logger to use.
-	Log *zap.Logger
-
-	// Time bounds on which data to retrieve.
-	// The respective time and item ID fields
-	// which are set must never conflict.
-	Timeframe Timeframe
-
-	// A checkpoint from which to resume
-	// item retrieval.
-	Checkpoint any
-
-	// Options specific to the data source,
-	// as provided by NewOptions.
-	DataSourceOptions any
-
-	// Maximum number of items to list; useful
-	// for previews. Data sources should not
-	// checkpoint previews.
-	// TODO: still should enforce this in the processor... but this is good for the DS to know too, so it can limit its API calls, for example
-	MaxItems int
-}
-
 // Files belonging at the root within the timeline repository.
 const (
-	// The name of the database file.
+	// The name of the main database file.
 	DBFilename = "timeline.db"
+
+	// The name of the thumbnail database file.
+	ThumbsDBFilename = "thumbnails.db"
 
 	// The folder containing data files.
 	DataFolderName = "data"
 
 	// The folder containing related assets, but not core timeline data
-	// (for example, profile pictures, etc).
+	// (for example, profile pictures).
 	AssetsFolderName = "assets"
 
 	// An optional file that is placed for informational purposes only.
-	MarkerFilename = "timelinize_repo.txt"
+	MarkerFilename = "timelinize_repo.txt" // TODO: README.txt?
 )
 
 const timelineMarkerContents = `This folder is a Timelinize repository.
@@ -1105,7 +1153,7 @@ as long as its structure is preserved. Files should not be added, removed,
 or edited, as this can corrupt the index or throw the database out of sync.
 Only use Timelinize to make changes.
 
-Timelines may contain private, sensitive, or personal information, so be
+Timelines may contain private, sensitive, and personal information, so be
 careful how these files are shared.
 
 For more information, visit https://timelinize.com.

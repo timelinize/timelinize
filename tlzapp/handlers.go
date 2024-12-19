@@ -32,6 +32,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/timelinize/timelinize/timeline"
+	"go.uber.org/zap"
 )
 
 func (s *server) handleFileSelectorRoots(w http.ResponseWriter, _ *http.Request) error {
@@ -94,14 +95,56 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) error {
 	return jsonResponse(w, stats, err)
 }
 
-func (s *server) handleJobs(w http.ResponseWriter, _ *http.Request) error {
-	jobs, err := s.app.ActiveJobs()
+type jobsPayload struct {
+	RepoID string  `json:"repo_id"`
+	JobIDs []int64 `json:"job_ids"`
+}
+
+func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*jobsPayload)
+	jobs, err := s.app.Jobs(payload.RepoID, payload.JobIDs)
 	return jsonResponse(w, jobs, err)
 }
 
-func (s *server) handleCancelJob(w http.ResponseWriter, r *http.Request) error {
-	jobID := r.Context().Value(ctxKeyPayload).(*string)
-	return jsonResponse(w, nil, s.app.CancelJob(*jobID))
+func (s *server) handleCancelJobs(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*jobsPayload)
+	var firstErr error
+	for _, jobID := range payload.JobIDs {
+		err := s.app.CancelJob(r.Context(), payload.RepoID, jobID)
+		if err != nil {
+			s.log.Error("canceling job failed",
+				zap.Int64("job_id", jobID),
+				zap.Error(err))
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return jsonResponse(w, nil, firstErr)
+}
+
+type jobPayload struct {
+	RepoID    string `json:"repo_id"`
+	JobID     int64  `json:"job_id"`
+	StartOver bool   `json:"start_over,omitempty"` // only used with StartJob
+}
+
+func (s *server) handlePauseJob(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*jobPayload)
+	err := s.app.PauseJob(r.Context(), payload.RepoID, payload.JobID)
+	return jsonResponse(w, nil, err)
+}
+
+func (s *server) handleUnpauseJob(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*jobPayload)
+	err := s.app.UnpauseJob(r.Context(), payload.RepoID, payload.JobID)
+	return jsonResponse(w, nil, err)
+}
+
+func (s *server) handleStartJob(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*jobPayload)
+	err := s.app.StartJob(r.Context(), payload.RepoID, payload.JobID, payload.StartOver)
+	return jsonResponse(w, nil, err)
 }
 
 func (s *server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
@@ -188,7 +231,7 @@ func (s *server) handleOpenRepo(w http.ResponseWriter, r *http.Request) error {
 	payload := r.Context().Value(ctxKeyPayload).(*openRepoPayload)
 
 	// TODO: maybe have the app methods return structured errors
-	openedTL, err := s.app.openRepository(payload.RepoPath, payload.Create)
+	openedTL, err := s.app.openRepository(r.Context(), payload.RepoPath, payload.Create)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return Error{
@@ -273,78 +316,16 @@ func (s *server) handleCloseRepo(w http.ResponseWriter, r *http.Request) error {
 // 	return s.app.AuthAccount(payload.Repo, payload.AccountID, payload.DataSourceOptions)
 // }
 
-func (s *server) handleRecognize(w http.ResponseWriter, r *http.Request) error {
-	filenames := *r.Context().Value(ctxKeyPayload).(*[]string)
-	sources, err := s.app.Recognize(filenames)
-	return jsonResponse(w, sources, err)
-
-	// TODO: We no longer need to include accounts since accounts aren't required for importing files
-	// // just return plain data source info if no timeline specified
-	// if payload.Repo == "" {
-	// 	// put files data source last since it is the generic importer and usually the least desired
-	// 	sort.Slice(sources, func(i, j int) bool {
-	// 		return sources[i].ID != files.DataSourceID
-	// 	})
-	// 	return jsonResponse(w, sources)
-	// }
-
-	// // expand specific account info
-
-	// tl, err := getOpenTimeline(payload.Repo)
-	// if err != nil {
-	// 	return Error{
-	// 		Err:             err,
-	// 		HTTPStatus:      http.StatusBadRequest,
-	// 		Log:             "getting open timeline",
-	// 		Message:         "Unable to query accounts compatible with this file.",
-	// 		Recommendations: []string{"Make sure the repo field is properly set to an open timeline."},
-	// 	}
-	// }
-
-	// dataSourceIDs := make([]string, len(sources))
-	// for i, ds := range sources {
-	// 	dataSourceIDs[i] = ds.ID
-	// }
-
-	// accounts, err := tl.LoadAccounts(nil, dataSourceIDs)
-	// if err != nil {
-	// 	return Error{
-	// 		Err:        err,
-	// 		HTTPStatus: http.StatusInternalServerError,
-	// 		Log:        "loading relevant accounts",
-	// 		Message:    "Unable to query accounts compatible with this file.",
-	// 	}
-	// }
-
-	// expandedAccounts := make([]expandedAccount, len(accounts))
-	// for i, acc := range accounts {
-	// 	expandedAccounts[i], err = s.expandAccount(tl, acc, true, true)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	// // put files data source last since it is the generic importer and usually the least desired
-	// sort.Slice(expandedAccounts, func(i, j int) bool {
-	// 	return expandedAccounts[i].DataSourceID != files.DataSourceID
-	// })
-	// sort.Slice(sources, func(i, j int) bool {
-	// 	return sources[i].ID != files.DataSourceID
-	// })
-
-	// return jsonResponse(w, struct {
-	// 	DataSources []timeline.DataSource `json:"data_sources,omitempty"`
-	// 	Accounts    []expandedAccount     `json:"accounts,omitempty"`
-	// }{
-	// 	DataSources: sources,
-	// 	Accounts:    expandedAccounts,
-	// })
+func (s *server) handlePlanImport(w http.ResponseWriter, r *http.Request) error {
+	plannerOptions := *r.Context().Value(ctxKeyPayload).(*PlannerOptions)
+	importPlan, err := s.app.PlanImport(r.Context(), plannerOptions)
+	return jsonResponse(w, importPlan, err)
 }
 
 func (s *server) handleImport(w http.ResponseWriter, r *http.Request) error {
 	params := *r.Context().Value(ctxKeyPayload).(*ImportParameters)
-	job, err := s.app.Import(params)
-	return jsonResponse(w, map[string]any{"job": job}, err)
+	jobID, err := s.app.Import(params)
+	return jsonResponse(w, map[string]any{"job_id": jobID}, err)
 }
 
 func (s *server) handleSearchItems(w http.ResponseWriter, r *http.Request) error {
@@ -361,13 +342,13 @@ func (s *server) handleSearchEntities(w http.ResponseWriter, r *http.Request) er
 
 func (s *server) handleRecentConversations(w http.ResponseWriter, r *http.Request) error {
 	params := r.Context().Value(ctxKeyPayload).(*timeline.ItemSearchParams)
-	results, err := s.app.LoadRecentConversations(*params)
+	results, err := s.app.LoadRecentConversations(r.Context(), *params)
 	return jsonResponse(w, results, err)
 }
 
 func (s *server) handleConversation(w http.ResponseWriter, r *http.Request) error {
 	params := r.Context().Value(ctxKeyPayload).(*timeline.ItemSearchParams)
-	results, err := s.app.LoadConversation(*params)
+	results, err := s.app.LoadConversation(r.Context(), *params)
 	return jsonResponse(w, results, err)
 }
 
@@ -411,7 +392,7 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 	// for some reason, on Windows, requesting the file listing of "C:" shows
 	// the contents of C:\Windows\system32, but requesting "C:\" works fine; so
 	// let's go ahead and fix that, shall we?
-	if runtime.GOOS == "windows" && len(listingReq.Path) == 2 && listingReq.Path[1] == ':' {
+	if runtime.GOOS == osWindows && len(listingReq.Path) == 2 && listingReq.Path[1] == ':' {
 		listingReq.Path += `\`
 	}
 

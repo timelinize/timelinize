@@ -84,10 +84,10 @@ async function navigateSPA(addrBarDestination) {
 	const addrBarDestinationParts = splitPathAndQueryString(addrBarDestination);
 
 	// special cases: rewrite when path contains application data
-	if (addrBarDestinationParts.path.match(/\/items\/[\w-]+\/\d+$/)) {
-		addrBarDestinationParts.path = "/item";
-	} else if (addrBarDestinationParts.path.match(/\/entities\/[\w-]+\/\d+$/)) {
-		addrBarDestinationParts.path = "/entity";
+	const matches = addrBarDestinationParts.path.match(/\/(items|entities|jobs)\/[\w-]+\/\d+$/);
+	if (matches) {
+		const rewriteTo = {"items": "/item", "entities": "/entity", "jobs": "/job"}
+		addrBarDestinationParts.path = rewriteTo[matches[1]]
 	}
 
 	// craft the true destination (not shown to the user)

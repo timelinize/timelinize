@@ -19,11 +19,9 @@
 package tlzapp
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/timelinize/timelinize/timeline"
@@ -33,24 +31,25 @@ import (
 func shutdownTimelines() {
 	// TODO: we need cleaner shutdowns, that wait until processing is complete after jobs are cancelled -- which allows updating import status properly (when possible)
 
-	activeJobsMu.Lock()
-	for _, job := range activeJobs {
-		// can't call job.cleanUp() because we have the lock on activeJobs right now
-		job.cancel()
-		delete(activeJobs, job.ID)
+	// TODO: this is from the old jobs system
+	// activeJobsMu.Lock()
+	// for _, job := range activeJobs {
+	// 	// can't call job.cleanUp() because we have the lock on activeJobs right now
+	// 	job.cancel()
+	// 	delete(activeJobs, job.ID)
 
-		logger := timeline.Log.With(zap.Time("started", job.Started))
+	// 	logger := timeline.Log.With(zap.Time("started", job.Started))
 
-		if job.Type == "import" {
-			logger = timeline.Log.With(
-				zap.String("repo", job.ImportParameters.Repo),
-				zap.Strings("filenames", job.ImportParameters.Filenames),
-				zap.Int64("account_id", job.ImportParameters.AccountID),
-			)
-		}
-		logger.Warn("canceled active job")
-	}
-	activeJobsMu.Unlock()
+	// 	if job.Type == "import" {
+	// 		logger = timeline.Log.With(
+	// 			zap.String("repo", job.ImportParameters.Repo),
+	// 			zap.Strings("filenames", job.ImportParameters.Filenames),
+	// 			zap.Int64("account_id", job.ImportParameters.AccountID),
+	// 		)
+	// 	}
+	// 	logger.Warn("canceled active job")
+	// }
+	// activeJobsMu.Unlock()
 
 	openTimelinesMu.Lock()
 	for key, tl := range openTimelines {
@@ -87,30 +86,6 @@ func getOpenTimeline(repoID string) (openedTimeline, error) {
 	}
 	return otl, nil
 }
-
-type ActiveJob struct {
-	ID      string    `json:"id"`
-	Type    string    `json:"type"`
-	Started time.Time `json:"started"`
-
-	// if an import job
-	ImportParameters *ImportParameters `json:"import_parameters,omitempty"`
-
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (job ActiveJob) cleanUp() {
-	job.cancel()
-	activeJobsMu.Lock()
-	delete(activeJobs, job.ID)
-	activeJobsMu.Unlock()
-}
-
-var (
-	activeJobs   = make(map[string]ActiveJob)
-	activeJobsMu sync.Mutex
-)
 
 type openedTimeline struct {
 	RepoDir    string    `json:"repo_dir"` // absolute path

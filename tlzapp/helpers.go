@@ -49,7 +49,7 @@ func userHomeDir() string {
 	if home := os.Getenv("HOME"); home != "" {
 		return home
 	}
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		if home := os.Getenv("USERPROFILE"); home != "" {
 			return home
 		}
@@ -129,12 +129,15 @@ func jsonResponse(w http.ResponseWriter, v any, err error) error {
 	if err != nil {
 		return err
 	}
-	respBytes, err := json.Marshal(v)
-	if err != nil {
-		return jsonEncodeErr(err)
+	if v != nil {
+		respBytes, err := json.Marshal(v)
+		if err != nil {
+			return jsonEncodeErr(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(respBytes)))
+		_, err = w.Write(respBytes)
+		return err
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", strconv.Itoa(len(respBytes)))
-	_, err = w.Write(respBytes)
-	return err
+	return nil
 }

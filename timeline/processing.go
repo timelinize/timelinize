@@ -40,84 +40,125 @@ import (
 
 	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-const (
-	// batchSize is how many items to process in one transaction;
-	// except for the final remainder, this is a minimum count,
-	// not a maximum, due to the recursive and inter-related nature
-	// of item graphs -- hopefully data sources don't send graphs
-	// too big for available memory
-	batchSize = 50
+// defaultBatchSize is how many items/entities (approximately) to process per transaction
+// if not specified by the user. See the docs for batch size on ProcessingOoptions.
+const defaultBatchSize = 10
 
-	// don't want too many workers because they can starve other
-	// imports happening at the same time, especially if one import
-	// is not very file-heavy and is more DB-heavy (after all, only
-	// 1 worker can have a lock at the DB at a time anyway)
-	workers = 5
-)
-
-func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions) (*sync.WaitGroup, chan<- *Graph) {
+func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, countOnly bool, done <-chan struct{}) (*sync.WaitGroup, chan<- *Graph) {
 	wg := new(sync.WaitGroup)
 	ch := make(chan *Graph)
 
-	for i := range workers {
-		wg.Add(1)
-		go func(workerNum int) {
-			defer wg.Done()
+	if po.BatchSize <= 0 {
+		po.BatchSize = defaultBatchSize
+	}
 
-			// addToBatch adds g to the batch, and if the batch is full, it
-			// sends it for processing and resets the batch. If g is nil,
-			// the batch is processed regardless of its size.
-			addToBatch := func(g *Graph) {
-				var batch []*Graph
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 
-				// TODO: do we want/need to prevent infinite recursion (avoid visiting same graph twice)?
+		// addToBatch adds g to the batch, and if the batch is full, it
+		// sends it for processing and resets the batch. If g is nil,
+		// the batch is processed regardless of its size.
+		addToBatch := func(g *Graph) {
+			var batch []*Graph
 
-				// add the new graph to the batch, keeping track of its actual
-				// nested size; and if the batch is now large enough to process,
-				// copy it (just the slice header) then reset the batch
-				p.batchMu.Lock()
-				if g != nil {
-					p.batch = append(p.batch, g)
-					p.batchSize += g.Size()
+			// add the new graph to the batch, keeping track of its actual
+			// nested size; and if the batch is now large enough to process,
+			// copy it (just the slice header) then reset the batch
+			if g != nil {
+				p.batch = append(p.batch, g)
+				p.batchSize += g.Size()
+			}
+			if p.batchSize >= po.BatchSize || (g == nil && len(p.batch) > 0) {
+				batch = p.batch
+				p.batch = make([]*Graph, 0, po.BatchSize)
+				p.batchSize = 0
+			}
+
+			if len(batch) > 0 {
+				err := p.pipeline(ctx, batch, &recursiveState{
+					procOpt: po,
+				})
+				if err != nil {
+					p.log.Error("batch pipeline", zap.Error(err))
 				}
-				if p.batchSize >= batchSize || (g == nil && len(p.batch) > 0) {
-					batch = p.batch
-					p.batch = make([]*Graph, 0, batchSize)
-					p.batchSize = 0
-				}
-				p.batchMu.Unlock()
 
-				if len(batch) > 0 {
-					err := p.pipeline(ctx, batch, &recursiveState{
-						worker:  workerNum,
-						procOpt: po,
-					})
-					if err != nil {
-						p.log.Error("batch pipeline",
-							zap.Int("worker", workerNum),
-							zap.Error(err))
+				lastChkptIdx := len(batch) - 1
+				for i := len(batch) - 1; i >= 0; i-- {
+					if batch[i].Checkpoint != nil {
+						lastChkptIdx = i
+						break
+					}
+				}
+
+				var batchSizeToCheckpoint int
+				for i := 0; i <= lastChkptIdx; i++ {
+					batchSizeToCheckpoint += batch[i].Size()
+				}
+
+				p.ij.job.Progress(batchSizeToCheckpoint)
+
+				// persist the last (most recent) checkpoint in the batch
+				if batch[lastChkptIdx].Checkpoint != nil {
+					if err := p.ij.checkpoint(p.estimatedCount, p.outerLoopIdx, p.innerLoopIdx, batch[lastChkptIdx].Checkpoint); err != nil {
+						p.log.Error("checkpointing", zap.Error(err))
 					}
 				}
 			}
+		}
 
-			// read all incoming item graphs (or entities) and add them
-			// to a batch, and process the batch if it is full
-			for g := range ch {
-				if ctx.Err() != nil {
-					return
+		// read all incoming graphs and add them to a batch, and'
+		// process the batch if it is full
+		for {
+			// block here if job is paused; but don't return if canceled
+			// (non-nil error) for the reason described just below
+			_ = p.ij.job.Continue()
+
+			// it may seem weird that we don't select on ctx.Done()
+			// here, and that's because we expect data sources to
+			// honor context cancellation; once they return, the
+			// done channel will be closed, and that's what we
+			// terminate on; if we return of our own accord when
+			// the context is canceled, we may leave data source
+			// goroutines hanging if they're trying to send on
+			// the pipeline channel... they can't know the context
+			// has canceled because they're blocked on a send,
+			// so we need to receive their sends until they
+			// are done (and data sources are expected to wait
+			// for their own goroutines to finish before they
+			// return completely)
+			select {
+			case <-done:
+				// process the remaining items in the last batch
+				// if the context hasn't been cancelled
+				if ctx.Err() == nil {
+					addToBatch(nil)
 				}
+				return
+			case g := <-ch:
 				if g == nil {
 					continue
 				}
+				if countOnly {
+					// don't call SetTotal() yet -- wait until we're done counting,
+					// so progress bars don't think we are done with the estimate
+					atomic.AddInt64(p.estimatedCount, int64(g.Size()))
+					continue
+				}
+				if po.Interactive != nil {
+					// TODO: emit log indicating to frontend that we have a graph ready
+					// po.Interactive.Graphs <- &InteractiveGraph{
+					// 	Graph:         g,
+					// 	DataFileReady: make(chan struct{}),
+					// }
+				}
 				addToBatch(g)
 			}
-
-			// process the remaining items in the last batch
-			addToBatch(nil)
-		}(i)
-	}
+		}
+	}()
 
 	return wg, ch
 }
@@ -133,6 +174,7 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph, rs *recursiveS
 	// an extra parameter or return value. Phases 2 and 3 do make some allocations even if
 	// there aren't any data files, but I'd want to dig deeper (likely with a profile) to
 	// determine if avoiding these phases entirely is worth the effort.
+	// (Phase 3 has logging used for live updates by the frontend)
 	if err := p.phase2(ctx, batch); err != nil {
 		return err
 	}
@@ -144,6 +186,9 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph, rs *recursiveS
 
 // phase1 inserts items into the database and preps data files for writing.
 func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Graph) error {
+	// TODO: maybe if we first go through the batch in a readlock, we can determine what are
+	// duplicates, before acquiring a write lock, and that could help for faster resumption
+	// (especially if we have even more workers)
 	p.tl.dbMu.Lock()
 	defer p.tl.dbMu.Unlock()
 
@@ -154,7 +199,7 @@ func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Gra
 	defer tx.Rollback()
 
 	for _, g := range batch {
-		if _, err = p.processGraph(ctx, tx, rs, g); err != nil {
+		if err = p.processGraph(ctx, tx, rs, g); err != nil {
 			p.log.Error("processing graph", zap.String("graph", g.String()), zap.Error(err))
 			g.err = err
 		}
@@ -167,20 +212,17 @@ func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Gra
 	return nil
 }
 
-// phase2 downloads data files.
+// phase2 downloads data files. Significantly, there is no lock on the DB in this phase,
+// so it can be run in parallel.
 func (p *processor) phase2(ctx context.Context, batch []*Graph) error {
 	var wg sync.WaitGroup
 	for _, g := range batch {
 		if g.err != nil {
 			continue
 		}
-		p.downloadThrottle <- struct{}{}
 		wg.Add(1)
 		go func(g *Graph) {
-			defer func() {
-				wg.Done()
-				<-p.downloadThrottle
-			}()
+			defer wg.Done()
 			if err := p.downloadDataFilesInGraph(ctx, g); err != nil {
 				p.log.Error("downloading data files in graph", zap.Error(err))
 				g.err = err
@@ -249,6 +291,77 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 		return nil
 	}
 
+	// this whole big thing is one huge log so the UI can stream
+	// a sample of live import data
+	defer func() {
+		graphType := "item"
+		if g.Entity != nil {
+			graphType = "entity"
+		}
+		l := p.log.With(
+			zap.String("graph", fmt.Sprintf("%p", g)),
+			zap.String("type", graphType),
+			zap.Int64("row_id", g.rowID.id()),
+			zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
+			zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
+			zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
+			zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
+			zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
+		)
+		if g.Item != nil && !g.Item.Timestamp.IsZero() {
+			l = l.With(zap.Time("item_timestamp", g.Item.Timestamp))
+		}
+		entityAttr := func(e Entity) zapcore.Field {
+			if e.Name != "" {
+				return zap.String("entity", e.Name)
+			}
+			for _, attr := range e.Attributes {
+				if attr.Identifying || attr.Identity {
+					return zap.Any("entity", attr.Value)
+				}
+			}
+			return zap.Stringp("entity", nil)
+		}
+		if options, obfuscate := p.tl.obfuscationMode(); obfuscate {
+			// this kind of nukes the actual values from this point forward,
+			// but we're done with them now, so it should be okay
+			if g.Item != nil {
+				g.Item.row.Anonymize(options)
+				g.Item.Owner.Anonymize()
+			}
+			if g.Entity != nil {
+				g.Entity.ID = g.rowID.id()
+				g.Entity.Anonymize()
+			}
+		}
+		if g.Item != nil {
+			size := g.Item.dataFileSize
+			if g.Item.row.DataText != nil {
+				size = int64(len(*g.Item.row.DataText))
+			}
+			preview := g.Item.row.DataText
+			const maxPreviewLen = 30
+			if preview != nil && len(*preview) > maxPreviewLen {
+				shortPreview := (*preview)[:maxPreviewLen]
+				preview = &shortPreview
+			}
+			l = l.With(
+				zap.String("status", string(g.Item.row.howStored)),
+				zap.String("classification", g.Item.Classification.Name),
+				zap.Stringp("preview", preview),
+				zap.Stringp("filename", g.Item.row.Filename),
+				zap.Int64("size", size),
+				zap.Float64p("lat", g.Item.row.Latitude),
+				zap.Float64p("lon", g.Item.row.Longitude),
+				zap.String("media_type", g.Item.Content.MediaType),
+				entityAttr(g.Item.Owner))
+		}
+		if g.Entity != nil {
+			l = l.With(entityAttr(*g.Entity))
+		}
+		l.Info("finished graph")
+	}()
+
 	if err := p.finishDataFileProcessing(ctx, tx, g.Item); err != nil {
 		return err
 	}
@@ -264,83 +377,43 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 	return nil
 }
 
-func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursiveState, ig *Graph) (latentID, error) {
+func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursiveState, ig *Graph) error {
 	if ig == nil {
-		return latentID{}, nil
+		return nil
 	}
 
 	// validate node type
 	if ig.Item != nil && ig.Entity != nil {
-		return latentID{}, fmt.Errorf("ambiguous node in graph is both an item and entity node (item_graph=%p)", ig)
+		return fmt.Errorf("ambiguous node in graph is both an item and entity node (item_graph=%p)", ig)
 	}
-
-	var rowID latentID
-
-	start := time.Now()
-	defer func() {
-		duration := time.Since(start)
-		l := p.progress.With(
-			zap.Int("worker", state.worker),
-			zap.String("graph", fmt.Sprintf("%p", ig)),
-			zap.Int64("row_id", rowID.id()),
-			zap.Duration("duration", duration),
-			zap.Int64("new_entities", atomic.LoadInt64(p.newEntityCount)),
-			zap.Int64("new_items", atomic.LoadInt64(p.newItemCount)),
-			zap.Int64("updated_items", atomic.LoadInt64(p.updatedItemCount)),
-			zap.Int64("skipped_items", atomic.LoadInt64(p.skippedItemCount)),
-			zap.Int64("total_items", atomic.LoadInt64(p.itemCount)),
-		)
-		if ig.Item != nil && !ig.Item.Timestamp.IsZero() {
-			l = l.With(zap.Time("item_timestamp", ig.Item.Timestamp))
-		}
-		if ig.Entity != nil {
-			l = l.With(zap.String("entity_name", ig.Entity.Name))
-		}
-		l.Info("finished graph")
-	}()
 
 	// process root node
 	switch {
 	case ig.Entity != nil:
 		var err error
-		rowID, err = p.processEntity(ctx, tx, *ig.Entity)
+		ig.rowID, err = p.processEntity(ctx, tx, *ig.Entity)
 		if err != nil {
-			return latentID{}, fmt.Errorf("processing entity node: %w", err)
+			return fmt.Errorf("processing entity node: %w", err)
 		}
 	case ig.Item != nil:
 		var err error
-		rowID, err = p.processItem(ctx, tx, ig.Item, state)
+		ig.rowID, err = p.processItem(ctx, tx, ig.Item, state)
 		if err != nil {
-			return latentID{}, fmt.Errorf("processing item node: %w", err)
+			return fmt.Errorf("processing item node: %w", err)
 		}
 	}
 
 	// process connected nodes
 	for _, r := range ig.Edges {
-		var err error
-		tx, err = p.processRelationship(ctx, tx, r, ig, rowID, state)
+		err := p.processRelationship(ctx, tx, r, ig, state)
 		if err != nil {
 			p.log.Error("processing relationship",
-				zap.Int64("item_or_attribute_row_id", rowID.id()),
+				zap.Int64("item_or_attribute_row_id", ig.rowID.id()),
 				zap.Error(err))
 		}
 	}
 
-	// successfully finished processing graph; save checkpoint, if specified
-	if ig.Checkpoint != nil {
-		chkpt, err := marshalGob(checkpoint{p.filenames, p.params.ProcessingOptions, ig.Checkpoint})
-		if err != nil {
-			return latentID{}, err
-		}
-
-		_, err = tx.Exec(`UPDATE imports SET checkpoint=? WHERE id=?`, // TODO: LIMIT 1 (see https://github.com/mattn/go-sqlite3/pull/564)
-			chkpt, p.impRow.id)
-		if err != nil {
-			return latentID{}, err
-		}
-	}
-
-	return rowID, nil
+	return nil
 }
 
 func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state *recursiveState) (latentID, error) {
@@ -377,7 +450,7 @@ func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state
 // TODO: godoc about return value of 0, nil
 func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64, error) {
 	// keep count of number of items processed, mainly for logging
-	defer atomic.AddInt64(p.itemCount, 1)
+	defer atomic.AddInt64(p.ij.itemCount, 1)
 
 	// obtain a handle on the item data (if any), and determine whether
 	// it'll be stored in the database or on disk
@@ -479,8 +552,8 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// prepare for DB queries to see if we have this same item already
 	// in some form or another
 	var dsName *string
-	if p.params.DataSourceName != "" {
-		dsName = &p.params.DataSourceName
+	if p.ds.Name != "" {
+		dsName = &p.ds.Name
 	}
 	it.makeIDHash(dsName)
 	it.makeContentHash()
@@ -492,7 +565,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	var updateOverrides map[string]fieldUpdatePolicy
 
 	// if the item is already in our DB, load it
-	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.params.ProcessingOptions.ItemUniqueConstraints, true)
+	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true)
 	if err != nil {
 		return 0, fmt.Errorf("looking up item in database: %w", err)
 	}
@@ -506,11 +579,13 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 			// dataFileIn gets closed and nilified
 			processDataFile = false
 
-			atomic.AddInt64(p.skippedItemCount, 1)
+			atomic.AddInt64(p.ij.skippedItemCount, 1)
 			p.log.Debug("skipping processing of existing item",
 				zap.Int64("row_id", ir.ID),
 				zap.String("filename", it.Content.Filename),
 				zap.String("item_original_id", it.ID))
+			ir.howStored = itemSkipped
+			it.row = ir
 			return ir.ID, nil
 		}
 		processDataFile = reprocessDataFile
@@ -572,7 +647,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	// with its original ID, we can still link a relationship, but if the incoming item has no content we
 	// should not zero out any existing version of the item in the database; the intent by the data source is
 	// to merely link the item by ID (or create a placeholder item), not zero it out!
-	ir.ID, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), updateOverrides)
+	ir.ID, ir.howStored, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), updateOverrides)
 	if err != nil {
 		return 0, fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
 	}
@@ -582,17 +657,24 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 	return ir.ID, nil
 }
 
+type itemStoreResult string
+
+const (
+	itemInserted itemStoreResult = "inserted"
+	itemSkipped  itemStoreResult = "skipped"
+	itemUpdated  itemStoreResult = "updated"
+)
+
 type recursiveState struct {
-	worker  int
 	procOpt ProcessingOptions
 }
 
-func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relationship, ig *Graph, rowID latentID, state *recursiveState) (*sql.Tx, error) {
+func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relationship, ig *Graph, state *recursiveState) error {
 	// both sides can be set, or if this graph has a node then just
 	// one needs to be set; but at least one of these needs always
 	// to be set since we need a node on both sides of an edge
 	if r.From == nil && r.To == nil {
-		return tx, fmt.Errorf("invalid edge: must have node on both sides: %+v", r)
+		return fmt.Errorf("invalid edge: must have node on both sides: %+v", r)
 	}
 
 	rawRel := rawRelationship{Relation: r.Relation}
@@ -613,79 +695,92 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 	if len(r.Metadata) > 0 {
 		metaJSON, err := json.Marshal(r.Metadata)
 		if err != nil {
-			return tx, fmt.Errorf("encoding relationship metadata: %w", err)
+			return fmt.Errorf("encoding relationship metadata: %w", err)
 		}
 		rawRel.metadata = metaJSON
 	}
 
 	// if the relationship explicitly has a "from" node set, use that;
 	// otherwise, assume this node is the "from" side
-	if r.From != nil {
-		connectedRowID, err := p.processGraph(ctx, tx, state, r.From)
-		if err != nil {
-			return tx, fmt.Errorf("from node: %w", err)
-		}
-		if r.From.Item != nil {
-			rawRel.fromItemID = &connectedRowID.itemID
-		} else if r.From.Entity != nil {
-			attrID, err := connectedRowID.identifyingAttributeID(ctx, tx)
-			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for connected entity (on From side): %w", err)
-			}
-			rawRel.fromAttributeID = &attrID
-		}
-	} else {
-		switch {
-		case ig.Item != nil:
-			rawRel.fromItemID = &rowID.itemID
-		case ig.Entity != nil:
-			attrID, err := rowID.identifyingAttributeID(ctx, tx)
-			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for graph entity (on From side): %w", err)
-			}
-			rawRel.fromAttributeID = &attrID
-		default:
-			return tx, fmt.Errorf("incomplete relationship: no 'from' node available: %+v (item_graph=%p %+v)", r, ig, ig)
-		}
+	if err := p.linkRelation(ctx, ig, state, tx, r, &rawRel, relationFrom); err != nil {
+		return err
 	}
+
 	// if the relationship explicitly has a "to" node set, use that;
 	// otherwise, assume this node is the "to" side
-	if r.To != nil {
-		connectedRowID, err := p.processGraph(ctx, tx, state, r.To)
-		if err != nil {
-			return tx, fmt.Errorf("to node: %w", err)
-		}
-		if r.To.Item != nil {
-			rawRel.toItemID = &connectedRowID.itemID
-		} else if r.To.Entity != nil {
-			attrID, err := connectedRowID.identifyingAttributeID(ctx, tx)
-			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for connected entity (on To side): %w", err)
-			}
-			rawRel.toAttributeID = &attrID
-		}
-	} else {
-		switch {
-		case ig.Item != nil:
-			rawRel.toItemID = &rowID.itemID
-		case ig.Entity != nil:
-			attrID, err := rowID.identifyingAttributeID(ctx, tx)
-			if err != nil {
-				return tx, fmt.Errorf("getting identifying attribute ID for graph entity (on To side): %w", err)
-			}
-			rawRel.toAttributeID = &attrID
-		default:
-			return tx, fmt.Errorf("incomplete relationship: no 'to' node available: %+v (item_graph=%p %+v)", r, ig, ig)
-		}
+	if err := p.linkRelation(ctx, ig, state, tx, r, &rawRel, relationTo); err != nil {
+		return err
 	}
 
 	err := p.tl.storeRelationship(ctx, tx, rawRel)
 	if err != nil {
-		return tx, fmt.Errorf("storing relationship: %w", err)
+		return fmt.Errorf("storing relationship: %w", err)
 	}
 
-	return tx, nil
+	return nil
 }
+
+// I know this function is hard to read, but I initially had this inline above, and the linter complained it was duplicated code,
+// despite the whole "from-to" parts being different; it's just annoying enough to have to change what you are assigning to that
+// I didn't want to refactor this, but I did it anyway, I hope the linter is happy.
+func (p *processor) linkRelation(ctx context.Context, ig *Graph, state *recursiveState, tx *sql.Tx, r Relationship, rawRel *rawRelationship, fromOrTo string) error {
+	otherGraph := r.From
+	if fromOrTo == relationTo {
+		otherGraph = r.To
+	}
+
+	if otherGraph != nil {
+		err := p.processGraph(ctx, tx, state, otherGraph)
+		if err != nil {
+			return fmt.Errorf("%s node: %w", fromOrTo, err)
+		}
+		if otherGraph.Item != nil {
+			if fromOrTo == relationFrom {
+				rawRel.fromItemID = &otherGraph.rowID.itemID
+			} else if fromOrTo == relationTo {
+				rawRel.toItemID = &otherGraph.rowID.itemID
+			}
+		} else if otherGraph.Entity != nil {
+			attrID, err := otherGraph.rowID.identifyingAttributeID(ctx, tx)
+			if err != nil {
+				return fmt.Errorf("getting identifying attribute ID for connected entity (on %s side): %w", fromOrTo, err)
+			}
+			if fromOrTo == relationFrom {
+				rawRel.fromAttributeID = &attrID
+			} else if fromOrTo == relationTo {
+				rawRel.toAttributeID = &attrID
+			}
+		}
+	} else {
+		switch {
+		case ig.Item != nil:
+			if fromOrTo == relationFrom {
+				rawRel.fromItemID = &ig.rowID.itemID
+			} else if fromOrTo == relationTo {
+				rawRel.toItemID = &ig.rowID.itemID
+			}
+		case ig.Entity != nil:
+			attrID, err := ig.rowID.identifyingAttributeID(ctx, tx)
+			if err != nil {
+				return fmt.Errorf("getting identifying attribute ID for graph entity (on %s side): %w", fromOrTo, err)
+			}
+			if fromOrTo == relationFrom {
+				rawRel.fromAttributeID = &attrID
+			} else if fromOrTo == relationTo {
+				rawRel.toAttributeID = &attrID
+			}
+		default:
+			return fmt.Errorf("incomplete relationship: no '%s' node available: %+v (item_graph=%p %+v)", fromOrTo, r, ig, ig)
+		}
+	}
+
+	return nil
+}
+
+const (
+	relationFrom = "from"
+	relationTo   = "to"
+)
 
 func (tl *Timeline) cleanDataFile(tx *sql.Tx, dataFilePath string) error {
 	var count int
@@ -703,7 +798,7 @@ func (tl *Timeline) cleanDataFile(tx *sql.Tx, dataFilePath string) error {
 }
 
 func (p *processor) integrityCheck(dbItem ItemRow) error {
-	if p.params.ProcessingOptions.Integrity || dbItem.DataFile == nil {
+	if p.ij.ProcessingOptions.Integrity || dbItem.DataFile == nil {
 		return nil
 	}
 
@@ -762,7 +857,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// (Example: filename is IMG_1234.HEIC, but data_file ends in IMG_1234__abcd.HEIC. We could rename to IMG_1234.HEIC
 	// if that filename is available in the repo and update the DB row to match.)
 	// TODO: Try to figure this out to make it correct. We might need a process-wide map mutex or something to avoid hacky solutions?
-	if dbItem.ImportID != nil && *dbItem.ImportID == p.impRow.id &&
+	if dbItem.JobID != nil && *dbItem.JobID == p.ij.job.id &&
 		dbItem.DataHash == nil &&
 		dbItem.DataFile != nil && FileExists(p.tl.FullPath(*dbItem.DataFile)) {
 		p.log.Debug("processing existing item, but skipping data file because it is already being processed by this import",
@@ -778,7 +873,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// (like an ID), then later as it iterates it finds that related item and fills out the rest
 	// of the item's information -- so if our current item row is missing information, we can at
 	// least safely add new info I think
-	if dbItem.ImportID != nil && *dbItem.ImportID == p.impRow.id {
+	if dbItem.JobID != nil && *dbItem.JobID == p.ij.job.id {
 		updateOverrides = make(map[string]fieldUpdatePolicy)
 
 		// if there's an incoming data file and we don't have one, then update
@@ -814,8 +909,30 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		if dbItem.OriginalID == nil && it.ID != "" {
 			updateOverrides["original_id"] = updatePolicyPreferIncoming
 		}
-		if len(it.Metadata) > 0 {
+
+		// metadata is a little tricky, especially to decide efficiently, unless
+		// the incoming item obiously has some and the existing one does not...
+		if len(it.Metadata) > 0 && len(dbItem.Metadata) == 0 {
 			updateOverrides["metadata"] = updatePolicyOverwriteExisting
+		} else if len(it.Metadata) > 0 {
+			var decoded Metadata
+			err := json.Unmarshal(dbItem.Metadata, &decoded)
+			if err == nil {
+				for k, incomingVal := range it.Metadata {
+					// this is not perfect, since the value could be any type, but string seems most common
+					if incomingVal == nil || incomingVal == "" {
+						continue
+					}
+					if _, ok := decoded[k]; !ok {
+						// incoming item has metadata field that DB does not; we should strive to be additive
+						// so I guess we take this as a hint to replace the existing... but obviously, there
+						// could be fields that DB has that the incoming item does not...
+						// TODO: we may need a way to apply metadata merge policy ?
+						updateOverrides["metadata"] = updatePolicyOverwriteExisting
+						break
+					}
+				}
+			}
 		}
 
 		item = len(updateOverrides) > 0
@@ -859,7 +976,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	}
 
 	// if modified manually, do not overwrite changes unless specifically enabled
-	if dbItem.Modified != nil && !p.params.ProcessingOptions.OverwriteModifications {
+	if dbItem.Modified != nil && !p.ij.ProcessingOptions.OverwriteModifications {
 		p.log.Debug("skipping processing of existing item because it has been manually modified within the repo (enable modification overwrites to override)",
 			zap.Int64("item_row_id", dbItem.ID),
 			zap.String("filename", it.Content.Filename),
@@ -869,7 +986,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 
 	// if the item data is explicitly configured to overwrite existing, then it
 	// should always be reprocessed, even if NULL
-	dataUpdatePolicy, dataUpdateEnabled := p.params.ProcessingOptions.ItemFieldUpdates["data"]
+	dataUpdatePolicy, dataUpdateEnabled := p.ij.ProcessingOptions.ItemFieldUpdates["data"]
 	if dataUpdatePolicy == updatePolicyOverwriteExisting {
 		return true, true, nil
 	}
@@ -926,7 +1043,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	}
 
 	// finally, if the user has configured/enabled updates, reprocess the item
-	item = len(p.params.ProcessingOptions.ItemFieldUpdates) > 0
+	item = len(p.ij.ProcessingOptions.ItemFieldUpdates) > 0
 
 	return item || dataFile, dataFile, nil
 }
@@ -972,7 +1089,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 
 	ir.DataSourceID = &p.dsRowID
 	ir.DataSourceName = &p.ds.Name
-	ir.ImportID = &p.impRow.id
+	ir.JobID = &p.ij.job.id
 	if attrID != 0 {
 		ir.AttributeID = &attrID
 	}
@@ -1250,14 +1367,14 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it
 }
 
 // insertOrUpdateItem inserts the fully-populated ir into the database (TODO: finish godoc)
-func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool, updateOverrides map[string]fieldUpdatePolicy) (int64, error) {
+func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool, updateOverrides map[string]fieldUpdatePolicy) (int64, itemStoreResult, error) {
 	// new item? insert it
 	if ir.ID == 0 {
 		var rowID int64
 
 		err := tx.QueryRowContext(ctx,
 			`INSERT INTO items
-				(data_source_id, import_id, attribute_id, classification_id,
+				(data_source_id, job_id, attribute_id, classification_id,
 				original_id, original_location, intermediate_location, filename,
 				timestamp, timespan, timeframe, time_offset, time_uncertainty,
 				data_type, data_text, data_file, data_hash, metadata,
@@ -1265,7 +1382,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 				note, starred, original_id_hash, initial_content_hash, retrieval_key)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			RETURNING id`,
-			ir.DataSourceID, ir.ImportID, ir.AttributeID, ir.ClassificationID,
+			ir.DataSourceID, ir.JobID, ir.AttributeID, ir.ClassificationID,
 			ir.OriginalID, ir.OriginalLocation, ir.IntermediateLocation, ir.Filename,
 			ir.timestampUnix(), ir.timespanUnix(), ir.timeframeUnix(), ir.TimeOffset, ir.TimeUncertainty,
 			ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, string(ir.Metadata),
@@ -1274,16 +1391,16 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			ir.Note, ir.Starred, ir.OriginalIDHash, ir.InitialContentHash, ir.RetrievalKey,
 		).Scan(&rowID)
 
-		atomic.AddInt64(p.newItemCount, 1)
+		atomic.AddInt64(p.ij.newItemCount, 1)
 
-		return rowID, err
+		return rowID, itemInserted, err
 	}
 
 	// existing item; update it
 
 	// ...only if any fields are configured to be updated
-	if len(p.params.ProcessingOptions.ItemFieldUpdates) == 0 && len(updateOverrides) == 0 {
-		return ir.ID, nil
+	if len(p.ij.ProcessingOptions.ItemFieldUpdates) == 0 && len(updateOverrides) == 0 {
+		return ir.ID, itemSkipped, nil
 	}
 
 	var sb strings.Builder
@@ -1292,11 +1409,11 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 	sb.WriteString(`UPDATE items SET `)
 
-	// set the modified_import_id (the ID of the import that most recently modified the item) only if
+	// set the modified_job_id (the ID of the import that most recently modified the item) only if
 	// it's not the original import, I think it makes sense to count the original import only once
-	if ir.ImportID != nil && *ir.ImportID != p.impRow.id {
-		sb.WriteString(`modified_import_id=?`)
-		args = append(args, p.impRow.id)
+	if ir.JobID != nil && *ir.JobID != p.ij.job.id {
+		sb.WriteString(`modified_job_id=?`)
+		args = append(args, p.ij.job.id)
 		needsComma = true
 	}
 
@@ -1404,18 +1521,18 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	// apply update overrides first
 	for field, policy := range updateOverrides {
 		if err := applyUpdatePolicy(field, policy); err != nil {
-			return 0, err
+			return 0, "", err
 		}
 	}
 
 	// then for every remaining field, apply the default policy
-	for field, policy := range p.params.ProcessingOptions.ItemFieldUpdates {
+	for field, policy := range p.ij.ProcessingOptions.ItemFieldUpdates {
 		// skip overrides; already applied
 		if _, ok := updateOverrides[field]; ok {
 			continue
 		}
 		if err := applyUpdatePolicy(field, policy); err != nil {
-			return 0, err
+			return 0, "", err
 		}
 	}
 
@@ -1424,7 +1541,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 	_, err := tx.ExecContext(ctx, sb.String(), args...)
 	if err != nil {
-		return 0, fmt.Errorf("updating item row: %w", err)
+		return 0, "", fmt.Errorf("updating item row: %w", err)
 	}
 
 	// if there's a chance that we just set the data_file to NULL, check to see if the
@@ -1438,9 +1555,9 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		}
 	}
 
-	atomic.AddInt64(p.updatedItemCount, 1)
+	atomic.AddInt64(p.ij.updatedItemCount, 1)
 
-	return ir.ID, nil
+	return ir.ID, itemUpdated, nil
 }
 
 // detectContentType strives to detect the media type of the item using the

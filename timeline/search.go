@@ -27,6 +27,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,10 +41,15 @@ type ItemSearchParams struct {
 	// The UUID of the open timeline to search.
 	Repo string `json:"repo,omitempty"`
 
+	// ML searches -- currently, only one of these can be set at a time
+	// TODO: add a QueryImage field for image search
+	QueryText string  `json:"query_text,omitempty"` // results
+	SimilarTo []int64 `json:"similar_to,omitempty"` // similar to the centroid of the vectors of the specified items
+
 	RowID []int64 `json:"row_id,omitempty"`
 	// AccountID  []int    `json:"account_id,omitempty"` // TODO: restore this, if useful
 	DataSourceName []string `json:"data_source,omitempty"`
-	ImportID       []int64  `json:"import_id,omitempty"`
+	JobID          []int64  `json:"job_id,omitempty"`
 	AttributeID    []int64  `json:"attribute_id,omitempty"`
 	EntityID       []int64  `json:"entity_id,omitempty"`
 	Classification []string `json:"classification,omitempty"`
@@ -148,8 +154,8 @@ type ItemSearchParams struct {
 	// multiple structs and performing various other computations.
 	// Instead it efficiently builds a string containing only the
 	// coordinate data. Non-spatial data will be excluded.
-	GeoJSON           bool                  `json:"geojson,omitempty"`
-	ObfuscatedGeoJSON []LocationObfuscation `json:"-"` // TODO: this is kind of a hack since it's the only data we encode before returning (for efficiency)
+	GeoJSON           bool                 `json:"geojson,omitempty"`
+	ObfuscatedGeoJSON []ObfuscatedLocation `json:"-"` // TODO: this is kind of a hack since it's the only data we encode before returning (for efficiency)
 
 	// Include the size of the item content with the results.
 	// For data files, this involves calling stat() on the file.
@@ -176,6 +182,9 @@ type SearchResults struct {
 }
 
 func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (SearchResults, error) {
+	// setting a natural language input has big implications, so make sure it's not just whitespace by accident
+	params.QueryText = strings.TrimSpace(params.QueryText)
+
 	// get the DB query string and associated arguments
 	q, args, err := tl.prepareSearchQuery(params)
 	if err != nil {
@@ -213,7 +222,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	// for JSON serialization, always initialize so "0 results" is at least an empty list and not null
 	results := make([]*SearchResult, 0)
 	var count, totalCount int
-	for rows.Next() {
+	for rows.Next() { // fun fact, the first call to Next() is actually what runs the query
 		// in GeoJSON mode, skip the usual full-row scan, and instead focus
 		// on the coordinates which is much more efficient
 		if params.GeoJSON {
@@ -260,16 +269,20 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		}
 
 		var re relatedEntity // entity is left-joined, so could be null
-		entityTargets := []any{&re.ID, &re.Name, &re.Picture, &re.Attribute.Name, &re.Attribute.Value, &re.Attribute.AltValue}
+		var embedDist float64
+		extraTargets := []any{&re.ID, &re.Name, &re.Picture, &re.Attribute.Name, &re.Attribute.Value, &re.Attribute.AltValue}
 		if params.WithTotal {
-			entityTargets = append(entityTargets, &totalCount)
+			extraTargets = append(extraTargets, &totalCount)
 		}
-		itemRow, err := scanItemRow(rows, entityTargets)
+		if params.QueryText != "" || len(params.SimilarTo) > 0 {
+			extraTargets = append(extraTargets, &embedDist)
+		}
+		itemRow, err := scanItemRow(rows, extraTargets)
 		if err != nil {
 			rows.Close()
 			return SearchResults{}, err
 		}
-		sr := &SearchResult{RepoID: tl.id.String(), ItemRow: itemRow}
+		sr := &SearchResult{RepoID: tl.id.String(), ItemRow: itemRow, Distance: embedDist}
 		if re.ID != nil {
 			sr.Entity = &re
 		}
@@ -284,6 +297,48 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	if params.GeoJSON {
 		sb.WriteString(`]}}`)
 		return SearchResults{GeoJSON: sb.String(), Total: totalCount}, nil
+	}
+
+	// TODO: this needs tuning
+	if params.QueryText != "" {
+		// filter results for relevance by passing them through the classifier...
+		// this is kind of a hack, but it's a well-known difficult problem apparently,
+		// for any KNN search, to only show relevant results
+		itemFiles := make(map[int64]string)
+		for _, result := range results {
+			if result.DataFile == nil || result.DataType == nil {
+				continue
+			}
+			if !strings.HasPrefix(*result.DataType, "image/") {
+				continue
+			}
+			itemFiles[result.ID] = tl.FullPath(*result.DataFile)
+		}
+
+		scores, err := classify(ctx, itemFiles, []string{params.QueryText})
+		if err != nil {
+			return SearchResults{}, fmt.Errorf("classifying results: %w", err)
+		}
+		for _, sr := range results {
+			if score, ok := scores[sr.ID]; ok {
+				sr.Score = score
+			}
+		}
+		// sort by score descending, then prefer items that weren't scored over scored items with a low score
+		sort.Slice(results, func(i, j int) bool {
+			_, iWasScored := scores[results[i].ID]
+			_, jWasScored := scores[results[j].ID]
+			return results[i].Score > results[j].Score || (jWasScored && !iWasScored)
+		})
+		// chop off results that are irrelevant, starting with the first result that was scored and has a score near zero
+		for i, sr := range results {
+			_, wasScored := scores[sr.ID]
+			// TODO: Be smarter: find the range the top/best results score, and only cull results below a significant threshold difference
+			if sr.Score <= 0.0001 && wasScored {
+				results = results[:i]
+				break
+			}
+		}
 	}
 
 	// traverse relationships
@@ -353,11 +408,19 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	// such items to appear as their own items in the top level.
 	// Note: We also do astructured if specific row IDs are being queried
 	// since we still want to select those specific rows even if
-	// they are, say, attachments of a message (who cares! we have
-	// specific rows to get).
-	itemsTable := "root_items"
-	if params.Astructured || len(params.RowID) > 0 {
-		itemsTable = "extended_items"
+	// they are, say, attachments of a message. Querying specific
+	// rows has priority over relationships.
+	rootItemsOnly := !params.Astructured || len(params.RowID) > 0
+
+	// select from the extended items table so we can get a little more information
+	const itemsTable = "extended_items"
+
+	// If searching by embeddings, we have to SELECT from the embeddings
+	// virtual table, and join in the items table.
+	vectorSearch := params.QueryText != "" || len(params.SimilarTo) > 0
+	selectFromTable, selectFromAs := itemsTable, " AS items"
+	if vectorSearch {
+		selectFromTable, selectFromAs = "embeddings", ""
 	}
 
 	// honor inclusivity for bounding-box searches
@@ -376,16 +439,29 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	if params.WithTotal {
 		q += ", count() over() AS total_count"
 	}
+	if vectorSearch {
+		q += ", embeddings.distance"
+	}
 	q += fmt.Sprintf(`
-		FROM %s AS items
+		FROM %s%s`, selectFromTable, selectFromAs)
+
+	if vectorSearch {
+		q += fmt.Sprintf(`
+		LEFT JOIN %s AS items ON items.embedding_id = embeddings.id`, itemsTable)
+	}
+
+	q += `
 		LEFT JOIN attributes ON items.attribute_id = attributes.id
 		LEFT JOIN entity_attributes ON attributes.id = entity_attributes.attribute_id
-		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`,
-		itemsTable)
+		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`
 
 	if len(params.ToAttributeID) > 0 || len(params.ToEntityID) > 0 {
 		q += `
 		JOIN relationships ON relationships.from_item_id = items.id`
+	} else if rootItemsOnly {
+		q += `
+		LEFT JOIN relationships ON relationships.to_item_id = items.id
+		LEFT JOIN relations ON relations.id = relationships.relation_id`
 	}
 
 	// build the WHERE in terms of groups of OR's that are AND'ed together
@@ -394,7 +470,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	and := func(ors func()) {
 		clauseCount = 0
 		if len(args) == 0 {
-			q += " WHERE"
+			q += "\n\t\tWHERE"
 		} else {
 			if params.OrFields {
 				q += " OR"
@@ -410,7 +486,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		// this is a poor-man's way of undoing it
 		q = strings.TrimSuffix(q, " OR ()")
 		q = strings.TrimSuffix(q, " AND ()")
-		q = strings.TrimSuffix(q, " WHERE ()")
+		q = strings.TrimSuffix(q, "\n\t\tWHERE ()")
 	}
 	or := func(clause string, val any) {
 		if clauseCount > 0 {
@@ -438,11 +514,11 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		}
 	})
 	and(func() {
-		if params.ImportID != nil && len(params.ImportID) == 0 {
-			or("items.import_id IS ?", nil)
+		if params.JobID != nil && len(params.JobID) == 0 {
+			or("items.job_id IS ?", nil)
 		}
-		for _, v := range params.ImportID {
-			or("items.import_id=?", v)
+		for _, v := range params.JobID {
+			or("items.job_id=?", v)
 		}
 	})
 	and(func() {
@@ -577,6 +653,38 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		}
 	}
 
+	// TODO: seems reasonable, but let's tune this
+	const k = 50
+
+	if vectorSearch {
+		if params.QueryText != "" {
+			// search relative to an arbitrary input (TODO: support image inputs too)
+			embedding, err := GenerateSerializedEmbedding(tl.ctx, "text/plain", []byte(params.QueryText), nil)
+			if err != nil {
+				return "", nil, err
+			}
+			and(func() {
+				or("embeddings.embedding MATCH ?", embedding)
+				and(func() {
+					// TODO: pull up limit calculation so we can use it early here... sigh.
+					or("k=?", k)
+				})
+			})
+		} else if len(params.SimilarTo) > 0 {
+			// search items similar to existing embeddings
+			// TODO: for multiple values in this slice, compute centroid instead of using 'or'/'and' in the sql statement...?
+			for _, similarItemID := range params.SimilarTo {
+				and(func() {
+					or("embeddings.embedding MATCH (SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)", similarItemID)
+					and(func() {
+						// TODO: pull up limit calculation so we can use it early here... sigh.
+						or("k=?", k)
+					})
+				})
+			}
+		}
+	}
+
 	// skip deleted items unless we are explicitly supposed to include them
 	// (NOTE: we include them if the specific row IDs are requested)
 	if !params.Deleted && len(params.RowID) == 0 {
@@ -597,8 +705,20 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		})
 	}
 
-	if params.Sort != SortNone {
-		q += " ORDER BY "
+	if rootItemsOnly {
+		// select only items which are not dependent on other items, i.e., items
+		// that are not at the end of a directed relation from another item
+		and(func() {
+			or("relations.directed != ?", 1)
+			or("relations.subordinating = ?", 0)
+			or("relationships.to_item_id IS ?", nil)
+		})
+	}
+
+	if vectorSearch {
+		q += "\n\t\tORDER BY embeddings.distance"
+	} else if params.Sort != SortNone {
+		q += "\n\t\tORDER BY "
 
 		// TODO: not sure if this is how autocomplete will work or be useful, but basically
 		// this sorts by data text so that if it's a prefix, it's weighed higher in the
@@ -659,11 +779,11 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		params.Limit = 1000
 	}
 	if params.Limit > 0 {
-		q += " LIMIT ?"
+		q += "\n\t\tLIMIT ?"
 		args = append(args, params.Limit)
 	}
 	if params.Offset > 0 {
-		q += " OFFSET ?"
+		q += "\n\t\tOFFSET ?"
 		args = append(args, params.Offset)
 	}
 
@@ -834,6 +954,10 @@ type SearchResult struct {
 	Entity  *relatedEntity `json:"entity,omitempty"`
 	Related []Related      `json:"related,omitempty"`
 	Size    int64          `json:"size,omitempty"`
+
+	// from ML model
+	Distance float64 `json:"distance,omitempty"`
+	Score    float64 `json:"score,omitempty"`
 }
 
 // TODO: Finish making this work
@@ -854,6 +978,8 @@ type relatedEntity struct {
 	Attribute nullableAttribute `json:"attribute,omitempty"` // TODO: experimental
 }
 
+// nullableAttribute is like Attribute but with nullable fields
+// so that it can be I/O for the database
 type nullableAttribute struct {
 	ID       *int64  `json:"id,omitempty"`
 	Name     *string `json:"name,omitempty"`

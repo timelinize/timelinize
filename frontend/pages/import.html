@@ -1,202 +1,305 @@
-<title>Import</title>
-<link rel="stylesheet" href="/resources/css/new.css">
-
+<title>Import Data</title>
+<link rel="stylesheet" href="/resources/css/import.css">
 
 
 <div class="page-header d-print-none">
 	<div class="container-xl">
 		<div class="row g-2 align-items-center">
 			<div class="col">
-				<h2 class="page-title">
-					Manual Entry
-				</h2>
+				<h1>
+					Import data
+				</h1>
 			</div>
+			
 		</div>
 	</div>
 </div>
 
-<!-- Page body -->
 <div class="page-body">
 	<div class="container-xl">
-		<div class="row row-cards">
-			<div class="col-12">
-				<div class="card">
-					<div class="card-header">
-						<h4 class="card-title">
-							Item 1
-						</h4>
+		<div class="row g-4">
+			
+
+			<div class="col-md-9">
+				<div class="row mb-4">
+					<div class="col">
+						<button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modal-file-picker">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								class="icon icon-tabler icons-tabler-outline icon-tabler-file-plus">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+								<path d="M14 3v4a1 1 0 0 0 1 1h4" />
+								<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+								<path d="M12 11l0 6" />
+								<path d="M9 14l6 0" />
+							</svg>
+							Add files...
+						</button>
+					</div>
+					<div class="col-auto ms-auto">
+						<a id="expand-all-dsgroup" class="btn btn-ghost-info me-2 disabled">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								class="icon icon-tabler icons-tabler-outline icon-tabler-viewport-tall">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+								<path d="M12 10v-7l3 3" />
+								<path d="M9 6l3 -3" />
+								<path d="M12 14v7l3 -3" />
+								<path d="M9 18l3 3" />
+								<path d="M18 3h1a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-1" />
+								<path d="M6 3h-1a2 2 0 0 0 -2 2v14a2 2 0 0 0 2 2h1" />
+							</svg>
+							Expand all
+						</a>
+						<a id="collapse-all-dsgroup" class="btn btn-ghost-info disabled">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								class="icon icon-tabler icons-tabler-outline icon-tabler-viewport-short">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+								<path d="M12 3v7l3 -3" />
+								<path d="M9 7l3 3" />
+								<path d="M12 21v-7l3 3" />
+								<path d="M9 17l3 -3" />
+								<path d="M18 9h1a2 2 0 0 1 2 2v2a2 2 0 0 1 -2 2h-1" />
+								<path d="M6 9h-1a2 2 0 0 0 -2 2v2a2 2 0 0 0 2 2h1" />
+							</svg>
+							Collapse all
+						</a>
+					</div>
+				</div>
+
+				<div class="row row-cards">
+					<div class="space-y" id="file-imports-container">
+
+					</div>
+				</div>
+			</div>
+
+			<div class="col-md-3">
+				<div class="sticky-top">
+					<div class="form-label">Integrity checks</div>
+					<div class="mb-4">
+						<label class="form-check form-switch">
+							<input id="integrity-checks" class="form-check-input" type="checkbox">
+							<span class="form-check-label form-check-label-on">On</span>
+							<span class="form-check-label form-check-label-off">Off</span>
+						</label>
+						<div class="small text-secondary">Items already in the timeline will be re-imported if their checksums no longer match. (Slow.)</div>
 					</div>
 
-					<div class="card-body">
-						<div class="btn-group w-25" role="group">
-							<input type="radio" class="btn-check" name="btn-radio-basic" id="btn-radio-basic-2"
-								autocomplete="off" checked>
-							<label for="btn-radio-basic-2" type="button" class="btn">Text input</label>
-							<input type="radio" class="btn-check" name="btn-radio-basic" id="btn-radio-basic-1"
-								autocomplete="off">
-							<label for="btn-radio-basic-1" type="button" class="btn">File upload</label>
-						</div>
-						<textarea rows="5" class="form-control mt-3" placeholder="Content"></textarea>
+					<div class="form-label">Overwrite modifications</div>
+					<div class="mb-4">
+						<label class="form-check form-switch">
+							<input id="overwrite-modifications" class="form-check-input" type="checkbox">
+							<span class="form-check-label form-check-label-on">On</span>
+							<span class="form-check-label form-check-label-off">Off</span>
+						</label>
+						<div class="small text-secondary">Items modified manually may be updated to the data in this import.</div>
 					</div>
 
-					<div class="card-body">
-						<div class="row g-5 mb-4">
-							<div class="col-4">
-								<label class="form-label">Owner</label>
-
-								<div class="input-group mb-2">
-									<select class="entity-input form-select form-control" placeholder="Name or contact info"></select>
-									<button class="btn" type="button">New...</button>
-								</div>
-
-								<!-- <select class="entity-input form-select form-control" placeholder="Name or contact info"></select> -->
-								<small class="form-hint">Who owns or created this item?</small>
-							</div>
-						</div>
-
-						<div class="row g-5 mb-4">
-							<div class="col-md-5">
-								<div>
-									<label class="form-label">ID</label>
-									<input type="text" class="form-control">
-									<small class="form-hint">A unique name or number with which this item has been
-										referred to.</small>
-								</div>
-							</div>
-							<div class="col-sm-6 col-md-3">
-								<div class="mb-3">
-									<label class="form-label">Type of item</label>
-									<select name="classification" class="form-control form-select">
-										<option></option>
-									</select>
-								</div>
-							</div>
-							<div class="col-sm-6 col-md-4">
-								<div class="mb-3">
-									<label class="form-label mb-3">Flag</label>
-									<button class="switch-icon switch-icon-scale"
-										data-bs-toggle="switch-icon">
-										<span class="switch-icon-a text-secondary">
-											<svg xmlns="http://www.w3.org/2000/svg"
-												class="icon icon-tabler icon-tabler-star" width="24"
-												height="24" viewBox="0 0 24 24" stroke-width="2"
-												stroke="currentColor" fill="none" stroke-linecap="round"
-												stroke-linejoin="round">
-												<path stroke="none" d="M0 0h24v24H0z" fill="none">
-												</path>
-												<path
-													d="M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873z">
-												</path>
-											</svg>
-										</span>
-										<span class="switch-icon-b text-yellow">
-											<svg xmlns="http://www.w3.org/2000/svg"
-												class="icon icon-tabler icon-tabler-star-filled"
-												width="24" height="24" viewBox="0 0 24 24"
-												stroke-width="2" stroke="currentColor" fill="none"
-												stroke-linecap="round" stroke-linejoin="round">
-												<path stroke="none" d="M0 0h24v24H0z" fill="none">
-												</path>
-												<path
-													d="M8.243 7.34l-6.38 .925l-.113 .023a1 1 0 0 0 -.44 1.684l4.622 4.499l-1.09 6.355l-.013 .11a1 1 0 0 0 1.464 .944l5.706 -3l5.693 3l.1 .046a1 1 0 0 0 1.352 -1.1l-1.091 -6.355l4.624 -4.5l.078 -.085a1 1 0 0 0 -.633 -1.62l-6.38 -.926l-2.852 -5.78a1 1 0 0 0 -1.794 0l-2.853 5.78z"
-													stroke-width="0" fill="currentColor"></path>
-											</svg>
-										</span>
-									</button>
-									(TODO: more...)
-								</div>
-							</div>
-						</div>
-
-
-						<div class="row g-5 mb-4">
-							<div class="col-sm-4 col-md-4">
-								<label class="form-label required">Timestamp</label>
-								<div id="timestamp"></div>
-								<small class="form-hint mt-2">Be as specific as possible, or use a range if a precise date is not known.</small>
-
-							</div>
-							<div class="col-sm-4 col-md-4">
-								<label class="form-label">Ending timestamp</label>
-								<div id="timespan"></div>
-								<small class="form-hint mt-2">If the data spans a time period (such as a vocation), fill out its end date here.</small>
-							</div>
-							<div class="col-sm-4 col-md-4">
-								<label class="form-label">Time uncertainty</label>
-								<div class="row">
-									<div class="col-4">
-										<input type="number" class="form-control" min="0">
-									</div>
-									<div class="col-5">
-										<select class="form-control form-select">
-											<option></option>
-											<option>minutes</option>
-											<option>hours</option>
-											<option>days</option>
-											<option>months</option>
-											<option>years</option>
-										</select>
-									</div>
-								</div>
-								<small class="form-hint mt-2">Indicate if the time may be off by some amount.</small>
-							</div>
-						</div>
-
-						<div class="row g-5 mb-4">
-							<div class="col-8">
-								<div class="ratio ratio-21x9">
-									<div id="coordinate-map" class="h-100"></div>
-								</div>
-							</div>
-
-							<div class="col-sm-3 col-md-3">
-								<div class="mb-3">
-									<label class="form-label">Latitude</label>
-									<input type="text" class="form-control">
-								</div>
-								<div class="mb-3">
-									<label class="form-label">Longitude</label>
-									<input type="text" class="form-control">
-								</div>
-								<div class="mb-3">
-									<label class="form-label">Location uncertainty</label>
-									<div class="row">
-										<div class="col-5">
-											<input type="number" class="form-control" min="0">
-										</div>
-										<div class="col-7">
-											<select class="form-control form-select">
-												<option></option>
-												<option>feet</option>
-												<option>meters</option>
-												<option>miles</option>
-												<option>kilometers</option>
-											</select>
-										</div>
-									</div>
-									<small class="form-hint mt-2">Approximate coordinate precision, if known.</small>
-								</div>
-								<div>
-									<label class="form-label">Altitude</label>
-									<div class="row">
-										<div class="col-6">
-											<input type="number" class="form-control">
-										</div>
-										<div class="col-6">
-											<select class="form-control form-select">
-												<option></option>
-												<option>feet</option>
-												<option>meters</option>
-											</select>
-										</div>
-									</div>
-								</div>
-							</div>
-						</div>
+					<div class="form-label">Estimate total</div>
+					<div class="mb-4">
+						<label class="form-check form-switch">
+							<input id="estimate-total" class="form-check-input" type="checkbox">
+							<span class="form-check-label form-check-label-on">On</span>
+							<span class="form-check-label form-check-label-off">Off</span>
+						</label>
+						<div class="small text-secondary">Take extra time up front to estimate total size of the import, solely for progress updates.</div>
 					</div>
 
+					<div class="form-label">Timeframe</div>
+					<div class="mb-4">
+						<div id="timeframe"></div>
+						<div class="small text-secondary">Only import items if their timestamp is within this interval.</div>
+					</div>
+
+
+					<div class="col-auto ms-auto d-print-none">
+						<button id="start-import" class="btn btn-primary disabled">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								class="icon icon-tabler icons-tabler-outline icon-tabler-player-play">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+								<path d="M7 4v16l13 -8z" />
+							</svg>
+							Start import
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>
 	</div>
 </div>
+
+
+
+<div id="modal-file-picker" class="modal modal-lg modal-blur fade" tabindex="-1" role="dialog" aria-hidden="true">
+	<div class="modal-dialog modal-dialog-scrollable" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Choose a file or folder to import from</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body">
+
+				
+
+			</div>
+			<div class="modal-footer">
+				<a class="btn btn-link link-secondary" data-bs-dismiss="modal">
+					Cancel
+				</a>
+				<label class="form-check ms-auto me-3">
+					<input type="checkbox" id="recursive" class="form-check-input" checked>
+					<span class="form-check-label">Recursive</span>
+				</label>
+				<label class="form-check me-5">
+					<input type="checkbox" id="traverse-archives" class="form-check-input">
+					<span class="form-check-label">Traverse archives (slower)</span>
+				</label>
+				<a id="select-file-picker" class="btn btn-primary disabled" data-bs-target="#modal-plan-loading" data-bs-toggle="modal">
+					Select
+				</a>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+<div id="modal-plan-loading" class="modal modal-blur fade" data-bs-backdrop="static" id="modal-small" tabindex="-1" aria-modal="true" role="dialog">
+	<div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+		<div class="modal-content">
+			<div class="modal-body">
+				<div class="slow-loader"></div>
+				<div class="modal-title text-center">Planning import...</div>
+				<div>Timelinize is scanning for data it recognizes. This may take some time. When complete, you will be able to adjust settings before starting the import.</div>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-outline-danger" data-bs-target="#modal-file-picker" data-bs-toggle="modal">Cancel</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+
+<template id="tpl-file-import-plan-dsgroup">
+	<div class="card accordion file-import-plan-dsgroup">
+		<div class="row g-0 align-items-center accordion-button" data-bs-toggle="collapse">
+			<div class="col-auto">
+				<div class="card-body">
+					<div class="avatar avatar-lg dsgroup-icon">
+						
+					</div>
+				</div>
+			</div>
+			<div class="col">
+				<div class="card-body ps-0">
+					
+					<div class="row align-items-center">
+						<div class="col">
+							<h2 class="mb-0 dsgroup-name"></h2>
+						</div>
+						<div class="col-auto ms-auto">
+							<div class="list-inline list-inline-dots text-secondary fw-normal">
+								<div class="list-inline-item" title="Files">
+									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+										stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+										class="icon icon-tabler icons-tabler-outline icon-tabler-file">
+										<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+										<path d="M14 3v4a1 1 0 0 0 1 1h4" />
+										<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+									</svg>
+									<span class="dsgroup-file-count"></span>
+								</div>
+								<div class="list-inline-item" title="Directories">
+									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+										stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+										class="icon icon-tabler icons-tabler-outline icon-tabler-folder">
+										<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+										<path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" />
+									</svg>
+									<span class="dsgroup-dir-count"></span>
+								</div>
+								<div class="list-inline-item"  title="Archives or files in archives">
+									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+										stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+										class="icon icon-tabler icons-tabler-outline icon-tabler-file-zip">
+										<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+										<path d="M6 20.735a2 2 0 0 1 -1 -1.735v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2h-1" />
+										<path d="M11 17a2 2 0 0 1 2 2v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1v-2a2 2 0 0 1 2 -2z" />
+										<path d="M11 5l-1 0" />
+										<path d="M13 7l-1 0" />
+										<path d="M11 9l-1 0" />
+										<path d="M13 11l-1 0" />
+										<path d="M11 13l-1 0" />
+										<path d="M13 15l-1 0" />
+									</svg>
+									<span class="dsgroup-archive-count"></span>
+								</div>
+							</div>
+						</div>
+						<div class="col-auto">
+							<!-- set the data-bs-* attributes this way to disable button from acting for the accordion; see https://stackoverflow.com/a/70664716/1048862 -->
+							<button class="btn import-dsgroup-opt-button" data-bs-toggle="collapse" data-bs-target>
+								<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+									stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+									class="icon icon-tabler icons-tabler-outline icon-tabler-settings">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+									<path
+										d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
+									<path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+								</svg>
+								Options
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="row g-0 collapse show import-dsgroup-files">
+
+			<div class="table-responsive">
+				<table class="table table-vcenter dsgroup-file-list">
+					<thead>
+						<tr>
+							<th><button class="table-sort" data-sort="sort-type">Type</button></th>
+							<th><button class="table-sort" data-sort="sort-filename">Filename</button></th>
+							<th><button class="table-sort" data-sort="sort-confidence">Confidence</button></th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody class="table-tbody">
+
+					</tbody>
+				</table>
+			</div>
+
+		</div>
+	</div>
+</template>
+
+
+<template id="tpl-file-import-dsgroup-row">
+	<tr>
+		<td class="sort-type">
+			<div class="avatar avatar-sm">
+				
+			</div>
+		</td>
+		<td class="sort-filename"></td>
+		<td class="sort-confidence text-secondary small"></td>
+		<td>
+			<a class="btn-action dsgroup-remove-row" title="Remove">
+				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					class="icon icon-tabler icons-tabler-outline icon-tabler-x">
+					<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+					<path d="M18 6l-12 12" />
+					<path d="M6 6l12 12" />
+				</svg>
+			</a>
+		</td>
+	</tr>
+</template>

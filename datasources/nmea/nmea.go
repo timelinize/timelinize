@@ -17,21 +17,28 @@
 */
 
 // Package nmea0183 implements a data source for NMEA 0183 logs (radios, marine electronics, etc).
+// The official NMEA Standard is expensive ($7,500 for acadamic and testing purposes -- an absolute
+// scam; $10k if you want to implement it! but only $1k if you're a member of the NMEA):
+// https://www.nmea.org/nmea-0183.html
+//
+// Here are some free reference manuals that have the most important information, which I used
+// to write this package:
+// - https://receiverhelp.trimble.com/alloy-gnss/en-us/NMEA-0183messages_MessageOverview.html
+// - https://www.sparkfun.com/datasheets/GPS/NMEA%20Reference%20Manual-Rev2.1-Dec07.pdf
 package nmea0183
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"io/fs"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/adrianmo/go-nmea"
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/datasources/googlelocation"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -41,7 +48,7 @@ func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
 		Name:            "nmea0183",
 		Title:           "NMEA-0183",
-		Icon:            "nmea.svg",
+		Icon:            "nmea.jpg",
 		Description:     "Data output typically associated with marine electronics from a GPS receiver, radio, sonar, echo sounder, anemometer, gyrocompass, etc.",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
@@ -70,144 +77,100 @@ type Options struct {
 type FileImporter struct{}
 
 // Recognize returns whether the input is supported.
-func (FileImporter) Recognize(ctx context.Context, filenames []string) (timeline.Recognition, error) {
-	var totalCount, matchCount int
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	rec := timeline.Recognition{DirThreshold: .9}
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if fpath == "." {
-					return nil
-				}
-				return fs.SkipDir // don't walk subfolders; it's uncommon and slower
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
-
-			totalCount++
-
-			ext := strings.ToLower(filepath.Ext(fpath))
-			if ext == ".nme" || ext == ".nmea" {
-				matchCount++
-			}
-
-			return nil
-		})
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
+	// we can import directories, but let the import planner figure that out; only recognize files
+	if dirEntry.IsDir() {
+		return rec, nil
 	}
 
-	var confidence float64
-	if totalCount > 0 {
-		confidence = float64(matchCount) / float64(totalCount)
+	// recognize by file extension
+	switch strings.ToLower(path.Ext(dirEntry.Name())) {
+	case ".nme", ".nmea":
+		rec.Confidence = 1
 	}
 
-	return timeline.Recognition{Confidence: confidence}, nil
+	return rec, nil
 }
 
 // FileImport imports data from the data source.
-func (fi *FileImporter) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions) error {
-	dsOpt := opt.DataSourceOptions.(*Options)
+func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	dsOpt := params.DataSourceOptions.(*Options)
 
-	owner := timeline.Entity{
-		ID: dsOpt.OwnerEntityID,
-	}
+	owner := timeline.Entity{ID: dsOpt.OwnerEntityID}
 
-	for _, filename := range filenames {
-		fsys, err := archiver.FileSystem(ctx, filename)
+	return fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
-		err = fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if fpath == "." {
-				fpath = path.Base(filename)
-			}
-			if strings.HasPrefix(path.Base(fpath), ".") {
-				// skip hidden files
-				if d.IsDir() {
-					return fs.SkipDir
-				}
-				return nil
-			}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			// skip hidden files & folders
 			if d.IsDir() {
-				return nil // traverse into subdirectories
+				return fs.SkipDir
 			}
-
-			// skip unsupported file types
-			ext := path.Ext(strings.ToLower(fpath))
-			if ext != ".nme" && ext != ".nmea" {
-				return nil
-			}
-
-			file, err := fsys.Open(fpath)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			proc, err := NewProcessor(file, owner, opt, dsOpt.Simplification, dsOpt.ReferenceYear)
-			if err != nil {
-				return err
-			}
-
-			for {
-				item, err := proc.NextNMEAItem(ctx)
-				if err != nil {
-					return err
-				}
-				if item == nil {
-					break
-				}
-				itemChan <- &timeline.Graph{Item: item}
-			}
-
 			return nil
-		})
+		}
+		if d.IsDir() {
+			return nil // traverse into subdirectories
+		}
+
+		// skip unsupported file types
+		ext := strings.ToLower(path.Ext(fpath))
+		if ext != ".nme" && ext != ".nmea" {
+			return nil
+		}
+
+		file, err := dirEntry.FS.Open(fpath)
 		if err != nil {
 			return err
 		}
-	}
+		defer file.Close()
 
-	return nil
+		proc, err := NewProcessor(file, owner, params, dsOpt.Simplification, dsOpt.ReferenceYear, params.Log.Named("nmea_processor"))
+		if err != nil {
+			return err
+		}
+
+		for {
+			item, err := proc.NextNMEAItem(ctx)
+			if err != nil {
+				return err
+			}
+			if item == nil {
+				break
+			}
+			params.Pipeline <- &timeline.Graph{Item: item}
+		}
+
+		return nil
+	})
 }
 
 // Processor can get the next NMEA datapoint. Call NewProcessor to make a valid instance.
 type Processor struct {
 	dec     *decoder
-	opt     timeline.ListingOptions
+	opt     timeline.ImportParams
 	locProc googlelocation.LocationSource
 	owner   timeline.Entity
 	refYear int
 }
 
 // NewProcessor returns a new file processor.
-func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ListingOptions, simplification float64, refYear int) (*Processor, error) {
+func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportParams,
+	simplification float64, refYear int, logger *zap.Logger) (*Processor, error) {
 	if refYear >= 0 {
 		refYear = time.Now().UTC().Year()
 	}
 
-	dec := &decoder{scanner: bufio.NewScanner(file), refYear: refYear}
+	dec := &decoder{scanner: bufio.NewScanner(file), refYear: refYear, logger: logger}
+
+	// some radios (like my Yaesu) produce \r-delimited (carriage-return ONLY) newlines,
+	// which the default scanner does not support. Use custom split function.
+	dec.scanner.Split(scanLines)
 
 	// create location processor to clean up any noisy raw data
 	locProc, err := googlelocation.NewLocationProcessor(dec, simplification)
@@ -270,11 +233,12 @@ type decoder struct {
 	scanner  *bufio.Scanner
 	refYear  int
 	lastDate nmea.Date
+	logger   *zap.Logger
 }
 
 // NextLocation returns the next available point from the NMEA file.
 func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, error) {
-	if d.scanner.Scan() {
+	for d.scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -299,6 +263,18 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 			loc.Metadata["Heading"] = s.Course
 
 		case nmea.GGA:
+			if !d.lastDate.Valid {
+				// No date... it's possible this came before any RMC lines, which means we don't
+				// know which date the time occurred on. We could try to be clever and read ahead
+				// to find a date, but that's complex and error-prone, and even then, there's no
+				// guarantee that a line in the future was the same date as this one. The processor
+				// will end up rejecting this if it becomes part of a cluster because a cluster has
+				// to have a start timestamp if it has an end timestamp. I guess just drop this
+				// data point. I don't know a better way to handle this.
+				d.logger.Warn("encountered GGA sentence before any sentence with a date, so we cannot make timestamp; dropping data point",
+					zap.String("raw", s.Raw))
+				continue
+			}
 			loc.LatitudeE7 = int64(s.Latitude * placesMult)
 			loc.LongitudeE7 = int64(s.Longitude * placesMult)
 			loc.Altitude = s.Altitude
@@ -325,6 +301,35 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 	}
 
 	return nil, nil
+}
+
+// scanLines is a bufio.SplitFunc for Scanners that tolerates variable newlines,
+// including carriage-return-only. https://stackoverflow.com/a/74962607/1048862
+func scanLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		if data[i] == '\n' {
+			// We have a line terminated by single newline.
+			return i + 1, data[0:i], nil
+		}
+		// We have a line terminated by carriage return at the end of the buffer.
+		if !atEOF && len(data) == i+1 {
+			return 0, nil, nil
+		}
+		advance = i + 1
+		if len(data) > i+1 && data[i+1] == '\n' {
+			advance++
+		}
+		return advance, data[0:i], nil
+	}
+	// If we're at EOF, we have a final, non-terminated line. Return it.
+	if atEOF {
+		return len(data), data, nil
+	}
+	// Request more data.
+	return 0, nil, nil
 }
 
 // 1 knot is this many m/s

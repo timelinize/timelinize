@@ -78,7 +78,7 @@ func Main(embeddedWebsite fs.FS) {
 	}
 
 	// start the application server
-	// TODO: customized listen address?
+	// TODO: customized listen address? -- load the config file and get the listen address from there
 	// TODO: Use a host like tlz.localhost to serve HTTP/2 over HTTPS... just need to automate the CA and cert... - or maybe a public domain like timelinize.app or timelinize.run or something
 	startedServer, err := app.Serve(os.Getenv("TLZ_ADMIN_ADDR"))
 	if err != nil {

@@ -26,8 +26,8 @@
 
 		<link rel="icon" href="/resources/images/favicon.png">
 
-		<link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.css">
-		<script src="https://api.mapbox.com/mapbox-gl-js/v3.2.0/mapbox-gl.js"></script>
+		<link rel="stylesheet" href="/resources/css/vendor/mapbox-gl-js-v3.6.0.min.css">
+		<script src="/resources/js/vendor/mapbox-gl-js-v3.6.0.min.js"></script>
 
 		<!-- First vendored styles, then Tabler, then ours -->
 		<link rel="stylesheet" href="/resources/css/vendor/tom-select-v2.2.2.css">
@@ -40,7 +40,7 @@
 
 		<!-- First vendored scripts, then Tabler, then ours -->
 		<script src="/resources/js/vendor/luxon.v3.5.0.min.js"></script>
-		<script src="/resources/js/vendor/apexcharts.js"></script>
+		<script src="/resources/js/vendor/apexcharts.min.js"></script>
 		<script src="/resources/js/vendor/nouislider.v15.6.1.min.js"></script>
 		<script src="/resources/js/vendor/air-datepicker.min.js"></script>
 		<script src="/resources/js/vendor/tom-select.base.min.js"></script>
@@ -60,15 +60,16 @@
 		<script src="/resources/js/common.js"></script>
 		<script src="/resources/js/modals.js" defer></script>
 		<script src="/resources/js/controllers.js"></script>
+		<script src="/resources/js/jobs.js"></script>
 
 
 
 
 					<!-- TODO: EXPERIMENTAL (for Manual Entry page) -->
-					<script src="https://unpkg.com/protomaps-leaflet@1.24.0/dist/protomaps-leaflet.min.js"></script>
+					<!-- <script src="https://unpkg.com/protomaps-leaflet@1.24.0/dist/protomaps-leaflet.min.js"></script>
 					<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 
-					<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+					<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script> -->
 
 
 
@@ -79,8 +80,10 @@
 		<script src="/resources/js/entities.js"></script>
 		<script src="/resources/js/entity.js"></script>
 		<script src="/resources/js/gallery.js"></script>
+		<script src="/resources/js/import.js"></script>
 		<script src="/resources/js/item.js"></script>
 		<script src="/resources/js/items.js"></script>
+		<script src="/resources/js/job.js"></script>
 		<script src="/resources/js/map.js"></script>
 		<script src="/resources/js/setup.js"></script>
 		<script src="/resources/js/timeline.js"></script>
@@ -131,7 +134,7 @@
 						<!-- Notifications -->
 						<div class="nav-item dropdown d-flex me-3">
 							<a id="notifications-link" class="nav-link px-0" data-bs-toggle="dropdown" data-bs-auto-close="outside" tabindex="-1"
-								aria-label="Show notifications">
+								aria-label="Notifications" title="Notifications">
 								<svg xmlns="http://www.w3.org/2000/svg" class="icon" width="24" height="24" viewBox="0 0 24 24"
 									stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round"
 									stroke-linejoin="round">
@@ -143,15 +146,39 @@
 							<div class="dropdown-menu dropdown-menu-arrow dropdown-menu-end dropdown-menu-card" data-bs-theme="light">
 								<div class="card">
 									<div class="card-header">
-										<h3 class="card-title">Happening now</h3>
+										<h3 class="card-title">Notifications</h3>
 									</div>
-									<div id="active-jobs" class="list-group list-group-flush list-group-hoverable">
+									<div id="notifications" class="list-group list-group-flush list-group-hoverable">
 										
 									</div>
 								</div>
 							</div>
 						</div>
-						
+
+						<!-- Jobs -->
+						<div class="nav-item dropdown d-flex me-3">
+							<a id="jobs-link" class="nav-link px-0" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+								tabindex="-1" aria-label="Jobs" title="Jobs">
+								<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+									stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+									class="icon icon-tabler icons-tabler-outline icon-tabler-blocks">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+									<path d="M14 4a1 1 0 0 1 1 -1h5a1 1 0 0 1 1 1v5a1 1 0 0 1 -1 1h-5a1 1 0 0 1 -1 -1z" />
+									<path d="M3 14h12a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h3a2 2 0 0 1 2 2v12" />
+								</svg>
+							</a>
+							<div class="dropdown-menu dropdown-menu-arrow dropdown-menu-end dropdown-menu-card" data-bs-theme="light">
+								<div class="card">
+									<div class="card-header">
+										<h3 class="card-title">Jobs</h3>
+									</div>
+									<div class="list-group list-group-flush list-group-hoverable recent-jobs-list">
+
+									</div>
+								</div>
+							</div>
+						</div>
+
 						<!-- User information -->
 						<div class="nav-item dropdown">
 							<a class="nav-link d-flex lh-1 text-reset p-0" data-bs-toggle="dropdown"
@@ -172,7 +199,7 @@
 			
 						<!-- Import button -->
 						<div class="nav-item dropdown ms-4">
-							<a class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown">
+							<a class="btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
 								<svg xmlns="http://www.w3.org/2000/svg" class="icon me-0" width="24" height="24"
 									viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
 									stroke-linecap="round" stroke-linejoin="round">
@@ -183,7 +210,7 @@
 								<span class="d-none d-sm-inline-block">Timelinize</span>
 							</a>
 							<div class="dropdown-menu dropdown-menu-end" data-bs-theme="light">
-								<a class="dropdown-item" data-bs-toggle="modal" data-bs-target="#modal-import">
+								<a href="/import" class="dropdown-item">
 									<div class="d-flex">
 										<!-- <svg xmlns="http://www.w3.org/2000/svg"
 											class="icon dropdown-item-icon icon-tabler icon-tabler-file-import" width="24"

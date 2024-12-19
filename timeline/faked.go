@@ -25,7 +25,10 @@ import (
 	"io"
 	"math"
 	weakrand "math/rand"
+	"mime"
 	"net/http"
+	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -120,10 +123,10 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 	}
 
 	for _, ds := range dataSources {
-		dsRowID, ok := tl.dataSources[ds.Name]
-		if !ok {
-			return fmt.Errorf("unknown data source: %s", ds.Name)
-		}
+		// dsRowID, ok := tl.dataSources[ds.Name]
+		// if !ok {
+		// 	return fmt.Errorf("unknown data source: %s", ds.Name)
+		// }
 
 		// inject our fake data source
 		ds.NewFileImporter = func() FileImporter {
@@ -134,44 +137,42 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 		}
 		ds.NewAPIImporter = nil
 
-		importParams := ImportParameters{
-			DataSourceName:    ds.Name,
-			Filenames:         []string{"example.zip"},
-			DataSourceOptions: nil, // TODO:
-		}
+		// TODO: Start the faker import job! Old code:
 
-		// create an import row in the DB
-		mode := importModeAPI
-		if len(importParams.Filenames) > 0 {
-			mode = importModeFile
-		}
-		impRow, err := tl.newImport(ctx, importParams.DataSourceName, mode, ProcessingOptions{}, importParams.AccountID)
-		if err != nil {
-			return fmt.Errorf("creating new import row: %w", err)
-		}
+		// importParams := ImportParameters{
+		// 	DataSourceName:    ds.Name,
+		// 	Filenames:         []string{"example.zip"},
+		// 	DataSourceOptions: nil, // TODO:
+		// }
 
-		logger := Log.Named("faker").With(zap.String("data_source", ds.Name))
-		if len(importParams.Filenames) > 0 {
-			logger = logger.With(zap.Strings("filenames", importParams.Filenames))
-		}
+		// // create an import row in the DB
+		// impRow, err := tl.newJob(ctx, importParams.DataSourceName, mode, ProcessingOptions{}, importParams.AccountID)
+		// if err != nil {
+		// 	return fmt.Errorf("creating new import row: %w", err)
+		// }
 
-		// set up the processor with our modified data source
-		proc := processor{
-			itemCount:        new(int64),
-			skippedItemCount: new(int64),
-			ds:               ds,
-			dsRowID:          dsRowID,
-			params:           importParams,
-			tl:               tl,
-			// acc:              Account{},
-			impRow:   impRow,
-			log:      logger,
-			progress: logger.Named("progress"),
-		}
+		// logger := Log.Named("faker").With(zap.String("data_source", ds.Name))
+		// if len(importParams.Filenames) > 0 {
+		// 	logger = logger.With(zap.Strings("filenames", importParams.Filenames))
+		// }
 
-		if err = proc.doImport(ctx); err != nil {
-			return fmt.Errorf("processor of fake data failed: %w", err)
-		}
+		// // set up the processor with our modified data source
+		// proc := processor{
+		// 	itemCount:        new(int64),
+		// 	skippedItemCount: new(int64),
+		// 	ds:               ds,
+		// 	dsRowID:          dsRowID,
+		// 	params:           importParams,
+		// 	tl:               tl,
+		// 	// acc:              Account{},
+		// 	jobRow:   impRow,
+		// 	log:      logger,
+		// 	progress: logger.Named("progress"),
+		// }
+
+		// if err = proc.doImport(ctx); err != nil {
+		// 	return fmt.Errorf("processor of fake data failed: %w", err)
+		// }
 	}
 
 	return nil
@@ -182,11 +183,11 @@ type fakeDataSource struct {
 	peopleCorpus []Entity
 }
 
-func (fakeDataSource) Recognize(_ context.Context, _ []string) (Recognition, error) {
+func (fakeDataSource) Recognize(_ context.Context, _ DirEntry, _ RecognizeParams) (Recognition, error) {
 	return Recognition{}, nil
 }
 
-func (fake *fakeDataSource) FileImport(_ context.Context, _ []string, itemChan chan<- *Graph, _ ListingOptions) error {
+func (fake *fakeDataSource) FileImport(_ context.Context, _ DirEntry, params ImportParams) error {
 	var class Classification
 	switch fake.realDS.Name {
 	case "smsbackuprestore":
@@ -201,14 +202,14 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ []string, itemChan c
 
 	switch fake.realDS.Name {
 	case "contactlist", "vcard":
-		for i := range len(fake.peopleCorpus) {
-			itemChan <- &Graph{Entity: &fake.peopleCorpus[i]}
+		for i := range fake.peopleCorpus {
+			params.Pipeline <- &Graph{Entity: &fake.peopleCorpus[i]}
 		}
 
 	case "google_photos":
 		for range gofakeit.Number(100, 10000) {
 			filename := gofakeit.Numerify("IMG_####_#####.jpg")
-			itemChan <- &Graph{
+			params.Pipeline <- &Graph{
 				Item: &Item{
 					ID:             gofakeit.UUID(),
 					Classification: class,
@@ -219,7 +220,7 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ []string, itemChan c
 					Owner: Entity{ID: 1},
 					Content: ItemData{
 						Filename:  filename,
-						MediaType: imageJpeg,
+						MediaType: ImageJPEG,
 						Data:      ByteData(gofakeit.ImageJpeg(1024, 1024)),
 					},
 					// TODO: metadata, location...
@@ -237,7 +238,7 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ []string, itemChan c
 			sentLen := weakrand.Intn(10) + 2 //nolint:gosec
 
 			// TODO: MMS, attachments, sent to...
-			itemChan <- &Graph{
+			params.Pipeline <- &Graph{
 				Item: &Item{
 					ID:             gofakeit.UUID(),
 					Classification: class,
@@ -255,7 +256,7 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ []string, itemChan c
 
 		// default:
 		// 	for i := 0; i < gofakeit.Number(10, 10000); i++ {
-		// 		itemChan <- NewItemGraph(&Item{
+		// 		params.Pipeline <- NewItemGraph(&Item{
 		// 			ID:             gofakeit.UUID(),
 		// 			Classification: class,
 		// 			Timestamp: gofakeit.DateRange(
@@ -399,6 +400,7 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 				lat, lon := locob.Obfuscate(*ir.Latitude, *ir.Longitude, ir.ID)
 				ir.Latitude = &lat
 				ir.Longitude = &lon
+				break
 			}
 		}
 	}
@@ -411,20 +413,47 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 		ir.DataText = &txt
 	}
 
-	if ir.DataType != nil && ir.DataFile != nil {
-		switch {
-		case strings.HasPrefix(*ir.DataType, "image/"):
-			// simply use thumbhash
-			ir.DataFile = nil
+	if ir.Filename != nil {
+		// try to preserve the file extension, but we can't be sure what it is
+		// (what if it's .tar.gz? What if there's a dot in the middle of the filename?
+		// I don't want to chance preserving sensitive parts of the filename by parsing)
+		// so try to deduce from the DataType; otherwise just use a random one
+		var extensions []string
+		var err error
+		if ir.DataType != nil {
+			extensions, err = mime.ExtensionsByType(*ir.DataType)
+		}
+		if err != nil || len(extensions) == 0 {
+			opts.Logger.Warn("no extensions for MIME type; generating a random one",
+				zap.Stringp("mime_type", ir.DataType),
+				zap.Error(err))
+			extensions = []string{"." + faker.FileExtension()}
+		}
+		fakeName := faker.Word() + faker.Password(true, true, true, false, false, weakrand.Intn(3)+2) + extensions[0] //nolint:gosec
+		ir.Filename = &fakeName
+	}
 
-			// or use a random image completely... :shrug:
-			// pic := fmt.Sprintf("https://picsum.photos/seed/%d/1024/768", ir.ID)
-			// ir.DataFile = &pic
-		case strings.HasPrefix(*ir.DataType, "video/"):
-			// let frontend request videos; frontend handler will obfuscate them
-		default:
-			// TODO: not sure how to generate/obfuscate other stuff for now
-			ir.DataFile = nil
+	if ir.DataFile != nil {
+		if opts.DataFiles {
+			// using a hard-coded string value here at least lets the frontend know that the filename is obfuscated,
+			// but if this setting is enabled, the frontend shouldn't be trying to request the data files anyway
+			fakePath := path.Join(path.Dir(*ir.DataFile), "(obfuscated)")
+			ir.DataFile = &fakePath
+		} else {
+			switch {
+			case ir.DataType != nil && strings.HasPrefix(*ir.DataType, "image/"):
+				// simply use thumbhash (TODO: if the image is requested anyways, return a blurred variant)
+				ir.DataFile = nil
+
+				// or use a random image completely... :shrug:
+				// pic := fmt.Sprintf("https://picsum.photos/seed/%d/1024/768", ir.ID)
+				// ir.DataFile = &pic
+			case ir.DataType != nil && strings.HasPrefix(*ir.DataType, "video/"):
+				// let frontend request videos; frontend handler will obfuscate them
+			default:
+				// TODO: not sure how to generate/obfuscate other stuff for now
+				ir.DataFile = nil
+			}
 		}
 	}
 
@@ -483,28 +512,50 @@ func randRune(ch rune) rune {
 // ObfuscationOptions controls how obfuscation is performed.
 // TODO: Finish implementing these
 type ObfuscationOptions struct {
-	Locations []LocationObfuscation
-	Logger    *zap.Logger
+	Logger *zap.Logger `json:"-"`
+
+	// Whether to enable obfuscation.
+	Enabled bool `json:"enabled"`
+
+	// The timeline IDs to apply obfuscation to. If nil,
+	// all timelines will be obfuscated if enabled.
+	RepoIDs []string `json:"repo_ids,omitempty"`
+
+	Locations []ObfuscatedLocation `json:"locations,omitempty"`
+
+	// If true, the base (last) component of data file names will be
+	// obfuscated, but this prevents the frontend from requesting the
+	// (obfuscated) data, because it won't have the filename with
+	// which to craft the request. Enable this if the data file is
+	// what is being displayed rather than the content.
+	DataFiles bool `json:"data_files,omitempty"`
 }
 
-// LocationObfuscation describes how to obfuscate a coordinate.
-type LocationObfuscation struct {
-	Latitude, Longitude float64
-	RadiusMeters        int
+func (obf ObfuscationOptions) AppliesTo(tl *Timeline) bool {
+	return obf.Enabled &&
+		(obf.RepoIDs == nil || slices.Contains(obf.RepoIDs, tl.id.String()))
+}
+
+// ObfuscatedLocation describes how to obfuscate a coordinate.
+type ObfuscatedLocation struct {
+	Description  string  `json:"description,omitempty"` // for convenience with managing
+	Lat          float64 `json:"lat,omitempty"`         // latitude
+	Lon          float64 `json:"lon,omitempty"`         // longitude
+	RadiusMeters int     `json:"radius_meters,omitempty"`
 }
 
 // Contains returns true if the circle approximately contains the given coordinate.
-func (l LocationObfuscation) Contains(lat, lon float64) bool {
-	return haversineDistanceMeters(l.Latitude, l.Longitude, lat, lon) < float64(l.RadiusMeters)
+func (l ObfuscatedLocation) Contains(lat, lon float64) bool {
+	return haversineDistanceMeters(l.Lat, l.Lon, lat, lon) < float64(l.RadiusMeters)
 }
 
 // Obfuscate returns obfuscated lat/lon values.
-func (l LocationObfuscation) Obfuscate(lat, lon float64, rowID int64) (float64, float64) {
+func (l ObfuscatedLocation) Obfuscate(lat, lon float64, rowID int64) (float64, float64) {
 	faker := gofakeit.New(rowID)
 
 	// translate all points within the circle a fixed vector; necessary to prevent
 	// averaging the smattering of points to find the original center(s)
-	circleFaker := gofakeit.New(int64((l.Latitude + l.Longitude) * 1e7))
+	circleFaker := gofakeit.New(int64((l.Lat + l.Lon) * 1e7))
 
 	// then shift each point a little bit individually to prevent map overlay attacks
 	// where you estimate the initial translation by seeing what map features the

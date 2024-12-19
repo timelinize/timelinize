@@ -36,7 +36,7 @@ async function galleryPageMain() {
 
 	// configure pagination links: enable next if we overflowed the search results limit,
 	// and enable prev if we are not on page 1; otherwise disable prev/next link(s)
-	for (elem of $$('.pagination .page-next')) {
+	for (const elem of $$('.pagination .page-next')) {
 		if (results.items.length > galleryLimit) {
 			elem.classList.remove('disabled');
 			let newQS = new URLSearchParams(window.location.search);
@@ -47,7 +47,7 @@ async function galleryPageMain() {
 			elem.href = '';
 		}
 	}
-	for (elem of $$('.pagination .page-prev')) {
+	for (const elem of $$('.pagination .page-prev')) {
 		if (currentPageNum() > 1) {
 			elem.classList.remove('disabled');
 			let newQS = new URLSearchParams(window.location.search);
@@ -94,6 +94,10 @@ async function galleryPageMain() {
 		$('.media-owner-avatar', elem).innerHTML = avatar(true, item.entity, "me-3");
 		$('.media-owner-name', elem).innerText = entityDisplayNameAndAttr(item.entity).name;
 		$('.media-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
+		
+		if (item.score) {
+			$('.media-similarity-score', elem).innerHTML = `<b>${(item.score * 100).toFixed(3)}%</b> match`;
+		}
 
 		$('.filter-results').append(elem);
 		pageItems[item.id] = item;
@@ -121,6 +125,7 @@ on('click', '.filter-results [data-bs-toggle=modal]', async e => {
 
 function galleryFilterParams(peekPrevOrNext, peekFromItem) {
 	const params = {
+		query_text: $('#text-search').value,
 		related: 1,
 		flat: $('#include-attachments').checked,
 		offset: galleryLimit * (currentPageNum()-1),

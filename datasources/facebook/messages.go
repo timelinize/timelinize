@@ -28,13 +28,12 @@ import (
 	"time"
 
 	"github.com/timelinize/timelinize/timeline"
-	"go.uber.org/zap"
 )
 
-func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, logger *zap.Logger) error {
+func GetMessages(dsName string, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	// figure out which archive version we're working with
 	messagesInboxPrefix := pre2024MessagesPrefix
-	if _, err := fs.Stat(fsys, messagesInboxPrefix); errors.Is(err, fs.ErrNotExist) {
+	if _, err := fs.Stat(dirEntry.FS, messagesInboxPrefix); errors.Is(err, fs.ErrNotExist) {
 		messagesInboxPrefix = year2024MessagesPrefix
 	}
 
@@ -42,18 +41,18 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 		"inbox",
 		"archived_threads",
 	} {
-		err := fs.WalkDir(fsys, path.Join(messagesInboxPrefix, messageSubfolder), func(fpath string, d fs.DirEntry, err error) error {
+		err := fs.WalkDir(dirEntry.FS, path.Join(messagesInboxPrefix, messageSubfolder), func(fpath string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 			if d.IsDir() {
 				return nil
 			}
-			if path.Ext(fpath) != ".json" {
+			if path.Ext(d.Name()) != ".json" {
 				return nil
 			}
 
-			file, err := fsys.Open(fpath)
+			file, err := dirEntry.FS.Open(fpath)
 			if err != nil {
 				return err
 			}
@@ -86,7 +85,7 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 						Classification: timeline.ClassMessage,
 						Owner:          sender,
 					}
-					photo.fillItem(attached, fsys, "", logger)
+					photo.fillItem(attached, dirEntry, "", params.Log)
 					if attached.Timestamp.IsZero() {
 						attached.Timestamp = msgTimestamp
 					}
@@ -97,7 +96,7 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 						Classification: timeline.ClassMessage,
 						Owner:          sender,
 					}
-					video.fillItem(attached, fsys, "", logger)
+					video.fillItem(attached, dirEntry, "", params.Log)
 					if attached.Timestamp.IsZero() {
 						attached.Timestamp = msgTimestamp
 					}
@@ -108,7 +107,7 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 						Classification: timeline.ClassMessage,
 						Owner:          sender,
 					}
-					gif.fillItem(attached, fsys, "", logger)
+					gif.fillItem(attached, dirEntry, "", params.Log)
 					if attached.Timestamp.IsZero() {
 						attached.Timestamp = msgTimestamp
 					}
@@ -119,7 +118,7 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 						Classification: timeline.ClassMessage,
 						Owner:          sender,
 					}
-					audio.fillItem(attached, fsys, "", logger)
+					audio.fillItem(attached, dirEntry, "", params.Log)
 					if attached.Timestamp.IsZero() {
 						attached.Timestamp = msgTimestamp
 					}
@@ -130,7 +129,7 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 						Classification: timeline.ClassMessage,
 						Owner:          sender,
 					}
-					msg.Sticker.fillItem(attached, fsys, "", logger)
+					msg.Sticker.fillItem(attached, dirEntry, "", params.Log)
 					if attached.Timestamp.IsZero() {
 						attached.Timestamp = msgTimestamp
 					}
@@ -189,7 +188,7 @@ func GetMessages(fsys fs.FS, itemChan chan<- *timeline.Graph, dsName string, log
 					}, timeline.RelReacted, FixString(reaction.Reaction))
 				}
 
-				itemChan <- ig
+				params.Pipeline <- ig
 			}
 
 			return nil

@@ -45,11 +45,11 @@ func (a *App) registerCommands() {
 			Method:  http.MethodGet,
 			Help:    "Displays information about this build.",
 		},
-		"cancel-job": {
-			Handler: a.server.handleCancelJob,
+		"cancel-jobs": {
+			Handler: a.server.handleCancelJobs,
 			Method:  http.MethodPost,
-			Payload: "",
-			Help:    "Cancels a running task.",
+			Payload: jobsPayload{},
+			Help:    "Cancels active jobs.",
 		},
 		"close-repository": {
 			Handler: a.server.handleCloseRepo,
@@ -116,9 +116,11 @@ func (a *App) registerCommands() {
 			Help:    "Returns the item classifications for the given timeline.",
 		},
 		"jobs": {
-			Handler: a.server.handleJobs,
-			Method:  http.MethodGet,
-			Help:    "Lists recent/active jobs.",
+			Handler:     a.server.handleJobs,
+			Method:      methodQuery,
+			Payload:     jobsPayload{},
+			ContentType: JSON,
+			Help:        "Gets current information about jobs.",
 		},
 		"logs": {
 			Handler: a.server.handleLogs,
@@ -142,17 +144,23 @@ func (a *App) registerCommands() {
 			Payload: openRepoPayload{},
 			Help:    "Open a timeline repository.",
 		},
+		"pause-job": {
+			Handler: a.server.handlePauseJob,
+			Method:  http.MethodPost,
+			Payload: jobPayload{},
+			Help:    "Pauses an active job.",
+		},
+		"plan-import": {
+			Handler: a.server.handlePlanImport,
+			Method:  http.MethodPost,
+			Payload: PlannerOptions{},
+			Help:    "Proposes an import plan in preparation for performing a data import.",
+		},
 		"recent-conversations": {
 			Handler: a.server.handleRecentConversations,
 			Method:  http.MethodPost,
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Loads recent conversations.",
-		},
-		"recognize": {
-			Handler: a.server.handleRecognize,
-			Method:  http.MethodPost,
-			Payload: []string{},
-			Help:    "Returns the list of data sources that recognize the given file/folder names.",
 		},
 		"repository-empty": {
 			Handler: a.server.handleRepositoryEmpty,
@@ -172,10 +180,22 @@ func (a *App) registerCommands() {
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Finds and filters items in a timeline.",
 		},
+		"start-job": {
+			Handler: a.server.handleStartJob,
+			Method:  http.MethodPost,
+			Payload: jobPayload{},
+			Help:    "Starts a job.",
+		},
 		"stats": {
 			Handler: a.server.handleStats,
 			Method:  http.MethodGet,
 			Help:    "Returns statistics about the timeline.",
+		},
+		"unpause-job": {
+			Handler: a.server.handleUnpauseJob,
+			Method:  http.MethodPost,
+			Payload: jobPayload{},
+			Help:    "Unpauses a paused job.",
 		},
 	}
 }
@@ -193,11 +213,15 @@ type Endpoint struct {
 func (e Endpoint) GetContentType() ContentType {
 	if e.ContentType == None && e.Payload != nil &&
 		(e.Method == http.MethodPost || e.Method == http.MethodPut ||
-			e.Method == http.MethodPatch || e.Method == http.MethodDelete) {
+			e.Method == http.MethodPatch || e.Method == http.MethodDelete ||
+			e.Method == methodQuery) {
 		return JSON
 	}
 	return e.ContentType
 }
+
+// GET but officially supports a request body.
+const methodQuery = "QUERY"
 
 type ctxKey string
 

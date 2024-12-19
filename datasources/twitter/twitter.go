@@ -62,7 +62,7 @@ func init() {
 
 // Client is a type that can process/import data from Twitter via API or file archive.
 type Client struct {
-	fsys fs.FS // if reading from an archive
+	// fsys fs.FS // if reading from an archive
 	// httpClient    *http.Client
 	//nolint:dupword
 	// checkpoint    checkpoint

@@ -66,11 +66,6 @@ async function myFetch(signal, endpoint, data, method) {
 		body: data,
 		signal: signal
 	}).then(async (response) => {
-		// re-enable form inputs
-		if ($('#modal-preview')?.offsetParent === null) {
-			formFields.forEach((elem) => { elem.disabled = false; });
-		}
-
 		if (response.ok) {
 			if (response.headers.get('Content-Type') == 'application/json')
 				return response.json();
@@ -86,6 +81,11 @@ async function myFetch(signal, endpoint, data, method) {
 		}
 
 		throw {response: response};
+	}).finally(function() {
+		// re-enable form inputs
+		if ($('#modal-preview')?.offsetParent === null) {
+			formFields.forEach((elem) => { elem.disabled = false; });
+		}
 	});
 }
 
@@ -93,14 +93,11 @@ async function myFetch(signal, endpoint, data, method) {
 
 
 const app = {
-	ActiveJobs() {
-		return get("/api/jobs");
-	},
 	AddEntity(repo_id, entity) {
 		return post("/api/add-entity", { repo_id, entity });
 	},
-	CancelJob(jobID) {
-		return post("/api/cancel-job", jobID);
+	CancelJobs(repo_id, job_ids) {
+		return post("/api/cancel-jobs", { repo_id, job_ids });
 	},
 	CloseRepository(repo_id) {
 		return post("/api/close-repository", repo_id);
@@ -130,6 +127,9 @@ const app = {
 	ItemClassifications(repoID) {
 		return post("/api/item-classifications", repoID);
 	},
+	Jobs(params) {
+		return post("/api/jobs", params, "QUERY");
+	},
 	LoadConversation(params) {
 		return post("/api/conversation", params);
 	},
@@ -148,8 +148,14 @@ const app = {
 	OpenRepositories() {
 		return get("/api/open-repositories");
 	},
+	PauseJob(repo_id, job_id) {
+		return post("/api/pause-job", { repo_id, job_id });
+	},
+	PlanImport(params) {
+		return post("/api/plan-import", params);
+	},
 	Recognize(filename) {
-		return post("/api/recognize", filename);
+		return post("/api/recognize", { filename });
 	},
 	RepositoryIsEmpty(repoID) {
 		 return post("/api/repository-empty", repoID);
@@ -159,6 +165,12 @@ const app = {
 	},
 	SearchEntities(params) {
 		return post("/api/search-entities", params);
+	},
+	StartJob(repo_id, job_id, start_over) {
+		return post("/api/start-job", { repo_id, job_id, start_over });
+	},
+	UnpauseJob(repo_id, job_id) {
+		return post("/api/unpause-job", { repo_id, job_id });
 	},
 };
 

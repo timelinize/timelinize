@@ -179,36 +179,39 @@
 </template>
 
 <template id="loader-container">
-	<div class="loader-container bg-muted-lt ratio ratio-4x3">
-		<div class="loader-container-content">
-			<svg class="loader" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-				viewBox="0 0 100 100" preserveAspectRatio="xMidYMid">
-				<g>
-					<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
-						values="0 50 50;360 50 50" keyTimes="0;1" dur="0.625s"></animateTransform>
-					<path fill-opacity="0.49" fill="#004d73" d="M50 50L50 0A50 50 0 0 1 100 50Z"></path>
-				</g>
-				<g>
-					<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
-						values="0 50 50;360 50 50" keyTimes="0;1" dur="0.8s"></animateTransform>
-					<path fill-opacity="0.49" fill="#00334e" d="M50 50L50 0A50 50 0 0 1 100 50Z"
-						transform="rotate(90 50 50)"></path>
-				</g>
-				<g>
-					<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
-						values="0 50 50;360 50 50" keyTimes="0;1" dur="1.25s"></animateTransform>
-					<path fill-opacity="0.49" fill="#007fdb" d="M50 50L50 0A50 50 0 0 1 100 50Z"
-						transform="rotate(180 50 50)"></path>
-				</g>
-				<g>
-					<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
-						values="0 50 50;360 50 50" keyTimes="0;1" dur="2.5s"></animateTransform>
-					<path fill-opacity="0.49" fill="#dbebfa" d="M50 50L50 0A50 50 0 0 1 100 50Z"
-						transform="rotate(270 50 50)"></path>
-				</g>
-			</svg>
+	<!-- The "supercontainer" can contain the image/video that is being loaded, then we fade out the loader for a nice effect. -->
+	<div class="loader-supercontainer ratio ratio-4x3">
+		<div class="loader-container bg-muted-lt">
+			<div class="loader-container-content">
+				<svg class="loader" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+					viewBox="0 0 100 100" preserveAspectRatio="xMidYMid">
+					<g>
+						<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
+							values="0 50 50;360 50 50" keyTimes="0;1" dur="0.625s"></animateTransform>
+						<path fill-opacity="0.49" fill="#004d73" d="M50 50L50 0A50 50 0 0 1 100 50Z"></path>
+					</g>
+					<g>
+						<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
+							values="0 50 50;360 50 50" keyTimes="0;1" dur="0.8s"></animateTransform>
+						<path fill-opacity="0.49" fill="#00334e" d="M50 50L50 0A50 50 0 0 1 100 50Z"
+							transform="rotate(90 50 50)"></path>
+					</g>
+					<g>
+						<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
+							values="0 50 50;360 50 50" keyTimes="0;1" dur="1.25s"></animateTransform>
+						<path fill-opacity="0.49" fill="#007fdb" d="M50 50L50 0A50 50 0 0 1 100 50Z"
+							transform="rotate(180 50 50)"></path>
+					</g>
+					<g>
+						<animateTransform attributeName="transform" type="rotate" repeatCount="indefinite"
+							values="0 50 50;360 50 50" keyTimes="0;1" dur="2.5s"></animateTransform>
+						<path fill-opacity="0.49" fill="#dbebfa" d="M50 50L50 0A50 50 0 0 1 100 50Z"
+							transform="rotate(270 50 50)"></path>
+					</g>
+				</svg>
 
-			<div class="loading-message text-secondary">Loading</div>
+				<div class="loading-message text-secondary">Loading</div>
+			</div>
 		</div>
 	</div>
 </template>
@@ -375,35 +378,31 @@
 	</tr>
 </template>
 
+<template id="tpl-job-preview">
+	<div class="row align-items-center job-preview">
+		<div class="col-auto job-icon">
 
-<template id="tpl-active-job">
-	<div class="list-group-item">
-		<div class="row align-items-center">
-			<div class="col-auto">
-				<span class="status-dot status-dot-animated bg-red d-block"></span>
+		</div>
+		<div class="col text-truncate">
+			<a class="text-body d-block job-link">
+				<b class="job-name"></b>
+				<span class="job-name-suffix text-truncate"></span>
+			</a>
+			<div class="progress my-2 job-progress">
+				<div class="progress-bar"></div>
 			</div>
-			<div class="col text-truncate">
-				<a class="text-body d-block">
-					Import from
-					<b class="data-source-title">
-
-					</b>
-				</a>
-				<div class="active-job-input d-block text-secondary text-truncate mt-n1">
-					
-				</div>
-				<div class="progress mt-2">
-					<div class="progress-bar progress-bar-indeterminate bg-blue"></div>
-				</div>
-				<div class="d-block small text-secondary mt-2">
-					<b class="import-item-count">0 items</b> in <b class="import-duration">0 min 0 sec</b>
-					&middot;
-					<a class="cancel-active-job">Cancel</a>
-				</div>
+			<div class="d-block small text-secondary">
+				<b>
+					<span class="job-progress-text"></span>
+					<span class="job-progress-units"></span>
+				</b>
+				in
+				<b class="me-2 job-duration">n/a</b>
+				<a class="pause-job mx-2 d-none">Pause</a><a class="unpause-job mx-2 d-none">Resume</a><a class="cancel-job mx-2 d-none">Cancel</a>
 			</div>
-			<div class="col-auto">
-				<span class="data-source-icon avatar ms-1"></span>
-			</div>
+		</div>
+		<div class="col-auto">
+			<span class="status-dot job-status-dot"></span>
 		</div>
 	</div>
 </template>

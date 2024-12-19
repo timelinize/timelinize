@@ -54,14 +54,15 @@ func newLogger() *zap.Logger {
 
 	core := zapcore.NewTee(
 		zapcore.NewCore(consoleEncoder, consoleOut, zap.DebugLevel), // TODO: keep at debug? make this optional?
-		zapcore.NewCore(jsonEncoder, websocketsOut, zap.InfoLevel),
+		zapcore.NewCore(jsonEncoder, websocketsOut, zap.InfoLevel),  // sent to web frontend / UI
 	)
 
-	// avoid a firehose of logs (TODO: maybe only sample for certain logs named something...?)
-	const firstNMsgs, everyNthMsg = 1, 100
+	// avoid a firehose of logs
+	const firstNMsgs, everyNthMsg = 10, 100
 	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
 
-	return zap.New(core)
+	const streamInterval = 250 * time.Millisecond
+	return zap.New(&customCore{Core: core, streamCore: zapcore.NewSamplerWithOptions(core, streamInterval, 1, 0)})
 }
 
 // multiConnWriter is like io.multiWriter from the standard lib,
@@ -117,12 +118,6 @@ func (mw *multiConnWriter) RemoveConn(conn *websocket.Conn) {
 	mw.connsMu.Unlock()
 }
 
-// func SetWailsAppContext(ctx context.Context) {
-// 	websocketLogOutputs.connsMu.Lock()
-// 	websocketLogOutputs.appCtx = ctx
-// 	websocketLogOutputs.connsMu.Unlock()
-// }
-
 // websocketLogOutputs mediates the list of active
 // websocket connections that are receiving process
 // logs.
@@ -139,4 +134,21 @@ func AddLogConn(conn *websocket.Conn) {
 // It is idempotent.
 func RemoveLogConn(conn *websocket.Conn) {
 	websocketLogOutputs.RemoveConn(conn)
+}
+
+// customCore wraps another zapcore.Core and prevents sampling based on logger name.
+type customCore struct {
+	zapcore.Core
+	streamCore zapcore.Core
+}
+
+func (c *customCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if ent.LoggerName == "job.status" {
+		// always allow through, no sampling -- otherwise UI gets out of sync
+		return ce.AddCore(ent, c.Core)
+	}
+	if ent.LoggerName == "job.action" && ent.Message == "finished graph" {
+		return c.streamCore.Check(ent, ce)
+	}
+	return c.Core.Check(ent, ce)
 }

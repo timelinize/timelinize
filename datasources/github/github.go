@@ -60,8 +60,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"regexp"
 	"time"
 
@@ -69,13 +68,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// Data source name and ID.
-type tlzTestKey int
-
 const (
-	DataSourceName            = "GitHub"
-	DataSourceID              = "github"
-	TLZTest        tlzTestKey = iota
+	DataSourceName = "GitHub"
+	DataSourceID   = "github"
 )
 
 type Repository struct {
@@ -111,32 +106,18 @@ func init() {
 type GitHub struct{}
 
 // Recognize returns whether the input file is recognized.
-func (GitHub) Recognize(_ context.Context, filenames []string) (timeline.Recognition, error) {
+func (GitHub) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	isoDateRegexp := regexp.MustCompile(`^ghstars(-(\d{4}-\d{2}-\d{2}|[0-9]{10}))?.json$`)
-	for _, filename := range filenames {
-		// ghstars.json or ghstars-YYYY-MM-DD.json or ghstars-UNIX_TIMESTAMP.json
-		if isoDateRegexp.MatchString(filepath.Base(filename)) {
-			return timeline.Recognition{Confidence: 1}, nil
-		}
+	// ghstars.json or ghstars-YYYY-MM-DD.json or ghstars-UNIX_TIMESTAMP.json
+	if isoDateRegexp.MatchString(dirEntry.Name()) {
+		return timeline.Recognition{Confidence: 1}, nil
 	}
-
 	return timeline.Recognition{}, nil
 }
 
 // FileImport conducts an import of the data using this data source.
-func (c *GitHub) FileImport(ctx context.Context, filenames []string, itemChan chan<- *timeline.Graph, _ timeline.ListingOptions) error {
-	for _, filename := range filenames {
-		err := c.process(ctx, filename, itemChan)
-		if err != nil {
-			return fmt.Errorf("processing %s: %w", filename, err)
-		}
-	}
-	return nil
-}
-
-// process reads the JSON file and sends the items to the channel.
-func (c *GitHub) process(ctx context.Context, path string, itemChan chan<- *timeline.Graph) error {
-	j, err := os.ReadFile(path)
+func (c *GitHub) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	j, err := fs.ReadFile(dirEntry.FS, dirEntry.Filename)
 	if err != nil {
 		return err
 	}
@@ -166,23 +147,24 @@ func (c *GitHub) process(ctx context.Context, path string, itemChan chan<- *time
 			item := &timeline.Item{
 				Classification:       timeline.ClassBookmark,
 				Timestamp:            repo.StarredAt,
-				IntermediateLocation: path,
+				IntermediateLocation: dirEntry.Filename,
 				Metadata: timeline.Metadata{
 					"ID":          repo.ID,
 					"Name":        repo.Name,
 					"Full name":   repo.FullName,
 					"URL":         repo.HTMLURL,
 					"Description": repo.Description,
-					"Created at":  repo.CreatedAt,
+					"Created":     repo.CreatedAt,
+					"Updated":     repo.UpdatedAt,
+					"Pushed":      repo.PushedAt,
 					"Stargazers":  repo.StargazersCount,
 					"Topics":      repo.Topics,
 					"Language":    repo.Language,
 					"Private":     repo.Private,
-					"Starred at":  repo.StarredAt,
 				},
 			}
 
-			itemChan <- &timeline.Graph{Item: item}
+			params.Pipeline <- &timeline.Graph{Item: item}
 		}
 	}
 

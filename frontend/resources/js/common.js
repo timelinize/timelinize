@@ -82,43 +82,6 @@ function entityAttribute(entity, attribute) {
 	return "";
 }
 
-async function updateActiveJobs() {
-	if (!$('#active-jobs')) return;
-
-	const jobs = await app.ActiveJobs();
-	
-	$('#active-jobs').replaceChildren();
-	
-	for (let i = 0; i < jobs.length; i++) {
-		const job = jobs[i];
-		let elem = cloneTemplate('#tpl-active-job');
-		elem.id = `active-job-${job.id}`;
-		if (job.type == "import") {
-			$('.data-source-title', elem).innerText = tlz.dataSources[job.import_parameters.data_source_name].title;
-			$('.active-job-input', elem).innerText = job.import_parameters.filenames[0]; // TODO: support multiple I guess
-		}
-		$('.cancel-active-job', elem).dataset.jobid = job.id;
-		$('.data-source-icon', elem).style.backgroundImage = `url("/resources/images/data-sources/${tlz.dataSources[job.import_parameters.data_source_name].icon}")`;
-
-		elem.dataset.started = job.started;
-		$('.import-duration', elem).innerText = DateTime.fromISO(job.started).diffNow().toHuman();
-
-		$('#active-jobs').append(elem);
-	}
-	
-	$('#notifications-link .badge')?.remove();
-	if (jobs.length > 0) {
-		$('#notifications-link').innerHTML += `<span class="badge bg-red badge-blink"></span>`;
-	}
-}
-
-async function cancelJob(jobID) {
-	await app.CancelJob(jobID);
-	updateActiveJobs();
-}
-
-
-
 
 
 
@@ -240,12 +203,6 @@ on('change', '.date-sort', e => {
 
 
 
-on('click', '.cancel-active-job', e => {
-	const jobid = e.target.dataset.jobid;
-	cancelJob(jobid);
-});
-
-
 on('mouseover', '.explore-pages a', e => {
 	$('#explore-page-preview').src = `/resources/images/${e.target.closest('a').dataset.preview}`;	
 });
@@ -274,11 +231,50 @@ on('click', '[data-bs-toggle="switch-icon"]', e => {
 });
 
 
+// Dynamic timestamps which update as much as every second to always show a correct
+// relative time on the screen. Pass in the element to put the relative text in
+// and the timestamp string from a JSON object.
+function setDynamicTimestamp(elem, isoOrUnixSecTime, forDuration) {
+	elem._timestamp = typeof isoOrUnixSecTime === 'number'
+		? DateTime.fromSeconds(isoOrUnixSecTime)
+		: DateTime.fromISO(isoOrUnixSecTime);
+	elem.innerText = elem._timestamp.toRelative();
+	elem.classList.add(forDuration ? "dynamic-duration" : "dynamic-time");
+}
 
+// Luxon (as of v3.5.0) does not have a good toHuman() function for Duration objects.
+// It naively prints all the units of the duration even if they are 0, and the default
+// units used by diff() is only milliseconds, which is not human readable at all. In
+// other words, Luxon's Duration.toHuman() is totally broken.
+// See bug report at https://github.com/moment/luxon/issues/1134.
+//
+// This function wraps Luxon's toHuman() with more sensible behavior. It prints milliseconds
+// only if the duration < 1s, and only prints non-zero units. It also prints whole numbers,
+// not fractions (unless the duration is <1 ms), and passes opts through to toHuman(), which
+// are the same as those available with the standard Intl.NumberFormat constructor (see Luxon's
+// toHuman() docs).
+//
+// Based on the workaround by seyeong on GitHub: https://github.com/moment/luxon/issues/1134#issuecomment-1637008762
+function betterToHuman(luxonDuration, opts) {
+	const duration = luxonDuration.shiftTo('days', 'hours', 'minutes', 'seconds', 'milliseconds').toObject();
 
+	// remove 0-valued units
+	const cleanedDuration = Object.fromEntries(
+		Object.entries(duration).filter(([_k, v]) => v !== 0)
+	);
 
+	// if units larger than milliseconds exist, drop milliseconds
+	if (Object.keys(cleanedDuration).length > 1) {
+		delete cleanedDuration.milliseconds;
+	}
 
+	let digits = 0;
+	if (cleanedDuration.milliseconds < 1.0) {
+		digits = 3;
+	}
 
+	return Duration.fromObject(cleanedDuration).toHuman({ maximumFractionDigits: digits, ...opts });
+}
 
 
 
@@ -286,72 +282,169 @@ on('click', '[data-bs-toggle="switch-icon"]', e => {
 // Events handling (logs)
 //////////////////////////////////////////////////////
 
-// runtime.EventsOn("log", (entryJSON) => {
-// 	const l = JSON.parse(entryJSON);
+function freezePage(modal) {
+	if (modal) {
+		tlz.loggerSocket.modal.show();
+	}
+	for (const [key, itvl] of Object.entries(tlz.intervals)) {
+		if (itvl.interval) {
+			console.info("Clearing interval:", key);
+			clearInterval(itvl.interval);
+		}
+	}
+}
 
-// 	// for now, we don't care about HTTP access logs
-// 	if (l.logger == "app.http") {
-// 		return;
-// 	}
-
-// 	if (l.logger == "processor.progress") {
-// 		const jobElem = $(`#active-job-${l.job_id}`);
-// 		if (!jobElem) return;
-// 		$('.import-item-count', jobElem).innerText = `${l.total_items.toLocaleString()} items`;
-// 		$('.import-duration', jobElem).innerText = $('.import-duration').innerText = DateTime.now().diff(DateTime.fromISO(jobElem.dataset.started)).toFormat("h 'h' m 'min' s 'sec'");
-// 		return;
-// 	}
-
-// 	if (l.logger == "job_manager" && l.msg == 'end') {
-// 		updateActiveJobs();
-// 	}
-	
-// 	console.log("LOG:", l);
-// });
-
-
-
+function unfreezePage(modal) {
+	if (modal) {
+		tlz.loggerSocket.modal.hide();
+	}
+	for (const [key, itvl] of Object.entries(tlz.intervals)) {
+		if (itvl.interval) {
+			console.info("Setting interval:", key);
+			tlz.intervals[key].interval = itvl.set();
+		}
+	}
+}
 
 function connectLog() {
-	logSocket = new WebSocket(`ws://${window.location.host}/api/logs`);
-	logSocket.onmessage = function(event) {
-		const l = JSON.parse(event.data);
-		console.log("LOG:", l);
+	// this sentinel value is used to avoid overlapping setTimeouts, and thus
+	// extra calls to connectLog, by both onerror and onclose being invoked
+	// (and since we are now trying to connect, we can clear the sentinel)
+	tlz.loggerSocket.retrying = false;
 
+	tlz.loggerSocket.socket = new WebSocket(`ws://${window.location.host}/api/logs`);
+
+	tlz.loggerSocket.socket.onopen = function(event) {
+		console.info("Established connection to logger socket", event, tlz.loggerSocket.socket);
+		if (tlz.loggerSocket.modal) {
+			unfreezePage(tlz.loggerSocket.modal);
+			delete tlz.loggerSocket.modal;
+		}
+	};
+	tlz.loggerSocket.socket.onmessage = function(event) {
+		const l = JSON.parse(event.data);
+		
 		// for now, we don't care about HTTP access logs
 		if (l.logger == "app.http") {
 			return;
 		}
 
-		if (l.logger == "processor.progress") {
-			const jobElem = $(`#active-job-${l.job_id}`);
-			if (!jobElem) return;
-			$('.import-item-count', jobElem).innerText = `${l.total_items.toLocaleString()} items`;
-			$('.import-duration', jobElem).innerText = $('.import-duration').innerText = DateTime.now().diff(DateTime.fromISO(jobElem.dataset.started)).toFormat("h 'h' m 'min' s 'sec'");
+		console.log("LOG:", l);
+
+		if (l.logger == "job.status") {
+			// if this job has a parent that happens to be on the screen showing
+			// previews of its children, make sure this job is rendered so it
+			// can be updated
+			if (l.parent_job_id != null) {
+				const container = $(`#subsequent-jobs-container.job-id-${l.parent_job_id}`);
+				if (container && !$(`.job-preview.job-id-${l.id}`, container)) {
+					container.classList.remove('d-none');
+					renderJobPreview($('#subsequent-jobs-list'), l);
+				}
+			}
+
+			// add job preview to global nav dropdown
+			for (listElem of $$('.recent-jobs-list')) {
+				// don't duplicate job preview elements; normally, renderJobPreview()
+				// does this for us, but we are wrapping the container for the sake of
+				// display in the navbar dropdown, which is a list-group, so we have
+				// to check for duplicates ourselves
+				if ($(`.job-preview.job-id-${l.id}`, listElem)) {
+					continue;
+				}
+				const listItemWrapperElem = document.createElement('div');
+				listItemWrapperElem.classList.add('list-group-item');
+				renderJobPreview(listItemWrapperElem, l);
+				listElem.prepend(listItemWrapperElem);
+			}
+
+			// update UI elements that portray this job
+			jobProgressUpdate(l);
+
 			return;
 		}
-	
-		if (l.logger == "job_manager" && l.msg == 'end') {
-			updateActiveJobs();
+
+		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.id}`)) {
+			const tableElem = $(`.job-import-stream.job-id-${l.id}`);
+			const rowElem = cloneTemplate('#tpl-job-import-stream-row');
+
+			let location = l?.lat?.toFixed(4) || "";
+			if (l.lon) {
+				if (location != "") location += ", ";
+				location += l.lon.toFixed(4);
+			}
+
+			let howStored = '<span class="badge bg-red me-1"></span> Interrupted';
+			if (l.status == 'inserted') {
+				howStored = '<span class="badge bg-green me-1"></span> New';
+			} else if (l.status == 'skipped') {
+				howStored = '<span class="badge bg-secondary me-1"></span> Skipped';
+			} else if (l.status == 'updated') {
+				howStored = '<span class="badge bg-blue me-1"></span> Updated';
+			} else if (l.type == "entity") {
+				howStored = '<span class="badge bg-purple me-1"></span> Processed';
+			}
+
+			let graphType = "";
+			if (l.type == "item") {
+				graphType = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+						stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+						class="icon icon-tabler icons-tabler-outline icon-tabler-file">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+						<path d="M14 3v4a1 1 0 0 0 1 1h4" />
+						<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
+					</svg> Item`;
+			} else if (l.type == "entity") {
+				graphType = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+						stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+						class="icon icon-tabler icons-tabler-outline icon-tabler-user">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+						<path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" />
+						<path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
+					</svg> Entity`;
+			}
+
+			$('.import-stream-row-id', rowElem).innerText = l.row_id || "";
+			$('.import-stream-row-type', rowElem).innerHTML = graphType;
+			$('.import-stream-row-status', rowElem).innerHTML = howStored;
+			$('.import-stream-row-data-source', rowElem).innerText = l.data_source_name ? tlz.dataSources[l.data_source_name].title : "";
+			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "";
+			$('.import-stream-row-entity', rowElem).innerText = l.entity || "";
+			$('.import-stream-row-content', rowElem).innerText = l.preview || maxlenStr(l.filename, 25) || "";
+			$('.import-stream-row-timestamp', rowElem).innerText = l.item_timestamp ? DateTime.fromSeconds(l.item_timestamp).toLocaleString(DateTime.DATETIME_SHORT_WITH_SECONDS) : "";
+			$('.import-stream-row-location', rowElem).innerText = location;
+			// $('.import-stream-row-content-type', rowElem).innerText = l.media_type || "";
+			$('.import-stream-row-size', rowElem).innerText = humanizeBytes(l.size);
+			// $('.import-stream-row-duration', rowElem).innerText = l.duration ? betterToHuman(Duration.fromMillis(l.duration*1000), { unitDisplay: 'short' }) : "-";
+			
+			$('tbody', tableElem).prepend(rowElem);
+
+			const MAX_STREAM_TABLE_ROWS = 15;
+			for (let i = MAX_STREAM_TABLE_ROWS; i < $$('tbody tr', tableElem).length; i++) {
+				$$('tbody tr', tableElem)[i].remove();
+			}
 		}
 	};
-	logSocket.onclose = function(event) {
-		console.error("Lost connection to logger socket:", event);
-		// TODO: put UI into frozen state
-		// connect(false);
+	function lostConnection(event) {
+		// don't repeat what has already been done for this connection failure
+		if (tlz.loggerSocket.retrying) {
+			return;
+		}
+		// if a disconnect message isn't showing already, display it
+		if (!tlz.loggerSocket.modal) {
+			tlz.loggerSocket.modal = new bootstrap.Modal($('#modal-disconnected'));
+			freezePage(tlz.loggerSocket.modal);
+		}
+		// log this event, then retry after a moment
+		const logFn = event.type == "error" ? console.error : console.warn;
+		logFn("Lost connection to logger socket; retrying:", event);
+		tlz.loggerSocket.retrying = true;
+		setTimeout(connectLog, 500);
 	}
+	tlz.loggerSocket.socket.onerror = lostConnection;
+	tlz.loggerSocket.socket.onclose = lostConnection;
 }
-
 connectLog();
-
-
-
-
-
-
-
-
-
 
 
 

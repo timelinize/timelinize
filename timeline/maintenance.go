@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -36,30 +37,75 @@ import (
 func (tl *Timeline) maintenanceLoop() {
 	logger := Log.Named("maintenance")
 
-	err := tl.deleteExpiredItems(tl.ctx, logger)
+	err := tl.deleteExpiredItems(logger)
 	if err != nil {
 		logger.Error("problem deleting expired items at startup", zap.Error(err))
 	}
 
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
+	// Best practice, according to the SQLite docs:
+	//
+	// "Applications with long-lived database connections should run "PRAGMA
+	// optimize=0x10002" when the database connection first opens, then run
+	// "PRAGMA optimize" again at periodic intervals - perhaps once per day.
+	// All applications should run "PRAGMA optimize" after schema changes,
+	// especially CREATE INDEX."
+	// - https://www.sqlite.org/pragma.html#pragma_optimize
+	//
+	// We stray slightly from this guidance and just run ANALYZE in the
+	// background at startup, and on a ticker or after large imports.
+	// I found occasions where 'PRAGMA optimize' did not fix a slow query
+	// when ANALYZE did. Maybe it was just under a threshold, I dunno.
+	//
+	// https://x.com/mholt6/status/1865169910940471492
+	// --> https://x.com/carlsverre/status/1865185078067835167 (whole thread)
+	go tl.optimizeDB(logger)
+
+	deletionTicker := time.NewTicker(time.Minute)
+	defer deletionTicker.Stop()
+
+	const analyzeInterval = 8 * time.Hour
+	analyzeTicker := time.NewTicker(analyzeInterval)
+	defer analyzeTicker.Stop()
 
 	for {
 		select {
 		case <-tl.ctx.Done():
 			return
-		case <-ticker.C:
-			err := tl.deleteExpiredItems(tl.ctx, logger)
+		case <-deletionTicker.C:
+			err := tl.deleteExpiredItems(logger)
 			if err != nil {
 				logger.Error("problem deleting expired items", zap.Error(err))
 			}
+		case <-analyzeTicker.C:
+			go tl.optimizeDB(logger)
 		}
 	}
 }
 
+// optimizeDB runs ANALYZE on the database. It can be very slow.
+// Recommended to run in a goroutine.
+func (tl *Timeline) optimizeDB(logger *zap.Logger) {
+	// don't overlap if optimization is already running
+	if !atomic.CompareAndSwapInt64(tl.optimizing, 0, 1) {
+		return
+	}
+	defer atomic.StoreInt64(tl.optimizing, 0)
+
+	// TODO: I assume a read lock is all we need for ANALYZE...
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
+	logger.Info("optimizing database for performance")
+	start := time.Now()
+	_, err := tl.db.ExecContext(tl.ctx, "ANALYZE")
+	if err != nil {
+		logger.Error("analyzing database: %w", zap.Error(err))
+	}
+	logger.Info("finished optimizing database", zap.Duration("duration", time.Since(start)))
+}
+
 // deleteExpiredItems finds items marked as deleted that have passed their retention period
 // and actually erases them.
-func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) error {
+func (tl *Timeline) deleteExpiredItems(logger *zap.Logger) error {
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
@@ -72,7 +118,7 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 	// first identify which items are ready to be erased; we need their row
 	// IDs and data files (we could do the erasure in a single UPDATE query,
 	// but we do need to get their data files first so we can delete those after)
-	rowIDsToEmpty, dataFilesToDelete, err := tl.findExpiredDeletedItems(ctx, tx)
+	rowIDsToEmpty, dataFilesToDelete, err := tl.findExpiredDeletedItems(tl.ctx, tx)
 	if err != nil {
 		return fmt.Errorf("finding expired deleted items: %w", err)
 	}
@@ -81,7 +127,7 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 	}
 
 	// clear out their rows
-	err = tl.deleteDataInItemRows(ctx, tx, rowIDsToEmpty, false)
+	err = tl.deleteDataInItemRows(tl.ctx, tx, rowIDsToEmpty, false)
 	if err != nil {
 		return fmt.Errorf("erasing deleted items (before deleting data files): %w", err)
 	}
@@ -101,20 +147,6 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 		logger.Error("error when deleting data files of erased items (items have already been marked as deleted in DB)", zap.Error(err))
 	}
 
-	// delete thumbnails, if present
-	for _, itemID := range rowIDsToEmpty {
-		for _, format := range []ThumbnailType{ImageThumbnail, VideoThumbnail} {
-			thumbPath := tl.ThumbnailPath(itemID, format)
-			err = os.Remove(thumbPath)
-			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				Log.Error("unable to delete thumbnail file for erased item",
-					zap.Int64("item_id", itemID),
-					zap.String("thumbnail_file", thumbPath),
-					zap.Error(err))
-			}
-		}
-	}
-
 	if len(rowIDsToEmpty) > 0 || numFilesDeleted > 0 {
 		logger.Info("erased deleted items",
 			zap.Int("count", len(rowIDsToEmpty)),
@@ -122,6 +154,32 @@ func (tl *Timeline) deleteExpiredItems(ctx context.Context, logger *zap.Logger) 
 	}
 
 	return nil
+}
+
+func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []int64, dataFiles []string) error {
+	tl.thumbsMu.Lock()
+	defer tl.thumbsMu.Unlock()
+
+	thumbsTx, err := tl.thumbs.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning thumbnail transaction: %w", err)
+	}
+	defer thumbsTx.Rollback()
+
+	for _, itemID := range itemRowIDs {
+		_, err = thumbsTx.ExecContext(ctx, `DELETE FROM thumbnails WHERE item_id=?`, itemID)
+		if err != nil {
+			return fmt.Errorf("unable to delete thumbnail row for erased item %d: %w", itemID, err)
+		}
+	}
+	for _, dataFile := range dataFiles {
+		_, err = thumbsTx.ExecContext(ctx, `DELETE FROM thumbnails WHERE data_file=?`, dataFile)
+		if err != nil {
+			return fmt.Errorf("unable to delete thumbnail row for data file %s: %w", dataFile, err)
+		}
+	}
+
+	return thumbsTx.Commit()
 }
 
 func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (rowIDs []int64, dataFilesToDelete []string, err error) {
@@ -189,7 +247,7 @@ func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs
 	// Keep id unchanged to preserve relationships. (TODO: This could be configurable in the future.)
 	// Keep the row hashes to remember the signature(s) of what was deleted.
 	sb.WriteString(`UPDATE items
-		SET data_source_id=NULL, import_id=NULL, modified_import_id=NULL, attribute_id=NULL,
+		SET data_source_id=NULL, job_id=NULL, modified_job_id=NULL, attribute_id=NULL,
 			classification_id=NULL, original_id=NULL, original_location=NULL, intermediate_location=NULL,
 			filename=NULL, timestamp=NULL, timespan=NULL, timeframe=NULL, time_offset=NULL, time_uncertainty=NULL,
 			stored=0, modified=NULL, data_type=NULL, data_text=NULL, data_file=NULL, data_hash=NULL,

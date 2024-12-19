@@ -53,7 +53,7 @@ outer:
 }
 
 // RecentConversations loads recent conversations from the DB. It honors a select number of ItemSearchParams fields.
-func (tl *Timeline) RecentConversations(params ItemSearchParams) ([]*Conversation, error) {
+func (tl *Timeline) RecentConversations(ctx context.Context, params ItemSearchParams) ([]*Conversation, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
@@ -64,7 +64,7 @@ func (tl *Timeline) RecentConversations(params ItemSearchParams) ([]*Conversatio
 	defer tx.Rollback()
 
 	// start by loading the bare conversations, which gives us entities involved and at least one message for each
-	convosMap, err := tl.loadRecentConversations(tx, params)
+	convosMap, err := tl.loadRecentConversations(ctx, tx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func (tl *Timeline) RecentConversations(params ItemSearchParams) ([]*Conversatio
 	return conversations, tx.Commit()
 }
 
-func (tl *Timeline) loadRecentConversations(tx *sql.Tx, params ItemSearchParams) (map[string]*Conversation, error) {
+func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, params ItemSearchParams) (map[string]*Conversation, error) {
 	// keyed by hash of entities, as a unique set of entities is what
 	// distinguishes conversations from one another (TODO: or attributes rather than entities? i.e. specific phone numbers instead of people?)
 	convosMap := make(map[string]*Conversation)
@@ -258,7 +258,7 @@ func (tl *Timeline) loadRecentConversations(tx *sql.Tx, params ItemSearchParams)
 			ORDER BY items.timestamp DESC
 			LIMIT ?`
 
-		rows, err := tx.Query(q, args...)
+		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -380,7 +380,7 @@ func (tl *Timeline) LoadConversation(ctx context.Context, params ItemSearchParam
 	defer tx.Rollback()
 
 	// start by loading the bare conversations, which gives us entities involved and at least one message for each
-	results, err := tl.loadConversation(tx, params)
+	results, err := tl.loadConversation(ctx, tx, params)
 	if err != nil {
 		return SearchResults{}, err
 	}
@@ -400,7 +400,7 @@ func (tl *Timeline) LoadConversation(ctx context.Context, params ItemSearchParam
 	return sr, tx.Commit()
 }
 
-func (tl *Timeline) loadConversation(tx *sql.Tx, params ItemSearchParams) ([]*SearchResult, error) {
+func (tl *Timeline) loadConversation(ctx context.Context, tx *sql.Tx, params ItemSearchParams) ([]*SearchResult, error) {
 	// if no entities or attributes specified, no conversation can be found
 	if len(params.EntityID) == 0 && len(params.AttributeID) == 0 {
 		return []*SearchResult{}, nil
@@ -411,7 +411,7 @@ func (tl *Timeline) loadConversation(tx *sql.Tx, params ItemSearchParams) ([]*Se
 		return nil, err
 	}
 
-	rows, err := tx.Query(q, args...)
+	rows, err := tx.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -516,14 +516,24 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 	}
 	where = "WHERE " + strings.TrimPrefix(where, " AND ")
 
-	// TODO: we might not need to use root_items, we could maybe use extended_items... see if one is faster or more correct
+	// TODO: Not sure if this is needed (is it okay if "attachments" show up as part of a conversation?
+	// seems unlikely that there would be such a thing, but):
+	// To select only "root" items (items that are NOT at the end of a
+	// directed relation from another item), join in the relation values
+	// if needed, then use this WHERE clause:
+	//  ...LEFT JOIN relationships ON relationships.to_item_id = items.id
+	//     LEFT JOIN relations ON relations.id = relationships.relation_id
+	// ... WHERE (relations.directed != 1 OR relations.subordinating = 0 OR relationships.to_item_id IS NULL)
+	// (the WHERE clause can be AND'ed into an existing one)
+	// (TODO: Not sure yet if a GROUP BY items.id is needed to avoid duplicates that have multiple relations)
+
 	selects := make([]string, 0, len(params.EntityID))
 	idsForExcept := make([]string, 0, len(params.EntityID))
 	for _, entityID := range params.EntityID {
 		idsForExcept = append(idsForExcept, strconv.FormatInt(entityID, 10))
 		selects = append(selects, fmt.Sprintf(
 			`SELECT %s, entities.id, entities.name, entities.picture_file
-			FROM root_items AS items
+			FROM extended_items AS items
 			JOIN relationships ON relationships.from_item_id = items.id
 			JOIN entity_attributes from_ea ON from_ea.attribute_id = items.attribute_id
 			JOIN entity_attributes to_ea   ON to_ea.attribute_id   = relationships.to_attribute_id
@@ -537,10 +547,11 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 		// TODO: we'd have to add some joins here to get entity info...
 		selects = append(selects, fmt.Sprintf(
 			`SELECT %s, entities.id, entities.name, entities.picture_file
-			FROM root_items AS items
+			FROM extended_items AS items
 			JOIN relationships ON relationships.from_item_id = items.id
 			%s
-				AND (items.attribute_id=? OR relationships.to_attribute_id=?)`, itemDBColumns, where))
+				AND (items.attribute_id=? OR relationships.to_attribute_id=?)
+				AND (relations.directed != 1 OR relations.subordinating = 0 OR relationships.to_item_id IS NULL)`, itemDBColumns, where))
 		args = append(args, append(whereArgs, attrID, attrID)...)
 	}
 
@@ -554,7 +565,7 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 		q += fmt.Sprintf(`
 		EXCEPT
 		SELECT %s, entities.id, entities.name, entities.picture_file
-			FROM root_items AS items
+			FROM extended_items AS items
 			JOIN relationships ON relationships.from_item_id = items.id
 			JOIN entity_attributes from_ea ON from_ea.attribute_id = items.attribute_id
 			JOIN entity_attributes to_ea ON to_ea.attribute_id = relationships.to_attribute_id

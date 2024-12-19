@@ -22,6 +22,7 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -31,7 +32,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions, fsys fs.FS) error {
+func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, opt timeline.ImportParams, dirEntry timeline.DirEntry) error {
 	albumName := filepath.Base(fimp.filename)
 
 	// process files in parallel for faster imports
@@ -39,11 +40,18 @@ func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, itemChan chan
 	const maxGoroutines = 100
 	throttle := make(chan struct{}, maxGoroutines)
 
-	err := fs.WalkDir(fsys, ".", func(fpath string, d fs.DirEntry, err error) error {
-		if err := ctx.Err(); err != nil {
+	// prevent subtle bug: we spawn goroutines which send graphs down the pipeline;
+	// if we return before they finish sending a value, they'll get deadlocked
+	// since the workers are stopped once we return, meaning their send will never
+	// get received; thus, we need to wait for the goroutines to finish before we
+	// return
+	defer wg.Wait()
+
+	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
+		if err != nil {
 			return err
 		}
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if fpath == "." {
@@ -68,16 +76,20 @@ func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, itemChan chan
 				wg.Done()
 			}()
 
+			if ctx.Err() != nil {
+				return
+			}
+
 			item := &timeline.Item{
 				Content: timeline.ItemData{
 					Filename: d.Name(),
 					Data: func(_ context.Context) (io.ReadCloser, error) {
-						return fsys.Open(fpath)
+						return dirEntry.FS.Open(path.Join(dirEntry.Filename, fpath))
 					},
 				},
 			}
 
-			_, err = media.ExtractAllMetadata(opt.Log, fsys, fpath, item, timeline.MetaMergeAppend)
+			_, err = media.ExtractAllMetadata(opt.Log, dirEntry.FS, fpath, item, timeline.MetaMergeAppend)
 			if err != nil {
 				opt.Log.Warn("extracting metadata",
 					zap.String("filename", fpath),
@@ -93,7 +105,7 @@ func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, itemChan chan
 				},
 			})
 
-			itemChan <- ig
+			opt.Pipeline <- ig
 		}()
 
 		return nil
@@ -101,8 +113,6 @@ func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, itemChan chan
 	if err != nil {
 		return err
 	}
-
-	wg.Wait()
 
 	return nil
 }

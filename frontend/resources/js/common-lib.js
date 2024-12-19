@@ -138,8 +138,44 @@ const tlz = {
 		"twitter_username": "Twitter",
 		"google_location_device": "Google Location Device",
 		"url": "Website"
+	},
+
+	// counter for IDs of collapsable regions which may be dynamically created
+	collapseCounter: 0,
+
+	// keeps statistics for active jobs, keyed by job ID
+	jobStats: {},
+
+	// this will hold the connection to the server's real-time logger WebSocket and related state
+	loggerSocket: {},
+
+	// These intervals are cleared when the page freezes, and restarted when the page unfreezes.
+	// The values in this object are objects with this structure:
+	//   { set(), interval }
+	// where set() returns the result of setInterval(), and interval is the
+	// returned interval that can be cleared.
+	intervals: {
+		// Update the dynamic timestamps (and durations) every second to keep them accurate
+		dynamicTime: {
+			set() {
+				return setInterval(function() {
+					for (const elem of $$('.dynamic-time')) {
+						elem.innerText = elem._timestamp.toRelative();
+					}
+					for (const elem of $$('.dynamic-duration')) {
+						// don't use diffNow() because it's implemented backwards (durations are always negative)!
+						elem.innerText = betterToHuman(DateTime.now().diff(elem._timestamp));
+					}
+				}, 1000);
+			}
+		}
 	}
 };
+
+// set all the predefined intervals
+for (const key in tlz.intervals) {
+	tlz.intervals[key].interval = tlz.intervals[key].set();
+}
 
 get('/api/build-info').then(bi => {
 	tlz.buildInfo = bi;
@@ -522,15 +558,18 @@ function newDatePicker(opts) {
 	// prefer the "Clear" and "Apply" buttons to go at the end
 	dpOpts.buttons.push(
 		'clear',
-		{
+	);
+
+	if (!opts.noApply) {
+		dpOpts.buttons.push({
 			content() {
 				return '<b>Apply</b>';
 			},
 			onClick(dp) {
 				dp.hide();
 			}
-		}
-	);
+		});
+	}
 
 	$('.date-input', tpl).datepicker = new AirDatepicker($('.date-input', tpl), dpOpts);
 
@@ -848,6 +887,7 @@ function itemImgSrc(item, thumbnail = false) {
 		return item.data_file;
 	}
 	const params = new URLSearchParams({
+		data_id: item.data_id || "",
 		data_file: item.data_file,
 		data_type: item.data_type
 	});
@@ -958,12 +998,15 @@ function maxlenStr(str, maxLen) {
 
 
 function humanizeBytes(size) {
+	if (size == null) {
+		return "";
+	}
 	var i = size == 0 ? 0 : Math.floor(Math.log(size) / Math.log(1024));
 	return (size / Math.pow(1024, i)).toFixed(2) * 1 + ' ' + ['bytes', 'KB', 'MB', 'GB', 'TB', 'PB'][i];
 }
 
 
-// for pages like /[entities|items]/uuid/rowID
+// for pages like /[entities|items|jobs]/uuid/rowID
 function parseURIPath() {
 	let parts = window.location.pathname.split('/');
 	return {
@@ -1222,19 +1265,30 @@ function itemContentElement(item, opts) {
 					container.append(imgTag);
 				}
 			} else {
-				const loader = cloneTemplate('#loader-container');
-				$('.loading-message', loader).innerText = "Rendering preview";
+				const loaderSupercontainer = cloneTemplate('#loader-container');
+				$('.loading-message', loaderSupercontainer).innerText = "Rendering preview";
 
-				container.append(loader);
+				// prepend the img tag to the supercontainer since it's (probably)
+				// lazy-loaded, and it has to be on the DOM to try loading -- then
+				// we can fade out the loader 
+				// TODO: Make videos have the same effect
+				loaderSupercontainer.prepend(imgTag);
+
+				container.append(loaderSupercontainer);
 
 				// when the image has loaded, replace loader element with the image
 				// (imgTag might be unset if obfuscation is enabled)
 				imgTag?.addEventListener('load', function() {
+					// TODO: is this still true now that we don't replace the container? (TODO: actually, we probably should, to keep things tidy, no need to keep the "supercontainer" around. just the content)
 					// In case the caller added classes to the returned element (the container),
 					// we will need to add those to the imgTag since it will replace the container.
 					container.classList.forEach(name => imgTag.classList.add(name));
 
-					loader.parentElement.replaceWith(imgTag);
+					$('.loader-container', loaderSupercontainer).classList.add('fade-out');
+					setTimeout(function() {
+						$('.loader-container', loaderSupercontainer).remove();
+					}, 1000);
+					
 				});
 			}
 
@@ -1513,12 +1567,17 @@ function miniDisplayBookmark(items) {
 }
 
 function renderBookmarkItem(item) {
-	const el = document.createElement('div');
-	el.classList.add('bookmark', 'bookmark-fold');
-	el.append(itemContentElement(item, {
+	const container = document.createElement('div');
+	container.classList.add('card');
+	const cardBody = document.createElement('div');
+	cardBody.classList.add('card-body', 'margin-for-ribbon-top-left');
+	cardBody.append(itemContentElement(item, {
 		maxLength: 1024, // we don't want to show an entire big file on a mini-display
 	}));
-	return el;
+	const ribbonEl = document.createElement('div');
+	ribbonEl.classList.add('ribbon', 'ribbon-top', 'ribbon-start', 'ribbon-bookmark');
+	container.append(cardBody, ribbonEl);
+	return container;
 }
 
 
@@ -1999,7 +2058,10 @@ function itemPreviews(items) {
 // Entity select dropdown
 ////////////////////////////////////////////////////
 
-function newEntitySelect(elementSelector, maxItems, noWrap) {
+function newEntitySelect(element, maxItems, noWrap) {
+	if (element.tomselect) {
+		return element.tomselect;
+	}
 
 	function tomSelectRenderItemAndOption(entity, escape) {
 		const {name, attribute} = entityDisplayNameAndAttr(entity);
@@ -2014,11 +2076,7 @@ function newEntitySelect(elementSelector, maxItems, noWrap) {
 		</div>`;
 	}
 
-	if ($(elementSelector).tomselect) {
-		return $(elementSelector).tomselect;
-	}
-
-	const ts = new TomSelect(elementSelector, {
+	const ts = new TomSelect(element, {
 		valueField: "id",
 		maxItems: maxItems,
 		searchField: [

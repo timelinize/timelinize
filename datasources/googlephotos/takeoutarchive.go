@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/maruel/natural"
-	"github.com/mholt/archiver/v4"
 	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -41,10 +40,10 @@ import (
 
 const googlePhotosPath = "Takeout/Google Photos"
 
-func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions, fsys fs.FS) error {
+func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeline.ImportParams, dirEntry timeline.DirEntry) error {
 	fimp.truncatedNames = make(map[string]int)
 
-	albumFolders, err := archiver.TopDirReadDir(fsys, googlePhotosPath)
+	albumFolders, err := dirEntry.TopDirReadDir(googlePhotosPath)
 	if err != nil {
 		return fmt.Errorf("getting album list from %s: %w", googlePhotosPath, err)
 	}
@@ -72,14 +71,14 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan c
 
 		thisAlbumFolderPath := path.Join(googlePhotosPath, albumFolder.Name())
 
-		albumMeta, err := fimp.readAlbumMetadata(fsys, thisAlbumFolderPath)
+		albumMeta, err := fimp.readAlbumMetadata(dirEntry, thisAlbumFolderPath)
 		if err != nil {
 			opt.Log.Error("could not open album metadata (maybe it is in another archive?)", zap.Error(err))
 		}
 
 		// read album folder contents, then sort in what I think is the same way
 		// Google does before truncating long filenames
-		albumItems, err := archiver.TopDirReadDir(fsys, thisAlbumFolderPath)
+		albumItems, err := dirEntry.TopDirReadDir(thisAlbumFolderPath)
 		if err != nil {
 			return err
 		}
@@ -94,8 +93,8 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan c
 			return natural.Less(albumItems[i].Name(), albumItems[j].Name())
 		})
 
-		for _, dirEntry := range albumItems {
-			if err := fimp.processAlbumItem(ctx, albumMeta, thisAlbumFolderPath, dirEntry, itemChan, opt, fsys); err != nil {
+		for _, d := range albumItems {
+			if err := fimp.processAlbumItem(ctx, albumMeta, thisAlbumFolderPath, d, opt, dirEntry); err != nil {
 				return fmt.Errorf("processing album item '%s': %w", path.Join(thisAlbumFolderPath, dirEntry.Name()), err)
 			}
 		}
@@ -104,7 +103,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, itemChan c
 	return nil
 }
 
-func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumArchiveMetadata, folderPath string, d fs.DirEntry, itemChan chan<- *timeline.Graph, opt timeline.ListingOptions, fsys fs.FS) error {
+func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumArchiveMetadata, folderPath string, d fs.DirEntry, opt timeline.ImportParams, dirEntry timeline.DirEntry) error {
 	fpath := path.Join(folderPath, d.Name())
 	if err := ctx.Err(); err != nil {
 		return err
@@ -120,7 +119,7 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 		return nil
 	}
 
-	f, err := archiver.TopDirOpen(fsys, fpath)
+	f, err := dirEntry.TopDirOpen(fpath)
 	if err != nil {
 		return err
 	}
@@ -159,12 +158,12 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			return nil
 		}
 
-		mediaFilePath = fimp.determineMediaFilenameInArchive(fsys, fpath, itemMeta)
+		mediaFilePath = fimp.determineMediaFilenameInArchive(dirEntry, fpath, itemMeta)
 		opt.Log.Debug("mapped sidecar to target media file",
 			zap.String("sidecar_file", fpath),
 			zap.String("target_file", mediaFilePath))
 	} else {
-		itemMeta.source = fsys
+		itemMeta.source = dirEntry
 	}
 
 	ig := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
@@ -177,18 +176,18 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	// if item has an "-edited" variant, relate it
 	ext := path.Ext(mediaFilePath)
 	editedPath := strings.TrimSuffix(mediaFilePath, ext) + "-edited" + ext
-	if timeline.FileExistsFS(fsys, editedPath) {
+	if timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, editedPath)) {
 		mediaFilePath = editedPath
 		edited := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 		ig.ToItem(timeline.RelEdit, edited.Item)
 	}
 
-	itemChan <- ig
+	opt.Pipeline <- ig
 
 	return nil
 }
 
-func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArchiveMetadata, albumMeta albumArchiveMetadata, opt timeline.ListingOptions) *timeline.Graph {
+func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArchiveMetadata, albumMeta albumArchiveMetadata, opt timeline.ImportParams) *timeline.Graph {
 	item := &timeline.Item{
 		Classification: timeline.ClassMedia,
 		// timestamp is not set here (we prefer timestamp embedded in file itself first, below)
@@ -205,7 +204,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 			"URL:":         itemMeta.URL,
 		},
 	}
-	if itemMeta.source != nil {
+	if itemMeta.source.FS != nil {
 		if item.Content.Filename == "" {
 			// if we're on the actual media file itself, and not the metadata file,
 			// we are still likely to get the filename (mostly) right if we use the
@@ -217,7 +216,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 			item.Content.Filename = path.Base(mediaFilePath)
 		}
 		item.Content.Data = func(_ context.Context) (io.ReadCloser, error) {
-			return archiver.TopDirOpen(itemMeta.source, mediaFilePath)
+			return itemMeta.source.TopDirOpen(mediaFilePath)
 		}
 
 		// add metadata contained in the image file itself; note that this overwrites any overlapping
@@ -225,7 +224,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 		// field; however, apparently (according to the PhotoStructure devs), the timestamp in the
 		// actual photo file is often more accurate than any in a sidecar metadata file, so prefer
 		// the embedded timestamp first, and if there isn't one, then use the sidecar data
-		_, err := media.ExtractAllMetadata(opt.Log, itemMeta.source, mediaFilePath, item, timeline.MetaMergeReplaceEmpty)
+		_, err := media.ExtractAllMetadata(opt.Log, itemMeta.source.FS, path.Join(itemMeta.source.Filename, mediaFilePath), item, timeline.MetaMergeReplaceEmpty)
 		if err != nil {
 			opt.Log.Warn("extracting metadata", zap.Error(err))
 		}
@@ -300,9 +299,9 @@ func (fimp *FileImporter) archiveFilenameWithoutPositionPart() string {
 	return strings.Join(parts[:2], "-")
 }
 
-func (fimp *FileImporter) readAlbumMetadata(fsys fs.FS, albumFolderPath string) (albumArchiveMetadata, error) {
+func (fimp *FileImporter) readAlbumMetadata(d timeline.DirEntry, albumFolderPath string) (albumArchiveMetadata, error) {
 	albumMetadataFilePath := path.Join(albumFolderPath, albumMetadataFilename)
-	albumMetadataFile, err := archiver.TopDirOpen(fsys, albumMetadataFilePath)
+	albumMetadataFile, err := d.TopDirOpen(albumMetadataFilePath)
 	if err != nil {
 		return albumArchiveMetadata{}, fmt.Errorf("opening metadata file %s: %w", albumMetadataFilename, err)
 	}
@@ -389,7 +388,7 @@ type mediaArchiveMetadata struct {
 	} `json:"photoLastModifiedTime"`
 
 	parsedPhotoTakenTime time.Time
-	source               fs.FS
+	source               timeline.DirEntry // the parent DirEntry (not representing the actual file itself; the one we're starting the import from)
 }
 
 func (m mediaArchiveMetadata) location() timeline.Location {
@@ -446,7 +445,7 @@ func (m mediaArchiveMetadata) timestamp() (time.Time, error) {
 // Google Photos export truncates long filenames. This function uses a lexical approach
 // with the help of some count state to assemble the image filename that can be used to
 // read it in the archive.
-func (fimp *FileImporter) determineMediaFilenameInArchive(fsys fs.FS, jsonFilePath string, itemMeta mediaArchiveMetadata) string {
+func (fimp *FileImporter) determineMediaFilenameInArchive(dirEntry timeline.DirEntry, jsonFilePath string, itemMeta mediaArchiveMetadata) string {
 	// target media file will be in the same directory
 	dir := path.Dir(jsonFilePath)
 
@@ -472,7 +471,7 @@ func (fimp *FileImporter) determineMediaFilenameInArchive(fsys fs.FS, jsonFilePa
 		fullTruncatedName := truncatedTitleWithDir + titleExt
 
 		// if the truncated filename already exists, then we need to count that as the first "hit"
-		if fimp.truncatedNames[fullTruncatedName] == 0 && timeline.FileExistsFS(fsys, fullTruncatedName) {
+		if fimp.truncatedNames[fullTruncatedName] == 0 && timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, fullTruncatedName)) {
 			fimp.truncatedNames[fullTruncatedName]++
 		}
 

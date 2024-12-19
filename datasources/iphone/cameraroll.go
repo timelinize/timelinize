@@ -97,5 +97,5 @@ func (fimp *FileImporter) processCameraRollFile(_ context.Context, fileID, relat
 
 	media.ConnectMotionPhoto(fimp.opt.Log, fsys, relativePath, ig)
 
-	fimp.itemChan <- ig
+	fimp.opt.Pipeline <- ig
 }

@@ -1,0 +1,251 @@
+<title>Job</title>
+
+<link rel="stylesheet" href="/resources/css/job.css">
+
+<div class="page-header d-print-none text-white">
+	<div class="container-xl">
+		<div class="row g-3 align-items-center">
+			<div class="col-auto">
+				<span class="status-indicator job-status-indicator">
+					<span class="status-indicator-circle"></span>
+					<span class="status-indicator-circle"></span>
+					<span class="status-indicator-circle"></span>
+				</span>
+			</div>
+			<div class="col">
+				<h2 class="page-title job-title">
+
+				</h2>
+				<div class="text-secondary">
+					<ul class="list-inline list-inline-dots mb-0">
+						<li class="list-inline-item job-status"></li>
+						<li class="list-inline-item"><span class="job-time-basis"></span> <span class="job-time"></span>
+						</li>
+					</ul>
+				</div>
+			</div>
+			<div class="col-md-auto ms-auto d-print-none">
+				<div class="btn-list">
+					<a class="btn btn-dark job-config" data-bs-toggle="modal" data-bs-target="#modal-job-config">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon icon-tabler icons-tabler-outline icon-tabler-settings">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<path
+								d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
+							<path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+						</svg>
+						Config
+					</a>
+					<a class="btn btn-outline-danger cancel-job d-none">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon icon-tabler icons-tabler-outline icon-tabler-cancel">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+							<path d="M18.364 5.636l-12.728 12.728" />
+						</svg>
+						<span class="cancel-job-text">Cancel</span>
+					</a>
+					<a class="btn btn-primary pause-job d-none">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+							<path d="M6 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z">
+							</path>
+							<path d="M14 5m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z">
+							</path>
+						</svg>
+						<span class="pause-job-text">Pause</span>
+					</a>
+					<a class="btn btn-primary unpause-job d-none">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+							stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon icon-tabler icons-tabler-outline icon-tabler-player-play">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<path d="M7 4v16l13 -8z" />
+						</svg>
+						<span class="unpause-job-text">Resume</span>
+					</a>
+					<a class="btn btn-orange restart-job d-none">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+							stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon icon-tabler icons-tabler-outline icon-tabler-rotate">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<path d="M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5" />
+						</svg>
+						<span class="restart-job-text">Restart</span>
+					</a>
+					<a class="btn btn-primary start-job d-none">
+						<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+							stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+							class="icon icon-tabler icons-tabler-outline icon-tabler-player-play">
+							<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+							<path d="M7 4v16l13 -8z" />
+						</svg>
+						<span class="start-job-text">Start</span>
+					</a>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="page-body">
+	<div class="container-xl">
+		<div class="row row-cards">
+			<div class="col-12">
+				<div class="card">
+					<div class="card-body">
+						<div class="progress job-progress big-progress">
+							<div class="progress-bar bg-green" style="width: 0%" role="progressbar" aria-valuenow="0"
+								aria-valuemin="0" aria-valuemax="100" aria-label="0% Complete">
+								<span class="visually-hidden">0% Complete</span>
+							</div>
+						</div>
+						<div class="h2 mt-3 mb-0 text-center job-progress-text">
+
+						</div>
+						<div class="text-center job-message"></div>
+					</div>
+				</div>
+			</div>
+
+			<div class="col-md-8">
+				<div class="row row-cards">
+					<div class="col-12">
+						<div class="card" id="throughput-chart-container">
+							<div class="card-body">
+								<div class="d-flex align-items-center">
+									<div class="subheader">Mean throughput</div>
+								</div>
+								<div class="d-flex align-items-baseline">
+									<div class="h1 mb-3 me-2 throughput-rate">
+										&ndash;
+									</div>
+									<div class="me-auto">
+										<span class="d-inline-flex align-items-center lh-1">
+											/second
+										</span>
+									</div>
+								</div>
+								<div id="chart-active-job-throughput"></div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="col-md-4">
+				<div class="row row-cards">
+					
+					<div class="col-12">
+						<div class="card">
+							<div class="card-body">
+								<div class="subheader">Progress</div>
+								<div class="h3 job-progress-text-detailed">n/a</div>
+
+								<div class="subheader">Duration</div>
+								<div class="h3 job-duration">n/a</div>
+							</div>
+						</div>
+					</div>
+
+					<div id="parent-job-container" class="col-12 d-none">
+						<div class="card">
+							<div class="card-header">
+								<h3 class="card-title">Parent job</h3>
+							</div>
+							<div class="card-body">
+								<div id="parent-job-list" class="divide-y">
+									
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div id="subsequent-jobs-container" class="col-12 d-none">
+						<div class="card">
+							<div class="card-header">
+								<h3 class="card-title">Subsequent jobs</h3>
+							</div>
+							<div class="card-body">
+								<div id="subsequent-jobs-list" class="divide-y">
+
+								</div>
+							</div>
+						</div>
+					</div>
+
+				</div>
+			</div>
+
+			<div class="col-12">
+				<div class="card">
+					<div class="card-header">
+						<h3 class="card-title">Recently processed</h3>
+						<div class="text-secondary ms-3">(sampled)</div>
+					</div>						
+
+						<div class="table-responsive">
+							<table class="table card-table table-vcenter text-nowrap datatable job-import-stream">
+								<thead>
+									<tr>
+										<th class="w-1">ID</th>
+										<th class="w-1">Type</th>
+										<th>Status</th>
+										<th>Data source</th>
+										<th>Class</th>
+										<th>Entity</th>
+										<th>Content</th>
+										<th>Timestamp</th>
+										<th>Location</th>
+										<!-- <th>Content type</th> -->
+										<th>Size</th>
+										<!-- <th>Duration</th> -->
+									</tr>
+								</thead>
+								<tbody>
+
+								</tbody>
+							</table>
+						</div>
+
+				</div>
+			</div>
+
+		</div>
+	</div>
+</div>
+
+<template id="tpl-job-import-stream-row">
+	<tr>
+		<td><span class="text-secondary import-stream-row-id"></span></td>
+		<td class="import-stream-row-type"></td>
+		<td class="import-stream-row-status"></td>
+		<td class="import-stream-row-data-source"></td>
+		<td class="import-stream-row-class"></td>
+		<td class="import-stream-row-entity"></td>
+		<td class="import-stream-row-content"></td>
+		<td class="import-stream-row-timestamp"></td>
+		<td class="import-stream-row-location"></td>
+		<!-- <td class="import-stream-row-content-type"></td> -->
+		<td class="import-stream-row-size"></td>
+		<!-- <td class="import-stream-row-duration"></td> -->
+	</tr>
+</template>
+
+<div id="modal-job-config" class="modal modal-blur fade" tabindex="-1" aria-hidden="true">
+	<div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Job configuration</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			</div>
+			<div class="modal-body">
+				<pre><code class="job-config-code"></code></pre>
+			</div>
+		</div>
+	</div>
+</div>

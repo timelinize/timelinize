@@ -43,7 +43,15 @@ func makeForm(args []string) string {
 // into "foo_bar"; i.e. it strips the flag prefix
 // and standardizes its format.
 func sanitizeFlag(s string) string {
-	return strings.ReplaceAll(s[2:], "-", "_")
+	// figure out how long the dash-prefix iss
+	name := s
+	switch {
+	case strings.HasPrefix(s, "--"):
+		name = s[2:]
+	case strings.HasPrefix(s, "-"):
+		name = s[1:]
+	}
+	return strings.ReplaceAll(name, "-", "_")
 }
 
 // makeJSON parses args and encodes the data as JSON.
@@ -108,7 +116,7 @@ func traverse(obj interface{}, flagParts []string, val interface{}) (interface{}
 	// part will either be an array index ("[0]") or an object key ("foo")
 	part := flagParts[0]
 
-	if part[0] == '[' && part[len(part)-1] == ']' {
+	if len(part) > 1 && part[0] == '[' && part[len(part)-1] == ']' {
 		// part is an array index
 
 		idx, err := strconv.Atoi(part[1 : len(part)-1])
