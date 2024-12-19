@@ -121,6 +121,10 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 	estimating := ij.EstimateTotal
 
+	if ij.ProcessingOptions.Interactive != nil {
+		ij.ProcessingOptions.Interactive.Graphs = make(chan *InteractiveGraph)
+	}
+
 	var chkpt importJobCheckpoint
 	if checkpoint != nil {
 		err := json.Unmarshal(checkpoint, &chkpt)

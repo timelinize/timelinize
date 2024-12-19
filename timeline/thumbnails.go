@@ -99,19 +99,19 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 	defer wg.Wait()
 
 	for i := startIdx; i < len(tj.Tasks); i++ {
-		if err := job.Continue(); err != nil {
-			return err
-		}
-
 		// At the end of every batch, wait for all the goroutines to complete before
 		// proceeding; and once they complete, that's a good time to checkpoint
 		if i%batchSize == batchSize-1 {
 			wg.Wait()
 
 			if err := job.Checkpoint(i); err != nil {
-				job.logger.Error("failed to save checkpoint",
+				job.Logger().Error("failed to save checkpoint",
 					zap.Int("position", i),
 					zap.Error(err))
+			}
+
+			if err := job.Continue(); err != nil {
+				return err
 			}
 		}
 
@@ -123,20 +123,24 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 		go func(job *ActiveJob, task thumbnailTask) {
 			defer wg.Done()
 
+			logger := job.Logger().With(
+				zap.Int64("data_id", task.DataID),
+				zap.String("data_file", task.DataFile),
+				zap.String("data_type", task.DataType),
+				zap.String("thumbnail_type", task.ThumbType),
+			)
+
 			job.Message(task.DataFile)
 
-			_, err := task.thumbnailAndThumbhash(job.Context(), task.DataID, task.DataFile)
+			_, thash, err := task.thumbnailAndThumbhash(job.Context(), task.DataID, task.DataFile)
 			if err != nil {
 				// don't terminate the job if there's an error
 				// TODO: but we should probably note somewhere in the job's
 				// row in the DB that this error happened... maybe?
-				job.logger.Error("thumbnail/thumbhash generation failed",
-					zap.Int64("data_id", task.DataID),
-					zap.String("data_file", task.DataFile),
-					zap.String("data_type", task.DataType),
-					zap.String("thumbnail_type", task.ThumbType),
-					zap.Error(err))
+				logger.Error("thumbnail/thumbhash generation failed", zap.Error(err))
 			}
+
+			logger.Info("finished thumbnail", zap.Binary("thumb_hash", thash))
 
 			job.Progress(1)
 		}(job, task)
@@ -166,21 +170,22 @@ type thumbnailTask struct {
 
 // thumbnailAndThumbhash returns the thumbnail, even if this returns an error because thumbhash
 // generation fails, the thumbnail is still usable in yhat case.
-func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context, dataID int64, dataFile string) (Thumbnail, error) {
+func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context, dataID int64, dataFile string) (Thumbnail, []byte, error) {
 	if dataID > 0 && dataFile != "" {
 		// is the content in the DB or a file?? can't be both
 		panic("ambiguous thumbnail task given both dataID and dataFile")
 	}
 	thumb, err := task.generateAndStoreThumbnail(ctx, dataID, dataFile)
 	if err != nil {
-		return Thumbnail{}, fmt.Errorf("generating/storing thumbnail: %w", err)
+		return Thumbnail{}, nil, fmt.Errorf("generating/storing thumbnail: %w", err)
 	}
+	var thash []byte
 	if strings.HasPrefix(thumb.MediaType, "image/") {
-		if err = task.generateAndStoreThumbhash(ctx, dataID, dataFile, thumb.Content); err != nil {
-			return thumb, fmt.Errorf("generating/storing thumbhash: %w", err)
+		if thash, err = task.generateAndStoreThumbhash(ctx, dataID, dataFile, thumb.Content); err != nil {
+			return thumb, thash, fmt.Errorf("generating/storing thumbhash: %w", err)
 		}
 	}
-	return thumb, nil
+	return thumb, thash, nil
 }
 
 var thumbnailMapMu = newMapMutex()
@@ -427,10 +432,10 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 	return thumbnail, mimeType, nil
 }
 
-func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, dataID int64, dataFile string, thumb []byte) error {
+func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, dataID int64, dataFile string, thumb []byte) ([]byte, error) {
 	thash, err := task.generateThumbhash(thumb)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	task.tl.dbMu.Lock()
@@ -441,7 +446,7 @@ func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, dataID 
 	} else {
 		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_file=?`, thash, dataFile)
 	}
-	return err
+	return thash, err
 }
 
 func (thumbnailTask) generateThumbhash(thumb []byte) ([]byte, error) {
@@ -480,7 +485,7 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 			DataType:  dataType,
 			ThumbType: thumbType,
 		}
-		thumb, err = task.thumbnailAndThumbhash(ctx, itemDataID, dataFile)
+		thumb, _, err = task.thumbnailAndThumbhash(ctx, itemDataID, dataFile)
 		if err != nil {
 			return Thumbnail{}, fmt.Errorf("existing thumbnail not found, so tried generating one, but got error: %w", err)
 		}

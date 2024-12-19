@@ -607,9 +607,22 @@ func (a App) Import(params ImportParameters) (int64, error) {
 		return 0, err
 	}
 	// queue job for a brief period to allow UI to render job page first and to help
-	// user get their bearings
+	// user get their bearings, unless it's interactive: then just start right away
+	// since the user will be waiting for the first item
 	const queueDuration = 5 * time.Second
-	return tl.CreateJob(params.Job, time.Now().Add(queueDuration), 0, 0, 0)
+	scheduled := time.Now().Add(queueDuration)
+	if params.Job.ProcessingOptions.Interactive != nil {
+		scheduled = time.Time{}
+	}
+	return tl.CreateJob(params.Job, scheduled, 0, 0, 0)
+}
+
+func (a App) NextGraph(repoID string, jobID int64) (*timeline.Graph, error) {
+	tl, err := getOpenTimeline(repoID)
+	if err != nil {
+		return nil, err
+	}
+	return tl.Timeline.NextGraphFromImport(jobID)
 }
 
 func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {

@@ -147,7 +147,7 @@ func (c *customCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore
 		// always allow through, no sampling -- otherwise UI gets out of sync
 		return ce.AddCore(ent, c.Core)
 	}
-	if ent.LoggerName == "job.action" && ent.Message == "finished graph" {
+	if ent.LoggerName == "job.action" && (ent.Message == "finished graph" || ent.Message == "finished thumbnail") {
 		return c.streamCore.Check(ent, ce)
 	}
 	return c.Core.Check(ent, ce)

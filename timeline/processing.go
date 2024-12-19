@@ -33,11 +33,13 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -149,11 +151,10 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 					continue
 				}
 				if po.Interactive != nil {
-					// TODO: emit log indicating to frontend that we have a graph ready
-					// po.Interactive.Graphs <- &InteractiveGraph{
-					// 	Graph:         g,
-					// 	DataFileReady: make(chan struct{}),
-					// }
+					if err := p.interactiveGraph(ctx, g, po.Interactive); err != nil {
+						p.log.Error("sending interactive graph", zap.Error(err))
+					}
+					continue
 				}
 				addToBatch(g)
 			}
@@ -161,6 +162,107 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 	}()
 
 	return wg, ch
+}
+
+func (p *processor) interactiveGraph(ctx context.Context, g *Graph, opts *InteractiveImport) error {
+	p.assignGraphIDs(g)
+
+	p.log.Info("graph ready", zap.String("graph_id", g.ProcessingID))
+
+	// download the data from the graph in the background while we present the initial structure to the user
+	p.downloadGraphDataFiles(ctx, g, opts)
+
+	opts.Graphs <- &InteractiveGraph{
+		Graph:         g,
+		DataFileReady: make(chan struct{}),
+	}
+
+	return errors.New("TODO: WIP")
+}
+
+func (p *processor) assignGraphIDs(g *Graph) {
+	if g == nil {
+		return
+	}
+	if g.ProcessingID == "" {
+		g.ProcessingID = uuid.New().String()
+	}
+	for _, edge := range g.Edges {
+		p.assignGraphIDs(edge.From)
+		p.assignGraphIDs(edge.To)
+	}
+}
+
+func (p *processor) downloadGraphDataFiles(ctx context.Context, g *Graph, opts *InteractiveImport) error {
+	if g == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if (g.Item != nil && g.Item.Content.Data != nil) ||
+		(g.Entity != nil && g.Entity.NewPicture != nil) {
+		// TODO: do this in a goroutine... and how do we handle errors here?
+		file, err := p.openInteractiveGraphDataFile(g)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		// open the reader for either the item data or the entity picture
+		var dataReader io.ReadCloser
+		if g.Item != nil && g.Item.Content.Data != nil {
+			dataReader, err = g.Item.Content.Data(ctx)
+		} else if g.Entity != nil && g.Entity.NewPicture != nil {
+			dataReader, err = g.Entity.NewPicture(ctx)
+		}
+		if err != nil {
+			return err
+		}
+		defer dataReader.Close()
+
+		// now copy the data to the file
+		if _, err := io.Copy(file, dataReader); err != nil {
+			return err
+		}
+		if err := file.Sync(); err != nil {
+			return err
+		}
+	}
+	if g.Item != nil && g.Item.Owner.NewPicture != nil {
+		// TODO: download the item owner's profile picture too, if available (though I don't know of anywhere this happens yet)
+	}
+	for _, edge := range g.Edges {
+		if err := p.downloadGraphDataFiles(ctx, edge.From, opts); err != nil {
+			return err
+		}
+		if err := p.downloadGraphDataFiles(ctx, edge.To, opts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *processor) openInteractiveGraphDataFile(g *Graph) (*os.File, error) {
+	// We store interactive graph data files, temporarily while the user is
+	// interacting with the graph, somewhat deep in the system temp folder.
+	// It's in a system temp folder because import jobs are not typically
+	// portable; especially starting on one system and continuing on another,
+	// though I guess we could simply change the path to be something within
+	// the timeline if desired. Still, this seems more proper at least for now.
+	tmpFilePath := filepath.Join(
+		os.TempDir(),
+		"timelinize",
+		fmt.Sprintf("job-%d", p.ij.job.ID()),
+		"interactive-graphs",
+		g.ProcessingID)
+
+	// ensure folder tree exists or we're gonna have a bad time
+	if err := os.MkdirAll(filepath.Dir(tmpFilePath), 0700); err != nil {
+		return nil, err
+	}
+
+	return os.Create(tmpFilePath)
 }
 
 func (p *processor) pipeline(ctx context.Context, batch []*Graph, rs *recursiveState) error {

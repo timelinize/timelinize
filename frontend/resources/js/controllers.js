@@ -150,6 +150,12 @@ tlz.pageControllers = {
 		}
 	},
 
+	"/pages/input.html": {
+		async render() {
+			inputPageMain();
+		},
+	},
+
 	"/pages/item.html": {
 		async render() {
 			await itemPageMain();

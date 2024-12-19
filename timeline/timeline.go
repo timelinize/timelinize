@@ -742,6 +742,30 @@ func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
 	return p, tx.Commit()
 }
 
+func (tl *Timeline) NextGraphFromImport(jobID int64) (*Graph, error) {
+	tl.activeJobsMu.RLock()
+	job, ok := tl.activeJobs[jobID]
+	tl.activeJobsMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("job %d is not active", jobID)
+	}
+	job.mu.Lock()
+	state := job.currentState
+	job.mu.Unlock()
+	if state != JobStarted {
+		return nil, fmt.Errorf("job %d is not running (currently %s)", jobID, state)
+	}
+	ij, ok := job.action.(ImportJob)
+	if !ok {
+		return nil, fmt.Errorf("job %d is %T, not ImportJob", jobID, job.action)
+	}
+	if ij.ProcessingOptions.Interactive == nil {
+		return nil, fmt.Errorf("job %d is not an interactive import", jobID)
+	}
+	g := <-ij.ProcessingOptions.Interactive.Graphs
+	return g.Graph, nil
+}
+
 // DeleteOptions configures how to perform a delete.
 type DeleteOptions struct {
 	Remember     bool           `json:"remember,omitempty"`
@@ -1091,7 +1115,7 @@ type ProcessingOptions struct {
 	// Note: Some fields are described in aggregate, such as data and location.
 	ItemFieldUpdates map[string]fieldUpdatePolicy `json:"item_field_updates,omitempty"`
 
-	// TODO: WIP
+	// TODO: WIP (Should this be in importjob or processingoptions?)
 	Interactive *InteractiveImport `json:"interactive,omitempty"`
 
 	// How many items to process in one database transaction. This is a minimum value,
@@ -1106,7 +1130,12 @@ type ProcessingOptions struct {
 }
 
 type InteractiveImport struct {
-	Graphs chan<- *Graph `json:"-"`
+	Graphs chan *InteractiveGraph `json:"-"`
+}
+
+type InteractiveGraph struct {
+	Graph         *Graph
+	DataFileReady chan struct{}
 }
 
 // fieldUpdatePolicy values specify how to update a field/column of an item in the DB.

@@ -133,6 +133,11 @@ func (a *App) registerCommands() {
 			Payload: mergeEntitiesPayload{},
 			Help:    "Merge two entities together.",
 		},
+		"next-graph": {
+			Handler: a.server.handleNextGraph,
+			Method:  http.MethodGet,
+			Help:    "Gets the next graph from an interactive import.",
+		},
 		"open-repositories": {
 			Handler: a.server.handleRepos,
 			Method:  http.MethodGet,

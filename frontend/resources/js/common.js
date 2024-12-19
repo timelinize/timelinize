@@ -365,6 +365,9 @@ function connectLog() {
 		}
 
 		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.id}`)) {
+			// this page is for this import job, so display its table
+			$('.job-import-stream-container').classList.remove('d-none');
+			
 			const tableElem = $(`.job-import-stream.job-id-${l.id}`);
 			const rowElem = cloneTemplate('#tpl-job-import-stream-row');
 
@@ -422,6 +425,25 @@ function connectLog() {
 			const MAX_STREAM_TABLE_ROWS = 15;
 			for (let i = MAX_STREAM_TABLE_ROWS; i < $$('tbody tr', tableElem).length; i++) {
 				$$('tbody tr', tableElem)[i].remove();
+			}
+		} else if (l.logger == "job.action" && l.msg == "finished thumbnail" && $(`.job-thumbnail-stream.job-id-${l.id}`)) {
+			// this page is for this thumbnail job, so display its output
+			$('.job-thumbnail-stream-container').classList.remove('d-none');
+
+			
+			
+			const gridElem = $(`.job-thumbnail-stream.job-id-${l.id}`);
+			const cellElem = cloneTemplate('#tpl-job-thumbnail-stream-cell');
+
+			$('.datagrid-content', cellElem).append(itemContentElement({
+				...l,
+			}, { thumbnail: true }))
+
+			gridElem.prepend(cellElem);
+
+			const MAX_STREAM_GRID_CELLS = 12;
+			for (let i = MAX_STREAM_GRID_CELLS; i < $$('.datagrid-item', gridElem).length; i++) {
+				$$('.datagrid-item', gridElem)[i].remove();
 			}
 		}
 	};

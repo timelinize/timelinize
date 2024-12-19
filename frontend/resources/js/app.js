@@ -142,6 +142,9 @@ const app = {
 	MergeEntities(repo_id, base_entity_id, other_entity_ids) {
 		return post("/api/merge-entities", { repo_id, base_entity_id, other_entity_ids });
 	},
+	NextGraph(repo_id, job_id) {
+		return get("/api/next-graph", { repo_id, job_id });
+	},
 	OpenRepository(repo_path, create) {
 		return post("/api/open-repository", { repo_path, create });
 	},

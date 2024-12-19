@@ -24,3 +24,8 @@
 		background-position-x: var(--tblr-progress-height);
 	}
 }
+
+
+.datagrid-content .video-thumbnail {
+	width: 100%;
+}

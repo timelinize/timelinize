@@ -92,6 +92,10 @@ type Graph struct {
 
 	// represents the row ID of either the inserted/updated Item or entity/attribute
 	rowID latentID
+
+	// Used by the processing pipeline, particularly in interactive imports.
+	// THIS IS NOT FOR DATA SOURCES TO SET.
+	ProcessingID string
 }
 
 // Size returns the number of nodes in the graph
@@ -488,7 +492,7 @@ type ItemData struct {
 
 	// A function that returns a way to read the item's data. The
 	// returned ReadCloser will be closed when processing finishes.
-	Data DataFunc
+	Data DataFunc `json:"-"`
 }
 
 // isPlainTextOrMarkdown returns true if the item is declared as having

@@ -379,6 +379,7 @@ on('click', '#start-import', async event => {
 				// 	"metadata": 2,
 				// 	"location": 2
 				// }
+				interactive: $('#interactive').checked ? {} : null
 			},
 			estimate_total: $('#estimate-total').checked
 		}
@@ -403,8 +404,14 @@ on('click', '#start-import', async event => {
 		duration: 2000
 	});
 
-	// redirect to job status, I guess
-	navigateSPA(`/jobs/${repoID}/${result.job_id}`);
+	if (importParams.job.processing_options.interactive) {
+		// take user to page where they can begin their interactive import
+		navigateSPA(`/input?repo_id=${repoID}&job_id=${result.job_id}`);
+	} else {
+		// otherwise, redirect to job status, I guess
+		navigateSPA(`/jobs/${repoID}/${result.job_id}`);
+	}
+
 });
 
 function dataSourceOptions(ds) {

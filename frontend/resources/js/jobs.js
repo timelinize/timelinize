@@ -90,7 +90,8 @@ function assignJobElements(containerElem, job) {
 		#subsequent-jobs-container,
 		#parent-job-container,
 		#throughput-chart-container,
-		.job-import-stream`, containerElem)) {
+		.job-import-stream,
+		.job-thumbnail-stream`, containerElem)) {
 		elem.classList.add(jobIDClass);
 		elem.dataset.jobId = job.id;
 	}

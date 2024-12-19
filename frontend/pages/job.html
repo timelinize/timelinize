@@ -188,7 +188,7 @@
 						<div class="text-secondary ms-3">(sampled)</div>
 					</div>						
 
-						<div class="table-responsive">
+						<div class="table-responsive job-import-stream-container d-none">
 							<table class="table card-table table-vcenter text-nowrap datatable job-import-stream">
 								<thead>
 									<tr>
@@ -210,6 +210,12 @@
 
 								</tbody>
 							</table>
+						</div>
+
+						<div class="card-body job-thumbnail-stream-container d-none">
+							<div class="datagrid job-thumbnail-stream">
+								
+							</div>
 						</div>
 
 				</div>
@@ -234,6 +240,15 @@
 		<td class="import-stream-row-size"></td>
 		<!-- <td class="import-stream-row-duration"></td> -->
 	</tr>
+</template>
+
+<template id="tpl-job-thumbnail-stream-cell">
+	<div class="datagrid-item">
+		<!-- <div class="datagrid-title"></div> -->
+		<div class="datagrid-content">
+			
+		</div>
+	</div>
 </template>
 
 <div id="modal-job-config" class="modal modal-blur fade" tabindex="-1" aria-hidden="true">

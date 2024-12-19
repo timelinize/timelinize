@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -326,6 +327,16 @@ func (s *server) handleImport(w http.ResponseWriter, r *http.Request) error {
 	params := *r.Context().Value(ctxKeyPayload).(*ImportParameters)
 	jobID, err := s.app.Import(params)
 	return jsonResponse(w, map[string]any{"job_id": jobID}, err)
+}
+
+func (s *server) handleNextGraph(w http.ResponseWriter, r *http.Request) error {
+	repoID, jobIDStr := r.FormValue("repo_id"), r.FormValue("job_id")
+	jobID, err := strconv.ParseInt(jobIDStr, 10, 64)
+	if err != nil {
+		return jsonResponse(w, nil, fmt.Errorf("job ID must be an integer: %w", err))
+	}
+	graph, err := s.app.NextGraph(repoID, jobID)
+	return jsonResponse(w, graph, err)
 }
 
 func (s *server) handleSearchItems(w http.ResponseWriter, r *http.Request) error {

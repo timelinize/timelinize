@@ -325,8 +325,15 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 
 	thumbReader := bytes.NewReader(thumb.Content)
 	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
-	if obfuscate && strings.HasPrefix(thumbType, "video/") {
-		return s.transcodeVideo(r.Context(), w, "", thumbReader, obfuscate)
+	if obfuscate {
+		if strings.HasPrefix(thumbType, "image/") {
+			return Error{
+				Err:        errors.New("obfuscation mode enabled: image thumbnail can just be thumbhash"),
+				HTTPStatus: http.StatusNoContent,
+			}
+		} else if strings.HasPrefix(thumbType, "video/") {
+			return s.transcodeVideo(r.Context(), w, "", thumbReader, obfuscate)
+		}
 	}
 
 	http.ServeContent(w, r, thumb.Name, thumb.ModTime, bytes.NewReader(thumb.Content))

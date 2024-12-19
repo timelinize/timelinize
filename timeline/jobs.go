@@ -103,7 +103,8 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, 
 
 	// TODO: This log is a bit of a hack; it's to notify the UI that a new job
 	// has been created, so it can be shown in the UI if relevant; but the
-	// longer-term status logger doesn't get made until runJob...
+	// longer-term status logger doesn't get made until runJob... so we have
+	// to make a logger with the same name and many of the same fields...
 	Log.Named("job.status").Info("created",
 		zap.String("repo_id", tl.ID().String()),
 		zap.Int64("id", jobID),
@@ -806,21 +807,60 @@ func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64) ([]Job, error) 
 
 func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
 	tl.activeJobsMu.Lock()
-	job, ok := tl.activeJobs[jobID]
+	activeJob, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.Unlock()
-	if !ok {
-		return fmt.Errorf("job %d is either inactive or does not exist", jobID)
+	if ok {
+		// job is actively running -- fun! we get to cancel it,
+		// and our job is actually easier this way
+		activeJob.cancel()
+
+		// wait for job action to return; this ensures its
+		// state has been synced to the DB and it has been
+		// removed from the map of active jobs
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-activeJob.done:
+		}
+
+		return nil
 	}
 
-	job.cancel()
+	// the job is not actively running; it could have been paused
+	// from a prior execution of the program, for example; or maybe
+	// it is still queued and they just want to prevent it from
+	// running; etc, let's check the DB
 
-	// wait for job action to return; this ensures its
-	// state has been synced to the DB and it has been
-	// removed from the map of active jobs
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-job.done:
+	tl.dbMu.Lock()
+	defer tl.dbMu.Unlock()
+
+	tx, err := tl.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	job, err := tl.loadJob(ctx, tx, jobID, false)
+	if err != nil {
+		return fmt.Errorf("loading job %d from database: %w", jobID, err)
+	}
+
+	switch job.State {
+	case JobQueued, JobStarted, JobPaused, JobInterrupted:
+		// Started and Interrupted should probably not be encountered since
+		// running jobs should be active (taken care of above by canceling
+		// its context), and we should resume interrupted jobs at startup,
+		// but might as well allow them here since it's no matter
+		_, err = tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE id=?`, JobAborted, jobID) // TODO: LIMIT 1
+		if err != nil {
+			return fmt.Errorf("updating job state: %w", err)
+		}
+	default:
+		return fmt.Errorf("job %d is in state %s, which cannot be canceled", jobID, job.State)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	return nil

@@ -61,14 +61,16 @@ type Entity struct {
 	// To set a profile picture for this entity, set this field.
 	NewPicture DataFunc `json:"-"`
 
-	// Contains the path to the previously-set profile picture file
-	// relative to the repo root. NOT FOR INPUT FROM DATA SOURCES.
-	Picture *string `json:"picture,omitempty"`
-
 	// Very optional extra information about this entity.
 	Metadata Metadata `json:"metadata,omitempty"`
 
 	Attributes []Attribute `json:"attributes,omitempty"`
+
+	// THE FOLLOWING FIELDS ARE NOT TO BE SET BY DATA SOURCES.
+
+	// Contains the path to the previously-set profile picture file
+	// relative to the repo root.
+	Picture *string `json:"picture,omitempty"`
 
 	// Fields below are only for use with search or JSON serialization
 	JobID  *int64    `json:"job_id,omitempty"`
