@@ -5,23 +5,15 @@ const mutationObs = new MutationObserver(function(mutations) {
 			if (!(node instanceof HTMLElement)) continue; // skip text/whitespace nodes
 			
 			if (node.matches('.map-container')) {
-				mapIntersectionObs.observe(node);
+				tlz.mapIntersectionObs.observe(node);
 			}
 			$$('.map-container', node).forEach(el => {
-				mapIntersectionObs.observe(el);
+				tlz.mapIntersectionObs.observe(el);
 			});
 		}
-		// also stop observing them when they're removed (TODO: is this necessary?)
-		for (const node of mut.removedNodes) {
-			if (!(node instanceof HTMLElement)) continue; // skip text/whitespace nodes
-
-			if (node.matches('.map-container')) {
-				mapIntersectionObs.unobserve(el);
-			}
-			$$('.map-container', node).forEach(el => {
-				mapIntersectionObs.unobserve(el);
-			});
-		}
+		// don't unobserve removedNodes, because the intersection observer
+		// removes map containers from a set when they go out of view,
+		// and if we unobserve it can't do that, causing a memory leak;
 	}
  });
  mutationObs.observe(document, {childList: true, subtree:true});
@@ -52,7 +44,8 @@ function currentURI() {
 
 // navigateSPA changes the page. The argument should be the URI (not including scheme/host; i.e. just
 // path and optional query string) to show in the address bar (the user-friendly URI). If omitted,
-// it defaults to the path and query currently in the address bar.
+// or not a string (sometimes it is an event handler) it defaults to the path and query currently
+// in the address bar.
 async function navigateSPA(addrBarDestination) {
 	$('#page-content').classList.add('opacity0');
 
@@ -135,18 +128,18 @@ async function navigateSPA(addrBarDestination) {
 			// replace page content
 			$('#page-content').innerHTML = data;
 
-			// set up the page, and store a reference to the current page's
-			// controller, since it will be used later like when unloading it
-			tlz.currentPageController = tlz.pageControllers[destPath];
-			if (tlz.currentPageController?.load) {
-				await tlz.currentPageController.load();
-			}
-
 			// adjust page title
 			const newTitleEl = $('body title');
 			if (newTitleEl) {
 				$('head title').innerText = newTitleEl.innerText;
 				newTitleEl.remove();
+			}
+
+			// set up the page, and store a reference to the current page's
+			// controller, since it will be used later like when unloading it
+			tlz.currentPageController = tlz.pageControllers[destPath];
+			if (tlz.currentPageController?.load) {
+				await tlz.currentPageController.load();
 			}
 
 			// Render data source filter dropdowns
@@ -166,6 +159,10 @@ async function navigateSPA(addrBarDestination) {
 			if (tlz.currentPageController?.render) {
 				await tlz.currentPageController.render();
 			}
+
+			// activate custom/Bootstrap tooltips on the page
+			const tooltipList = [...$$('[data-bs-toggle="tooltip"]')].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl))
+
 
 			// hide any loading indicator (or prevent it from appearing in the first place)
 			if (slowLoadingHandle) {

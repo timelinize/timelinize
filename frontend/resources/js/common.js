@@ -482,62 +482,112 @@ connectLog();
 
 
 // This intersection observer is intended for map placeholder elements only.
-const mapIntersectionObs = new IntersectionObserver((entries, opts) => {
+tlz.mapIntersectionObs = new IntersectionObserver((entries, opts) => {
 	entries.forEach(entry => {
 		if (entry.isIntersecting) {
-
-			// when the map is rendered to the page, make sure it resizes properly, then render this map's data
-			// See https://stackoverflow.com/a/66172042/1048862 (several answers exist, most are kind of hacky)
-			var observer = new ResizeObserver(function(arg) {
-				tlz.map.resize();
-
-				// clear map data
-				tlz.map.tl_clear();
-
-				const renderMapData = function() {
-					if (entry.target.getAttribute("tl-onload")) {
-						eval(entry.target.getAttribute("tl-onload"));
-					} else if (typeof tlz.map.tl_containers.get(entry.target) === 'function') {
-						tlz.map.tl_containers.get(entry.target)();
-					}
-				};
-
-				// render new data
-				if (tlz.map.tl_isLoaded) {
-					renderMapData();
-				} else {
-					tlz.map.on('load', async () => {
-						// // Custom atmosphere styling
-						// map.setFog({
-						// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
-						// 	'high-color': 'rgb(36, 92, 223)', // Blue sky / upper atmosphere
-						// 	'horizon-blend': 0.4 // Exaggerate atmosphere (default is .1)
-						// });
-						renderMapData();
-					});
-				}
-
-				// we're done, so no need to observe anymore
-				observer.disconnect();
-			});
-			observer.observe(entry.target);
-
-			const currentPlaceholder = tlz.map._container.previousElementSibling;
-
-			if ($('.map-placeholder', entry.target)) {
-				$('.map-placeholder', entry.target).classList.add('d-none');
-			}
-			entry.target.append($('#map') || tlz.map._container);
-
-			currentPlaceholder?.classList.remove('d-none');
-
+			tlz.mapsInViewport.add(entry.target);
 		} else {
-			// TODO: anything?
+			tlz.mapsInViewport.delete(entry.target);
 		}
 	});
-}, {
-	root: null, // default is viewport
-	rootMargin: '-40% 0% -40% 0%', // center of viewport
-	threshold: 0 // percentage of element that intersects; triggers callback; must be zero for rootMargin
+	if (tlz.mapsInViewport.size == 1) {
+		moveMapInto(tlz.mapsInViewport.values().next().value);
+	}
 });
 
+
+
+
+
+// These next blocks move the map to the map container nearest the mouse pointer
+
+function getDistanceToRect(mouseX, mouseY, rect) {
+	const dx = Math.max(rect.left - mouseX, mouseX - rect.right);
+	const dy = Math.max(rect.top - mouseY, mouseY - rect.bottom);
+	return Math.sqrt(dx**2 + dy**2);
+}
+
+function getNearestMapPlaceholderElement(mouseX, mouseY) {
+	let nearestElement;
+	let nearestDistance = Infinity;
+
+	tlz.mapsInViewport.forEach(element => {
+		const rect = element.getBoundingClientRect();
+		const distance = getDistanceToRect(mouseX, mouseY, rect);
+
+		if (distance < nearestDistance) {
+			nearestDistance = distance;
+			nearestElement = element;
+		}
+	});
+
+	return nearestElement;
+}
+
+document.addEventListener('mousemove', event => {
+	if (tlz.mapsInViewport.size > 1) {
+		const nearestElement = getNearestMapPlaceholderElement(event.clientX, event.clientY);
+		moveMapInto(nearestElement);
+	}
+});
+
+function moveMapInto(mapContainerElem) {
+	if (mapContainerElem && mapContainerElem != tlz.nearestMapElem) {
+		const prevMapElem = tlz.nearestMapElem;
+		tlz.nearestMapElem = mapContainerElem;
+
+		// when the map is rendered to the page, make sure it resizes properly, then render this map's data
+		// See https://stackoverflow.com/a/66172042/1048862 (several answers exist, most are kind of hacky)
+		var observer = new ResizeObserver(function(arg) {
+			tlz.map.resize();
+
+			// clear map data
+			tlz.map.tl_clear();
+
+			const renderMapData = function() {
+				if (mapContainerElem.getAttribute("tl-onload")) {
+					eval(mapContainerElem.getAttribute("tl-onload"));
+				} else if (typeof tlz.map.tl_containers.get(mapContainerElem) === 'function') {
+					tlz.map.tl_containers.get(mapContainerElem)();
+				}
+			};
+
+			// render new data
+			if (tlz.map.tl_isLoaded) {
+				renderMapData();
+			} else {
+				tlz.map.on('load', async () => {
+					// // Custom atmosphere styling
+					// map.setFog({
+					// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
+					// 	'high-color': 'rgb(36, 92, 223)', // Blue sky / upper atmosphere
+					// 	'horizon-blend': 0.4 // Exaggerate atmosphere (default is .1)
+					// });
+					renderMapData();
+				});
+			}
+
+			// we're done, so no need to observe anymore
+			observer.disconnect();
+		});
+		observer.observe(mapContainerElem);
+
+		const currentPlaceholder = tlz.map._container.previousElementSibling;
+
+		if ($('.map-placeholder', mapContainerElem)) {
+			$('.map-placeholder', mapContainerElem).classList.add('d-none');
+		}
+		
+		mapContainerElem.append($('#map') || tlz.map._container);
+		
+		currentPlaceholder?.classList.remove('d-none');
+
+		// inform document listeners that the map has moved containers
+		document.dispatchEvent(new CustomEvent("mapMoved", {
+			detail: {
+				previousElement: prevMapElem,
+				currentElement: mapContainerElem
+			}
+		}));
+	}
+}

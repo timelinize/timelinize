@@ -33,7 +33,7 @@ type processor struct {
 	estimatedCount             *int64
 	outerLoopIdx, innerLoopIdx int
 
-	ij ImportJob
+	ij *ImportJob
 
 	ds      DataSource
 	dsRowID int64

@@ -287,7 +287,9 @@ audio {
 	box-shadow: none;
 }
 
-
+dfn {
+	text-decoration: underline dashed;
+}
 
 
 

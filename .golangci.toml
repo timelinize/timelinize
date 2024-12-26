@@ -153,7 +153,6 @@
 # TODO: This linter is broken: https://github.com/denis-tingaikin/go-header/issues/41
 [linters-settings.goheader]
 template = """
-/*
 	{{ APP_NAME }}
 	Copyright (c) {{ ORIGIN_YEAR }} {{ AUTHOR }}
 
@@ -169,7 +168,6 @@ template = """
 
 	You should have received a copy of the GNU Affero General Public License
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
 
 """
 

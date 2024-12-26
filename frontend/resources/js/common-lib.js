@@ -165,17 +165,14 @@ const tlz = {
 				}, 1000);
 			}
 		}
-	}
+	},
+
+	// these values are used for moving the map to containers
+	// closest to the cursor; the set makes the distance search
+	// more efficient by limiting it to those in the viewport
+	mapsInViewport: new Set(),
+	nearestMapElem: null
 };
-
-// set all the predefined intervals
-for (const key in tlz.intervals) {
-	tlz.intervals[key].interval = tlz.intervals[key].set();
-}
-
-get('/api/build-info').then(bi => {
-	tlz.buildInfo = bi;
-});
 
 // Icons associated with each class of item.
 tlz.itemClassIcons = {
@@ -231,7 +228,14 @@ tlz.itemClassIcons = {
 	</svg>`
 };
 
+// set all the predefined intervals
+for (const key in tlz.intervals) {
+	tlz.intervals[key].interval = tlz.intervals[key].set();
+}
 
+get('/api/build-info').then(bi => {
+	tlz.buildInfo = bi;
+});
 
 
 
@@ -254,13 +258,12 @@ tlz.itemClassIcons = {
 // TODO: Users should provide their own Mapbox tokens.
 mapboxgl.accessToken = 'pk.eyJ1IjoiZHlhbmltIiwiYSI6ImNsYXNqcDVrYjF2OGwzcG1xaDB5YmlhZmQifQ.Y6QIKhjU0NeccKS6Rs8YqA';
 
-// TODO: move this into tl object, probably?
 tlz.map = new mapboxgl.Map({
 	container: document.createElement('div'),
 	style: `mapbox://styles/mapbox/standard?optimized=true`,
 	antialias: true
 });
-tlz.map._container.id = 'map'; // the container element we specified above is stored at tlz.map._container
+tlz.map._container.id = 'map'; // the container element we specified above in the Map constructor is stored at tlz.map._container
 tlz.map.tl_navControl = new mapboxgl.NavigationControl();
 tlz.map.tl_containers = new Map(); // JS map, not geo map
 tlz.map.tl_data = {

@@ -339,6 +339,19 @@ func (s *server) handleNextGraph(w http.ResponseWriter, r *http.Request) error {
 	return jsonResponse(w, graph, err)
 }
 
+type submitGraphPayload struct {
+	RepoID string          `json:"repo_id"`
+	JobID  int64           `json:"job_id"`
+	Graph  *timeline.Graph `json:"graph"`
+	Skip   bool            `json:"skip"`
+}
+
+func (s *server) handleSubmitGraph(w http.ResponseWriter, r *http.Request) error {
+	params := *r.Context().Value(ctxKeyPayload).(*submitGraphPayload)
+	err := s.app.SubmitGraph(params.RepoID, params.JobID, params.Graph, params.Skip)
+	return jsonResponse(w, nil, err)
+}
+
 func (s *server) handleSearchItems(w http.ResponseWriter, r *http.Request) error {
 	params := r.Context().Value(ctxKeyPayload).(*timeline.ItemSearchParams)
 	results, err := s.app.SearchItems(*params)

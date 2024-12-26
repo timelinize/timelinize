@@ -594,8 +594,8 @@ func (dsCounts *dataSourceCounts) count(match timeline.DataSourceRecognition) {
 }
 
 type ImportParameters struct {
-	Repo string             `json:"repo"`
-	Job  timeline.ImportJob `json:"job"`
+	Repo string              `json:"repo"`
+	Job  *timeline.ImportJob `json:"job"`
 
 	// For external data sources: (TODO: ... figure this out)
 	// DataSource timeline.DataSource // required: Name, Title, Icon, Description
@@ -617,12 +617,20 @@ func (a App) Import(params ImportParameters) (int64, error) {
 	return tl.CreateJob(params.Job, scheduled, 0, 0, 0)
 }
 
-func (a App) NextGraph(repoID string, jobID int64) (*timeline.Graph, error) {
+func (App) NextGraph(repoID string, jobID int64) (*timeline.Graph, error) {
 	tl, err := getOpenTimeline(repoID)
 	if err != nil {
 		return nil, err
 	}
 	return tl.Timeline.NextGraphFromImport(jobID)
+}
+
+func (App) SubmitGraph(repoID string, jobID int64, g *timeline.Graph, skip bool) error {
+	tl, err := getOpenTimeline(repoID)
+	if err != nil {
+		return err
+	}
+	return tl.Timeline.SubmitGraph(jobID, g, skip)
 }
 
 func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {

@@ -743,6 +743,52 @@ func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
 }
 
 func (tl *Timeline) NextGraphFromImport(jobID int64) (*Graph, error) {
+	ij, err := tl.loadInteractiveImportJob(jobID)
+	if err != nil {
+		return nil, err
+	}
+
+	// see if graph is already being processed interactively
+	graphPath := filepath.Join(ij.tempGraphFolder(), "root.graph")
+	if FileExists(graphPath) {
+		var g *Graph
+		file, err := os.Open(graphPath)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		if err = json.NewDecoder(file).Decode(&g); err != nil {
+			return nil, err
+		}
+		return g, nil
+	}
+
+	// TODO: see if there's already one that has been received
+	g := <-ij.ProcessingOptions.Interactive.Graphs
+	return g.Graph, nil
+}
+
+func (tl *Timeline) SubmitGraph(jobID int64, g *Graph, skip bool) error {
+	ij, err := tl.loadInteractiveImportJob(jobID)
+	if err != nil {
+		return err
+	}
+	if !skip {
+		ij.pMu.Lock()
+		proc := ij.p
+		ij.pMu.Unlock()
+		if err := proc.pipeline(tl.ctx, []*Graph{g}); err != nil {
+			return err
+		}
+	}
+	graphPath := ij.tempGraphFolder()
+	if err := os.RemoveAll(graphPath); err != nil {
+		return fmt.Errorf("clearing graph's state in temp folder: %s: %w", graphPath, err)
+	}
+	return nil
+}
+
+func (tl *Timeline) loadInteractiveImportJob(jobID int64) (*ImportJob, error) {
 	tl.activeJobsMu.RLock()
 	job, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.RUnlock()
@@ -755,15 +801,14 @@ func (tl *Timeline) NextGraphFromImport(jobID int64) (*Graph, error) {
 	if state != JobStarted {
 		return nil, fmt.Errorf("job %d is not running (currently %s)", jobID, state)
 	}
-	ij, ok := job.action.(ImportJob)
+	ij, ok := job.action.(*ImportJob)
 	if !ok {
 		return nil, fmt.Errorf("job %d is %T, not ImportJob", jobID, job.action)
 	}
 	if ij.ProcessingOptions.Interactive == nil {
 		return nil, fmt.Errorf("job %d is not an interactive import", jobID)
 	}
-	g := <-ij.ProcessingOptions.Interactive.Graphs
-	return g.Graph, nil
+	return ij, nil
 }
 
 // DeleteOptions configures how to perform a delete.

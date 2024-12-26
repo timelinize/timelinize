@@ -52,11 +52,11 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, 
 
 	var name JobName
 	switch action.(type) {
-	case ImportJob:
+	case *ImportJob:
 		name = JobNameImport
-	case thumbnailJob:
+	case *thumbnailJob:
 		name = JobNameThumbnails
-	case embeddingJob:
+	case *embeddingJob:
 		name = JobNameEmbeddings
 	}
 
@@ -377,19 +377,19 @@ func (tl *Timeline) runJob(row Job) error {
 	var action JobAction
 	switch row.Name {
 	case JobNameImport:
-		var importJob ImportJob
+		var importJob *ImportJob
 		if err := json.Unmarshal([]byte(row.Config), &importJob); err != nil {
 			return fmt.Errorf("unmarshaling import job config: %w", err)
 		}
 		action = importJob
 	case JobNameThumbnails:
-		var thumbnailJob thumbnailJob
+		var thumbnailJob *thumbnailJob
 		if err := json.Unmarshal([]byte(row.Config), &thumbnailJob); err != nil {
 			return fmt.Errorf("unmarshaling thumbnail job config: %w", err)
 		}
 		action = thumbnailJob
 	case JobNameEmbeddings:
-		var embeddingJob embeddingJob
+		var embeddingJob *embeddingJob
 		if err := json.Unmarshal([]byte(row.Config), &embeddingJob); err != nil {
 			return fmt.Errorf("unmarshaling embedding job config: %w", err)
 		}

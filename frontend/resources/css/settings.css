@@ -1,0 +1,24 @@
+.boxdraw {
+	background: rgba(56, 135, 190, 0.1);
+	border: 2px solid #3887be;
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 0;
+	height: 0;
+	border-radius: 50%;
+}
+
+.mapbox-gl-draw_ctrl-draw-btn .icon,
+.icon.thicker {
+	stroke-width: 2.25;
+}
+
+#secret-location-list {
+	height: 100%;
+	overflow-y: auto;
+}
+
+.selected-location {
+	background: var(--tblr-highlight-bg);
+}

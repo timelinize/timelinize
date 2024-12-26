@@ -620,7 +620,7 @@ on('click', '#bbox-toggle', event => {
 		$('.mapboxgl-canvas-container').style.cursor = 'crosshair';
 
 		// when user clicks down on map, start drawing process
-		tlz.map.on('mousedown', mouseDown);
+		tlz.map.on('mousedown', onMouseDown);
 
 		const canvas = tlz.map.getCanvasContainer();
 
@@ -631,7 +631,7 @@ on('click', '#bbox-toggle', event => {
 		// Variable for the draw box element.
 		let box;
 
-		function mouseDown(e) {
+		function onMouseDown(e) {
 			// TODO: if space is held down (keyCode 32 -- probably needed in keyDown event), don't draw the box: pan instead
 
 			tlz.map.on('mousemove', onMouseMove);
@@ -695,7 +695,7 @@ on('click', '#bbox-toggle', event => {
 			tlz.map.dragPan.enable();
 			tlz.map.boxZoom.enable();
 
-			tlz.map.off('mousedown', mouseDown);
+			tlz.map.off('mousedown', onMouseDown);
 			tlz.map.off('mousemove', onMouseMove);
 			tlz.map.off('mouseup', onMouseUp);
 
@@ -1031,6 +1031,7 @@ function renderHeatmap() {
 }
 
 
+// Returns the distance between two coordinates in kilometers.
 // from https://stackoverflow.com/a/48805273/1048862
 // NOTE: We use [lon, lat] order because that's what Mapbox uses, so the rest of our code uses this order too.
 function haversineDistance([lon1, lat1], [lon2, lat2], miles = false) {

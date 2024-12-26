@@ -173,6 +173,12 @@ func (a *App) registerCommands() {
 			Payload: "",
 			Help:    "Returns whether the repository is empty or not.",
 		},
+		"submit-graph": {
+			Handler: a.server.handleSubmitGraph,
+			Method:  http.MethodPost,
+			Payload: submitGraphPayload{},
+			Help:    "Submits a graph for processing during an interactive import.",
+		},
 		"search-entities": {
 			Handler: a.server.handleSearchEntities,
 			Method:  http.MethodPost,

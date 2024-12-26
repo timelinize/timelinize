@@ -23,8 +23,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -62,6 +64,10 @@ type ImportJob struct {
 	newEntityCount                                              *int64
 
 	job *ActiveJob
+
+	// interactive jobs need access to the current processor to send graphs ready for processing
+	p   *processor
+	pMu *sync.Mutex
 
 	Plan              ImportPlan        `json:"plan,omitempty"`
 	ProcessingOptions ProcessingOptions `json:"processing_options,omitempty"`
@@ -110,14 +116,14 @@ func (ij ImportJob) checkpoint(estimatedSize *int64, outer, inner int, ds any) e
 // 	return
 // }
 
-func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
-	// TODO: are these racey?
+func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 	ij.job = job
 	ij.itemCount = new(int64)
 	ij.newItemCount = new(int64)
 	ij.updatedItemCount = new(int64)
 	ij.skippedItemCount = new(int64)
 	ij.newEntityCount = new(int64)
+	ij.pMu = new(sync.Mutex)
 
 	estimating := ij.EstimateTotal
 
@@ -216,6 +222,9 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 					log:      logger,
 					progress: logger.Named("progress"),
 				}
+				ij.pMu.Lock()
+				ij.p = &p
+				ij.pMu.Unlock()
 
 				// Create the file system from which this file/dir will be accessed. It must be
 				// a DeepFS since the filename might refer to a path inside an archive file.
@@ -652,6 +661,14 @@ func (ij ImportJob) generateEmbeddingsForImportedItems() {
 		ij.job.Logger().Error("creating embedding job", zap.Error(err))
 		return
 	}
+}
+
+func (ij ImportJob) tempGraphFolder() string {
+	return filepath.Join(
+		os.TempDir(),
+		"timelinize",
+		fmt.Sprintf("job-%d", ij.job.ID()),
+		"interactive")
 }
 
 // couldBeMarkdown is a very naive Markdown detector. I'm trying to avoid regexp for performance,

@@ -1,0 +1,172 @@
+<title>Settings</title>
+<link rel="stylesheet" href="/resources/css/settings.css">
+
+<!-- Page header -->
+<div class="page-header d-print-none">
+	<div class="container-xl">
+		<div class="row g-2 align-items-center">
+			<div class="col">
+				<h20 class="page-title">
+					Settings
+				</h2>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Page body -->
+<div class="page-body">
+	<div class="container-xl">
+		<div class="card">
+			<div class="row g-0">
+				<div class="col-12 col-md-3 border-end">
+					<div class="card-body settings-nav">
+						<h4 class="subheader">Application</h4>
+						<div class="list-group list-group-transparent">
+							<a href="#general" class="list-group-item list-group-item-action active">General</a>
+							<a href="#demo-mode" class="list-group-item list-group-item-action">Demo Mode</a>
+							<a href="#advanced" class="list-group-item list-group-item-action">Advanced</a>
+						</div>
+						<h4 class="subheader mt-4">Timeline</h4>
+						<div class="list-group list-group-transparent">
+							<a href="#data-source-options" class="list-group-item list-group-item-action">Data Source Options</a>
+						</div>
+					</div>
+				</div>
+				<div class="col-12 col-md-9 d-flex flex-column">
+					<div class="card-body">
+
+						<div id="general" class="settings-page d-none">
+							<h2 class="mb-4">General</h2>
+
+							<h3 class="card-title mt-4">Mapbox API Token</h3>
+							<p class="card-subtitle">
+								Use your own <a href="https://mapbox.com">Mapbox</a> account for increased availability. The free tier should suffice.
+							</p>
+							<div class="row g-2">
+								<div class="col-auto">
+									<input type="text" class="form-control w-auto" size="50" placeholder="pk.eyJ1IjoiZHlhbmltIiwiYSI6ImNtNHo0eXkzZ...">
+								</div>
+							</div>
+						</div>
+
+						<div id="demo-mode" class="settings-page d-none">
+							<h2 class="mb-4">Demo Mode</h2>
+
+							<p>
+								Demo mode obfuscates timeline data so it can be screenshotted, recorded, and shared without revealing personal information.
+							</p>
+							<ul>
+								<li>Names, phone numbers, email addresses, and other personal attributes will be random.</li>
+								<li>Text content will be replaced with gibberish.</li>
+								<li>Images and videos will be blurred. (On-the-fly video transcoding may use more resources.)</li>
+								<li>Locations will <b>NOT</b> be obfuscated except for circles drawn below.</li>
+								<li>Dates and times are <b>NOT</b> obfuscated.</li>
+								<li>Obfuscated values are mapped consistently throughout your experience. In other words, a person's name will become the same random name throughout the timeline, making conversations and other related content comprehensible.</li>
+							</ul>
+
+							<h3 class="card-title mt-4">Enable demo mode</h3>
+							<label class="form-check form-switch form-switch-lg">
+								<input class="form-check-input" type="checkbox">
+								<span class="form-check-label form-check-label-on strong">Enabled</span>
+								<span class="form-check-label form-check-label-off strong">Disabled</span>
+							</label>
+
+							<hr>
+
+							<h3 class="card-title mt-4">Data file names</h3>
+							<p class="card-subtitle">
+								When enabled, the names of data files will be obfuscated. However, these filenames are seldom displayed, and this prevents content from those files from loading. This option is primarily useful when viewing the streaming progress of an import job.
+							</p>
+							<label class="form-check">
+								<input class="form-check-input" type="checkbox">
+								<span class="form-check-label">Obfuscate file names</span>
+							</label>
+
+							<hr>
+
+							<h3 class="card-title mt-4">Locations</h3>
+							<p class="card-subtitle">
+								Obscuring location data is nuanced. Locations are obfuscated within selected radii (circles) because obfuscating all location data indiscrimately makes map data incomprehensible. Instead, location data within selected circles will be shifted by an offset, and then a random delta will be applied. This combination makes it difficult to determine the secret centroid while also mitigating <dfn data-bs-toggle="tooltip" data-bs-placement="top" title="If data points remain in the same positions relative to each other, they can be translated over the map until underlying map features (like roads) match the pattern. To prevent this, data points are each shifted randomly.">overlay attacks</dfn> which recover the true coordinates.
+							</p>
+							<p>
+								Click the <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-circle-plus-2 thicker">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+									<path d="M20.985 12.522a9 9 0 1 0 -8.475 8.464"></path>
+									<path d="M16 19h6"></path>
+									<path d="M19 16v6"></path>
+								</svg> button and then click-and-drag on the map to draw a circle around a point, starting with the center of the circle, until the circle is large enough to provide sufficient misdirection. Then give each circle a description for your own convenience.
+							</p>
+
+
+							<div class="row g-3">
+								<div class="col-8">
+									<div id="secret-location-picker">
+
+									</div>
+								</div>
+								<div class="col-4">
+									<div id="secret-location-list" class="list-group list-group-flush list-group-hoverable">
+										
+									</div>
+								</div>
+							</div>
+						</div>
+
+
+						<div id="advanced" class="settings-page d-none">
+							<h2 class="mb-4">Advanced</h2>
+
+							<h3 class="card-title mt-4">Server address</h3>
+							<p class="card-subtitle">
+								The address for the server to listen on.
+							</p>
+							<div class="row g-2">
+								<div class="col-auto">
+									<input type="text" class="form-control w-auto" value="127.0.0.1:12002" disabled>
+								</div>
+								<div class="col-auto">
+									<a href="#" class="btn">
+										Change
+									</a>
+								</div>
+							</div>
+						</div>
+
+						<div id="data-source-options" class="settings-page d-none">
+							<h2 class="mb-4">Data Source Options</h2>
+
+							
+							
+						</div>
+
+					</div>
+					<div class="card-footer bg-transparent mt-auto">
+						<div class="btn-list justify-content-end">
+							<a href="#" class="btn">
+								Cancel
+							</a>
+							<a href="#" class="btn btn-primary">
+								Save
+							</a>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<template id="tpl-secret-location">
+	<div class="list-group-item secret-location">
+		<input type="text" class="form-control mb-2 secret-location-name" placeholder="Description">
+		<div class="my-1">
+			<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-map-pin"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z" /></svg>
+			<span class="secret-location-coords"></span>
+		</div>
+		<div class="mt-1">
+			<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-line"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M6 18m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M18 6m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M7.5 16.5l9 -9" /></svg>
+			<span class="secret-location-radius"></span>
+		</div>
+	</div>
+</template>

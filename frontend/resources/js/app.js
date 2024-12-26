@@ -169,6 +169,9 @@ const app = {
 	SearchEntities(params) {
 		return post("/api/search-entities", params);
 	},
+	SubmitGraph(repo_id, job_id, graph, skip) {
+		return post("/api/submit-graph", { repo_id, job_id, graph, skip });
+	},
 	StartJob(repo_id, job_id, start_over) {
 		return post("/api/start-job", { repo_id, job_id, start_over });
 	},

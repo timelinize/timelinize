@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"path"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -422,6 +423,14 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 		var err error
 		if ir.DataType != nil {
 			extensions, err = mime.ExtensionsByType(*ir.DataType)
+			// prefer common extensions, not ".jfif" and ".f4v" or whatever
+			sort.Slice(extensions, func(i int, _ int) bool {
+				switch extensions[i] {
+				case ".jpg", ".jpeg", ".mp4", ".m4v", ".mov":
+					return true
+				}
+				return false
+			})
 		}
 		if err != nil || len(extensions) == 0 {
 			opts.Logger.Warn("no extensions for MIME type; generating a random one",

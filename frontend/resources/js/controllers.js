@@ -95,6 +95,21 @@ tlz.pageControllers = {
 		}
 	},
 
+	"/pages/settings.html": {
+		load() {
+			changeSettingsTab(window.location.hash || "#general");
+
+			const mapContainer = cloneTemplate('#map-container');
+			// add a class to identify this particular container element
+			// to remove the drawing controls and turn off some event
+			// listeners custom to this component; because when the page
+			// navigates away and this container removed from the DOM, it
+			// no longer can be referred to by its parent element(s)
+			mapContainer.classList.add('ratio-4x3', 'secret-location-picker');
+			$('#secret-location-picker').append(mapContainer);
+		}
+	},
+
 	"/pages/entities.html": {
 		async render() {
 			await entitiesPageMain();
