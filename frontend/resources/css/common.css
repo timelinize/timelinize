@@ -259,6 +259,11 @@ form .dropdown-menu {
 	display: block;
 }
 
+/* necessary after upgrading to Tabler v1.0.0-beta.21 -- not sure why though */
+.icon {
+	min-width: var(--tblr-icon-size);
+}
+
 
 
 
