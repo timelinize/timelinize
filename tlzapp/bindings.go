@@ -700,6 +700,36 @@ func (*App) LoadItemStats(statName, repoID string, params url.Values) (any, erro
 	return nil, fmt.Errorf("unknown stat name: %s", statName)
 }
 
+type Settings struct {
+	Application *Config `json:"application"`
+
+	// Map of repo ID to map of property name to value.
+	Timelines map[string]map[string]any `json:"timelines,omitempty"`
+}
+
+func (a *App) GetSettings(ctx context.Context) (Settings, error) {
+	return Settings{
+		Application: a.cfg,
+	}, nil
+}
+
+func (a *App) ChangeSettings(ctx context.Context, newSettings changeSettingsPayload) error {
+	a.cfg.Lock()
+	defer a.cfg.Unlock()
+
+	// TODO: maybe a safer way to type-assert these would be preferable... return an error if the type is invalid, rather than panicking
+	for key, val := range newSettings.Application {
+		switch key {
+		case "obfuscation.enabled":
+			a.cfg.Obfuscation.Enabled = val.(bool)
+		case "obfuscation.locations":
+			a.cfg.Obfuscation.Locations = val.([]timeline.ObfuscatedLocation)
+		}
+	}
+
+	return nil
+}
+
 // TODO: very experimental
 func (a *App) LoadRecentConversations(ctx context.Context, params timeline.ItemSearchParams) ([]*timeline.Conversation, error) {
 	tl, err := getOpenTimeline(params.Repo)

@@ -20,7 +20,7 @@ function changeSettingsTab(target) {
 
 // when the map is moved into the location picker, set up its interactive draw features;
 // and when it is removed from the location picker, reset its configuration
-document.addEventListener('mapMoved', e => {
+document.addEventListener('mapMoved', async e => {
 	if (e.detail.currentElement.matches('#secret-location-picker .map-container'))
 	{
 		// map inserted
@@ -72,6 +72,23 @@ document.addEventListener('mapMoved', e => {
 		// If no position is specified the control defaults to `top-right`. See the docs
 		// for more details: https://docs.mapbox.com/mapbox-gl-js/api/#map#addcontrol
 		tlz.map.addControl(tlz.mapDrawBar);
+
+		////////////////////////// WIP:
+
+		const settings = await app.GetSettings();
+		console.log("SETTINGS:", settings);
+
+		const obfs = settings?.application?.obfuscation;
+		$('#demo-mode-enabled').checked = obfs?.enabled == true;
+		$('#data-file-names').checked = obfs?.data_files == true;
+		if (obfs?.locations) {
+			for (const loc of settings.application.obfuscation.locations) {
+				const circle = MapboxDrawGeodesic.createCircle([loc.lon, loc.lat], loc.radius_meters/1000);
+				circle.properties.name = loc.description;
+				const featureIDs = draw.add(circle);
+				settingsMapLocObfuscationDrawCreate({features: [circle]});			
+			}
+		}
 	}
 	// when the element is no longer in the DOM, we can't use descendency selectors to match it
 	else if (e.detail.previousElement.matches('.secret-location-picker.map-container'))
@@ -101,6 +118,7 @@ function settingsMapLocObfuscationDrawCreate(e) {
 		const radius = MapboxDrawGeodesic.getCircleRadius(geojson); // kilometers
 		$('.secret-location-coords', elem).innerText = `${center[1].toFixed(4)}, ${center[0].toFixed(4)}`;
 		$('.secret-location-radius', elem).innerText = `${radius.toFixed(2)} km`;
+		$('.secret-location-name', elem).value = geojson.properties.name || "";
 	}
 
 	$('#secret-location-list').append(elem);

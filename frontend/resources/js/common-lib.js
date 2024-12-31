@@ -1635,14 +1635,14 @@ function renderMessageItem(item, options) {
 				continue;
 			const entityEl = document.createElement('div');
 			entityEl.classList.add('fw-bold');
-			entityEl.innerText = rel.to_entity.name;
+			entityEl.innerText = rel.to_entity.name || rel.to_entity.attribute.value;
 			sendersContainer.append(entityEl);
 		}
 		return sendersContainer;
 	}
 
 	const elem = cloneTemplate('#tpl-message');
-	$('.message-sender', elem).innerText = item.entity?.name;
+	$('.message-sender', elem).innerText = item.entity?.name || item.entity.attribute.value;
 	$('.message-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
 	$('.message-avatar', elem).innerHTML = avatar(true, item.entity);
 	$('.message-avatar .avatar', elem).classList.add('avatar-sm');

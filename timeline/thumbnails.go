@@ -386,15 +386,18 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 				"-t", "5",
 
 				// important to scale down the video for fast encoding
-				"-vf", "scale='min(480,iw)':-1",
+				"-vf", "scale='min(720,iw)':-1",
 
 				// libvpx is much faster than default encoder
 				"-vcodec", "libvpx",
-				"-acodec", "libvorbis",
+				// "-acodec", "libvorbis", // if keeping audio, use this
+
+				// strip audio, not necessary for thumbnail
+				"-an",
 
 				// bitrate, important quality determination
 				"-b:v", "256k", // constant bitrate, default is 256k
-				// "-crf", "40", // variable bitrate, valid range for vpx is 4-63; higher number is lower quality
+				// "-crf", "40", // variable bitrate (slower encode), valid range for vpx is 4-63; higher number is lower quality
 
 				// we are already running concurrently, so limit to just 1 CPU thread
 				"-threads", "1",

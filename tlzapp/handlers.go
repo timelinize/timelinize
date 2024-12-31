@@ -148,6 +148,26 @@ func (s *server) handleStartJob(w http.ResponseWriter, r *http.Request) error {
 	return jsonResponse(w, nil, err)
 }
 
+func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) error {
+	allSettings, err := s.app.GetSettings(r.Context())
+	if allSettings.Application != nil {
+		allSettings.Application.RLock()
+		defer allSettings.Application.RUnlock()
+	}
+	return jsonResponse(w, allSettings, err)
+}
+
+type changeSettingsPayload struct {
+	Application map[string]any            `json:"application"`
+	Timelines   map[string]map[string]any `json:"timelines"` // map of repo ID to map of setting keys to their new values
+}
+
+func (s *server) handleChangeSettings(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(changeSettingsPayload)
+	err := s.app.ChangeSettings(r.Context(), payload)
+	return jsonResponse(w, nil, err)
+}
+
 func (s *server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
 	filename := r.Context().Value(ctxKeyPayload).(*string)
 	info, err := os.Stat(*filename)

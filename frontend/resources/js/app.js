@@ -99,6 +99,9 @@ const app = {
 	CancelJobs(repo_id, job_ids) {
 		return post("/api/cancel-jobs", { repo_id, job_ids });
 	},
+	ChangeSettings(settings) {
+		return post("/api/change-settings", settings);
+	},
 	CloseRepository(repo_id) {
 		return post("/api/close-repository", repo_id);
 	},
@@ -168,6 +171,9 @@ const app = {
 	},
 	SearchEntities(params) {
 		return post("/api/search-entities", params);
+	},
+	GetSettings() {
+		return get("/api/settings");
 	},
 	SubmitGraph(repo_id, job_id, graph, skip) {
 		return post("/api/submit-graph", { repo_id, job_id, graph, skip });

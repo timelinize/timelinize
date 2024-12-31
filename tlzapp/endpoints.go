@@ -51,6 +51,12 @@ func (a *App) registerCommands() {
 			Payload: jobsPayload{},
 			Help:    "Cancels active jobs.",
 		},
+		"change-settings": {
+			Handler: a.server.handleChangeSettings,
+			Method:  http.MethodPost,
+			Payload: changeSettingsPayload{},
+			Help:    "Changes settings.",
+		},
 		"close-repository": {
 			Handler: a.server.handleCloseRepo,
 			Method:  http.MethodPost,
@@ -172,6 +178,11 @@ func (a *App) registerCommands() {
 			Method:  http.MethodPost,
 			Payload: "",
 			Help:    "Returns whether the repository is empty or not.",
+		},
+		"settings": {
+			Handler: a.server.handleSettings,
+			Method:  http.MethodGet,
+			Help:    "Returns settings for the application and opened timelines.",
 		},
 		"submit-graph": {
 			Handler: a.server.handleSubmitGraph,
