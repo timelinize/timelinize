@@ -47,6 +47,8 @@ type Config struct {
 	// compiled into the binary will be used by default.
 	WebsiteDir string `json:"website_dir,omitempty"`
 
+	MapboxAPIKey string `json:"mapbox_api_key,omitempty"`
+
 	// The folder paths of timeline repositories to open at
 	// program start.
 	Repositories []string `json:"repositories,omitempty"`
@@ -68,11 +70,17 @@ func (cfg *Config) fillDefaults() {
 	}
 }
 
-// save persists the config to disk. It locks the config, so is safe for concurrent use.
-func (cfg *Config) save() error {
+// autosave persists the config to disk by obtaining a read lock, so it is safe for concurrent use.
+func (cfg *Config) autosave() error {
 	cfg.RLock()
 	defer cfg.RUnlock()
+	if err := cfg.unsyncedSave(); err != nil {
+		return err
+	}
+	return nil
+}
 
+func (cfg *Config) unsyncedSave() error {
 	filename := DefaultConfigFilePath()
 	err := os.MkdirAll(filepath.Dir(filename), 0755)
 	if err != nil {
@@ -80,7 +88,7 @@ func (cfg *Config) save() error {
 	}
 	cfgFile, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("saving config file: %w", err)
+		return fmt.Errorf("creating config file: %w", err)
 	}
 	defer cfgFile.Close()
 	enc := json.NewEncoder(cfgFile)
@@ -89,7 +97,7 @@ func (cfg *Config) save() error {
 		return fmt.Errorf("encoding config: %w", err)
 	}
 	if cfg.log != nil {
-		cfg.log.Info("autosaved config file", zap.String("path", filename))
+		cfg.log.Info("saved config file", zap.String("path", filename))
 	}
 	return nil
 }
@@ -114,7 +122,7 @@ func (cfg *Config) syncOpenRepos() error {
 	cfg.Unlock()
 
 	if !sameOpenTimelines {
-		if err := cfg.save(); err != nil {
+		if err := cfg.autosave(); err != nil {
 			return err
 		}
 	}

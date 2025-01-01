@@ -436,7 +436,7 @@ func (a *App) openRepos() error {
 	}
 
 	// persist config so it can be used on restart
-	if err := a.cfg.save(); err != nil {
+	if err := a.cfg.autosave(); err != nil {
 		return fmt.Errorf("persisting config file: %w", err)
 	}
 

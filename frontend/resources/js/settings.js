@@ -78,6 +78,9 @@ document.addEventListener('mapMoved', async e => {
 		const settings = await app.GetSettings();
 		console.log("SETTINGS:", settings);
 
+		$('#mapbox-api-key').value = settings?.application?.mapbox_api_key || "";
+
+		// demo mode (obfuscation)
 		const obfs = settings?.application?.obfuscation;
 		$('#demo-mode-enabled').checked = obfs?.enabled == true;
 		$('#data-file-names').checked = obfs?.data_files == true;
@@ -91,7 +94,7 @@ document.addEventListener('mapMoved', async e => {
 		}
 	}
 	// when the element is no longer in the DOM, we can't use descendency selectors to match it
-	else if (e.detail.previousElement.matches('.secret-location-picker.map-container'))
+	else if (e.detail?.previousElement?.matches('.secret-location-picker.map-container'))
 	{
 		// map removed
 		
@@ -114,10 +117,10 @@ function settingsMapLocObfuscationDrawCreate(e) {
 	elem.id = "secret-location-"+geojson.id;
 
 	if (MapboxDrawGeodesic.isCircle(geojson)) {
-		const center = MapboxDrawGeodesic.getCircleCenter(geojson); // [lon, lat]
-		const radius = MapboxDrawGeodesic.getCircleRadius(geojson); // kilometers
-		$('.secret-location-coords', elem).innerText = `${center[1].toFixed(4)}, ${center[0].toFixed(4)}`;
-		$('.secret-location-radius', elem).innerText = `${radius.toFixed(2)} km`;
+		elem._center = MapboxDrawGeodesic.getCircleCenter(geojson); // [lon, lat]
+		elem._radius = MapboxDrawGeodesic.getCircleRadius(geojson); // kilometers
+		$('.secret-location-coords', elem).innerText = `${elem._center[1].toFixed(4)}, ${elem._center[0].toFixed(4)}`;
+		$('.secret-location-radius', elem).innerText = `${elem._radius.toFixed(2)} km`;
 		$('.secret-location-name', elem).value = geojson.properties.name || "";
 	}
 
@@ -130,10 +133,11 @@ function settingsMapLocObfuscationUpdate(e) {
 	// this event fires if a circle point (the center or on the circumference, like while editing
 	// the feature) is selected when the feature is deleted, but the coordinates are empty; avoid crashing
 	if (MapboxDrawGeodesic.isCircle(geojson) && geojson.geometry.coordinates.length > 0) {
-		const center = MapboxDrawGeodesic.getCircleCenter(geojson); // [lon, lat]
-		const radius = MapboxDrawGeodesic.getCircleRadius(geojson); // kilometers
-		$('.secret-location-coords', '#secret-location-'+geojson.id).innerText = `${center[1].toFixed(4)}, ${center[0].toFixed(4)}`;
-		$('.secret-location-radius', '#secret-location-'+geojson.id).innerText = `${radius.toFixed(2)} km`;
+		const elem = $('#secret-location-'+geojson.id);
+		elem._center = MapboxDrawGeodesic.getCircleCenter(geojson); // [lon, lat]
+		elem._radius = MapboxDrawGeodesic.getCircleRadius(geojson); // kilometers
+		$('.secret-location-coords', elem).innerText = `${elem._center[1].toFixed(4)}, ${elem._center[0].toFixed(4)}`;
+		$('.secret-location-radius', elem).innerText = `${elem._radius.toFixed(2)} km`;
 	}
 }
 
@@ -210,4 +214,30 @@ on('click', '.settings-nav a', e => {
 	changeSettingsTab(e.target.getAttribute('href'));
 
 	return false;
+});
+
+// save settings!
+on('click', '#submit-settings', async event => {
+	// build array of obfuscated locations
+	const locations = [];
+	$$('.secret-location').forEach(el => {
+		locations.push({
+			description: $('.secret-location-name', el).value,
+			lat: el._center[1],
+			lon: el._center[0],
+			radius: el._radius*1000
+		});
+	});
+
+	const mutatedSettings = {
+		application: {
+			"app.obfuscation.enabled":  $('#demo-mode-enabled').checked,
+			"app.obfuscation.data_files": $('#data-file-names').checked,
+			"app.obfuscation.locations": locations,
+			"app.mapbox_api_key": $('#mapbox-api-key').value
+		}
+	};
+
+	const newSettings = await app.ChangeSettings(mutatedSettings);
+	console.log("SAVE SETTINGS RESULT:", newSettings);
 });

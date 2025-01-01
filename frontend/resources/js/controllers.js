@@ -105,7 +105,7 @@ tlz.pageControllers = {
 			// listeners custom to this component; because when the page
 			// navigates away and this container removed from the DOM, it
 			// no longer can be referred to by its parent element(s)
-			mapContainer.classList.add('ratio-4x3', 'secret-location-picker');
+			mapContainer.classList.add('secret-location-picker');
 			$('#secret-location-picker').append(mapContainer);
 		}
 	},

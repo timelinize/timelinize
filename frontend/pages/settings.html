@@ -45,7 +45,7 @@
 							</p>
 							<div class="row g-2">
 								<div class="col-auto">
-									<input type="text" class="form-control w-auto" size="50" placeholder="pk.eyJ1IjoiZHlhbmltIiwiYSI6ImNtNHo0eXkzZ...">
+									<input type="text" id="mapbox-api-key" class="form-control w-auto" size="50" placeholder="pk.eyJ1IjoiZHlhbmltIiwiYSI6ImNtNHo0eXkzZ...">
 								</div>
 							</div>
 						</div>
@@ -99,13 +99,13 @@
 							</p>
 
 
-							<div class="row g-3">
+							<div class="row g-3" id="locations-row">
 								<div class="col-8">
 									<div id="secret-location-picker">
 
 									</div>
 								</div>
-								<div class="col-4">
+								<div class="col-4" id="secret-location-list-container">
 									<div id="secret-location-list" class="list-group list-group-flush list-group-hoverable">
 										
 									</div>
@@ -143,10 +143,10 @@
 					</div>
 					<div class="card-footer bg-transparent mt-auto">
 						<div class="btn-list justify-content-end">
-							<a href="#" class="btn">
+							<a class="btn">
 								Cancel
 							</a>
-							<a href="#" class="btn btn-primary">
+							<a class="btn btn-primary" id="submit-settings">
 								Save
 							</a>
 						</div>
@@ -161,11 +161,11 @@
 	<div class="list-group-item secret-location">
 		<input type="text" class="form-control mb-2 secret-location-name" placeholder="Description">
 		<div class="my-1">
-			<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-map-pin"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z" /></svg>
+			<svg title="Center" xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-map-pin"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /><path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z" /></svg>
 			<span class="secret-location-coords"></span>
 		</div>
 		<div class="mt-1">
-			<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-line"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M6 18m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M18 6m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M7.5 16.5l9 -9" /></svg>
+			<svg title="Radius" xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-line"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M6 18m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M18 6m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M7.5 16.5l9 -9" /></svg>
 			<span class="secret-location-radius"></span>
 		</div>
 	</div>

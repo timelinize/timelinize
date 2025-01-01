@@ -410,7 +410,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	// since we still want to select those specific rows even if
 	// they are, say, attachments of a message. Querying specific
 	// rows has priority over relationships.
-	rootItemsOnly := !params.Astructured || len(params.RowID) > 0
+	rootItemsOnly := !params.Astructured && len(params.RowID) == 0
 
 	// select from the extended items table so we can get a little more information
 	const itemsTable = "extended_items"

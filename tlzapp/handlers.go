@@ -19,6 +19,7 @@
 package tlzapp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -158,12 +159,12 @@ func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) error {
 }
 
 type changeSettingsPayload struct {
-	Application map[string]any            `json:"application"`
-	Timelines   map[string]map[string]any `json:"timelines"` // map of repo ID to map of setting keys to their new values
+	Application map[string]json.RawMessage            `json:"application"`
+	Timelines   map[string]map[string]json.RawMessage `json:"timelines"` // map of repo ID to map of setting keys to their new values
 }
 
 func (s *server) handleChangeSettings(w http.ResponseWriter, r *http.Request) error {
-	payload := r.Context().Value(ctxKeyPayload).(changeSettingsPayload)
+	payload := r.Context().Value(ctxKeyPayload).(*changeSettingsPayload)
 	err := s.app.ChangeSettings(r.Context(), payload)
 	return jsonResponse(w, nil, err)
 }

@@ -713,18 +713,31 @@ func (a *App) GetSettings(ctx context.Context) (Settings, error) {
 	}, nil
 }
 
-func (a *App) ChangeSettings(ctx context.Context, newSettings changeSettingsPayload) error {
+func (a *App) ChangeSettings(_ context.Context, newSettings *changeSettingsPayload) error {
 	a.cfg.Lock()
 	defer a.cfg.Unlock()
 
-	// TODO: maybe a safer way to type-assert these would be preferable... return an error if the type is invalid, rather than panicking
+	// TODO: any settings that require a server/application restart should set a flag and then we do so
+
 	for key, val := range newSettings.Application {
+		var err error
 		switch key {
-		case "obfuscation.enabled":
-			a.cfg.Obfuscation.Enabled = val.(bool)
-		case "obfuscation.locations":
-			a.cfg.Obfuscation.Locations = val.([]timeline.ObfuscatedLocation)
+		case "app.mapbox_api_key":
+			err = json.Unmarshal(val, &a.cfg.MapboxAPIKey)
+		case "app.obfuscation.enabled":
+			err = json.Unmarshal(val, &a.cfg.Obfuscation.Enabled)
+		case "app.obfuscation.locations":
+			err = json.Unmarshal(val, &a.cfg.Obfuscation.Locations)
+		case "app.obfuscation.data_files":
+			err = json.Unmarshal(val, &a.cfg.Obfuscation.DataFiles)
 		}
+		if err != nil {
+			return fmt.Errorf("saving setting %s: %w (value=%s)", key, err, string(val))
+		}
+	}
+
+	if err := a.cfg.unsyncedSave(); err != nil {
+		return fmt.Errorf("saving config: %w", err)
 	}
 
 	return nil

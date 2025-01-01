@@ -14,7 +14,16 @@
 	stroke-width: 2.25;
 }
 
-#secret-location-list {
+#locations-row {
+	height: 500px;
+}
+
+#secret-location-picker,
+#secret-location-picker .map-container {
+	height: 100%;
+}
+
+#secret-location-list-container {
 	height: 100%;
 	overflow-y: auto;
 }
