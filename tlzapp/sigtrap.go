@@ -65,14 +65,11 @@ func shutdown(exitCode int) {
 	shutdownTimelines()
 	vips.Shutdown()
 
+	appMu.Lock()
 	if app != nil {
-		if app.server.adminLn != nil {
-			app.server.adminLn.Close()
-		}
-		if app.server.remoteLn != nil {
-			app.server.adminLn.Close()
-		}
+		app.cancel()
 	}
+	appMu.Unlock()
 
 	_ = timeline.Log.Sync()
 

@@ -707,7 +707,7 @@ type Settings struct {
 	Timelines map[string]map[string]any `json:"timelines,omitempty"`
 }
 
-func (a *App) GetSettings(ctx context.Context) (Settings, error) {
+func (a *App) GetSettings(_ context.Context) (Settings, error) {
 	return Settings{
 		Application: a.cfg,
 	}, nil
@@ -717,13 +717,19 @@ func (a *App) ChangeSettings(_ context.Context, newSettings *changeSettingsPaylo
 	a.cfg.Lock()
 	defer a.cfg.Unlock()
 
-	// TODO: any settings that require a server/application restart should set a flag and then we do so
+	// some settings, when changed, may necessitate a restart of the server/app to take effect
+	var restart bool
 
 	for key, val := range newSettings.Application {
 		var err error
 		switch key {
 		case "app.mapbox_api_key":
 			err = json.Unmarshal(val, &a.cfg.MapboxAPIKey)
+		case "app.website_dir":
+			var newVal string
+			err = json.Unmarshal(val, &newVal)
+			restart = restart || newVal != a.cfg.WebsiteDir
+			a.cfg.WebsiteDir = newVal
 		case "app.obfuscation.enabled":
 			err = json.Unmarshal(val, &a.cfg.Obfuscation.Enabled)
 		case "app.obfuscation.locations":
@@ -738,6 +744,26 @@ func (a *App) ChangeSettings(_ context.Context, newSettings *changeSettingsPaylo
 
 	if err := a.cfg.unsyncedSave(); err != nil {
 		return fmt.Errorf("saving config: %w", err)
+	}
+
+	if restart {
+		go func(oldApp *App) {
+			oldApp.cancel()
+
+			newApp, err := New(context.Background(), oldApp.cfg, oldApp.embeddedWebsite)
+			if err != nil {
+				oldApp.log.Error("initializing new app", zap.Error(err))
+				return
+			}
+
+			started, err := newApp.Serve()
+			if err != nil {
+				oldApp.log.Fatal("could not start server", zap.Error(err))
+			}
+			if !started {
+				oldApp.log.Error("server not started; maybe the old listener is still bound (please report this as a bug)")
+			}
+		}(a)
 	}
 
 	return nil

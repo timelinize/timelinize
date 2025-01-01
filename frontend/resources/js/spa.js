@@ -14,6 +14,20 @@ const mutationObs = new MutationObserver(function(mutations) {
 		// don't unobserve removedNodes, because the intersection observer
 		// removes map containers from a set when they go out of view,
 		// and if we unobserve it can't do that, causing a memory leak;
+		// but we can fire mapMoved events for special-use maps that may
+		// need to reset some state or initialization, such as the map on
+		// the Demo Mode Settings page, which adds draw controls (it needs
+		// to remove them when navigating away).
+		for (const node of mut.removedNodes) {
+			if (!(node instanceof HTMLElement)) continue; // skip text/whitespace nodes
+			
+			if (node.matches('.map-container')) {
+				document.dispatchEvent(new CustomEvent("mapMoved", { detail: { previousElement: node } }));
+			}
+			$$('.map-container', node).forEach(el => {
+				document.dispatchEvent(new CustomEvent("mapMoved", { detail: { previousElement: el } }));
+			});
+		}
 	}
  });
  mutationObs.observe(document, {childList: true, subtree:true});

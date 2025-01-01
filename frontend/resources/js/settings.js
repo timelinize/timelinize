@@ -21,7 +21,7 @@ function changeSettingsTab(target) {
 // when the map is moved into the location picker, set up its interactive draw features;
 // and when it is removed from the location picker, reset its configuration
 document.addEventListener('mapMoved', async e => {
-	if (e.detail.currentElement.matches('#secret-location-picker .map-container'))
+	if (e.detail?.currentElement?.matches('#secret-location-picker .map-container'))
 	{
 		// map inserted
 
@@ -33,6 +33,7 @@ document.addEventListener('mapMoved', async e => {
 			},
 			modes
 		});
+
 		tlz.mapDrawBar = new extendDrawBar({
 			draw: draw,
 			buttons: [
@@ -73,11 +74,12 @@ document.addEventListener('mapMoved', async e => {
 		// for more details: https://docs.mapbox.com/mapbox-gl-js/api/#map#addcontrol
 		tlz.map.addControl(tlz.mapDrawBar);
 
-		////////////////////////// WIP:
+		// next, load settings and populate fields
 
 		const settings = await app.GetSettings();
 		console.log("SETTINGS:", settings);
 
+		// general
 		$('#mapbox-api-key').value = settings?.application?.mapbox_api_key || "";
 
 		// demo mode (obfuscation)
@@ -92,12 +94,14 @@ document.addEventListener('mapMoved', async e => {
 				settingsMapLocObfuscationDrawCreate({features: [circle]});			
 			}
 		}
+
+		// advanced
+		$('#website-dir').value = settings?.application?.website_dir || "";
 	}
 	// when the element is no longer in the DOM, we can't use descendency selectors to match it
 	else if (e.detail?.previousElement?.matches('.secret-location-picker.map-container'))
 	{
 		// map removed
-		
 		if (tlz.mapDrawBar) {
 			tlz.map.removeControl(tlz.mapDrawBar);
 			delete(tlz.mapDrawBar);
@@ -234,7 +238,8 @@ on('click', '#submit-settings', async event => {
 			"app.obfuscation.enabled":  $('#demo-mode-enabled').checked,
 			"app.obfuscation.data_files": $('#data-file-names').checked,
 			"app.obfuscation.locations": locations,
-			"app.mapbox_api_key": $('#mapbox-api-key').value
+			"app.mapbox_api_key": $('#mapbox-api-key').value,
+			"app.website_dir": $('#website-dir').value
 		}
 	};
 

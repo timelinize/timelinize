@@ -37,13 +37,103 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
 
-var app *App
+type App struct {
+	ctx    context.Context
+	cancel context.CancelFunc // shuts down the app
+
+	cfg *Config
+	log *zap.Logger
+
+	commands map[string]Endpoint
+
+	server   server
+	mlServer *exec.Cmd
+
+	// a reference to the embedded website assets; due to
+	// limitations in the go embed tool, it has to be
+	// in a parent directory of what is being embedded,
+	// so we pass in a reference to it for the app,
+	// mainly to pass along to a new app if the config
+	// is changed and the app is restarted
+	embeddedWebsite fs.FS
+}
+
+func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) {
+	cfg.fillDefaults()
+
+	var frontend fs.FS
+	if cfg.WebsiteDir == "" {
+		// embedded file systems have a top level folder that is annoying for us
+		// because it means all requests for these static resources need to be
+		// prefixed by the dir name, as if that's relevant!? anyway, strip it.
+		topLevelDir := "."
+		entries, err := fs.ReadDir(embeddedWebsite, ".")
+		if err == nil && len(entries) == 1 {
+			topLevelDir = entries[0].Name()
+		}
+		frontend, err = fs.Sub(embeddedWebsite, topLevelDir)
+		if err != nil {
+			return nil, fmt.Errorf("could not strip top level folder from embedded website FS: %w", err)
+		}
+	} else {
+		frontend = os.DirFS(cfg.WebsiteDir)
+	}
+
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(ctx)
+
+	newApp := &App{
+		ctx:             ctx,
+		cfg:             cfg,
+		log:             timeline.Log,
+		embeddedWebsite: embeddedWebsite,
+	}
+	newApp.server = server{
+		app:      newApp,
+		log:      newApp.log.Named("http"),
+		frontend: frontend,
+	}
+	newApp.cancel = func() {
+		// cancel the context, so anything relying on it knows to terminate
+		cancel()
+
+		// close all open timelines (TODO: Maybe they should be open on the app, not global in the timeline package?)
+		shutdownTimelines()
+
+		// stop python server (will wait for it below)
+		if err := newApp.mlServer.Process.Kill(); err != nil {
+			newApp.log.Error("could not terminate ML server", zap.Error(err))
+		}
+
+		// gracefully close the HTTP server (let existing requests finish within a timeout)
+		if newApp.server.httpServer != nil {
+			// use a different context since the one we have has been canceled
+			const shutdownTimeout = 10 * time.Second
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer shutdownCancel()
+			_ = newApp.server.httpServer.Shutdown(shutdownCtx)
+		}
+
+		// finish waiting for python server to exit
+		if state, err := newApp.mlServer.Process.Wait(); err != nil {
+			newApp.log.Error("ML server", zap.Error(err), zap.String("state", state.String()))
+		}
+	}
+	newApp.registerCommands()
+
+	appMu.Lock()
+	app = newApp
+	appMu.Unlock()
+
+	return newApp, nil
+}
 
 func (a *App) RunCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
@@ -74,7 +164,7 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 	case None:
 	}
 
-	url := "http://" + defaultAdminAddr + apiBasePath + commandName
+	url := "http://" + a.cfg.listenAddr() + apiBasePath + commandName
 
 	req, err := http.NewRequestWithContext(ctx, endpoint.Method, url, body)
 	if err != nil {
@@ -144,15 +234,15 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 // Serve serves the application server only if it is not already running
 // (possibly in another process). It returns true if it started the
 // application server, or false if it was already running.
-func (a *App) Serve(adminAddr string) (bool, error) {
+func (a *App) Serve() (bool, error) {
 	if a.serverRunning() {
 		return false, nil
 	}
-	return true, a.serve(adminAddr)
+	return true, a.serve()
 }
 
-func (a *App) MustServe(adminAddr string) error {
-	return a.serve(adminAddr)
+func (a *App) MustServe() error {
+	return a.serve()
 }
 
 // TODO: This is not ideal, but I'm just throwing this together temporarily to get us up and running quickly and easily.
@@ -219,23 +309,23 @@ func installPython(ctx context.Context) error {
 	return nil
 }
 
-func startMLServer() error {
+func (a *App) startMLServer() error {
 	// TODO: This has to be distributable somehow; maybe embed it into the binary and then write it to an application dir or something
 	cmd := exec.Command("uv", "run", "server.py")
 	cmd.Dir = "ml"
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	// TODO: a way to manage the process (stop it, etc)...
+	a.mlServer = cmd
 	return cmd.Start()
 }
 
-func (a *App) serve(adminAddr string) error {
+func (a *App) serve() error {
 	// TODO: Eventually this will be configurable, but seems like a good idea to do at first
 	if err := installPython(a.ctx); err != nil {
 		return fmt.Errorf("setting up ML environment: %w", err)
 	}
 
-	if err := startMLServer(); err != nil {
+	if err := a.startMLServer(); err != nil {
 		return fmt.Errorf("starting ML server: %w", err)
 	}
 
@@ -247,9 +337,7 @@ func (a *App) serve(adminAddr string) error {
 		return fmt.Errorf("server already running on %s", a.server.adminLn.Addr())
 	}
 
-	if adminAddr == "" {
-		adminAddr = defaultAdminAddr
-	}
+	adminAddr := a.cfg.listenAddr()
 	a.server.fillAllowedHosts(adminAddr)   // restrict allowed Host headers to mitigate DNS rebinding attacks
 	a.server.fillAllowedOrigins(adminAddr) // for CORS enforcement
 
@@ -268,7 +356,7 @@ func (a *App) serve(adminAddr string) error {
 	}
 
 	// static file server
-	a.server.staticFiles = http.FileServer(http.FS(a.frontend))
+	a.server.staticFiles = http.FileServer(http.FS(a.server.frontend))
 	addRoute("/", Endpoint{
 		Method:  http.MethodGet,
 		Handler: a.server.serveFrontend,
@@ -308,20 +396,19 @@ func (a *App) serve(adminAddr string) error {
 	// TODO: remote server (with TLS mutual auth)
 
 	a.log.Info("started admin server", zap.String("listener", ln.Addr().String()))
+	a.server.httpServer = &http.Server{
+		Handler:           a.server,
+		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    1024 * 512,
+	}
 
 	go func() {
-		server := &http.Server{
-			Handler:           a.server,
-			ReadHeaderTimeout: 10 * time.Second,
-			MaxHeaderBytes:    1024 * 512,
-		}
-		if err := server.Serve(ln); err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				// normal; the listener was closed
-				a.log.Info("stopped admin server", zap.String("listener", ln.Addr().String()))
-			} else {
-				a.log.Error("admin server failed", zap.String("listener", ln.Addr().String()), zap.Error(err))
-			}
+		err := a.server.httpServer.Serve(ln)
+		if errors.Is(err, net.ErrClosed) || errors.Is(err, http.ErrServerClosed) {
+			// normal; the listener or server was deliberately closed
+			a.log.Info("stopped server", zap.String("listener", ln.Addr().String()))
+		} else if err != nil {
+			a.log.Error("server failed", zap.String("listener", ln.Addr().String()), zap.Error(err))
 		}
 	}()
 
@@ -379,57 +466,14 @@ func (a *App) serverRunning() bool {
 	return resp.Header.Get("Server") == "Timelinize"
 }
 
-func Init(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) {
-	if app != nil {
-		return nil, errors.New("application already initialized")
-	}
-
-	// // TODO: FOR DEVELOPMENT ONLY!!
-	// cfg.WebsiteDir = "./frontend"
-
-	cfg.fillDefaults()
-
-	var frontend fs.FS
-	if cfg.WebsiteDir == "" {
-		// embedded file systems have a top level folder that is annoying for us
-		// because it means all requests for these static resources need to be
-		// prefixed by the dir name, as if that's relevant!? anyway, strip it.
-		var topLevelDir string
-		entries, err := fs.ReadDir(embeddedWebsite, ".")
-		if err == nil && len(entries) == 1 {
-			topLevelDir = entries[0].Name()
-		}
-		frontend, err = fs.Sub(embeddedWebsite, topLevelDir)
-		if err != nil {
-			return nil, fmt.Errorf("stripping top level folder from frontend FS: %w", err)
-		}
-	} else {
-		frontend = os.DirFS(cfg.WebsiteDir)
-	}
-
-	app = &App{
-		ctx:      ctx,
-		cfg:      cfg,
-		log:      timeline.Log,
-		frontend: frontend,
-	}
-	app.server = server{
-		app: app,
-		log: app.log.Named("http"),
-	}
-	app.registerCommands()
-
-	return app, nil
-}
-
 func (a *App) openRepos() error {
 	// open designated timelines; copy pointer so we don't have to acquire lock on cfg and create deadlock with OpenRepository()
 	// TODO: use race detector to verify ^
 	lastOpenedRepos := a.cfg.Repositories
 	for i, repoDir := range lastOpenedRepos {
-		_, err := app.openRepository(a.ctx, repoDir, false)
+		_, err := a.openRepository(a.ctx, repoDir, false)
 		if err != nil {
-			app.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(a.cfg.Repositories)),
+			a.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(a.cfg.Repositories)),
 				zap.Error(err),
 				zap.String("dir", repoDir))
 		}
@@ -442,66 +486,6 @@ func (a *App) openRepos() error {
 
 	return nil
 }
-
-type App struct {
-	ctx context.Context
-	cfg *Config
-	log *zap.Logger
-
-	commands map[string]Endpoint
-
-	server server // TODO: not sure if this needs to be a pointer?
-
-	frontend fs.FS
-}
-
-// func (a *App) Logger() *zap.Logger { return a.log }
-
-// func newApp(cfg *Config) *App {
-// 	appLog := timeline.Log.Named("app")
-// 	a := &App{
-// 		ctx:     context.Background(), // default in case GUI isn't used; otherwise replaced by Wails context on app startup
-// 		cfg:     cfg,
-// 		log:     appLog,
-// 		httpLog: appLog.Named("http"),
-// 	}
-// 	// TODO: ensure this works & is useful
-// 	if cfg.WebsiteDir == "" {
-// 		// serve from embedded file system (compile-time load)
-// 		a.frontend = embeddedWebsite
-// 	} else {
-// 		// serve directly from disk (request-time load)
-// 		a.frontend = os.DirFS(cfg.WebsiteDir)
-// 	}
-// 	return a
-// }
-
-// func (a *App) Run() error {
-// return wails.Run(&options.App{
-// 	Title:     "Timelinize",
-// 	Width:     1200,
-// 	Height:    800,
-// 	Frameless: runtime.GOOS != "darwin",
-// 	AssetServer: &assetserver.Options{
-// 		Assets:  a.frontend,
-// 		Handler: a.StaticWebsiteHandler(),
-// 		// Middleware: a.StaticWebsiteMiddleware,
-// 	},
-// 	Mac: &mac.Options{
-// 		TitleBar: mac.TitleBarHiddenInset(),
-// 		About: &mac.AboutInfo{
-// 			Title:   "Timelinize",
-// 			Message: "All your data, organized on your own computer.\n\n© Dyanim LLC. All rights reserved.",
-// 			Icon:    build.AppIcon,
-// 		},
-// 	},
-// 	OnStartup: func(ctx context.Context) {
-// 		a.ctx = ctx
-// 		timeline.SetWailsAppContext(ctx)
-// 	},
-// 	Bind: []any{a},
-// })
-// }
 
 // virtualResponseWriter is used in virtualized HTTP requests
 // where the handler is called directly rather than using a
@@ -523,6 +507,13 @@ func (vrw *virtualResponseWriter) WriteHeader(statusCode int) {
 func (vrw *virtualResponseWriter) Write(data []byte) (int, error) {
 	return vrw.body.Write(data)
 }
+
+// The app global instance is used mainly for properly
+// shutting down after a signal is received.
+var (
+	app   *App
+	appMu sync.Mutex
+)
 
 const lowestErrorStatus = 400
 

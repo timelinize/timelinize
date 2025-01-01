@@ -163,10 +163,14 @@ type changeSettingsPayload struct {
 	Timelines   map[string]map[string]json.RawMessage `json:"timelines"` // map of repo ID to map of setting keys to their new values
 }
 
+// TODO: I guess, "get settings" could just be this handler with an empty payload. *shrug*
 func (s *server) handleChangeSettings(w http.ResponseWriter, r *http.Request) error {
 	payload := r.Context().Value(ctxKeyPayload).(*changeSettingsPayload)
 	err := s.app.ChangeSettings(r.Context(), payload)
-	return jsonResponse(w, nil, err)
+	if err != nil {
+		return jsonResponse(w, nil, err)
+	}
+	return s.handleSettings(w, r)
 }
 
 func (s *server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
@@ -280,63 +284,6 @@ func (s *server) handleCloseRepo(w http.ResponseWriter, r *http.Request) error {
 	repoID := r.Context().Value(ctxKeyPayload).(*string)
 	return jsonResponse(w, nil, s.app.CloseRepository(*repoID))
 }
-
-// // TODO: we might need a way to "add identity"
-// func (s *server) handleAddAccount(w http.ResponseWriter, r *http.Request) error {
-// 	var payload struct {
-// 		Repo       string `json:"repo"`
-// 		DataSource string `json:"data_source"`
-// 		// Owner      timeline.Person `json:"owner"` // TODO: necessary?
-
-// 		// sometimes useful when interacting with the data
-// 		// source, like setting up account or processing
-// 		DataSourceOptions json.RawMessage `json:"data_source_options"`
-
-// 		// if true, also get authorization with data source's auth endpoint (like for API access)
-// 		Auth bool `json:"auth"`
-// 	}
-// 	err := json.NewDecoder(r.Body).Decode(&payload)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	acct, err := s.app.AddAccount(payload.Repo, payload.DataSource, payload.Auth, payload.DataSourceOptions)
-// 	return jsonResponse(w, acct, err)
-// }
-
-// TODO: revise this once we update accounts
-// func (s *server) handleGetAccounts(w http.ResponseWriter, r *http.Request) error {
-// 	var payload struct {
-// 		Repo             string  `json:"repo"`
-// 		IDs              []int64 `json:"ids"`         // optionally get specific accounts
-// 		DataSource       string  `json:"data_source"` // optionally filter by data source
-// 		ExpandDataSource bool    `json:"expand_data_source"`
-// 	}
-// 	err := json.NewDecoder(r.Body).Decode(&payload)
-// 	if err != nil {
-// 		return jsonDecodeErr(err)
-// 	}
-
-// 	allInfo, err := s.app.GetAccounts(payload.Repo, payload.IDs, payload.DataSource, payload.ExpandDataSource)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	return jsonResponse(w, allInfo)
-// }
-
-// func (s *server) handleAuthAccount(_ http.ResponseWriter, r *http.Request) error {
-// 	var payload struct {
-// 		Repo              string          `json:"repo"`
-// 		AccountID         int64           `json:"account_id"`
-// 		DataSourceOptions json.RawMessage `json:"data_source_options"`
-// 	}
-// 	err := json.NewDecoder(r.Body).Decode(&payload)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return s.app.AuthAccount(payload.Repo, payload.AccountID, payload.DataSourceOptions)
-// }
 
 func (s *server) handlePlanImport(w http.ResponseWriter, r *http.Request) error {
 	plannerOptions := *r.Context().Value(ctxKeyPayload).(*PlannerOptions)

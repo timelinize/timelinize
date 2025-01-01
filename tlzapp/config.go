@@ -37,8 +37,8 @@ import (
 type Config struct {
 	sync.RWMutex `json:"-"`
 
-	// // The listen address to bind the socket to.
-	// Listen string `json:"listen,omitempty"`
+	// The listen address to bind the socket to.
+	Listen string `json:"listen,omitempty"`
 
 	// Serves the website from this folder on disk instead of
 	// the embedded file system. This can make local, rapid
@@ -47,23 +47,37 @@ type Config struct {
 	// compiled into the binary will be used by default.
 	WebsiteDir string `json:"website_dir,omitempty"`
 
+	// The API token to use for Mapbox GL JS and tiles. The
+	// user should set this to their own to guarantee
+	// availability of the maps.
 	MapboxAPIKey string `json:"mapbox_api_key,omitempty"`
 
 	// The folder paths of timeline repositories to open at
 	// program start.
 	Repositories []string `json:"repositories,omitempty"`
 
+	// Obfuscation is often used for demonstrating the
+	// software to mask personal data and details.
 	Obfuscation timeline.ObfuscationOptions `json:"obfuscation,omitempty"`
 
 	log *zap.Logger
 }
 
+func (cfg *Config) listenAddr() string {
+	cfg.RLock()
+	defer cfg.RUnlock()
+	if envVal := os.Getenv("TLZ_ADMIN_ADDR"); envVal != "" {
+		return envVal
+	}
+	if cfg.Listen != "" {
+		return cfg.Listen
+	}
+	return defaultAdminAddr
+}
+
 func (cfg *Config) fillDefaults() {
 	cfg.Lock()
 	defer cfg.Unlock()
-	// if cfg.Listen == "" {
-	// 	cfg.Listen = defaultConfig.Listen
-	// }
 	cfg.Obfuscation.Logger = timeline.Log.Named("faker")
 	if cfg.log == nil {
 		cfg.log = timeline.Log.Named("config").With(zap.Time("loaded", time.Now()))

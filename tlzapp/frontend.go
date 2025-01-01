@@ -85,7 +85,7 @@ func (s server) serveFrontend(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 
-	if err := executeTemplate(rec, r); err != nil {
+	if err := executeTemplate(rec, r, s.app); err != nil {
 		return err
 	}
 
@@ -608,7 +608,7 @@ func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, input
 	return nil
 }
 
-func executeTemplate(rr *responseRecorder, r *http.Request) error {
+func executeTemplate(rr *responseRecorder, r *http.Request, app *App) error {
 	var data any
 	if dataFunc, ok := templateData[r.URL.Path]; ok && dataFunc != nil {
 		var err error
@@ -617,7 +617,7 @@ func executeTemplate(rr *responseRecorder, r *http.Request) error {
 			return err
 		}
 	}
-	if err := executeTemplateInBuffer(r.URL.Path, rr.Buffer(), data); err != nil {
+	if err := executeTemplateInBuffer(r.URL.Path, rr.Buffer(), data, app); err != nil {
 		// TODO: make it possible for templates to return errors with a specific status code
 		return err
 	}
@@ -625,8 +625,8 @@ func executeTemplate(rr *responseRecorder, r *http.Request) error {
 	return nil
 }
 
-func executeTemplateInBuffer(tplName string, buf *bytes.Buffer, data any) error {
-	tpl := newTemplate(tplName)
+func executeTemplateInBuffer(tplName string, buf *bytes.Buffer, data any, app *App) error {
+	tpl := newTemplate(tplName, app)
 
 	_, err := tpl.Parse(buf.String())
 	if err != nil {
@@ -638,7 +638,7 @@ func executeTemplateInBuffer(tplName string, buf *bytes.Buffer, data any) error 
 	return tpl.Execute(buf, data)
 }
 
-func newTemplate(tplName string) *template.Template {
+func newTemplate(tplName string, app *App) *template.Template {
 	tpl := template.New(tplName).Option("missingkey=zero")
 
 	// add sprig library
@@ -648,7 +648,7 @@ func newTemplate(tplName string) *template.Template {
 	tpl.Funcs(template.FuncMap{
 		"N":       tplFuncIntIter,
 		"now":     time.Now,
-		"include": tplFuncInclude,
+		"include": app.tplFuncInclude,
 	})
 
 	return tpl
@@ -662,17 +662,17 @@ func tplFuncIntIter(n int) []struct{} {
 // and renders it in place. Note that included files are NOT escaped, so you
 // should only include trusted files. If it is not trusted, be sure to use
 // escaping functions in your template.
-func tplFuncInclude(filename string) (string, error) {
+func (a *App) tplFuncInclude(filename string) (string, error) {
 	bodyBuf := bufPool.Get().(*bytes.Buffer)
 	bodyBuf.Reset()
 	defer bufPool.Put(bodyBuf)
 
-	err := readFileToBuffer(http.FS(app.frontend), filename, bodyBuf)
+	err := readFileToBuffer(http.FS(a.server.frontend), filename, bodyBuf)
 	if err != nil {
 		return "", err
 	}
 
-	err = executeTemplateInBuffer(filename, bodyBuf, nil)
+	err = executeTemplateInBuffer(filename, bodyBuf, nil, a)
 	if err != nil {
 		return "", err
 	}

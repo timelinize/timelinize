@@ -532,62 +532,65 @@ document.addEventListener('mousemove', event => {
 });
 
 function moveMapInto(mapContainerElem) {
-	if (mapContainerElem && mapContainerElem != tlz.nearestMapElem) {
-		const prevMapElem = tlz.nearestMapElem;
-		tlz.nearestMapElem = mapContainerElem;
-
-		// when the map is rendered to the page, make sure it resizes properly, then render this map's data
-		// See https://stackoverflow.com/a/66172042/1048862 (several answers exist, most are kind of hacky)
-		var observer = new ResizeObserver(function(arg) {
-			tlz.map.resize();
-
-			// clear map data
-			tlz.map.tl_clear();
-
-			const renderMapData = function() {
-				if (mapContainerElem.getAttribute("tl-onload")) {
-					eval(mapContainerElem.getAttribute("tl-onload"));
-				} else if (typeof tlz.map.tl_containers.get(mapContainerElem) === 'function') {
-					tlz.map.tl_containers.get(mapContainerElem)();
-				}
-			};
-
-			// render new data
-			if (tlz.map.tl_isLoaded) {
-				renderMapData();
-			} else {
-				tlz.map.on('load', async () => {
-					// // Custom atmosphere styling
-					// map.setFog({
-					// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
-					// 	'high-color': 'rgb(36, 92, 223)', // Blue sky / upper atmosphere
-					// 	'horizon-blend': 0.4 // Exaggerate atmosphere (default is .1)
-					// });
-					renderMapData();
-				});
-			}
-
-			// we're done, so no need to observe anymore
-			observer.disconnect();
-		});
-		observer.observe(mapContainerElem);
-
-		const currentPlaceholder = tlz.map._container.previousElementSibling;
-
-		if ($('.map-placeholder', mapContainerElem)) {
-			$('.map-placeholder', mapContainerElem).classList.add('d-none');
-		}
-		
-		mapContainerElem.append($('#map') || tlz.map._container);
-		
-		currentPlaceholder?.classList.remove('d-none');
-
-		// inform document listeners that the map has moved containers
-		document.dispatchEvent(new CustomEvent("mapMoved", {
-			detail: {
-				previousElement: prevMapElem,
-				currentElement: mapContainerElem
-			}
-		}));
+	// no-op if there is nothing to move the map into, or if it's the same element
+	if (!mapContainerElem || mapContainerElem == tlz.nearestMapElem) {
+		return;
 	}
+	
+	const prevMapElem = tlz.nearestMapElem;
+	tlz.nearestMapElem = mapContainerElem;
+
+	// when the map is rendered to the page, make sure it resizes properly, then render this map's data
+	// See https://stackoverflow.com/a/66172042/1048862 (several answers exist, most are kind of hacky)
+	var observer = new ResizeObserver(function(arg) {
+		tlz.map.resize();
+
+		// clear map data
+		tlz.map.tl_clear();
+
+		const renderMapData = function() {
+			if (mapContainerElem.getAttribute("tl-onload")) {
+				eval(mapContainerElem.getAttribute("tl-onload"));
+			} else if (typeof tlz.map.tl_containers.get(mapContainerElem) === 'function') {
+				tlz.map.tl_containers.get(mapContainerElem)();
+			}
+		};
+
+		// render new data
+		if (tlz.map.tl_isLoaded) {
+			renderMapData();
+		} else {
+			tlz.map.on('load', async () => {
+				// // Custom atmosphere styling
+				// map.setFog({
+				// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
+				// 	'high-color': 'rgb(36, 92, 223)', // Blue sky / upper atmosphere
+				// 	'horizon-blend': 0.4 // Exaggerate atmosphere (default is .1)
+				// });
+				renderMapData();
+			});
+		}
+
+		// we're done, so no need to observe anymore
+		observer.disconnect();
+	});
+	observer.observe(mapContainerElem);
+
+	const currentPlaceholder = tlz.map._container.previousElementSibling;
+
+	if ($('.map-placeholder', mapContainerElem)) {
+		$('.map-placeholder', mapContainerElem).classList.add('d-none');
+	}
+	
+	mapContainerElem.append($('#map') || tlz.map._container);
+	
+	currentPlaceholder?.classList.remove('d-none');
+
+	// inform document listeners that the map has moved containers
+	document.dispatchEvent(new CustomEvent("mapMoved", {
+		detail: {
+			previousElement: prevMapElem,
+			currentElement: mapContainerElem
+		}
+	}));
 }
