@@ -207,26 +207,31 @@ on('click', '.settings-nav a', e => {
 
 // save settings!
 on('click', '#submit-settings', async event => {
-	// build array of obfuscated locations
-	const locations = [];
-	$$('.secret-location').forEach(el => {
-		locations.push({
-			description: $('.secret-location-name', el).value,
-			lat: el._center[1],
-			lon: el._center[0],
-			radius: el._radius*1000
-		});
-	});
-
 	const mutatedSettings = {
 		application: {
 			"app.obfuscation.enabled":  $('#demo-mode-enabled').checked,
 			"app.obfuscation.data_files": $('#data-file-names').checked,
-			"app.obfuscation.locations": locations,
 			"app.mapbox_api_key": $('#mapbox-api-key').value,
 			"app.website_dir": $('#website-dir').value
 		}
 	};
+
+	// only add the locations key to the object if locations were rendered, which only
+	// happens if the location obfuscation map comes into view; otherwise we could
+	// wipe out all configured locations if we submit this value as empty or null!
+	if (tlz.mapDrawBar) {
+		// build array of obfuscated locations
+		const locations = [];
+		$$('.secret-location').forEach(el => {
+			locations.push({
+				description: $('.secret-location-name', el).value,
+				lat: el._center[1],
+				lon: el._center[0],
+				radius: el._radius*1000
+			});
+		});
+		mutatedSettings.application["app.obfuscation.locations"] = locations;
+	}
 
 	// when saving settings, the new settings are returned, so update our copy
 	tlz.settings = await app.ChangeSettings(mutatedSettings);
