@@ -227,7 +227,7 @@ on('click', '#submit-settings', async event => {
 				description: $('.secret-location-name', el).value,
 				lat: el._center[1],
 				lon: el._center[0],
-				radius: el._radius*1000
+				radius_meters: Math.round(el._radius*1000) // must be an integer for compatibility with the integer type in the Go backend
 			});
 		});
 		mutatedSettings.application["app.obfuscation.locations"] = locations;
