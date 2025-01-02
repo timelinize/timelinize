@@ -17,7 +17,7 @@
 */
 
 // AJQuery: https://github.com/coolaj86/ajquery.js (modified slightly by me)
-function $(sel, el) { return ((typeof el === 'string' ? $(el) : el) || document).querySelector(sel); }
+function $(sel, el) { return typeof sel === 'string' ? ((typeof el === 'string' ? $(el) : el) || document).querySelector(sel) : sel; }
 function $$(sel, el) { return (el || document).querySelectorAll(sel); }
 
 
