@@ -13,10 +13,6 @@
 	max-height: 200px;
 }
 
-.timeline-container-grid .messages-list-group {
-	max-height: none;
-}
-
 .navbar-overlap::after {
 	/* background-color: #e3e9f1; */
 	background-color: #143a56;

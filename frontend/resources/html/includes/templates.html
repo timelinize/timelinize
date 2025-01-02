@@ -224,32 +224,38 @@
 
 
 <template id="tpl-message">
-	<div class="list-group-item">
-		<div class="row g-2">
-			<div class="message-info col-auto d-flex flex-column align-items-center gap-2">
-				<div class="message-avatar">
-					<!-- avatar -->
-				</div>
+	<div class="chat-item">
+		<div class="row align-items-top">
+			<div class="col-auto message-avatar mt-3">
+				<!-- avatar -->
 			</div>
-			<div class="col m-2">
-				<div class="d-flex align-items-end">
-					<div class="message-sender fw-bold">
-						<!-- name -->
+			<div class="col col-lg-9">
+				<div class="chat-bubble">
+					<div class="chat-bubble-title">
+						<div class="row">
+							<div class="col chat-bubble-author message-sender">
+								<!-- name -->
+							</div>
+							<div class="col-auto chat-bubble-date message-timestamp">
+								<!-- timestamp -->
+							</div>
+							<div class="col-auto message-data-source small">
+								<span class="data-source-icon avatar avatar-xxs align-middle"></span>
+							</div>
+						</div>
 					</div>
-					<div class="message-timestamp text-secondary small ms-2">
-						<!-- timestamp -->
-					</div>
-					<div class="message-data-source small ms-2">
-						<span class="data-source-icon avatar avatar-xxs align-middle"></span>
+					<div class="chat-bubble-body">
+						<div class="message-content">
+							<!-- content -->
+						</div>
+						<div class="attachments mt-2 d-none">
+							<!-- attachments -->
+						</div>
+						<div class="message-reactions mt-2 d-flex d-none">
+							<!-- reactions -->
+						</div>
 					</div>
 				</div>
-				<div class="message-content mt-1">
-					<!-- content -->
-				</div>
-				<div class="attachments row mt-2 d-none">
-					<!-- attachments -->
-				</div>
-				<div class="message-reactions d-flex"></div>
 			</div>
 			<div class="col-auto lh-1 align-self-center">
 				<div class="dropdown">

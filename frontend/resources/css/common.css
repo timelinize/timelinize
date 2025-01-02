@@ -7,9 +7,14 @@
 
 /*
 
-MY OWN TABLER (BETA 19, 20, 21) FIXES
+MY OWN TABLER (BETA 19, 20, 21, 22) FIXES
 
 */
+
+/* that single-story "a" looks terrible IMO, so disable cv11. See all Inter font features here: https://rsms.me/inter/#features */
+body {
+	font-feature-settings: "liga" 0, "calt" 1, "cv03", "cv04";
+}
 
 /* vertical spacing fix... ? hopefully not bad; ca. Tabler beta 20 */
 .row-cards {
@@ -711,18 +716,6 @@ the one that it is stuck to when scrolling */
 	}
 }
 
-/* since we do column-reverse, we need to reverse the last-child logic... */
-/* .messages-list-group .list-group-item:last-child {
-	border-bottom: var(--tblr-list-group-border-width) solid var(--tblr-list-group-border-color);
-}
-.messages-list-group .list-group-item:first-child {
-	border-bottom: 0;
-} */
-.messages-list-group {
-	/* flex-direction: column-reverse; */
-	max-height: 300px; /* TODO: 235px? */
-	overflow-y: auto;
-}
 .message-content {
 	word-break: break-word;
 }

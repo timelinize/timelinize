@@ -75,8 +75,10 @@
 
 				</div>
 				<div id="convo-container" class="filter-results card d-none">
-					<div class="list-group card-list-group">
+					<div class="chat card-body">
+						<div class="chat-bubbles">
 
+						</div>
 					</div>
 				</div>
 			</div>
@@ -104,31 +106,6 @@
 				</div>
 			</div>
 		</a>
-	</div>
-</template>
-
-<!-- TODO: This is no longer used, since we have smooth page transitions now... but maybe could still be useful if loading is taking a while? -->
-<template id="tpl-convo-placeholder">
-	<div class="col-sm-6 col-lg-4 mb-4">
-		<div class="card placeholder-glow">
-			<div class="card-body">
-				<div class="placeholder col-9 mb-3"></div>
-				<div class="placeholder placeholder-xs col-10"></div>
-				<div class="placeholder placeholder-xs col-11"></div>
-				<div class="placeholder placeholder-xs col-8"></div>
-				<div class="text-end mt-3">
-					<a tabindex="-1" class="btn btn-primary disabled placeholder col-4" aria-hidden="true"></a>
-				</div>
-			</div>
-			<div class="card-footer">
-				<div class="row align-items-center">
-					<div class="col-auto ms-auto">
-						<div class="avatar avatar-sm avatar-rounded placeholder"></div>
-						<div class="avatar avatar-sm avatar-rounded placeholder"></div>
-					</div>
-				</div>
-			</div>
-		</div>
 	</div>
 </template>
 

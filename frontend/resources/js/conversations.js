@@ -132,14 +132,6 @@ async function renderConversationsPage() {
 
 
 async function renderConversations() {
-	// // show placeholders
-	// TODO: no longer used, since we have smooth page transitions, but maybe we could still use this for slower loads?
-	// $('#convos-container').replaceChildren();
-	// for (let i = 0; i < 5; i++) {
-	// 	const elem = cloneTemplate('#tpl-convo-placeholder');
-	// 	$('#convos-container').append(elem);
-	// }
-
 	$('#convos-container').classList.remove('d-none');
 	$('#convo-container').classList.add('d-none');
 	$('#showing-info').classList.remove('d-none');
@@ -237,7 +229,7 @@ async function renderSingleConversation() {
 	$('#convos-container').classList.add('d-none');
 	$('#showing-info').classList.add('d-none');
 	$('.page-title').classList.add('mb-4');
-	$('#convo-container .list-group').replaceChildren();
+	$('#convo-container .chat-bubbles').replaceChildren();
 
 	await renderConversationChunk();
 
@@ -250,7 +242,7 @@ async function renderSingleConversation() {
 }
 
 async function forMediaToRender() {
-	await Promise.all([...$$('.list-group-item img.content, .list-group-item video.content')].map(async (elem) => {
+	await Promise.all([...$$('.chat-item img.content, .chat-item video.content')].map(async (elem) => {
 		while (!elem.offsetHeight) {
 			await new Promise(requestAnimationFrame);
 		}
@@ -321,7 +313,7 @@ async function renderConversationChunk(direction) {
 		// scroll to that element's new position ("offsetTop"); if at the end, we have
 		// to add the difference between its height and its container's height, so that
 		// the *bottom* of that element is at the bottom of the container, but it works!
-		const scrollTargetElem = $(`#convo-container .list-group-item${direction == "older" ? ":first-child" : ":last-child"}`);
+		const scrollTargetElem = $(`#convo-container .chat-item${direction == "older" ? ":first-child" : ":last-child"}`);
 
 		for (const item of results.items) {
 			// disable lazy loading because Safari won't give media elements their
@@ -331,10 +323,10 @@ async function renderConversationChunk(direction) {
 			// TODO: It'd be nice to still lazy-load images in a way that works in poor old Safari
 			const elem = renderMessageItem(item, {noLazyLoading: true});
 			if (direction == "newer") {
-				$('#convo-container .list-group').append(elem);
+				$('#convo-container .chat-bubbles').append(elem);
 				messages.push(item);
 			} else {
-				$('#convo-container .list-group').prepend(elem);
+				$('#convo-container .chat-bubbles').prepend(elem);
 				messages.unshift(item);
 			}
 		}
@@ -343,7 +335,7 @@ async function renderConversationChunk(direction) {
 		// are no longer visible or nearby in the opposite direction we're scrolling
 		const maxMessages = limit * 3;
 		if (messages.length > maxMessages && direction) {
-			const messageElems = $$('#convo-container .list-group-item');
+			const messageElems = $$('#convo-container .chat-item');
 			if (direction == "older") {
 				// clear out newest messages
 				messages.splice(-limit);

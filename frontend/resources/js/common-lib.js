@@ -1654,13 +1654,19 @@ function miniDisplayMessages(items) {
 	const card = document.createElement('div');
 	card.classList.add('card');
 
-	const container = document.createElement('div');
-	container.classList.add('list-group', 'card-list-group', 'messages-list-group');
+	const cardBody = document.createElement('div');
+	cardBody.classList.add('chat', 'card-body');
+
+	const chatBubbles = document.createElement('div');
+	chatBubbles.classList.add('chat-bubbles');
+	
 	for (const item of items) {
-		container.append(renderMessageItem(item, {withToRelations: true}));
+		chatBubbles.append(renderMessageItem(item, {withToRelations: true}));
 	}
 
-	card.append(container);
+	cardBody.append(chatBubbles);
+	card.append(cardBody);
+	
 
 	return {
 		icon: `
@@ -1691,9 +1697,15 @@ function renderMessageItem(item, options) {
 
 	const elem = cloneTemplate('#tpl-message');
 	$('.message-sender', elem).innerText = item.entity?.name || item.entity.attribute.value;
+	if (item.entity?.id == 1) {
+		// if current user (presumably, entity ID 1 -- though this could change later) is
+		// the sender, then put their own chats along the right, I guess, with the avatar
+		// on the outside (far right)
+		$('.align-items-top', elem).classList.add('flex-row-reverse');
+		$('.chat-bubble', elem).classList.add('chat-bubble-me');
+	}
 	$('.message-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
 	$('.message-avatar', elem).innerHTML = avatar(true, item.entity);
-	$('.message-avatar .avatar', elem).classList.add('avatar-sm');
 	$('.data-source-icon', elem).style.backgroundImage = `url('/resources/images/data-sources/${tlz.dataSources[item.data_source_name].icon}')`;
 	$('.data-source-icon', elem).title = tlz.dataSources[item.data_source_name].title;
 	$('.view-item-link', elem).href = `/items/${item.repo_id}/${item.id}`;
@@ -1755,16 +1767,20 @@ function renderMessageItem(item, options) {
 		};
 
 		// render any reactions we accumulated
-		for (const [reaction, rels] of Object.entries(reactions)) {
-			var reactElem = document.createElement('div');
-			reactElem.classList.add('message-reaction');
-			reactElem.textContent = reaction;
-			reactElem.title = `${reactionLabels[reaction] || reaction} (${rels.length}): `;
-			for (const rel of rels) {
-				reactElem.title += `${entityDisplayNameAndAttr(rel.from_entity).name}, `;
+		if (Object.keys(reactions).length) {
+			$('.message-reactions', elem).classList.remove('d-none');
+
+			for (const [reaction, rels] of Object.entries(reactions)) {
+				var reactElem = document.createElement('div');
+				reactElem.classList.add('message-reaction');
+				reactElem.textContent = reaction;
+				reactElem.title = `${reactionLabels[reaction] || reaction} (${rels.length}): `;
+				for (const rel of rels) {
+					reactElem.title += `${entityDisplayNameAndAttr(rel.from_entity).name}, `;
+				}
+				reactElem.title = reactElem.title.slice(0, -2); // trim off trailing comma and space
+				$('.message-reactions', elem).appendChild(reactElem);
 			}
-			reactElem.title = reactElem.title.slice(0, -2); // trim off trailing comma and space
-			$('.message-reactions', elem).appendChild(reactElem);
 		}
 
 	}
