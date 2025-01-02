@@ -2,35 +2,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Toggle all checkboxes in dropdown list
 on('click', '.dropdown-menu .select-all, .dropdown-menu .select-none', (e) => {
 	const menu = e.target.closest('.dropdown-menu');
@@ -41,8 +12,17 @@ on('click', '.dropdown-menu .select-all, .dropdown-menu .select-none', (e) => {
 });
 
 
-
-
+// For some reason, the "Clear" and "Apply" Air Datepicker buttons
+// will submit a parent form, when clicked... but I do not know why
+// the other buttons don't, nor do I know why it only happened on
+// the Items and Gallery pages. Form tags can be semantically useful
+// so I don't want to never use them, but we also can't allow the
+// browser to submit the form when we're using the datepicker.
+on('submit', 'form', e => {
+	if (e.submitter.classList.contains('air-datepicker-button')) {
+		e.preventDefault();
+	}
+});
 
 
 function classInfo(name) {

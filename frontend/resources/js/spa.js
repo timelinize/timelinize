@@ -120,8 +120,10 @@ async function navigateSPA(addrBarDestination) {
 	// wait for page to finish fading out before
 	setTimeout(async function() {
 		promise.then(async (data) => {
-			tlz.map.tl_containers = new Map();
-			tlz.map.tl_clear();
+			if (tlz.map) {
+				tlz.map.tl_containers = new Map();
+				tlz.map.tl_clear();
+			}
 			for (const dateInputEl of $$('.date-input')) {
 				// it seems like a good idea to clean up our AirDatepickers, but
 				// I haven't confirmed whether this is truly necessary

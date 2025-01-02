@@ -519,10 +519,15 @@ function newDatePicker(opts) {
 			days: '<span><strong>MMMM</strong> <span class="text-secondary">yyyy</span></span>',
 			months: '<strong>yyyy</strong>'
 		},
-		onShow() {
+		onShow(isFinished) {
+			if (isFinished) return false;
 			lastVal = dateInputElem.value;
 		},
-		onHide() {
+		onHide(isFinished) {
+			// gets called twice apparently (!?) once when it has started
+			// being hidden and once when it has finished being hidden
+			if (isFinished) return;
+
 			if (dateInputElem.value != lastVal) {
 				lastVal = dateInputElem.value;
 				trigger(dateInputElem, 'change');
@@ -919,6 +924,9 @@ function itemImgSrc(item, thumbnail = false) {
 	}
 	if (item.data_file.startsWith("http://") || item.data_file.startsWith("https://")) {
 		return item.data_file;
+	}
+	if (item.data_type == "image/gif") {
+		thumbnail = false; // just show the actual gif
 	}
 	const params = new URLSearchParams({
 		data_id: item.data_id || "",
@@ -2233,8 +2241,6 @@ function filterToQueryString() {
 		const val = ts.getValue();
 		if (Array.isArray(val) && val.length) {
 			qs.set("entity", val.join(','));
-		} else if (val) {
-			qs.set("entity", val);
 		} else {
 			qs.delete("entity");
 		}
