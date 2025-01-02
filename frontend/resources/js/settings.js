@@ -74,29 +74,14 @@ document.addEventListener('mapMoved', async e => {
 		// for more details: https://docs.mapbox.com/mapbox-gl-js/api/#map#addcontrol
 		tlz.map.addControl(tlz.mapDrawBar);
 
-		// next, load settings and populate fields
-
-		const settings = await app.GetSettings();
-		console.log("SETTINGS:", settings);
-
-		// general
-		$('#mapbox-api-key').value = settings?.application?.mapbox_api_key || "";
-
-		// demo mode (obfuscation)
-		const obfs = settings?.application?.obfuscation;
-		$('#demo-mode-enabled').checked = obfs?.enabled == true;
-		$('#data-file-names').checked = obfs?.data_files == true;
-		if (obfs?.locations) {
-			for (const loc of settings.application.obfuscation.locations) {
+		if (tlz.settings?.application?.obfuscation?.locations) {
+			for (const loc of tlz.settings.application.obfuscation.locations) {
 				const circle = MapboxDrawGeodesic.createCircle([loc.lon, loc.lat], loc.radius_meters/1000);
 				circle.properties.name = loc.description;
 				const featureIDs = draw.add(circle);
 				settingsMapLocObfuscationDrawCreate({features: [circle]});			
 			}
 		}
-
-		// advanced
-		$('#website-dir').value = settings?.application?.website_dir || "";
 	}
 	// when the element is no longer in the DOM, we can't use descendency selectors to match it
 	else if (e.detail?.previousElement?.matches('.secret-location-picker.map-container'))
@@ -243,6 +228,12 @@ on('click', '#submit-settings', async event => {
 		}
 	};
 
-	const newSettings = await app.ChangeSettings(mutatedSettings);
-	console.log("SAVE SETTINGS RESULT:", newSettings);
+	// when saving settings, the new settings are returned, so update our copy
+	tlz.settings = await app.ChangeSettings(mutatedSettings);
+
+	notify({
+		type: "success",
+		title: "Settings saved",
+		duration: 2000
+	});
 });

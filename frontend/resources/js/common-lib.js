@@ -254,80 +254,120 @@ get('/api/build-info').then(bi => {
 
 
 
-// set up map singleton
-// TODO: Users should provide their own Mapbox tokens.
-mapboxgl.accessToken = 'pk.eyJ1IjoiZHlhbmltIiwiYSI6ImNsYXNqcDVrYjF2OGwzcG1xaDB5YmlhZmQifQ.Y6QIKhjU0NeccKS6Rs8YqA';
+// sets up map singleton; should be done after settings but before first page load
+function initMapSingleton() {
+	const defaultMapboxToken = 'pk.eyJ1IjoiZHlhbmltIiwiYSI6ImNsYXNqcDVrYjF2OGwzcG1xaDB5YmlhZmQifQ.Y6QIKhjU0NeccKS6Rs8YqA';
+	mapboxgl.accessToken = tlz.settings?.application?.mapbox_api_key || defaultMapboxToken;
 
-tlz.map = new mapboxgl.Map({
-	container: document.createElement('div'),
-	style: `mapbox://styles/mapbox/standard?optimized=true`,
-	antialias: true
-});
-tlz.map._container.id = 'map'; // the container element we specified above in the Map constructor is stored at tlz.map._container
-tlz.map.tl_navControl = new mapboxgl.NavigationControl();
-tlz.map.tl_containers = new Map(); // JS map, not geo map
-tlz.map.tl_data = {
-	markers: [], // stores markers that are currently on the map
-	layers: {},  // layers currently on the map, keyed by ID
-	sources: {}  // sources currently on the map, keyed by ID
-};
-tlz.map.tl_addNavControl = function() {
-	if (!tlz.map.hasControl(tlz.map.tl_navControl)) {
-		tlz.map.addControl(tlz.map.tl_navControl);
+	tlz.map = new mapboxgl.Map({
+		container: document.createElement('div'),
+		style: `mapbox://styles/mapbox/standard?optimized=true`,
+		antialias: true
+	});
+	tlz.map._container.id = 'map'; // the container element we specified above in the Map constructor is stored at tlz.map._container
+	tlz.map.tl_navControl = new mapboxgl.NavigationControl();
+	tlz.map.tl_containers = new Map(); // JS map, not geo map
+	tlz.map.tl_data = {
+		markers: [], // stores markers that are currently on the map
+		layers: {},  // layers currently on the map, keyed by ID
+		sources: {}  // sources currently on the map, keyed by ID
+	};
+	tlz.map.tl_addNavControl = function() {
+		if (!tlz.map.hasControl(tlz.map.tl_navControl)) {
+			tlz.map.addControl(tlz.map.tl_navControl);
+		}
+	};
+	tlz.map.tl_addMarker = function(marker) {
+		tlz.map.tl_data.markers.push(marker);
+		marker.addTo(tlz.map);
+	};
+	tlz.map.tl_removeMarker = function(marker) {
+		const idx = tlz.map.tl_data.markers.indexOf(marker);
+		if (idx > -1) {
+			marker.remove();
+			tlz.map.tl_data.markers.splice(idx, 1);
+		}
+	};
+	tlz.map.tl_addLayer = function(layer, underLayerID) {
+		tlz.map.tl_data.layers[layer.id] = layer;
+		if (underLayerID && !tlz.map.getLayer(underLayerID)) {
+			underLayerID = null;
+		}
+		tlz.map.addLayer(layer, underLayerID);
+	};
+	tlz.map.tl_removeLayer = function(layerID) {
+		delete tlz.map.tl_data.layers[layerID];
+		if (tlz.map.getLayer(layerID)) {
+			tlz.map.removeLayer(layerID);
+		}
+	};
+	tlz.map.tl_addSource = function(id, source) {
+		tlz.map.tl_data.sources[id] = source;
+		tlz.map.addSource(id, source);
+	};
+	tlz.map.tl_removeSource = function(sourceID) {
+		delete tlz.map.tl_data.sources[sourceID];
+		if (tlz.map.getSource(sourceID)) {
+			tlz.map.removeSource(sourceID);
+		}
+	};
+	tlz.map.tl_clearMarkers = function() {
+		tlz.map.tl_data.markers.forEach(marker => marker.remove());
+		tlz.map.tl_data.markers = [];
 	}
-};
-tlz.map.tl_addMarker = function(marker) {
-	tlz.map.tl_data.markers.push(marker);
-	marker.addTo(tlz.map);
-};
-tlz.map.tl_removeMarker = function(marker) {
-	const idx = tlz.map.tl_data.markers.indexOf(marker);
-	if (idx > -1) {
-		marker.remove();
-		tlz.map.tl_data.markers.splice(idx, 1);
-	}
-};
-tlz.map.tl_addLayer = function(layer, underLayerID) {
-	tlz.map.tl_data.layers[layer.id] = layer;
-	if (underLayerID && !tlz.map.getLayer(underLayerID)) {
-		underLayerID = null;
-	}
-	tlz.map.addLayer(layer, underLayerID);
-};
-tlz.map.tl_removeLayer = function(layerID) {
-	delete tlz.map.tl_data.layers[layerID];
-	if (tlz.map.getLayer(layerID)) {
-		tlz.map.removeLayer(layerID);
-	}
-};
-tlz.map.tl_addSource = function(id, source) {
-	tlz.map.tl_data.sources[id] = source;
-	tlz.map.addSource(id, source);
-};
-tlz.map.tl_removeSource = function(sourceID) {
-	delete tlz.map.tl_data.sources[sourceID];
-	if (tlz.map.getSource(sourceID)) {
-		tlz.map.removeSource(sourceID);
-	}
-};
-tlz.map.tl_clearMarkers = function() {
-	tlz.map.tl_data.markers.forEach(marker => marker.remove());
-	tlz.map.tl_data.markers = [];
+	tlz.map.tl_clear = function() {
+		tlz.map.tl_clearMarkers();
+		for (const layerID in tlz.map.tl_data.layers) {
+			tlz.map.tl_removeLayer(layerID);
+		}
+		for (const sourceID in tlz.map.tl_data.sources) {
+			tlz.map.tl_removeLayer(sourceID);
+		}
+		tlz.map.setPadding({left: 0, top: 0});
+	};
+
+	// tlz.map.loaded() doesn't always return true after 'load' event fires, not clear why; TODO: maybe create issue to ask?
+	tlz.map.tl_isLoaded = false;
+	tlz.map.on('load', () => tlz.map.tl_isLoaded = true);
+
+	tlz.map.on('style.load', async () => {
+		// update the lighting every minute to match the current time of day
+		updateMapLighting();
+		setInterval(updateMapLighting, 60000);
+
+		// add terrain source, but don't set it on the map unless enabled
+		tlz.map.tl_addSource('mapbox-dem', {
+			type: 'raster-dem',
+			// TODO: what's the difference between these?
+			url: 'mapbox://mapbox.terrain-rgb'
+			// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
+		});
+
+		applyTerrain();
+
+		// changing the style obliterates layers
+		tlz.openRepos.forEach(repo => {
+			if (mapData.heatmap) {
+				renderHeatmap();
+			}
+			if (mapData.results) {
+				renderMapData();
+			}
+		});
+	});
+
+
+	tlz.map.on('click', e => {
+		if ($('#proximity-toggle')?.classList?.contains('active')) {
+			$('#proximity').value = `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`;
+			$('#proximity').dataset.lat = e.lngLat.lat;
+			$('#proximity').dataset.lon = e.lngLat.lng;
+			$('#proximity').dispatchEvent(new Event('change', { bubbles: true }));
+			$('#proximity-toggle').classList.remove('active');
+			$('.mapboxgl-canvas-container').style.cursor = '';
+		}
+	});
 }
-tlz.map.tl_clear = function() {
-	tlz.map.tl_clearMarkers();
-	for (const layerID in tlz.map.tl_data.layers) {
-		tlz.map.tl_removeLayer(layerID);
-	}
-	for (const sourceID in tlz.map.tl_data.sources) {
-		tlz.map.tl_removeLayer(sourceID);
-	}
-	tlz.map.setPadding({left: 0, top: 0});
-};
-// tlz.map.loaded() doesn't always return true after 'load' event fires, not clear why; TODO: maybe create issue to ask?
-tlz.map.tl_isLoaded = false;
-tlz.map.on('load', () => tlz.map.tl_isLoaded = true);
-
 
 
 

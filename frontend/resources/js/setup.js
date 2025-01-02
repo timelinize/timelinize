@@ -74,7 +74,6 @@ on('click', '#continue', async () => {
 			// otherwise, if there is at least one person, return to app
 			await navigateSPA('/');
 
-			console.log("NOTIFYING", $('#alert-container'));
 			notify({
 				type: "success",
 				title: "Timeline opened",

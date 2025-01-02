@@ -511,31 +511,6 @@ function updateMapLighting() {
 }
 
 
-tlz.map.on('style.load', async () => {
-	// update the lighting every minute to match the current time of day
-	updateMapLighting();
-	setInterval(updateMapLighting, 60000);
-
-	// add terrain source, but don't set it on the map unless enabled
-	tlz.map.tl_addSource('mapbox-dem', {
-		type: 'raster-dem',
-		// TODO: what's the difference between these?
-		url: 'mapbox://mapbox.terrain-rgb'
-		// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
-	});
-
-	applyTerrain();
-
-	// changing the style obliterates layers
-	tlz.openRepos.forEach(repo => {
-		if (mapData.heatmap) {
-			renderHeatmap();
-		}
-		if (mapData.results) {
-			renderMapData();
-		}
-	});
-});
 
 // TODO: this adds buildings, if we want that...
 function addBuildings() {
@@ -731,17 +706,6 @@ function hideMapPageInfoCard() {
 on('click', '#proximity-toggle', event => {
 	$('.mapboxgl-canvas-container').style.cursor =
 		$('#proximity-toggle').classList.contains('active') ? 'crosshair' : '';
-});
-
-tlz.map.on('click', e => {
-	if ($('#proximity-toggle')?.classList?.contains('active')) {
-		$('#proximity').value = `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`;
-		$('#proximity').dataset.lat = e.lngLat.lat;
-		$('#proximity').dataset.lon = e.lngLat.lng;
-		$('#proximity').dispatchEvent(new Event('change', { bubbles: true }));
-		$('#proximity-toggle').classList.remove('active');
-		$('.mapboxgl-canvas-container').style.cursor = '';
-	}
 });
 
 on('change', '#bbox', e => {

@@ -308,6 +308,12 @@ async function initialize() {
 		await updateItemClasses();
 	}
 
+	// load app settings
+	tlz.settings = await app.GetSettings();
+
+	// now that settings are loaded, initialize the map
+	initMapSingleton();
+
 	// perform initial page load
 	if (document.readyState === 'loading') {
 		window.addEventListener('DOMContentLoaded', navigateSPA);

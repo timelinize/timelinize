@@ -96,8 +96,24 @@ tlz.pageControllers = {
 	},
 
 	"/pages/settings.html": {
-		load() {
+		async load() {
 			changeSettingsTab(window.location.hash || "#general");
+
+			// next, load settings and populate fields
+
+			tlz.settings = await app.GetSettings();
+			console.log("SETTINGS:", tlz.settings);
+
+			// general
+			$('#mapbox-api-key').value = tlz.settings?.application?.mapbox_api_key || "";
+
+			// demo mode (obfuscation)
+			const obfs = tlz.settings?.application?.obfuscation;
+			$('#demo-mode-enabled').checked = obfs?.enabled == true;
+			$('#data-file-names').checked = obfs?.data_files == true;
+
+			// advanced
+			$('#website-dir').value = tlz.settings?.application?.website_dir || "";
 		}
 	},
 
