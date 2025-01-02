@@ -4,8 +4,8 @@
 
 // when "merge entity" dialog is shown, set up the form
 on('show.bs.modal', '#modal-merge-entity', async e => {
-	const entitySelectMerge = newEntitySelect('#modal-merge-entity .entity-merge', 1, true);
-	const entitySelectKeep = newEntitySelect('#modal-merge-entity .entity-keep', 1, true);
+	const entitySelectMerge = newEntitySelect($('#modal-merge-entity .entity-merge'), 1, true);
+	const entitySelectKeep = newEntitySelect($('#modal-merge-entity .entity-keep'), 1, true);
 	const entityIDMerge =  e?.relatedTarget?.dataset?.entityIDMerge;
 	const entityIDKeep = e?.relatedTarget?.dataset?.entityIDKeep;
 	if (entityIDMerge) {

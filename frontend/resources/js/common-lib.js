@@ -2087,8 +2087,8 @@ function itemPreviews(items) {
 ////////////////////////////////////////////////////
 
 function newEntitySelect(element, maxItems, noWrap) {
-	if (element.tomselect) {
-		return element.tomselect;
+	if ($(element).tomselect) {
+		return $(element).tomselect;
 	}
 
 	function tomSelectRenderItemAndOption(entity, escape) {

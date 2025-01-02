@@ -1,8 +1,11 @@
 // render functions should be synchronous (async should be awaited) so that the page load isn't janky.
 tlz.pageControllers = {
 	"/pages/conversations.html": {
-		async render() {
+		async load() {
 			await conversationsPageMain();
+		},
+		async render() {
+			await renderConversationsPage();
 		}
 	},
 

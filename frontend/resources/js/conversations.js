@@ -14,6 +14,17 @@ var _bottom = true, _top = false;
 async function conversationsPageMain() {
 	const entitySelect = newEntitySelect('.entity-input', 20);
 	
+	entitySelect.on('change', async () => {
+		if (entitySelect.getValue().length == 0) {
+			$('#selected-entities-only').checked = false;
+			$('#selected-entities-only').disabled = true;
+		} else {
+			$('#selected-entities-only').disabled = false;
+		}
+	});
+	
+	$('#selected-entities-only').checked = queryParam("only_entity") == "true";
+	
 	const qsEntities = queryParam("entity");
 
 	// load the initial entities involved so they can be displayed in the selector, only if they aren't already
@@ -30,11 +41,6 @@ async function conversationsPageMain() {
 			$('#selected-entities-only').disabled = false;
 		}
 	}
-
-	// render page first, then bind event listeners that *update* the page when renderConversationsPage is called,
-	// otherwise if we bind those event listeners first, we end up rendering the page multiple times,
-	// including before it's ready
-	await renderConversationsPage();
 
 	$('.content-column').addEventListener('scroll', async (event) => {
 		// only load more into the conversation view when a conversation is being viewed
@@ -68,15 +74,6 @@ async function conversationsPageMain() {
 		if (event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 1 && !_bottom) {
 			await renderConversationChunk("newer");
 			return;
-		}
-	});
-	
-	entitySelect.on('change', async () => {
-		if (entitySelect.getValue().length == 0) {
-			$('#selected-entities-only').checked = false;
-			$('#selected-entities-only').disabled = true;
-		} else {
-			$('#selected-entities-only').disabled = false;
 		}
 	});
 }
