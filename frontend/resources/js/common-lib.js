@@ -136,6 +136,9 @@ const tlz = {
 		"url": "Website"
 	},
 
+	// map of filepicker names to last settings/state (like path)
+	filePickers: {},
+
 	// counter for IDs of collapsable regions which may be dynamically created
 	collapseCounter: 0,
 
@@ -638,7 +641,7 @@ function newDatePicker(opts) {
 // FILE PICKER
 ///////////////////
 
-async function newFilePicker(options) {
+async function newFilePicker(name, options) {
 	const filePicker = cloneTemplate('#tpl-file-picker');
 	filePicker.options = options; // keeps track of its configuration
 	filePicker.filepaths = {}; // keeps track of which files are currently selected
@@ -711,7 +714,7 @@ async function newFilePicker(options) {
 
 
 	// TODO: should 'options' be set when the picker is made? or for every file listing like it is now...
-	filePicker.navigate = async function (dir = "", options) {
+	filePicker.navigate = async function (dir = tlz.filePickers?.[name], options) {
 		// merge navigate options with those specified for the file picker
 		options = {...filePicker.options, ...options}
 
@@ -721,7 +724,6 @@ async function newFilePicker(options) {
 		}
 
 		const listing = await app.FileListing(dir, options);
-		console.log("LISTING:", listing);
 
 		// only navigate if the location is different or refresh is forced
 		if (filePicker.dir && listing.dir == filePicker.dir && !options?.refresh) {
@@ -729,6 +731,7 @@ async function newFilePicker(options) {
 		}
 
 		filePicker.dir = listing.dir;
+		tlz.filePickers[name] = listing.dir;
 
 		// let listeners know we are navigating
 		const event = new CustomEvent("navigate", {

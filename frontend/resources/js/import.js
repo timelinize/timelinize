@@ -1,6 +1,6 @@
 // TODO: Presumably, these handlers will need to be generalized if we ever want to reuse our filepicker modal
 on('show.bs.modal', '#modal-file-picker', async event => {
-	const filePicker = await newFilePicker();
+	const filePicker = await newFilePicker("import");
 	filePicker.classList.add('fw-normal');
 	
 	const container = $('.modal-body', event.target);

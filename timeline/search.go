@@ -447,7 +447,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 
 	if vectorSearch {
 		q += fmt.Sprintf(`
-		LEFT JOIN %s AS items ON items.embedding_id = embeddings.id`, itemsTable)
+		JOIN %s AS items ON items.embedding_id = embeddings.id`, itemsTable)
 	}
 
 	q += `
