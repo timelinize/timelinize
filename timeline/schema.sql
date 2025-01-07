@@ -31,14 +31,6 @@ CREATE TABLE IF NOT EXISTS "data_sources" (
 	"name" TEXT NOT NULL UNIQUE   -- programming ID, e.g. "google_photos" as used in the application code
 ) STRICT;
 
--- An account contains credentials necessary for accessing a remote data source.
-CREATE TABLE IF NOT EXISTS "accounts" (
-	"id" INTEGER PRIMARY KEY,
-	"data_source_id" INTEGER NOT NULL,
-	"authorization" BLOB,
-	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE
-) STRICT;
-
 CREATE TABLE IF NOT EXISTS "jobs" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT NOT NULL, -- import, thumbnails, etc...
@@ -59,11 +51,6 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	"parent_job_id" INTEGER, -- the job before this one that scheduled or created this one, forming a chain or linked list
 	FOREIGN KEY ("parent_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
-
-CREATE INDEX IF NOT EXISTS "idx_jobs_name" ON "jobs"("name");
-CREATE INDEX IF NOT EXISTS "idx_jobs_hash" ON "jobs"("hash");
-CREATE INDEX IF NOT EXISTS "idx_jobs_created" ON "jobs"("created");
-CREATE INDEX IF NOT EXISTS "idx_jobs_state" ON "jobs"("state");
 
 -- Embeddings enable "intelligent" search using ML models to derive semantics and meaning.
 -- By finding other embeddings that are close (dot product or euclidean distance),
@@ -100,12 +87,6 @@ CREATE TABLE IF NOT EXISTS "entities" (
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS "idx_entities_name" ON "entities"("name");
-CREATE INDEX IF NOT EXISTS "idx_entities_birth_date" ON "entities"("birth_date");
-CREATE INDEX IF NOT EXISTS "idx_entities_birth_place" ON "entities"("birth_place");
-CREATE INDEX IF NOT EXISTS "idx_entities_hidden" ON "entities"("hidden");
-CREATE INDEX IF NOT EXISTS "idx_entities_deleted" ON "entities"("deleted");
-
 -- Attributes describe entities. An attribute has a name and a value. The name for a particular
 -- kind of attribute should be consistent throughout because some attributes need special handling
 -- or can be normalized in the code (e.g. phone numbers). A single attribute may describe one or
@@ -132,11 +113,6 @@ CREATE TABLE IF NOT EXISTS "attributes" (
 	UNIQUE ("name", "value")
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS "idx_attributes_longitude1" ON "attributes"("longitude1");
-CREATE INDEX IF NOT EXISTS "idx_attributes_latitude1" ON "attributes"("latitude1");
-CREATE INDEX IF NOT EXISTS "idx_attributes_longitude2" ON "attributes"("longitude2");
-CREATE INDEX IF NOT EXISTS "idx_attributes_latitude2" ON "attributes"("latitude2");
-
 -- This table links entities and attributes. An entity may have multiple attributes, and an attribute
 -- may apply to multiple entities. If the attribute represents an entity's identity on a particular
 -- data source, the data_source_id field will be filled out.
@@ -151,21 +127,20 @@ CREATE TABLE IF NOT EXISTS "entity_attributes" (
 	"autolink_attribute_id" INTEGER, -- if set, the other attribute by which this attribute was automatically linked as the entity's ID on the data source
 	-- TODO: rename to start/end as with relationships table?
 	"timeframe_start" INTEGER, -- when the attribute started applying to the entity
-	"timeframe_end" INTEGER,   -- when the attribute stopped applying to the entity
+	"timeframe_end" INTEGER,   -- when the attribute stopped applyiing to the entity
 	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL,
 	FOREIGN KEY ("autolink_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL,
-	FOREIGN KEY ("autolink_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE SET NULL,
+	FOREIGN KEY ("autolink_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE SET NULL
 	-- a person can have multiple attributes, and an attribute can be shared by multiple people (though rare;
 	-- usually that's just for shared accounts, which have to be manually linked to the persons by the user)
 	-- but a person can reuse the same attribute as identity on different data sources, so we need the third
 	-- field data_source_id in this constraint, however sqlite treats NULLs as distinct (argh!!!) and since
 	-- data_source_id is only populated when the attribute is also an identity, it may be NULL; so instead
-	-- we use a trick and create a "partial index" below ("CREATE UNIQUE INDEX") that applies a separate
-	-- unique constraint on only the first two fields if the last one is NULL.
-	UNIQUE ("entity_id", "attribute_id", "data_source_id")
+	-- we could use a trick and create a "partial index" ("CREATE UNIQUE INDEX ... WHERE ...") that applies
+	-- a separate unique constraint on only the first two fields if the last one is NULL... but that's a TODO:.
 ) STRICT;
 
 -- A classification describes what kind of thing an item is, for example a text message, tweet, email, or location.
@@ -186,7 +161,7 @@ CREATE TABLE IF NOT EXISTS "item_data" (
 -- An item is something imported from a specific data source.
 CREATE TABLE IF NOT EXISTS "items" (
 	"id" INTEGER PRIMARY KEY,
-	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model; TODO: we may need an item_embeddings table...
+	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model; TODO: we may need an item_embeddings table for multiple...
 	"data_source_id" INTEGER,
 	"job_id" INTEGER, -- the import job that originally inserted this item
 	"modified_job_id" INTEGER, -- the import job that most recently modified this existing item
@@ -229,26 +204,11 @@ CREATE TABLE IF NOT EXISTS "items" (
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("classification_id") REFERENCES "classifications"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("data_id") REFERENCES "item_data"("id") ON UPDATE CASCADE ON DELETE SET NULL,
-	-- TODO: UNIQUE("job_id", "intermediate_location") maybe? the only problem is I could see embedded items like album art violating this -- unless embedded items don't have an intermediate_location
 	UNIQUE ("data_source_id", "original_id"),
 	UNIQUE ("retrieval_key")
 ) STRICT;
 
--- TODO: figure out which of these are actually necessary (use EXPLAIN QUERY PLAN SELECT ...) -- (add a ton of data to a timeline with no indexes here, then perform some searches; then add indexes until they get fast)
-CREATE INDEX IF NOT EXISTS "idx_items_filename" ON "items"("filename");
 CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
-CREATE INDEX IF NOT EXISTS "idx_items_timespan" ON "items"("timespan");
-CREATE INDEX IF NOT EXISTS "idx_items_timeframe" ON "items"("timeframe");
-CREATE INDEX IF NOT EXISTS "idx_items_time_offset" ON "items"("time_offset");
-CREATE INDEX IF NOT EXISTS "idx_items_data_text" ON "items"("data_text" COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS "idx_items_data_file" ON "items"("data_file" COLLATE NOCASE);
-CREATE INDEX IF NOT EXISTS "idx_items_data_hash" ON "items"("data_hash");
-CREATE INDEX IF NOT EXISTS "idx_items_longitude" ON "items"("longitude");
-CREATE INDEX IF NOT EXISTS "idx_items_latitude" ON "items"("latitude");
-CREATE INDEX IF NOT EXISTS "idx_items_altitude" ON "items"("altitude");
-CREATE INDEX IF NOT EXISTS "idx_items_hidden" ON "items"("hidden");
-CREATE INDEX IF NOT EXISTS "idx_items_deleted" ON "items"("deleted");
-CREATE INDEX IF NOT EXISTS "idx_items_initial_hash" ON "items"("initial_hash");
 
 -- Relationships may exist between and across items and entities. A row
 -- in this table is an actual connection between items and/or entities.
@@ -269,17 +229,8 @@ CREATE TABLE IF NOT EXISTS "relationships" (
 	FOREIGN KEY ("from_item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("to_item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("from_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("to_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	-- TODO: are these constraints harmful given the timestamp bounds? SQLite has distinct nulls, should I just add start and end to the constraints? right now it's impossible to represent a re-marriage (to the same person), for example
-	UNIQUE ("relation_id", "from_item_id", "to_item_id"),
-	UNIQUE ("relation_id", "from_item_id", "to_attribute_id"),
-	UNIQUE ("relation_id", "from_attribute_id", "to_item_id"),
-	UNIQUE ("relation_id", "from_attribute_id", "to_attribute_id")
+	FOREIGN KEY ("to_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
-
-CREATE INDEX IF NOT EXISTS "idx_relationships_value" ON "relationships"("value");
-CREATE INDEX IF NOT EXISTS "idx_relationships_start" ON "relationships"("start");
-CREATE INDEX IF NOT EXISTS "idx_relationships_end" ON "relationships"("end");
 
 -- Relations define the way relationships connect. They are described by natural
 -- language phrases such as "in reply to", "picture of", or "attached to"; or could
@@ -348,14 +299,7 @@ CREATE TABLE IF NOT EXISTS "tagged" (
 	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("curation_id") REFERENCES "curations"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("relationship_id") REFERENCES "relationships"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	-- TODO: Gah, another case of distinct NULLs biting me, so I can't do this:
-	-- UNIQUE("tag_id", "item_id", "entity_id", "curation_id", "relationship_id")
-	UNIQUE("tag_id", "item_id"),
-	UNIQUE("tag_id", "entity_id"),
-	UNIQUE("tag_id", "attribute_id"),
-	UNIQUE("tag_id", "curation_id"),
-	UNIQUE("tag_id", "relationship_id")
+	FOREIGN KEY ("relationship_id") REFERENCES "relationships"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
 -- TODO: Still figuring out how to structure this...

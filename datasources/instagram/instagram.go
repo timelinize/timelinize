@@ -106,7 +106,7 @@ func (c *Client) FileImport(_ context.Context, dirEntry timeline.DirEntry, param
 			return dirEntry.FS.Open(picFilename)
 		}
 	}
-	if personalInfo.DateOfBirth.Value != "" {
+	if personalInfo.DateOfBirth.Value != "" && personalInfo.DateOfBirth.Value != "1919-01-01" { // for some weird reason their default is 1919??
 		bd, err := time.Parse("2006-01-02", personalInfo.DateOfBirth.Value)
 		if err == nil {
 			owner.Attributes = append(owner.Attributes, timeline.Attribute{

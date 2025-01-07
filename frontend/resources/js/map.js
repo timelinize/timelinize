@@ -449,7 +449,7 @@ async function renderMapData(newMapData) {
 			});
 			dataPoint.adjacent = results.items;
 
-			if (!dataPoint.adjacent.length) {
+			if (!dataPoint.adjacent?.length) {
 				return;
 			}
 

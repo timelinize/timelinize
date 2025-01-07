@@ -684,20 +684,22 @@ func (a *App) ItemClassifications(repo string) ([]timeline.Classification, error
 }
 
 // TODO: Very WIP / experimental
-func (*App) LoadItemStats(statName, repoID string, params url.Values) (any, error) {
+func (*App) ChartStats(ctx context.Context, chartName, repoID string, params url.Values) (any, error) {
 	tl, err := getOpenTimeline(repoID)
 	if err != nil {
 		return nil, err
 	}
-	switch statName {
+	switch chartName {
 	case "periodical":
-		return tl.RecentItemStats(params)
+		return tl.RecentItemStats(ctx, params)
 	case "classifications":
-		return tl.ItemTypeStats()
+		return tl.ItemTypeStats(ctx)
 	case "datasources":
-		return tl.DataSourceUsageStats()
+		return tl.DataSourceUsageStats(ctx)
+	case "attributes_stacked_area":
+		return tl.AttributeStats(ctx, params)
 	}
-	return nil, fmt.Errorf("unknown stat name: %s", statName)
+	return nil, fmt.Errorf("unknown chart name: %s", chartName)
 }
 
 type Settings struct {

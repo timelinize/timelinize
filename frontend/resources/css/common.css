@@ -296,9 +296,6 @@ audio {
 	background-color: transparent;
 	box-shadow: none;
 }
-.avatar-xxl {
-	--tblr-avatar-font-size: 8rem;
-}
 
 dfn {
 	text-decoration: underline dashed;

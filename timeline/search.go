@@ -143,6 +143,9 @@ type ItemSearchParams struct {
 	// TODO: This can be very slow for large DBs on broad queries... maybe cache results? Or find a way to paginate without this (see comment above)
 	WithTotal bool `json:"with_total,omitempty"`
 
+	// Only return a total count that ignores offset and limit.
+	OnlyTotal bool `json:"only_total,omitempty"`
+
 	// If true, the only fields that will be selected from the DB are
 	// latitude and longitude, and the search results will not be filled
 	// with items; instead, the results will contain a GeoJSON document
@@ -174,7 +177,7 @@ type SearchResults struct {
 	Total int `json:"total,omitempty"`
 
 	// The items of the search result.
-	Items []*SearchResult `json:"items"`
+	Items []*SearchResult `json:"items,omitempty"`
 
 	// The search results in GeoJSON mode. A GeoJSON document
 	// useful for rendering heatmaps or clusters.
@@ -202,6 +205,16 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		return SearchResults{}, err
 	}
 	defer tx.Rollback()
+
+	// in count-only mode, there's only a single row with a single field
+	if params.OnlyTotal {
+		var count int
+		err := tx.QueryRowContext(ctx, q, args...).Scan(&count)
+		if err != nil {
+			return SearchResults{}, err
+		}
+		return SearchResults{Total: count}, nil
+	}
 
 	// run query and scan results
 	rows, err := tx.QueryContext(ctx, q, args...)
@@ -393,6 +406,9 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		// arbitrary, but I suspect it's a good idea to limit this for performance reasons
 		return "", nil, errors.New("max degrees of separation for relationships is 2")
 	}
+	if params.WithTotal && params.OnlyTotal {
+		return "", nil, errors.New("cannot query results with total and only total at the same time")
+	}
 
 	tl.convertNamesToIDs(&params)
 
@@ -432,6 +448,9 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	// TODO: use strings.Builder (also in RecentConversations())
 
 	q := fmt.Sprintf(`SELECT %s, entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value`, itemDBColumns)
+	if params.OnlyTotal {
+		q = "SELECT count()"
+	}
 	if params.GeoJSON {
 		// GeoJSON mode is intended to be more efficient; as such, only select coordinate data
 		q = "SELECT items.id, items.latitude, items.longitude"
@@ -715,7 +734,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		})
 	}
 
-	if vectorSearch {
+	if vectorSearch && !params.OnlyTotal {
 		q += "\n\t\tORDER BY embeddings.distance"
 	} else if params.Sort != SortNone {
 		q += "\n\t\tORDER BY "
@@ -775,16 +794,18 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	}
 
 	// limit
-	if params.Limit == 0 {
-		params.Limit = 1000
-	}
-	if params.Limit > 0 {
-		q += "\n\t\tLIMIT ?"
-		args = append(args, params.Limit)
-	}
-	if params.Offset > 0 {
-		q += "\n\t\tOFFSET ?"
-		args = append(args, params.Offset)
+	if !params.OnlyTotal {
+		if params.Limit == 0 {
+			params.Limit = 1000
+		}
+		if params.Limit > 0 {
+			q += "\n\t\tLIMIT ?"
+			args = append(args, params.Limit)
+		}
+		if params.Offset > 0 {
+			q += "\n\t\tOFFSET ?"
+			args = append(args, params.Offset)
+		}
 	}
 
 	return q, args, nil

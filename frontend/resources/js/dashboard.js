@@ -18,7 +18,7 @@ async function renderDashboard() {
 async function recentItemStats() {
 	const period = $('#recent-items .chart-scope .dropdown-item.active').dataset.period;
 
-	const itemStats = await app.LoadItemStats("periodical", tlz.openRepos[0].instance_id, {period});
+	const itemStats = await app.ChartStats("periodical", tlz.openRepos[0].instance_id, {period});
 
 	if (!itemStats) {
 		// TODO: show empty dashboard -- tell user to import some data
@@ -138,7 +138,7 @@ async function recentItemStats() {
 }
 
 async function itemTypeStats() {
-	const stats = await app.LoadItemStats("classifications", tlz.openRepos[0].instance_id);
+	const stats = await app.ChartStats("classifications", tlz.openRepos[0].instance_id);
 
 	if (!stats) {
 		// TODO: show empty dashboard -- tell user to import some data
@@ -312,7 +312,7 @@ async function itemTypeStats() {
 
 
 async function dataSourceHourStats() {
-	const stats = await app.LoadItemStats("datasources", tlz.openRepos[0].instance_id);
+	const stats = await app.ChartStats("datasources", tlz.openRepos[0].instance_id);
 
 	if (!stats) {
 		// TODO: show empty dashboard -- tell user to import some data

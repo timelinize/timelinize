@@ -12,12 +12,14 @@ tlz.pageControllers = {
 	"/pages/dashboard.html": {
 		load() {
 			$('.navbar').classList.add('navbar-overlap');
+			$('.navbar').dataset.bsTheme = "dark";
 		},
 		async render() {
 			await renderDashboard();
 		},
 		unload() {
 			$('.navbar').classList.remove('navbar-overlap');
+			delete($('.navbar').dataset.bsTheme);
 		}
 
 		// TODO: build a real dashboard, you fool

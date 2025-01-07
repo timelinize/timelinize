@@ -136,8 +136,8 @@ const app = {
 	LoadConversation(params) {
 		return post("/api/conversation", params);
 	},
-	LoadItemStats(name, repo_id, data) {
-		return get("/api/stats", { name, repo_id, ...data });
+	ChartStats(name, repo_id, data) {
+		return get("/api/charts", { name, repo_id, ...data });
 	},
 	LoadRecentConversations(params) {
 		return post("/api/recent-conversations", params);

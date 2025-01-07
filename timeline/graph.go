@@ -706,6 +706,7 @@ var (
 	RelDepicts      = Relation{Label: "depicts", Directed: true}                         // flexible, but most common is: "<from_item> depicts <to_entity>"
 	RelEdit         = Relation{Label: "edit", Directed: true}                            // "<to_item> is edit of <from_item>"
 	RelInCollection = Relation{Label: "in_collection", Directed: true}                   // "<from_item> is in collection <to_item> at position <value>"
+	RelAt           = Relation{Label: "at", Directed: true}                              // "<from_item> is at <to_entity>"
 	// RelTranscript = Relation{Label: "transcript", Directed: true, Subordinating: true} // "<from_item> is transcribed by <to_item>"
 )
 

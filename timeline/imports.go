@@ -502,7 +502,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 // generateThumbnailsForImportedItems generates thumbnails for qualifying items
 // that were a part of the import associated with this processor. It should be
 // run after the import completes.
-// TODO: What about generating thumbnails for... just anything that needs one
+// TODO: What about generating thumbnails for... just anything that needs one -- this is actually going to be important for jobs that have errors and stuff (an empty list should imply all that qualify)
 func (ij ImportJob) generateThumbnailsForImportedItems() {
 	var job thumbnailJob
 

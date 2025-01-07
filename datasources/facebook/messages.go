@@ -193,7 +193,8 @@ func GetMessages(dsName string, dirEntry timeline.DirEntry, params timeline.Impo
 
 			return nil
 		})
-		if err != nil {
+		// since we try different folders above, ignore NotExist since some just might not exist in the archive
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("walking messages: %w", err)
 		}
 	}

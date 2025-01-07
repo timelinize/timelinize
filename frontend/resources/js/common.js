@@ -390,7 +390,7 @@ function connectLog() {
 			$('.import-stream-row-id', rowElem).innerText = l.row_id || "";
 			$('.import-stream-row-type', rowElem).innerHTML = graphType;
 			$('.import-stream-row-status', rowElem).innerHTML = howStored;
-			$('.import-stream-row-data-source', rowElem).innerText = l.data_source_name ? tlz.dataSources[l.data_source_name].title : "";
+			$('.import-stream-row-data-source', rowElem).innerText = l.data_source_name ? tlz.dataSources[l.data_source_name].title : ""; // TODO: Show icon instead, to save space
 			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "";
 			$('.import-stream-row-entity', rowElem).innerText = l.entity || "";
 			$('.import-stream-row-content', rowElem).innerText = l.preview || maxlenStr(l.filename, 25) || "";

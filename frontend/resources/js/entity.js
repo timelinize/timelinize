@@ -27,8 +27,7 @@ async function entityPageMain() {
 
 	const entities = await app.SearchEntities({
 		repo: repoID,
-		row_id: [ rowID ],
-		// count_items: true, // TODO: this is broken (counts are wrong)
+		row_id: [rowID],
 		limit: 1,
 	});
 
@@ -37,92 +36,266 @@ async function entityPageMain() {
 	const ent = entities[0];
 	
 	$('#entity-id').innerText = ent.id;
-	$('.entity-type').innerHTML = entityTypes[ent.type];
-	$('.picture').innerHTML = avatar(true, ent, 'avatar-xxl avatar-rounded');
-	$('.name').innerText = ent.name;
+	$('#entity-type').innerHTML = entityTypes[ent.type];
+	$('#picture').innerHTML = avatar(true, ent, 'avatar-xxl');
+	$('#name').innerText = ent.name || "Unknown";
 
 	for (const attr of ent.attributes) {
-		if (attr.name == "_entity") continue;
-		const tpl = cloneTemplate('#tpl-attribute');
-		$('.attribute-name', tpl).innerText = attr.name;
-		$('.attribute-value', tpl).innerText = attr.value;
-		if (!attr.identity) {
-			$('.ribbon', tpl).remove();
+		if (attr.name == "birth_date") {
+			$('#birth-date').innerText = DateTime.fromSeconds(Number(attr.value)).toLocaleString(DateTime.DATE_FULL);
 		}
-		$('#attributes').append(tpl);
+		if (attr.name == "birth_place") {
+			$('#birth-date').innerText = attr.value;
+		}
+		if (attr.name == "gender") {
+			$('#birth-date').innerText = attr.value;
+		}
+		if (attr.name == "website") {
+			const container = document.createElement('div');
+			container.innerText = attr.value;
+			if ($('#websites').children.length == 0) {
+				$('#websites').innerHTML = '';
+			}
+			$('#websites').append(container);
+		}
 	}
 
-	// const labels = [];
-	// const data = [];
+	// no need to block page load for this
+	app.SearchItems({
+		entity_id: [rowID],
+		only_total: true,
+		flat: true
+	}).then(result => {
+		$('#num-items').innerText = `${result.total.toLocaleString()} items`;
+	});
+
+
+	///////////////////////////////////////////////////////////////////////////////
+
+
+
+	const attributeStats = await app.ChartStats("attributes_stacked_area", tlz.openRepos[0].instance_id, {entity_id: rowID});
+	console.log("ATTRIBUTE STATS:", attributeStats);
+
+
+	const colors = [];
+	for (const colorClass of tlz.colorClasses) {
+		if (!colorClass.endsWith("-lt")) {
+			colors.push(tabler.getColor(colorClass.slice(3)));
+		}
+	}
+
+	for (const series of attributeStats) {
+		let i = 0;
+		for (const attrName in tlz.attributeLabels) {
+			if (attrName == series.attribute_name) {
+				break;
+			}
+			i++;
+		}
+		series.color = colors[i % colors.length];
+	}
+	
+
+	var options2 = {
+		series: attributeStats,
+		chart: {
+			type: 'area',
+			stacked: false,
+			height: 500,
+			// zoom: {
+			// 	enabled: false
+			// },
+		},
+		dataLabels: {
+			enabled: false
+		},
+		markers: {
+			size: 0,
+		},
+		stroke: {
+			// curve: 'straight'
+		},
+		fill: {
+			type: 'gradient',
+			gradient: {
+				shadeIntensity: 1,
+				inverseColors: false,
+				opacityFrom: 0.45,
+				opacityTo: 0.05,
+				stops: [20, 100, 100, 100]
+			},
+		},
+		yaxis: {
+			// logarithmic: true,
+			labels: {
+				style: {
+					colors: '#8e8da4',
+				},
+				offsetX: 0,
+				// formatter: function (val) {
+				// 	return (val / 1000000).toFixed(2);
+				// },
+			},
+			axisBorder: {
+				show: false,
+			},
+			axisTicks: {
+				show: false
+			}
+		},
+		xaxis: {
+			type: 'datetime',
+			// tickAmount: 8,
+			// min: new Date("01/01/2014").getTime(),
+			// max: new Date("01/20/2014").getTime(),
+			labels: {
+				// rotate: -15,
+				// rotateAlways: true,
+				// formatter: function (val, timestamp) {
+				// 	return moment(new Date(timestamp)).format("DD MMM YYYY")
+				// }
+			}
+		},
+		title: {
+			text: 'Items by Attribute Over Time',
+			align: 'left',
+			// offsetX: 14
+		},
+		tooltip: {
+			// shared: true
+		},
+		legend: {
+			position: 'top',
+			// horizontalAlign: 'right',
+			// offsetX: -10,
+			// customLegendItems: [
+			// 	"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", 
+			// ]
+		}
+	};
+
+	var chart2 = new ApexCharts(document.querySelector("#chart2"), options2);
+	chart2.render();
+
+
+
+	/////////////////////////////////////////////////////////////////////////////
+
+
+	// const seriesMap = {};
+
 	// for (const attr of ent.attributes) {
-	// 	labels.push(attr.value);
-	// 	data.push(attr.item_count || 0);
+	// 	// if (attr.name == "_entity") continue;
+	// 	// TODO: could group these to allow them to run concurrently
+	// 	const first = await app.SearchItems({
+	// 		start_timestamp: new Date("0000-01-01").toISOString(), // require result to have a timestamp
+	// 		attribute_id: [attr.id],
+	// 		flat: true,
+	// 		limit: 1,
+	// 		sort: "ASC"
+	// 	});
+	// 	const last = await app.SearchItems({
+	// 		start_timestamp: new Date("0000-01-01").toISOString(), // require result to have a timestamp
+	// 		attribute_id: [attr.id],
+	// 		flat: true,
+	// 		limit: 1,
+	// 		sort: "DESC"
+	// 	});
+
+	// 	if (!first.items?.length || !last.items?.length) {
+	// 		continue;
+	// 	}
+
+	// 	if (!seriesMap[attr.name]) {
+	// 		seriesMap[attr.name] = {
+	// 			name: attr.name,
+	// 			data: []
+	// 		};
+	// 	}
+
+	// 	seriesMap[attr.name].data.push({
+	// 		x: attr.value,
+	// 		y: [
+	// 			new Date(first.items[0].timestamp).getTime(),
+	// 			new Date(last.items[0].timestamp).getTime()
+	// 		]
+	// 	});
 	// }
 
-	// console.log(labels, data);
+	// console.log("SERIES MAP:", seriesMap);
+	// const series = [];
+	// for (const attrName in seriesMap) {
+	// 	series.push(seriesMap[attrName]);
+	// }
 
-	// new ApexCharts($('#chart-item-counts-by-attribute'), {
+	// console.log("SERIES:", series);
+
+	// var options = {
+	// 	series: series,
 	// 	chart: {
-	// 		type: "bar",
-	// 		fontFamily: 'inherit',
-	// 		height: 200,
-	// 		parentHeightOffset: 0,
+	// 		height: ent.attributes.length*15,
+	// 		type: 'rangeBar',
 	// 		toolbar: {
 	// 			show: false,
 	// 		},
-	// 		animations: {
+	// 		zoom: {
 	// 			enabled: false
 	// 		},
 	// 	},
 	// 	plotOptions: {
 	// 		bar: {
-	// 			barHeight: '50%',
-	// 			 horizontal: true,
+	// 			borderRadius: 5,
+	// 			horizontal: true,
+	// 			barHeight: "75%",
+	// 			rangeBarGroupRows: true
 	// 		}
 	// 	},
 	// 	dataLabels: {
-	// 		enabled: false,
-	// 	},
-	// 	fill: {
-	// 		opacity: 1,
-	// 	},
-	// 	series: [{
-	// 		name: "Item count",
-	// 		data: data
-	// 	}],
-	// 	tooltip: {
-	// 		theme: 'dark'
-	// 	},
-	// 	grid: {
-	// 		padding: {
-	// 			top: -20,
-	// 			right: 0,
-	// 			left: -4,
-	// 			bottom: -4
-	// 		},
-	// 		show: false
-	// 		// strokeDashArray: 4,
-	// 	},
-	// 	xaxis: {
-	// 		labels: {
-	// 			padding: 0,
-	// 		},
-	// 		tooltip: {
-	// 			enabled: false
-	// 		},
-	// 		axisBorder: {
-	// 			show: false,
-	// 		},
-	// 		// type: 'datetime',
-	// 	},
-	// 	yaxis: {
-	// 		labels: {
-	// 			padding: 4
+	// 		enabled: true,
+	// 		formatter: function (val) {
+	// 			return betterToHuman(DateTime.fromJSDate(val[0]).diff(DateTime.fromJSDate(val[1])))
 	// 		}
 	// 	},
-	// 	labels: labels,
-	// 	colors: [tabler.getColor("primary")],
-	// }).render();
+	// 	fill: {
+	// 		type: 'gradient',
+	// 		gradient: {
+	// 			shade: 'light',
+	// 			type: 'vertical',
+	// 			shadeIntensity: 0.25,
+	// 			gradientToColors: undefined,
+	// 			inverseColors: true,
+	// 			opacityFrom: 1,
+	// 			opacityTo: 1,
+	// 			stops: [50, 0, 100, 100]
+	// 		}
+	// 	},
+	// 	xaxis: {
+	// 		type: 'datetime'
+	// 	},
+	// 	grid: {
+	// 		row: {
+	// 			colors: ['#fafafa', '#fff'],
+	// 			opacity: 1
+	// 		}
+	// 	},
+	// 	legend: {
+	// 		position: 'top'
+	// 	}
+	// };
+
+	// var chart = new ApexCharts($("#chart"), options);
+	// chart.render();
+
+
+
+
+
+
+
+
+	/////////////////////////////////////////////////////////
+
 
 
 }

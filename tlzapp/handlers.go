@@ -87,13 +87,13 @@ func (s *server) handleMergeEntities(w http.ResponseWriter, r *http.Request) err
 	return jsonResponse(w, nil, err)
 }
 
-func (s *server) handleStats(w http.ResponseWriter, r *http.Request) error {
-	statName, repoID := r.FormValue("name"), r.FormValue("repo_id")
+func (s *server) handleCharts(w http.ResponseWriter, r *http.Request) error {
+	chartName, repoID := r.FormValue("name"), r.FormValue("repo_id")
 	q := r.URL.Query()
 	q.Del("name")
 	q.Del("repo_id")
 	r.URL.RawQuery = q.Encode()
-	stats, err := s.app.LoadItemStats(statName, repoID, r.URL.Query())
+	stats, err := s.app.ChartStats(r.Context(), chartName, repoID, r.URL.Query())
 	return jsonResponse(w, stats, err)
 }
 

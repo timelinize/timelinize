@@ -61,8 +61,8 @@ async function jobPageMain() {
 				show: false,
 			},
 			zoom: {
-                enabled: false
-            },
+				enabled: false
+			},
 			animations: {
 				enabled: true,
 				dynamicAnimation: {

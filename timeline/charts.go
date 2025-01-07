@@ -19,7 +19,9 @@
 package timeline
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"strconv"
 	"time"
@@ -33,7 +35,7 @@ type PeriodicStats struct {
 }
 
 // RecentItemStats returns period statistics about recent items.
-func (tl *Timeline) RecentItemStats(params url.Values) ([]PeriodicStats, error) {
+func (tl *Timeline) RecentItemStats(ctx context.Context, params url.Values) ([]PeriodicStats, error) {
 	period := params.Get("period")
 
 	var dateAdjust, startOf, periodColumn string
@@ -79,7 +81,7 @@ func (tl *Timeline) RecentItemStats(params url.Values) ([]PeriodicStats, error) 
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
-	rows, err := tl.db.Query(query)
+	rows, err := tl.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -116,11 +118,11 @@ type ClassificationStat struct {
 }
 
 // ItemTypeStats returns info about items by their classifications.
-func (tl *Timeline) ItemTypeStats() ([]ClassificationStat, error) {
+func (tl *Timeline) ItemTypeStats(ctx context.Context) ([]ClassificationStat, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
-	rows, err := tl.db.Query("SELECT classification_name, count() FROM extended_items GROUP BY classification_id")
+	rows, err := tl.db.QueryContext(ctx, "SELECT classification_name, count() FROM extended_items GROUP BY classification_id")
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +180,7 @@ type DSUsageStat struct {
 }
 
 // DataSourceUsageStats returns the counts by data source.
-func (tl *Timeline) DataSourceUsageStats() ([]DSUsageSeries, error) {
+func (tl *Timeline) DataSourceUsageStats(ctx context.Context) ([]DSUsageSeries, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
@@ -199,7 +201,7 @@ func (tl *Timeline) DataSourceUsageStats() ([]DSUsageSeries, error) {
 	// the readability of the chart. Finally, we limit to 1000 results to avoid burdening the frontend.
 	// Another idea is to not constrain by timestamp and instead to sample every Nth row, for example
 	// (but still would want to ensure timestamp is not null).
-	rows, err := tl.db.Query(`
+	rows, err := tl.db.QueryContext(ctx, `
 		SELECT
 			data_source_name,
 			date(timestamp/1000, 'unixepoch') AS date,
@@ -239,4 +241,72 @@ func (tl *Timeline) DataSourceUsageStats() ([]DSUsageSeries, error) {
 	}
 
 	return all, nil
+}
+
+// DSUsageStat is a data point containing the date, hour of day, and number of items.
+type AttributeStatsSeries struct {
+	Name string    `json:"name"` // attribute value
+	Data [][]int64 `json:"data"`
+
+	AttributeName string `json:"attribute_name"` // attribute name is not used by the chart lib, but by our script
+}
+
+// AttributeStats returns the counts of items by month for attributes of an entity.
+func (tl *Timeline) AttributeStats(ctx context.Context, params url.Values) ([]AttributeStatsSeries, error) {
+	entityID, err := strconv.Atoi(params.Get("entity_id"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid entity ID; must be integer: %w", err)
+	}
+
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
+
+	start := time.Now()
+	rows, err := tl.db.QueryContext(ctx, `
+		SELECT
+			strftime('%Y', date(items.timestamp/1000, 'unixepoch')) AS year,
+			strftime('%m', date(items.timestamp/1000, 'unixepoch')) AS month,
+			attributes.name,
+			attributes.value,
+			count(items.id) AS num
+		FROM entity_attributes
+		JOIN attributes ON attributes.id = entity_attributes.attribute_id
+		JOIN items ON items.attribute_id = attributes.id
+		WHERE entity_attributes.entity_id = ? AND items.timestamp IS NOT NULL
+		GROUP BY year, month, entity_attributes.attribute_id
+		ORDER BY year DESC, month DESC, num DESC`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	seriesMap := make(map[string]AttributeStatsSeries)
+
+	for rows.Next() {
+		var year, month int
+		var count int64
+		var attrName, attrValue string
+		err := rows.Scan(&year, &month, &attrName, &attrValue, &count)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seriesMap[attrValue]; !ok {
+			seriesMap[attrValue] = AttributeStatsSeries{Name: attrValue, AttributeName: attrName}
+		}
+		monthYear := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+		series := seriesMap[attrValue]
+		series.Data = append(series.Data, []int64{monthYear.Unix(), count})
+		seriesMap[attrValue] = series
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	log.Println("TOTAL TIME:", time.Since(start))
+
+	results := make([]AttributeStatsSeries, 0, len(seriesMap))
+	for _, series := range seriesMap {
+		results = append(results, series)
+	}
+
+	return results, nil
 }

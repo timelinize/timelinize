@@ -1,7 +1,7 @@
 async function loadAllGroups(maxGroups = 50) {
 	async function loadBatch(params) {
 		const results = await app.SearchItems(params);
-		console.log("BATCH:", results.items);
+		console.log("BATCH PARAMS, RESULTS:", params, results);
 		return results.items;
 	}
 
@@ -21,6 +21,7 @@ async function loadAllGroups(maxGroups = 50) {
 	do {
 		const params = timelineFilterParams(items?.[items.length-1]);
 		const batch = await loadBatch(params);
+		if (!batch) break;
 		items = items.concat(batch);
 		const groups = timelineGroups(items);
 

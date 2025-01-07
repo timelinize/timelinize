@@ -270,8 +270,10 @@ func provisionThumbsDB(ctx context.Context, thumbsDB *sql.DB, repoID uuid.UUID) 
 	return nil
 }
 
+// explainQueryPlan prints out the query and its plan. You MUST acquire a lock on the dbMu first.
+//
 //nolint:unused
-func (tl *Timeline) explainQueryPlan(ctx context.Context, q string, args ...any) {
+func (tl *Timeline) explainQueryPlan(ctx context.Context, tx *sql.Tx, q string, args ...any) {
 	logger := Log.Named("query_planner")
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
@@ -279,9 +281,15 @@ func (tl *Timeline) explainQueryPlan(ctx context.Context, q string, args ...any)
 	fmt.Fprint(w, q)
 	fmt.Fprint(w, "\n============================================================================================\n")
 
-	tl.dbMu.RLock()
-	rows, err := tl.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+q, args...)
-	tl.dbMu.RUnlock()
+	explainQ := "EXPLAIN QUERY PLAN " + q
+
+	var rows *sql.Rows
+	var err error
+	if tx == nil {
+		rows, err = tl.db.QueryContext(ctx, explainQ, args...)
+	} else {
+		rows, err = tx.QueryContext(ctx, explainQ, args...)
+	}
 	if err != nil {
 		logger.Error("explaining query plan", zap.Error(err))
 		return

@@ -12,8 +12,3 @@
 .timeline-container-grid .minidisp-media > * {
 	max-height: 200px;
 }
-
-.navbar-overlap::after {
-	/* background-color: #e3e9f1; */
-	background-color: #143a56;
-}

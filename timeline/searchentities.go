@@ -38,9 +38,6 @@ type EntitySearchParams struct {
 	// If true, OR different fields instead of AND
 	OrFields bool `json:"or_fields,omitempty"`
 
-	// if true, include item count (can be slow)
-	CountItems bool `json:"count_items,omitempty"`
-
 	// // query related items and people recursively to this many degrees
 	// // (e.g. 0 is only the item, 1 adds direct relationships, etc...)
 	// // TODO: not implemented (yet?) -- if we did, it'd probably only make sense to get relationships to other entities...
@@ -56,10 +53,6 @@ type EntitySearchParams struct {
 	Sort SortDir `json:"sort,omitempty"`
 
 	Limit int `json:"limit,omitempty"`
-}
-
-func (esp EntitySearchParams) hasItemCount() bool {
-	return esp.CountItems || esp.OrderBy == "item_count"
 }
 
 func (tl *Timeline) SearchEntities(ctx context.Context, params EntitySearchParams) ([]Entity, error) {
@@ -100,9 +93,6 @@ func (tl *Timeline) SearchEntities(ctx context.Context, params EntitySearchParam
 			&ent.ID, &ent.typeID, &ent.Type, &ent.JobID, &stored, &ent.name,
 			&ent.Picture, &identDS, &autolinkImportID, &autolinkAttributeID,
 			&nattr.ID, &nattr.Name, &nattr.Value,
-		}
-		if params.hasItemCount() {
-			dests = append(dests, &itemCount)
 		}
 
 		err := rows.Scan(dests...)
@@ -174,13 +164,7 @@ func (tl *Timeline) prepareEntitySearchQuery(params EntitySearchParams) (string,
 		all_entity_attributes.autolink_attribute_id,
 		attributes.id,
 		attributes.name,
-		attributes.value`
-	// TODO: This item count is clearly wrong...
-	if params.hasItemCount() {
-		q += `,
-		count(items.id) AS item_count`
-	}
-	q += `
+		attributes.value
 	FROM entities
 	JOIN entity_types ON entity_types.id = entities.type_id
 	LEFT JOIN entity_attributes AS all_entity_attributes ON all_entity_attributes.entity_id = entities.id
@@ -188,10 +172,6 @@ func (tl *Timeline) prepareEntitySearchQuery(params EntitySearchParams) (string,
 	LEFT JOIN attributes ON attributes.id = all_entity_attributes.attribute_id
 	LEFT JOIN attributes AS specific_attributes ON specific_attributes.id = specific_entity_attributes.attribute_id
 	`
-	if params.hasItemCount() {
-		q += `LEFT JOIN items ON items.attribute_id = all_entity_attributes.attribute_id
-		`
-	}
 
 	// build the WHERE in terms of groups of OR's that are AND'ed together
 	var args []any
@@ -286,11 +266,7 @@ func (tl *Timeline) prepareEntitySearchQuery(params EntitySearchParams) (string,
 	// sort direction
 	sortDir := strings.ToUpper(string(params.Sort))
 	if sortDir == "" {
-		if params.hasItemCount() {
-			sortDir = string(SortDesc)
-		} else {
-			sortDir = string(SortAsc)
-		}
+		sortDir = string(SortAsc)
 	}
 	if sortDir != string(SortAsc) && sortDir != string(SortDesc) {
 		return "", nil, fmt.Errorf("invalid sort direction: %s", sortDir)

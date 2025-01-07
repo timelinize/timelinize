@@ -208,10 +208,10 @@ func (a *App) registerCommands() {
 			Payload: jobPayload{},
 			Help:    "Starts a job.",
 		},
-		"stats": {
-			Handler: a.server.handleStats,
+		"charts": {
+			Handler: a.server.handleCharts,
 			Method:  http.MethodGet,
-			Help:    "Returns statistics about the timeline.",
+			Help:    "Returns statistics about the timeline for use in charts.",
 		},
 		"unpause-job": {
 			Handler: a.server.handleUnpauseJob,
