@@ -147,9 +147,8 @@ async function renderConversations() {
 	const end = DateTime.now();
 	const duration = end.diff(start, 'seconds');
 
-	// TODO: not used currently, but might be restored if we want to show them for slower loads
-	// // delete placeholders
-	// $('#convos-container').replaceChildren();
+	// delete prior results
+	$('#convos-container').replaceChildren();
 
 	$('#convos-count').innerText = results.length;
 	$('#convos-duration').innerText = duration.toHuman();
