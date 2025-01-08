@@ -45,10 +45,10 @@ async function entityPageMain() {
 			$('#birth-date').innerText = DateTime.fromSeconds(Number(attr.value)).toLocaleString(DateTime.DATE_FULL);
 		}
 		if (attr.name == "birth_place") {
-			$('#birth-date').innerText = attr.value;
+			$('#birth-place').innerText = attr.value;
 		}
 		if (attr.name == "gender") {
-			$('#birth-date').innerText = attr.value;
+			$('#gender').innerText = attr.value;
 		}
 		if (attr.name == "website") {
 			const container = document.createElement('div');
@@ -94,6 +94,9 @@ async function entityPageMain() {
 			i++;
 		}
 		series.color = colors[i % colors.length];
+		// TODO: Trying to see if bookending the series with nulls improves performance/appearance at all
+		series.data.unshift([series.data[0][0]-1, null]);
+		series.data.push([series.data[series.data.length-1][0]-1, null]);
 	}
 	
 
@@ -106,6 +109,9 @@ async function entityPageMain() {
 			// zoom: {
 			// 	enabled: false
 			// },
+			animations: {
+				enabled: false
+			}
 		},
 		dataLabels: {
 			enabled: false
@@ -163,7 +169,8 @@ async function entityPageMain() {
 			// offsetX: 14
 		},
 		tooltip: {
-			// shared: true
+			// intersect: true,
+			shared: false
 		},
 		legend: {
 			position: 'top',
