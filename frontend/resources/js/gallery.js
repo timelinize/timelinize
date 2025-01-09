@@ -37,7 +37,7 @@ async function galleryPageMain() {
 	// configure pagination links: enable next if we overflowed the search results limit,
 	// and enable prev if we are not on page 1; otherwise disable prev/next link(s)
 	for (const elem of $$('.pagination .page-next')) {
-		if (results.items.length > galleryLimit) {
+		if (results.items?.length > galleryLimit) {
 			elem.classList.remove('disabled');
 			let newQS = new URLSearchParams(window.location.search);
 			newQS.set('page', currentPageNum() + 1);
@@ -63,6 +63,10 @@ async function galleryPageMain() {
 		}
 	}
 
+	if (!results.items) {
+		return;
+	}
+	
 	results.items.splice(galleryLimit); // strip the extra item that is only used for pagination purposes
 
 	// reset items

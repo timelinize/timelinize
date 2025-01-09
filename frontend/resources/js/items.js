@@ -66,7 +66,7 @@ async function itemsMain() {
 	// configure pagination links: enable next if we overflowed the search results limit,
 	// and enable prev if we are not on page 1; otherwise disable prev/next link(s)
 	for (const elem of $$('.pagination .page-next')) {
-		if (results.items.length > limit()) {
+		if (results.items?.length > limit()) {
 			elem.classList.remove('disabled');
 			let newQS = new URLSearchParams(window.location.search);
 			newQS.set('page', currentPageNum() + 1);
@@ -110,7 +110,7 @@ async function itemsMain() {
 	const maxPageLinksAtBeginning = 3;
 
 	// remove the extra item from the list that we only used to know whether there's another page
-	if (results.items.length > pageSize) {
+	if (results.items?.length > pageSize) {
 		results.items.pop();
 	}
 
@@ -120,7 +120,7 @@ async function itemsMain() {
 	}
 
 	// render all items
-	for (let i = 0; i < results.items.length; i++) {
+	for (let i = 0; i < results.items?.length; i++) {
 		const item = results.items[i];
 		const ts = DateTime.fromISO(item.timestamp);
 		const itemLink = `/items/${repo.instance_id}/${item.id}`;

@@ -75,7 +75,7 @@ async function loadAndRenderMapData() {
 
 		// prepare map data: associate each coordinate with its information & color
 		let newMapData = { items: [], params: params, totalDistance: 0 };
-		for (let i = 0; i < results.items.length; i++) {
+		for (let i = 0; i < results.items?.length; i++) {
 			const item = results.items[i];
 			
 			if (!canRenderOnMap(item)) {
