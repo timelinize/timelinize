@@ -517,8 +517,31 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 		return fmt.Errorf("loading relation ID: %w (rawRelationship=%s)", err, rel)
 	}
 
-	// TODO: FIXME: By taking out the composite UNIQUE keys, we broke this, and somehow, multiple recipients appear for messages... but I don't
-	// think they were correct, since they might vary by start/end... we might need more sophisticated duplicate check query here first
+	// make sure the relationship is unique; we don't use UNIQUE constraints in the DB because this
+	// check is a little more complex with the potential timeframes; and we only need 1 index to
+	// make it reasonably fast, rather than multiple on the different to/from fields
+	// (I found SELECT 1 to be faster than SELECT count(), but maybe that was just a fluke?)
+	var dupe bool
+	err = tx.QueryRowContext(ctx, `
+		SELECT 1
+		FROM relationships
+		WHERE relation_id=?
+			AND from_item_id IS ?
+			AND to_item_id IS ?
+			AND from_attribute_id IS ?
+			AND to_attribute_id IS ?
+			AND ((? IS NULL OR start >= ?) AND (? IS NULL OR end <= ?))
+		LIMIT 1`, relID,
+		rel.fromItemID, rel.toItemID,
+		rel.fromAttributeID, rel.toAttributeID,
+		rel.start, rel.start, rel.end, rel.end).Scan(&dupe)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("checking for duplicate relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
+	}
+	if dupe {
+		return nil // already in DB
+	}
+
 	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO relationships
 		(relation_id, value,
 			from_item_id, from_attribute_id,

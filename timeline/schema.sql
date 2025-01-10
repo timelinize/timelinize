@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS "items" (
 	-- TODO: unique on these two hashes?
 	"original_id_hash" BLOB, -- a hash of the data source and original ID of the item, also used for duplicate detection, optionally stored when item is deleted
 	"initial_content_hash" BLOB, -- a hash computed during initial import, used for duplicate detection (remains same even if item is modified by user)
-	"retrieval_key" BLOB, -- an optional opaque value that indicates this item may not be fully populated in a single import; not an ID but still a unique identifier
+	"retrieval_key" BLOB UNIQUE, -- an optional opaque value that indicates this item may not be fully populated in a single import; not an ID but still a unique identifier
 	"hidden" INTEGER,  -- if owner would like to forget about this item, don't show it in search results, etc. TODO: keep?
 	"deleted" INTEGER, -- 1 = if the columns will be erased, they have been erased; >1 = a unix epoch timestamp after which the columns can be erased
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE,
@@ -204,8 +204,7 @@ CREATE TABLE IF NOT EXISTS "items" (
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("classification_id") REFERENCES "classifications"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("data_id") REFERENCES "item_data"("id") ON UPDATE CASCADE ON DELETE SET NULL,
-	UNIQUE ("data_source_id", "original_id"),
-	UNIQUE ("retrieval_key")
+	UNIQUE ("data_source_id", "original_id")
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
@@ -231,6 +230,10 @@ CREATE TABLE IF NOT EXISTS "relationships" (
 	FOREIGN KEY ("from_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("to_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
+
+-- This speeds up inserts because we check for duplicate relationships in the app (it's complex with potential timeframes),
+-- and this way only 1 index is necessary, not multiple on the various fields we check for uniqueness
+CREATE INDEX IF NOT EXISTS "idx_relationships_from_item_id" ON "relationships"("from_item_id");
 
 -- Relations define the way relationships connect. They are described by natural
 -- language phrases such as "in reply to", "picture of", or "attached to"; or could

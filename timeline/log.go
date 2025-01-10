@@ -58,7 +58,7 @@ func newLogger() *zap.Logger {
 	)
 
 	// avoid a firehose of logs
-	const firstNMsgs, everyNthMsg = 10, 100
+	const firstNMsgs, everyNthMsg = 4, 100
 	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
 
 	const streamInterval = 250 * time.Millisecond

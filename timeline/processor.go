@@ -47,6 +47,10 @@ type processor struct {
 	// batching inserts can greatly increase speed
 	batch     []*Graph
 	batchSize int // size is at least len(batch) but edges on a graph can add to it
+
+	// counter used for periodic DB optimization during an import
+	// TODO: this should ideally be global per timeline, even if multiple jobs run simultaneously
+	rootGraphCount int
 }
 
 func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint json.RawMessage) error {

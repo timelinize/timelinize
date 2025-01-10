@@ -13,6 +13,10 @@ tlz.pageControllers = {
 		load() {
 			$('.navbar').classList.add('navbar-overlap');
 			$('.navbar').dataset.bsTheme = "dark";
+
+			const ctaButton = $('.nav-item .btn-outline-primary');
+			ctaButton.classList.remove('btn-outline-primary');
+			ctaButton.classList.add('btn-outline-light');
 		},
 		async render() {
 			await renderDashboard();
@@ -20,6 +24,10 @@ tlz.pageControllers = {
 		unload() {
 			$('.navbar').classList.remove('navbar-overlap');
 			delete($('.navbar').dataset.bsTheme);
+
+			const ctaButton = $('.nav-item .btn-outline-light');
+			ctaButton.classList.remove('btn-outline-light');
+			ctaButton.classList.add('btn-outline-primary');
 		}
 
 		// TODO: build a real dashboard, you fool

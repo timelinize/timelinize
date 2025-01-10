@@ -293,6 +293,18 @@ func (p *processor) tempGraphFolder() string {
 }
 
 func (p *processor) pipeline(ctx context.Context, batch []*Graph) error {
+	// During large imports, I've found that running ANALYZE every so often
+	// can be helpful for improving performance, since an import is much more
+	// than just an INSERT, there's lots of SELECTs along the way that use
+	// indexes. For example, in my tests importing about a quarter million
+	// messages (relation-heavy, since they are sent to an attribute), which
+	// I repeated twice, it would take 30 minutes to import without ANALYZE.
+	// But when running ANALYZE every so often, it only took 23 minutes.
+	p.rootGraphCount += len(batch)
+	if p.rootGraphCount%15000 < len(batch) {
+		p.tl.optimizeDB(p.log.Named("optimizer"))
+	}
+
 	err := p.phase1(ctx, batch)
 	if err != nil {
 		return err
