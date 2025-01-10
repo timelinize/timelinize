@@ -600,6 +600,7 @@ func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, input
 	// TODO: potentially use Accept header to make this dynamic
 	const format = "video/webm"
 	w.Header().Set("Content-Type", format)
+	// TODO: Safari sends "Range: bytes=0-1" before it requests the whole video, I think it expects a Content-Range header. can we use ServeContent to make it work on Safari?
 
 	if err := s.app.Transcode(ctx, inputVideoFilePath, inputVideoStream, format, w, obfuscate); err != nil {
 		return fmt.Errorf("video transcode error: %#w", err)

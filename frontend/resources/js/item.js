@@ -234,7 +234,7 @@ async function itemPageMain() {
 				$('#item-content').append(tpl);
 			});
 			video.addEventListener('error', (event, err) => {
-				console.error("loading video:", err);
+				console.error("loading video:", event, err);
 				video.remove();
 			});
 

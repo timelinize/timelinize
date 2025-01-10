@@ -367,8 +367,9 @@ func (it *Item) makeContentHash() {
 }
 
 func (it Item) String() string {
-	return fmt.Sprintf("[id=%s class=%+v timestamp=%s timespan=%s orig_path=%s inter_path=%s location=%s content=%p meta=%v]",
-		it.ID, it.Classification, it.Timestamp, it.Timespan, it.OriginalLocation, it.IntermediateLocation, it.Location, it.Content.Data, it.Metadata)
+	return fmt.Sprintf("[id=%s class=%+v owner=%+v timestamp=%s timespan=%s orig_path=%s inter_path=%s location=%s content=%p meta=%v]",
+		it.ID, it.Classification, it.Owner, it.Timestamp, it.Timespan, it.OriginalLocation,
+		it.IntermediateLocation, it.Location, it.Content.Data, it.Metadata)
 }
 
 // HasContent returns true if the item has data or a location.

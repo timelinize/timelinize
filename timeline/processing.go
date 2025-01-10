@@ -1007,6 +1007,21 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 			updateOverrides["data"] = updatePolicyPreferIncoming
 		}
 
+		// if incoming item is linked to an owner attribute, but the one in the DB is null,
+		// prefer the incoming attribute/owner
+		if dbItem.AttributeID == nil {
+			var hasIDAttr bool
+			for _, attr := range it.Owner.Attributes {
+				if attr.Identity {
+					hasIDAttr = true
+					break
+				}
+			}
+			if hasIDAttr {
+				updateOverrides["attribute_id"] = updatePolicyPreferIncoming
+			}
+		}
+
 		// reprocess the item row if there's new data to be added
 		if (dbItem.Latitude == nil && it.Location.Latitude != nil) ||
 			(dbItem.Longitude == nil && it.Location.Longitude != nil) ||

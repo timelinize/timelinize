@@ -1700,7 +1700,7 @@ function renderMessageItem(item, options) {
 	}
 
 	const elem = cloneTemplate('#tpl-message');
-	$('.message-sender', elem).innerText = item.entity?.name || item.entity.attribute.value;
+	$('.message-sender', elem).innerText = item.entity?.name || item.entity?.attribute?.value;
 	if (item.entity?.id == 1) {
 		// if current user (presumably, entity ID 1 -- though this could change later) is
 		// the sender, then put their own chats along the right, I guess, with the avatar

@@ -517,6 +517,8 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 		return fmt.Errorf("loading relation ID: %w (rawRelationship=%s)", err, rel)
 	}
 
+	// TODO: FIXME: By taking out the composite UNIQUE keys, we broke this, and somehow, multiple recipients appear for messages... but I don't
+	// think they were correct, since they might vary by start/end... we might need more sophisticated duplicate check query here first
 	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO relationships
 		(relation_id, value,
 			from_item_id, from_attribute_id,

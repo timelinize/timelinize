@@ -118,8 +118,9 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 	rows, err := im.DB.QueryContext(ctx,
 		`SELECT
 			m.ROWID, m.guid, m.text, m.attributedBody, m.service, m.date, m.date_read, m.date_delivered,
-			m.is_from_me, m.is_spam, m.associated_message_guid, m.associated_message_type, m.destination_caller_id,
-			m.reply_to_guid, m.thread_originator_guid,
+			m.is_from_me, m.is_spam,
+			m.associated_message_guid, m.associated_message_type, m.associated_message_emoji,
+			m.destination_caller_id, m.reply_to_guid, m.thread_originator_guid,
 			h.id, h.country, h.service,
 			chat_h.id, chat_h.country, chat_h.service,
 			a.guid, a.created_date, a.filename, a.mime_type, a.transfer_name
@@ -153,7 +154,6 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		// the primary content of the message, i.e. the main/parent item
 		attachments := currentMessage.attachments(ctx, im, msgItem.Owner)
 		if msgItem.Content.Data == nil && len(attachments) > 0 {
-			// log.Println("ATTACHMENT AS MAIN:", msgItem.ID, attachments[0].ID)
 			msgItem.Content = attachments[0].Content
 			msgItem.OriginalLocation = attachments[0].OriginalLocation
 			msgItem.IntermediateLocation = attachments[0].IntermediateLocation
@@ -198,7 +198,8 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 
 		err := rows.Scan(
 			&msg.rowid, &msg.guid, &msg.text, &msg.attributedBody, &msg.service, &msg.date, &msg.dateRead,
-			&msg.dateDelivered, &msg.isFromMe, &msg.isSpam, &msg.associatedMessageGUID, &msg.associatedMessageType,
+			&msg.dateDelivered, &msg.isFromMe, &msg.isSpam,
+			&msg.associatedMessageGUID, &msg.associatedMessageType, &msg.associatedMessageEmoji,
 			&msg.destinationCallerID, &msg.replyToGUID, &msg.threadOriginatorGUID, &msg.handle.id,
 			&msg.handle.country, &msg.handle.service, &joinedH.id, &joinedH.country, &joinedH.service,
 			&attach.guid, &attach.createdDate, &attach.filename, &attach.mimeType, &attach.transferName)
@@ -220,8 +221,14 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		// if message is a reaction handle it separately
 		if msg.associatedMessageGUID != nil && msg.associatedMessageType != nil {
 			reaction := messageReactions[*msg.associatedMessageType]
+			// TODO: a message type of 3006 means removing the reaction placed with a message of type 2006.
+			if *msg.associatedMessageType == 2006 && msg.associatedMessageEmoji != nil {
+				reaction = *msg.associatedMessageEmoji
+			}
 			reactor := msg.sender()
 
+			// oftentimes, the associated_message_guid values are prefixed by a string like "p:0/" or
+			// "bp:" but I don't know what they're for, and apparently we can ignore them for our purposes
 			_, associatedGUID, cut := strings.Cut(*msg.associatedMessageGUID, "/")
 			if !cut {
 				_, associatedGUID, cut = strings.Cut(*msg.associatedMessageGUID, ":")
@@ -312,8 +319,9 @@ type message struct {
 	normalizedCallerID  string
 
 	// message reactions
-	associatedMessageGUID *string
-	associatedMessageType *int
+	associatedMessageGUID  *string
+	associatedMessageType  *int
+	associatedMessageEmoji *string
 
 	replyToGUID          *string // always seems to be set, even if not an explicit reply via user gesture
 	threadOriginatorGUID *string // I think this is only set when the user explicitly makes a thread (by replying)
@@ -520,11 +528,11 @@ func entityWithID(id string) timeline.Entity {
 
 // TODO: These but in the 3000s are for removing the reaction.
 var messageReactions = map[int]string{
-	2000: "\u2764\uFE0F", // red heart, but it appears black otherwise: ❤️
+	2000: "\u2764\uFE0F", // red heart, but it appears black without the modifier: ❤️
 	2001: "👍",
 	2002: "👎",
 	2003: "😂",
-	2004: "\u203C\uFE0F", // red double-exclamation, but it appears plain black otherwise: ‼️
+	2004: "\u203C\uFE0F", // red double-exclamation, but it appears plain black without the modifier: ‼️
 	2005: "❓",
 }
 
