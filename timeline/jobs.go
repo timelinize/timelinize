@@ -688,6 +688,7 @@ func (j *ActiveJob) flushProgress(logger *zap.Logger) {
 			zap.Timep("checkpointed", j.lastCheckpoint),
 			zap.Int64p("parent_job_id", j.parentJobID))
 		j.lastFlush = time.Now()
+		_ = logger.Sync() // ensure it gets written promptly
 	}
 }
 
@@ -853,7 +854,8 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
 		// running jobs should be active (taken care of above by canceling
 		// its context), and we should resume interrupted jobs at startup,
 		// but might as well allow them here since it's no matter
-		_, err = tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE id=?`, JobAborted, jobID) // TODO: LIMIT 1
+		job.State = JobAborted
+		_, err = tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE id=?`, job.State, jobID) // TODO: LIMIT 1
 		if err != nil {
 			return fmt.Errorf("updating job state: %w", err)
 		}
@@ -864,6 +866,25 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
+
+	// update any UI elements that may be showing info about this inactive job
+	statusLog := Log.Named("job.status").With(
+		zap.String("repo_id", tl.ID().String()),
+		zap.Int64("id", job.ID),
+		zap.String("name", string(job.Name)),
+		zap.Time("created", job.Created),
+		zap.Timep("start", job.Start))
+	inactiveJob := &ActiveJob{
+		id:              job.ID,
+		statusLog:       statusLog,
+		parentJobID:     job.ParentJobID,
+		currentState:    job.State,
+		currentProgress: job.Progress,
+		currentTotal:    job.Total,
+		currentMessage:  job.Message,
+		lastCheckpoint:  job.Updated,
+	}
+	inactiveJob.flushProgress(statusLog)
 
 	return nil
 }
