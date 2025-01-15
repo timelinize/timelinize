@@ -689,20 +689,7 @@ func (*App) ChartStats(ctx context.Context, chartName, repoID string, params url
 	if err != nil {
 		return nil, err
 	}
-	// TODO: refactor all stats/charts functions into one
-	switch chartName {
-	case "periodical":
-		return tl.RecentItemStats(ctx, params)
-	case "classifications":
-		return tl.ItemTypeStats(ctx)
-	case "datasources":
-		return tl.DataSourceUsageStats(ctx)
-	case "attributes_stacked_area":
-		return tl.AttributeStats(ctx, params)
-	case "recent_data_sources":
-		return tl.RecentDaysItemCount(ctx, params)
-	}
-	return nil, fmt.Errorf("unknown chart name: %s", chartName)
+	return tl.Chart(ctx, chartName, params)
 }
 
 type Settings struct {

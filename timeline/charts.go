@@ -27,15 +27,24 @@ import (
 	"time"
 )
 
-// periodicStats represents period statistics.
-// TODO: This is very much an experimental, WIP type... might need to generalize it or make way more of these
-type periodicStats struct {
-	Period string `json:"period"`
-	Count  int    `json:"count"`
+func (tl *Timeline) Chart(ctx context.Context, chartName string, params url.Values) (any, error) {
+	switch chartName {
+	case "periodical":
+		return tl.chartRecentItems(ctx, params)
+	case "classifications":
+		return tl.chartItemTypes(ctx)
+	case "datasources":
+		return tl.chartDataSourceUsage(ctx)
+	case "attributes_stacked_area":
+		return tl.AttributeStats(ctx, params)
+	case "recent_data_sources":
+		return tl.chartRecentDaysItemCount(ctx, params)
+	default:
+		return nil, fmt.Errorf("unknown chart name: %s", chartName)
+	}
 }
 
-// RecentItemStats returns period statistics about recent items.
-func (tl *Timeline) RecentItemStats(ctx context.Context, params url.Values) ([]periodicStats, error) {
+func (tl *Timeline) chartRecentItems(ctx context.Context, params url.Values) (any, error) {
 	period := params.Get("period")
 
 	var dateAdjust, startOf, periodColumn string
@@ -87,6 +96,11 @@ func (tl *Timeline) RecentItemStats(ctx context.Context, params url.Values) ([]p
 	}
 	defer rows.Close()
 
+	type periodicStats struct {
+		Period string `json:"period"`
+		Count  int    `json:"count"`
+	}
+
 	var results []periodicStats
 	for rows.Next() {
 		var group string
@@ -111,14 +125,7 @@ func (tl *Timeline) RecentItemStats(ctx context.Context, params url.Values) ([]p
 	return results, nil
 }
 
-// classificationStat holds counts of item classes.
-type classificationStat struct {
-	ClassificationName string `json:"name"`
-	Count              int    `json:"value"`
-}
-
-// ItemTypeStats returns info about items by their classifications.
-func (tl *Timeline) ItemTypeStats(ctx context.Context) ([]classificationStat, error) {
+func (tl *Timeline) chartItemTypes(ctx context.Context) (any, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
@@ -127,6 +134,11 @@ func (tl *Timeline) ItemTypeStats(ctx context.Context) ([]classificationStat, er
 		return nil, err
 	}
 	defer rows.Close()
+
+	type classificationStat struct {
+		ClassificationName string `json:"name"`
+		Count              int    `json:"value"`
+	}
 
 	var results []classificationStat
 	for rows.Next() {
@@ -149,14 +161,7 @@ func (tl *Timeline) ItemTypeStats(ctx context.Context) ([]classificationStat, er
 	return results, nil
 }
 
-type recentDaysCount struct {
-	Date           string `json:"date"`
-	DataSourceName string `json:"data_source_name"`
-	Count          int    `json:"count"`
-}
-
-// inside dimension: element 0 = date, element 1 = count
-func (tl *Timeline) RecentDaysItemCount(ctx context.Context, params url.Values) ([]recentDaysCount, error) {
+func (tl *Timeline) chartRecentDaysItemCount(ctx context.Context, params url.Values) (any, error) {
 	days, err := strconv.Atoi(params.Get("days"))
 	if err != nil {
 		return nil, err
@@ -183,6 +188,12 @@ func (tl *Timeline) RecentDaysItemCount(ctx context.Context, params url.Values) 
 		return nil, err
 	}
 	defer rows.Close()
+
+	type recentDaysCount struct {
+		Date           string `json:"date"`
+		DataSourceName string `json:"data_source_name"`
+		Count          int    `json:"count"`
+	}
 
 	var results []recentDaysCount
 	for rows.Next() {
@@ -217,14 +228,8 @@ ORDER BY timestamp
 LIMIT 1000;
 */
 
-// dsUsageSeries correlates data source name with a series of statistics.
-type dsUsageSeries struct {
-	Name string  `json:"name"`
-	Data [][]any `json:"data"` // inner dimension is [x, y, z] or, specifically, [date, hour, count]
-}
-
-// DataSourceUsageStats returns the counts by data source.
-func (tl *Timeline) DataSourceUsageStats(ctx context.Context) ([]dsUsageSeries, error) {
+// chartDataSourceUsage returns the counts by data source.
+func (tl *Timeline) chartDataSourceUsage(ctx context.Context) (any, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
@@ -264,6 +269,11 @@ func (tl *Timeline) DataSourceUsageStats(ctx context.Context) ([]dsUsageSeries, 
 	}
 	defer rows.Close()
 
+	type dsUsageSeries struct {
+		Name string  `json:"name"`
+		Data [][]any `json:"data"` // inner dimension is [x, y, z] or, specifically, [date, hour, count]
+	}
+
 	var all []dsUsageSeries
 
 	for rows.Next() {
@@ -285,15 +295,8 @@ func (tl *Timeline) DataSourceUsageStats(ctx context.Context) ([]dsUsageSeries, 
 	return all, nil
 }
 
-type attributeStatsSeries struct {
-	Name string    `json:"name"` // attribute value
-	Data [][]int64 `json:"data"`
-
-	AttributeName string `json:"attribute_name"` // attribute name is not used by the chart lib, but by our script
-}
-
 // AttributeStats returns the counts of items by month for attributes of an entity.
-func (tl *Timeline) AttributeStats(ctx context.Context, params url.Values) ([]attributeStatsSeries, error) {
+func (tl *Timeline) AttributeStats(ctx context.Context, params url.Values) (any, error) {
 	entityID, err := strconv.Atoi(params.Get("entity_id"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid entity ID; must be integer: %w", err)
@@ -319,6 +322,13 @@ func (tl *Timeline) AttributeStats(ctx context.Context, params url.Values) ([]at
 		return nil, err
 	}
 	defer rows.Close()
+
+	type attributeStatsSeries struct {
+		Name string    `json:"name"` // attribute value
+		Data [][]int64 `json:"data"`
+
+		AttributeName string `json:"attribute_name"` // attribute name is not used by the chart lib, but by our script
+	}
 
 	seriesMap := make(map[string]attributeStatsSeries)
 
