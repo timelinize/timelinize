@@ -309,8 +309,6 @@ function connectLog() {
 			return;
 		}
 
-		console.log("LOG:", l);
-
 		if (l.logger == "job.status") {
 			// if this job has a parent that happens to be on the screen showing
 			// previews of its children, make sure this job is rendered so it

@@ -46,7 +46,7 @@
 
 		<!-- First vendored scripts, then Tabler, then ours -->
 		<script src="/resources/js/vendor/luxon.v3.5.0.min.js"></script>
-		<script src="/resources/js/vendor/apexcharts.min.js"></script>
+		<script src="/resources/js/vendor/echarts-v5.6.0.min.js"></script>
 		<script src="/resources/js/vendor/nouislider.v15.6.1.min.js"></script>
 		<script src="/resources/js/vendor/air-datepicker.min.js"></script>
 		<script src="/resources/js/vendor/tom-select.base.min.js"></script>
@@ -55,10 +55,7 @@
 		<script src="/resources/js/vendor/thumbhash.js"></script>
 		<script src="/resources/js/vendor/marked.min.js"></script>
 		<script src="/resources/js/vendor/purify.min.js"></script>
-		<!-- <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta17/dist/js/tabler.min.js"></script> -->
 		<script src="/resources/js/vendor/tabler.min.js"></script>
-		<!-- <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
-		<script src="https://cdn.jsdelivr.net/npm/@easepick/bundle@1.2.0/dist/index.umd.min.js"></script> -->
 
 		<!-- TODO: these should ideally NOT be deferred; separate out DOM-specific code that runs at page load -->
 		<script src="/resources/js/app.js"></script>
@@ -321,7 +318,7 @@
 										</span>
 									</a>
 									<div class="dropdown-menu dropdown-menu-card"
-										style="--tblr-dropdown-min-width: 700px;" data-bs-theme="light">
+										style="--tblr-dropdown-min-width: 700px; --tblr-dropdown-border-width: 0;" data-bs-theme="light">
 										<div class="card">
 			
 			

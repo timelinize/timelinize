@@ -72,237 +72,76 @@ async function entityPageMain() {
 
 	///////////////////////////////////////////////////////////////////////////////
 
-
-
-	const attributeStats = await app.ChartStats("attributes_stacked_area", tlz.openRepos[0].instance_id, {entity_id: rowID});
-	console.log("ATTRIBUTE STATS:", attributeStats);
-
-
-	const colors = [];
-	for (const colorClass of tlz.colorClasses) {
-		if (!colorClass.endsWith("-lt")) {
-			colors.push(tabler.getColor(colorClass.slice(3)));
-		}
+	const attributeStats2 = await app.ChartStats("attributes_stacked_area", tlz.openRepos[0].instance_id, {entity_id: rowID});
+	console.log("ATTRIBUTE STATS:", attributeStats2);
+	for (const series of attributeStats2) {
+		series.type = 'bar';
+		// series.barWidth = '100%';
+		// series.smooth = true;
+		series.stack = 'total';
+		// series.areaStyle = {};
+		series.emphasis = {	focus: 'series' };
 	}
 
-	for (const series of attributeStats) {
-		let i = 0;
-		for (const attrName in tlz.attributeLabels) {
-			if (attrName == series.attribute_name) {
-				break;
-			}
-			i++;
-		}
-		series.color = colors[i % colors.length];
-		// TODO: Trying to see if bookending the series with nulls improves performance/appearance at all
-		series.data.unshift([series.data[0][0]-1, null]);
-		series.data.push([series.data[series.data.length-1][0]-1, null]);
-	}
-	
+	// const totalData = [];
+	// for (const series of attributeStats2) {
+	// 	let sum = 0;
+	// 	for (let j = 0; j < series.data.length; ++j) {
+	// 		sum += series.data[j][1];
+	// 	}
+	// 	totalData.push(sum);
+	// }
+	// console.log("TOTAL DATA:", totalData);
 
-	var options2 = {
-		series: attributeStats,
-		chart: {
-			type: 'area',
-			stacked: false,
-			height: 500,
-			// zoom: {
-			// 	enabled: false
-			// },
-			animations: {
-				enabled: false
-			}
-		},
-		dataLabels: {
-			enabled: false
-		},
-		markers: {
-			size: 0,
-		},
-		stroke: {
-			// curve: 'straight'
-		},
-		fill: {
-			type: 'gradient',
-			gradient: {
-				shadeIntensity: 1,
-				inverseColors: false,
-				opacityFrom: 0.45,
-				opacityTo: 0.05,
-				stops: [20, 100, 100, 100]
-			},
-		},
-		yaxis: {
-			// logarithmic: true,
-			labels: {
-				style: {
-					colors: '#8e8da4',
-				},
-				offsetX: 0,
-				// formatter: function (val) {
-				// 	return (val / 1000000).toFixed(2);
-				// },
-			},
-			axisBorder: {
-				show: false,
-			},
-			axisTicks: {
-				show: false
-			}
-		},
-		xaxis: {
-			type: 'datetime',
-			// tickAmount: 8,
-			// min: new Date("01/01/2014").getTime(),
-			// max: new Date("01/20/2014").getTime(),
-			labels: {
-				// rotate: -15,
-				// rotateAlways: true,
-				// formatter: function (val, timestamp) {
-				// 	return moment(new Date(timestamp)).format("DD MMM YYYY")
-				// }
-			}
-		},
+
+	var chartDom = $('#chart2');
+	var myChart = echarts.init(chartDom);
+	var option;
+
+	option = {
 		title: {
-			text: 'Items by Attribute Over Time',
-			align: 'left',
-			// offsetX: 14
+			text: 'Stacked Area Chart'
 		},
 		tooltip: {
-			// intersect: true,
-			shared: false
+			trigger: 'axis',
+			axisPointer: {
+				type: 'shadow',
+				label: {
+					backgroundColor: '#6a7985'
+				}
+			}
 		},
-		legend: {
-			position: 'top',
-			// horizontalAlign: 'right',
-			// offsetX: -10,
-			// customLegendItems: [
-			// 	"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", 
-			// ]
-		}
+		toolbox: {
+			feature: {
+				saveAsImage: {},
+				dataZoom: {
+					yAxisIndex: 'none'
+				},
+				restore: {}
+			}
+		},
+		legend: {},
+		xAxis: [
+			{
+				type: 'time'
+			}
+		],
+		yAxis: [
+			{
+				type: 'value'
+			}
+		],
+		dataZoom: [
+			{
+				type: 'inside'
+			},
+			{
+				type: 'slider'
+			}
+		],
+		series: attributeStats2,
 	};
 
-	var chart2 = new ApexCharts(document.querySelector("#chart2"), options2);
-	chart2.render();
-
-
-
-	/////////////////////////////////////////////////////////////////////////////
-
-
-	// const seriesMap = {};
-
-	// for (const attr of ent.attributes) {
-	// 	// if (attr.name == "_entity") continue;
-	// 	// TODO: could group these to allow them to run concurrently
-	// 	const first = await app.SearchItems({
-	// 		start_timestamp: new Date("0000-01-01").toISOString(), // require result to have a timestamp
-	// 		attribute_id: [attr.id],
-	// 		flat: true,
-	// 		limit: 1,
-	// 		sort: "ASC"
-	// 	});
-	// 	const last = await app.SearchItems({
-	// 		start_timestamp: new Date("0000-01-01").toISOString(), // require result to have a timestamp
-	// 		attribute_id: [attr.id],
-	// 		flat: true,
-	// 		limit: 1,
-	// 		sort: "DESC"
-	// 	});
-
-	// 	if (!first.items?.length || !last.items?.length) {
-	// 		continue;
-	// 	}
-
-	// 	if (!seriesMap[attr.name]) {
-	// 		seriesMap[attr.name] = {
-	// 			name: attr.name,
-	// 			data: []
-	// 		};
-	// 	}
-
-	// 	seriesMap[attr.name].data.push({
-	// 		x: attr.value,
-	// 		y: [
-	// 			new Date(first.items[0].timestamp).getTime(),
-	// 			new Date(last.items[0].timestamp).getTime()
-	// 		]
-	// 	});
-	// }
-
-	// console.log("SERIES MAP:", seriesMap);
-	// const series = [];
-	// for (const attrName in seriesMap) {
-	// 	series.push(seriesMap[attrName]);
-	// }
-
-	// console.log("SERIES:", series);
-
-	// var options = {
-	// 	series: series,
-	// 	chart: {
-	// 		height: ent.attributes.length*15,
-	// 		type: 'rangeBar',
-	// 		toolbar: {
-	// 			show: false,
-	// 		},
-	// 		zoom: {
-	// 			enabled: false
-	// 		},
-	// 	},
-	// 	plotOptions: {
-	// 		bar: {
-	// 			borderRadius: 5,
-	// 			horizontal: true,
-	// 			barHeight: "75%",
-	// 			rangeBarGroupRows: true
-	// 		}
-	// 	},
-	// 	dataLabels: {
-	// 		enabled: true,
-	// 		formatter: function (val) {
-	// 			return betterToHuman(DateTime.fromJSDate(val[0]).diff(DateTime.fromJSDate(val[1])))
-	// 		}
-	// 	},
-	// 	fill: {
-	// 		type: 'gradient',
-	// 		gradient: {
-	// 			shade: 'light',
-	// 			type: 'vertical',
-	// 			shadeIntensity: 0.25,
-	// 			gradientToColors: undefined,
-	// 			inverseColors: true,
-	// 			opacityFrom: 1,
-	// 			opacityTo: 1,
-	// 			stops: [50, 0, 100, 100]
-	// 		}
-	// 	},
-	// 	xaxis: {
-	// 		type: 'datetime'
-	// 	},
-	// 	grid: {
-	// 		row: {
-	// 			colors: ['#fafafa', '#fff'],
-	// 			opacity: 1
-	// 		}
-	// 	},
-	// 	legend: {
-	// 		position: 'top'
-	// 	}
-	// };
-
-	// var chart = new ApexCharts($("#chart"), options);
-	// chart.render();
-
-
-
-
-
-
-
-
-	/////////////////////////////////////////////////////////
-
-
+	option && myChart.setOption(option);
 
 }

@@ -16,7 +16,7 @@ tlz.pageControllers = {
 
 			const ctaButton = $('.nav-item .btn-outline-primary');
 			ctaButton.classList.remove('btn-outline-primary');
-			ctaButton.classList.add('btn-outline-light');
+			ctaButton.classList.add('btn-primary');
 		},
 		async render() {
 			await renderDashboard();
@@ -25,8 +25,8 @@ tlz.pageControllers = {
 			$('.navbar').classList.remove('navbar-overlap');
 			delete($('.navbar').dataset.bsTheme);
 
-			const ctaButton = $('.nav-item .btn-outline-light');
-			ctaButton.classList.remove('btn-outline-light');
+			const ctaButton = $('.nav-item .btn-primary');
+			ctaButton.classList.remove('btn-primary');
 			ctaButton.classList.add('btn-outline-primary');
 		}
 

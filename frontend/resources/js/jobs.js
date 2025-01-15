@@ -24,27 +24,28 @@ function updateActiveJobStats() {
 
 		const chartData = stats.chartSeries[0].data;
 
-		chartData.push({
-			x: stats.secondsSinceStart,
-			y: Math.floor(stats.window.reduce((sum, val) => sum+val, 0) / stats.window.length)
-		});
+		chartData.push([
+			stats.secondsSinceStart, // x
+			Math.floor(stats.window.reduce((sum, val) => sum+val, 0) / stats.window.length) // y
+		]);
+		if (chartData.length > jobThroughputXRange+jobThroughputOffScreen) {
+			chartData.shift();
+		}
 		stats.secondsSinceStart++;
 		
 		const chartContainer = $(`#throughput-chart-container.job-id-${jobID}`);
 		if (chartContainer) {
 			// this element shows the mean throughput over the entire chart data
-			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, val) => sum+val.y, 0) / chartData.length).toFixed(1).replace(".0", "");
-			$('#chart-active-job-throughput', chartContainer).apexchart?.updateOptions({
+			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, val) => sum+val[1], 0) / chartData.length).toFixed(1).replace(".0", "");
+			$('#chart-active-job-throughput', chartContainer).chart?.setOption({
 				series: stats.chartSeries,
-				xaxis: {
-					// allow the axis to grow (squishing the line graph) until it reaches its max size; this prevents negative x-values etc
-					range: Math.min(chartData.length-1, jobThroughputXRange)
+				xAxis: {
+					min: chartData.length >= jobThroughputXRange
+						? chartData[chartData.length-jobThroughputXRange][0]
+						: 'dataMin',
+					max: 'dataMax'
 				}
 			});
-		} else if (chartData.length > jobThroughputXRange+jobThroughputOffScreen) {
-			// notice how we don't do this if the chart is rendered on the screen! causes jankiness / reanimation
-			// (a separate interval is needed for pruning when it is being rendered live)
-			chartData.splice(0, chartData.length - jobThroughputXRange - jobThroughputOffScreen);
 		}
 	}
 }
@@ -212,6 +213,7 @@ function jobProgressUpdate(job) {
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Queued";
 			elem.classList.add("text-secondary");
+			elem.classList.remove('text-azure', 'text-orange', 'text-red', 'text-green');
 		}
 		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			if (job.start) {
@@ -262,6 +264,7 @@ function jobProgressUpdate(job) {
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Running";
 			elem.classList.add("text-green");
+			elem.classList.remove('text-azure', 'text-orange', 'text-red', 'text-secondary');
 		}
 		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			elem.innerText = "Started";
@@ -307,6 +310,7 @@ function jobProgressUpdate(job) {
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Completed";
 			elem.classList.add("text-green");
+			elem.classList.remove('text-azure', 'text-orange', 'text-red', 'text-secondary');
 		}
 		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			elem.innerText = "Finished";
@@ -355,7 +359,7 @@ function jobProgressUpdate(job) {
 		for (const elem of $$(`.job-status.job-id-${job.id}`)) {
 			elem.innerText = "Paused";
 			elem.classList.add('text-azure');
-			elem.classList.remove('text-green', 'text-secondary');
+			elem.classList.remove('text-green', 'text-orange', 'text-red', 'text-secondary');
 		}
 		for (const elem of $$(`.job-time-basis.job-id-${job.id}`)) {
 			elem.innerText = "Paused";

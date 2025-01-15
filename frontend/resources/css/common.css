@@ -195,14 +195,6 @@ header .logo {
 	display: block;
 }
 
-.page-wrapper .page-header-overlap {
-	margin-top: 0;
-	padding-top: 15px;
-	position: relative;
-	background: var(--tblr-navbar-bg);
-	--tblr-navbar-bg: var(--tblr-bg-surface);
-}
-
 .navbar-minimal {
 	background: rgba(233, 239, 244, .6);
 	-webkit-backdrop-filter: blur(4px);
@@ -382,6 +374,10 @@ a {
 .static-menu .dropdown-menu .dropdown-header {
 	background: inherit;
 	top: calc(-1 * var(--tblr-dropdown-padding-y));
+}
+
+.btn-dark {
+	--tblr-btn-border-color: #485f7a;
 }
 
 .pagination .btn-list {

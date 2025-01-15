@@ -41,4 +41,9 @@ on('click', '#do-entity-merge', async e => {
 	const mergeID = $('#modal-merge-entity .entity-merge').tomselect.getValue();
 	if (!keepID || !mergeID) return;
 	await app.MergeEntities(tlz.openRepos[0].instance_id, Number(keepID), [Number(mergeID)]);
+	notify({
+		type: "success",
+		title: `Entities merged`,
+		duration: 2000
+	});
 });

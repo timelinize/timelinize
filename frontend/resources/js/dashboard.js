@@ -1,3 +1,4 @@
+// TODO: these two dropdowns are similar; refactor and consolidate code?
 on('click', '.chart-scope .dropdown-item', (e) => {
 	if (e.target.closest('#recent-items')) {
 		$('.active', e.target.closest('.dropdown-menu')).classList.remove('active');
@@ -6,12 +7,21 @@ on('click', '.chart-scope .dropdown-item', (e) => {
 		recentItemStats();
 	}
 });
+on('click', '.chart-scope .dropdown-item', (e) => {
+	if (e.target.closest('#days-documented')) {
+		$('.active', e.target.closest('.dropdown-menu')).classList.remove('active');
+		e.target.classList.add('active');
+		$('a', e.target.closest('.dropdown')).innerText = e.target.innerText;
+		recentDataSourceStats();
+	}
+});
 
 async function renderDashboard() {
 	await Promise.all([
 		recentItemStats(),
 		itemTypeStats(),
-		dataSourceHourStats()
+		dataSourceHourStats(),
+		recentDataSourceStats()
 	]);
 }
 
@@ -62,7 +72,6 @@ async function recentItemStats() {
 	// clean up any prior info
 	$('svg', '#recent-items-trend-container')?.remove();
 	$('#recent-items-trend-container').classList.remove('text-red', 'text-green');
-	$('#chart-recent-items-count').replaceChildren();
 
 
 	$('#recent-items-count').innerText = total.toLocaleString();
@@ -80,61 +89,78 @@ async function recentItemStats() {
 		<polyline points="21 10 21 17 14 17"></polyline>
 		</svg>`;
 
-	new ApexCharts($('#chart-recent-items-count'), {
-		chart: {
-			type: 'area',
-			fontFamily: 'inherit',
-			height: 80.0,
-			sparkline: {
-				enabled: true
-			},
-			animations: {
-				enabled: true
-			},
-		},
-		dataLabels: {
-			enabled: false,
-		},
-		// fill: {
-		// 	opacity: .16,
-		// 	type: 'solid'
-		// },
-		stroke: {
-			width: 2
-		},
-		series: [{
-			name: "Items",
-			data: data,
-		}],
-		tooltip: {
-			theme: 'dark'
-		},
-		grid: {
-			strokeDashArray: 4,
-		},
-		xaxis: {
-			labels: {
-				padding: 0,
+	
+	const elem = $('#chart-recent-items-count');
+	let chartOptions = {};
+	
+	if (!elem.chart) {
+		elem.chart = echarts.init(elem, null, {
+			renderer: 'svg'
+		});
+
+		chartOptions = {
+			xAxis: {
+				show: false,
+				type: 'category',
+				boundaryGap: false,
 			},
 			tooltip: {
-				enabled: false
+				trigger: 'axis',
 			},
-			axisBorder: {
-				show: false,
+			yAxis: {
+				show: false
 			},
-			type: 'category',
-		},
-		yaxis: {
-			labels: {
-				padding: 4
+			grid: {
+				left: 0,
+				top: 0,
+				right: 0,
+				bottom: 0
 			},
-		},
-		labels: groups,
-		colors: [tabler.getColor("primary")],
-		legend: {
-			show: false,
-		},
-	}).render();	
+			animationDuration: 2000,
+			series: [
+				{
+					name: "Items",
+					data: data,
+					type: 'line',
+					smooth: true,
+					lineStyle: {
+						width: 3
+					},
+					symbolSize: 8,
+					showSymbol: false,
+					emphasis: {
+						focus: 'series'
+					},
+					areaStyle: {
+						opacity: 0.8,
+						color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+							{
+								offset: 0,
+								color: tabler.getColor("primary")
+							},
+							{
+								offset: 1,
+								color: tabler.hexToRgba(tabler.getColor("primary"), .1)
+							}
+						])
+					}
+				}
+			]
+		};
+	} else {
+		chartOptions = {
+			series: [
+				{
+					data: data
+				}
+			],
+			xAxis: {
+				data: null
+			}
+		};
+	}
+	
+	elem.chart.setOption(chartOptions);
 }
 
 async function itemTypeStats() {
@@ -146,342 +172,234 @@ async function itemTypeStats() {
 	}
 
 	let total = 0;
-	stats.map(point => total += point.y);
+	stats.map(point => total += point.value);
 
 	// clean up any prior info
 	$('#chart-item-types').replaceChildren();
 
-	// TODO: Figure out what the number will be
 	$('#item-class-count').innerText = total.toLocaleString();
 
+	const elem = $('#chart-item-types');
+	let chartOptions = {};
+	
+	if (!elem.chart) {
+		elem.chart = echarts.init(elem, null, {
+			renderer: 'svg'
+		});
 
-	//////
-
-	// const series = [], labels = [];
-	// stats.map(point => {
-	// 	labels.push(point.x);
-	// 	series.push(point.y);
-	// });
-	// // console.log("SERIES:", series);
-
-	// // can't use sparkline because we want the legend
-	// new ApexCharts($('#chart-item-types'), {
-	// 	chart: {
-	// 		type: 'polarArea',
-	// 		fontFamily: 'inherit',
-
-	// 		// these values are to make up for the fact that barHeight doesn't seem to work
-	// 		height: 110,
-	// 		// height: 150.0, // 40 more than it should be
-	// 		// offsetY: -35, // 50 less than it should be; the gap of 10 becomes a welcomed margin/padding
-	// 		// parentHeightOffset: -40, // 40 less than it should be to keep the card equally sized
-			
-	// 		animations: {
-	// 			enabled: true
-	// 		},
-	// 		toolbar: {
-	// 			show: false
-	// 		}
-	// 	},
-	// 	plotOptions: {
-	// 		dataLabels: {
-	// 			position: 'top'
-	// 		}
-	// 	},
-	// 	dataLabels: {
-	// 		enabled: false,
-	// 	},
-	// 	theme: {
-	// 		palette: 'palette1' // up to palette10
-	// 	},
-	// 	stroke: {
-	// 		colors: ['#fff']
-	// 	  },
-	// 	  fill: {
-	// 		opacity: 0.8
-	// 	  },
-	// 	series: series,
-	// 	labels: labels,
-	// 	// tooltip: {
-	// 	// 	theme: 'dark'
-	// 	// },
-	// 	// grid: {
-	// 	// 	strokeDashArray: 4
-	// 	// },
-	// 	xaxis: {
-	// 		type: 'category',
-	// 		// show: false,
-	// 		// labels: {
-	// 		// 	show: false
-	// 		// },
-	// 		// axisBorder: {
-	// 		// 	show: false
-	// 		// },
-	// 		// axisTicks: {
-	// 		// 	show: false
-	// 		// }
-	// 		// tooltip: {
-	// 		// 	enabled: false
-	// 		// },
-	// 	},
-	// 	// yaxis: {
-	// 	// 	show: false
-	// 	// },
-	// 	// grid: {
-	// 	// 	show: false
-	// 	// },
-	// 	// legend: {
-	// 	// 	// show: true
-	// 	// 	position: 'left'
-	// 	// },
-	// }).render();
-
-	/////
-
-	// can't use sparkline because we want the legend
-	new ApexCharts($('#chart-item-types'), {
-		chart: {
-			type: 'bar',
-			fontFamily: 'inherit',
-
-			// these values are to make up for the fact that barHeight doesn't seem to work
-			height: 150.0, // 40 more than it should be
-			offsetY: -35, // 50 less than it should be; the gap of 10 becomes a welcomed margin/padding
-			parentHeightOffset: -40, // 40 less than it should be to keep the card equally sized
-			
-			animations: {
-				enabled: true
+		chartOptions = {
+			tooltip: {
+				trigger: 'item'
 			},
-			toolbar: {
-				show: false
-			}
-		},
-		plotOptions: {
-			bar: {
-				columnWidth: '50%',
-				barHeight: '200%', // TODO: this doesn't work :()
-				distributed: true // necessary for palette colors
+			grid: {
+				top: 0,
+				bottom: 0,
+				left: 0,
+				right: 0
 			},
-			dataLabels: {
-				position: 'top'
-			}
-		},
-		dataLabels: {
-			enabled: false,
-		},
-		theme: {
-			palette: 'palette1' // up to palette10
-		},
-		series: [{
-			name: "Item types",
-			data: stats
-		}],
-		// tooltip: {
-		// 	theme: 'dark'
-		// },
-		// grid: {
-		// 	strokeDashArray: 4
-		// },
-		xaxis: {
-			type: 'category',
-			labels: {
-				show: false
-			},
-			axisBorder: {
-				show: false
-			},
-			axisTicks: {
-				show: false
-			}
-			// tooltip: {
-			// 	enabled: false
-			// },
-		},
-		yaxis: {
-			show: false
-		},
-		grid: {
-			show: false
-		},
-		legend: {
-			// show: true
-			position: 'left'
-		},
-	}).render();
+			series: [
+				{
+					name: 'Item type',
+					type: 'pie',
+					radius: ['50%', '80%'],
+					center: ['70%', '50%'],
+					avoidLabelOverlap: false,
+					itemStyle: {
+						borderRadius: 10,
+						borderColor: '#fff',
+						borderWidth: 2
+					},
+					label: {
+						show: false,
+						position: 'center'
+					},
+					emphasis: {
+						label: {
+							show: true,
+							// fontSize: ,
+							fontWeight: 'bold'
+						}
+					},
+					labelLine: {
+						show: false
+					},
+					data: stats
+				}
+			]
+		};
+	} else {
+		chartOptions = {
+			series: stats
+		};
+	}
+
+	elem.chart.setOption(chartOptions);
 }
 
 
 async function dataSourceHourStats() {
-	const stats = await app.ChartStats("datasources", tlz.openRepos[0].instance_id);
+	const series = await app.ChartStats("datasources", tlz.openRepos[0].instance_id);
 
-	if (!stats) {
+	if (!series) {
 		// TODO: show empty dashboard -- tell user to import some data
 		return;
 	}
-
-	console.log("STATS:", stats);
-
-	// clean up any prior info
-	$('#chart-data-sources').replaceChildren();
-
-
-	// // can't use sparkline because we want the legend
-	// new ApexCharts($('#chart-data-sources'), {
-	// 	chart: {
-	// 		type: 'bubble',
-	// 		fontFamily: 'inherit',
-	// 		height: 270.0,
-	// 		offsetY: -50,
-	// 		parentHeightOffset: -70,
-	// 		animations: {
-	// 			enabled: true
-	// 		},
-	// 		toolbar: {
-	// 			show: false
-	// 		},
-	// 		zoom: {
-	// 			enabled: false
-	// 		}
-	// 	},
-	// 	plotOptions: {
-	// 		bubble: {
-	// 			// zScaling: false,
-	// 			minBubbleRadius: 1,
-	// 			// maxBubbleRadius: 10
-	// 		},
-	// 		dataLabels: {
-	// 			enabled: false
-	// 		}
-	// 	},
-	// 	dataLabels: {
-	// 		enabled: false,
-	// 	},
-	// 	theme: {
-	// 		palette: 'palette1' // up to palette10
-	// 	},
-	// 	series: stats,
-	// 	// tooltip: {
-	// 	// 	theme: 'dark'
-	// 	// },
-	// 	// grid: {
-	// 	// 	strokeDashArray: 4
-	// 	// },
-	// 	xaxis: {
-	// 		type: 'datetime',
-	// 		// show: false,
-	// 		labels: {
-	// 			show: false
-	// 		},
-	// 		axisBorder: {
-	// 			show: false
-	// 		},
-	// 		axisTicks: {
-	// 			show: false
-	// 		}
-	// 		// tooltip: {
-	// 		// 	enabled: false
-	// 		// },
-	// 	},
-	// 	yaxis: {
-	// 		show: false,
-	// 		reversed: true
-	// 	},
-	// 	grid: {
-	// 		show: false
-	// 	},
-	// 	legend: {
-	// 		show: false,
-	// 		// position: 'bottom'
-	// 	}
-	// }).render();
-
-	//////////
-	// With axes:
-
-	// can't use sparkline because we want the legend
-	new ApexCharts($('#chart-data-sources'), {
-		chart: {
-			type: 'bubble',
-			fontFamily: 'inherit',
-
-			// these values are to make up for the fact that barHeight doesn't seem to work
-			height: 500.0, // 40 more than it should be
-			offsetY: -70, // 50 less than it should be; the gap of 10 becomes a welcomed margin/padding
-			parentHeightOffset: -70, // 40 less than it should be to keep the card equally sized
-			
-			animations: {
-				enabled: true
-			},
-			toolbar: {
-				show: false
-			},
-			zoom: {
-				enabled: false
+	
+	// add some chart formatting to the returned data
+	const minSymbolSize = 4, maxSymbolSize = 25;
+	for (let i = 0; i < series.length; i++) {
+		series[i] = {
+			...series[i], // includes name and data
+			type: 'scatter',
+			symbolSize: point => Math.max(Math.min(point[2]/3, maxSymbolSize), minSymbolSize),
+			emphasis: {
+				focus: 'series'
 			}
-		},
-		plotOptions: {
-			bubble: {
-				// zScaling: false,
-				minBubbleRadius: 1,
-				// maxBubbleRadius: 10
-			},
-			dataLabels: {
-				enabled: false
-			}
-		},
-		dataLabels: {
-			enabled: false,
-		},
-		theme: {
-			palette: 'palette1' // up to palette10
-		},
-		series: stats,
-		// tooltip: {
-		// 	theme: 'dark'
-		// },
-		// grid: {
-		// 	strokeDashArray: 4
-		// },
-		xaxis: {
-			type: 'datetime',
-			// show: false,
-			// labels: {
-			// 	show: false
-			// },
-			// axisBorder: {
-			// 	show: false
-			// },
-			// axisTicks: {
-			// 	show: false
-			// }
-			// tooltip: {
-			// 	enabled: false
-			// },
-		},
-		yaxis: {
-			// show: false,
-			// floating: true,
-			min: 0,
-			max: 24,
-			stepSize: 3,
-			reversed: true,
-			labels: {
-				// offsetX: 25,
-				formatter: v => {
-					if (v == 0) return "12am";
-					if (v < 0 || v >= 24) return "";
-					if (v == 12) return "noon";
-					if (v > 12) return `${v%12}pm`;
-					return `${v}am`;
-				}
-			}
-		},
-		grid: {
-			show: false
-		},
-		legend: {
-			show: false,
-			// position: 'bottom'
+		};
+	}
+
+	// turns a decimal hour (of day; i.e. between 0 and 24) into a human-readable time
+	function hourDecimalToHumanTime(decimalHour) {
+		// fast path for whole numbers
+		if (decimalHour < 0 || decimalHour >= 24) return "";
+		if (decimalHour == 0) return "12am";
+		if (decimalHour == 12) return "noon";
+		if (decimalHour % 1 == 0) {
+			if (decimalHour > 12) return `${decimalHour%12}pm`;
+			return `${decimalHour}am`;
 		}
-	}).render();
+
+		const hours = Math.floor(decimalHour);
+		const minutes = Math.round((decimalHour - hours) * 60);
+	
+		const date = new Date();
+		date.setHours(hours, minutes, 0, 0);
+	
+		return date.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' });
+	}
+
+	const elem = $('#chart-data-sources');
+	let chartOptions = {};
+	
+	if (!elem.chart) {
+		elem.chart = echarts.init(elem, null, {
+			// renderer: 'svg'
+		});
+
+		chartOptions = {
+			legend: {
+				bottom: 0
+			},
+			xAxis: {
+				type: 'time',
+				splitLine: {
+					show: false
+				}
+			},
+			yAxis: {
+				splitLine: {
+					show: false
+				},
+				splitNumber: 8,
+				axisLabel: {
+					formatter: hourDecimalToHumanTime
+				},
+				inverse: true,
+				axisPointer: {
+					label: {
+						formatter: params =>  hourDecimalToHumanTime(params.value)
+					}
+				},
+			},
+			tooltip: {
+				axisPointer: {
+					type: 'cross',
+					label: {
+						backgroundColor: '#283b56'
+					}
+				},
+				formatter: params => {
+					return `
+						<b>${hourDecimalToHumanTime(params.data[1])}</b>
+						<br>
+						<span style="color: ${params.color}; font-weight: bold">${params.seriesName}</span>:
+						${params.data[2]}`;
+				},
+			},
+			grid: {
+				top: 10,
+				right: 0,
+			},
+			dataZoom: [
+				{
+					type: 'inside',
+					xAxisIndex: [0],
+				},
+				{
+					type: 'inside',
+					yAxisIndex: [0],
+				}
+			],
+			animation: false,
+			animationDuration: 2000,
+			series: series
+		};
+	} else {
+		chartOptions = {
+			series: series
+		};
+	}
+
+	elem.chart.setOption(chartOptions);
+}
+
+
+async function recentDataSourceStats() {
+	$('#chart-days-documented').replaceChildren();
+	$('#chart-days-documented-legend').replaceChildren();
+
+	const days = Number($('#days-documented .chart-scope .dropdown-item.active').dataset.days);
+
+	const stats = await app.ChartStats("recent_data_sources", tlz.openRepos[0].instance_id, {days});
+
+	let totalItems = 0;
+	const dataSourceItemCounts = {};
+	const daysSeen = {};
+
+	if (stats)
+	{
+		for (const stat of stats) {
+			daysSeen[stat.date] = true;
+			dataSourceItemCounts[stat.data_source_name] = 
+				(dataSourceItemCounts[stat.data_source_name] || 0) + stat.count;
+			totalItems += stat.count;
+		}
+	}
+
+	$('#days-documented-count').innerText = `${Object.keys(daysSeen).length.toLocaleString()} / ${days}`;
+
+	const daysSeenPct = Object.keys(daysSeen).length / days * 100;
+	const daysNotSeenPct = (days - Object.keys(daysSeen).length) / days * 100;
+
+	let i = 0;
+	for (const [dsName, count] of Object.entries(dataSourceItemCounts)) {
+		const color = tlz.colorClasses[i%tlz.colorClasses.length];
+
+		const div = document.createElement('div');
+		div.classList.add('progress-bar', "bg-"+color);
+		div.style.width = `${count/totalItems * daysSeenPct}%`;
+
+		const legend = cloneTemplate('#tpl-days-documented-legend');
+		$('.legend', legend).classList.add("bg-"+color);
+		$('.ds-name', legend).innerText = dsName;
+		$('.count', legend).innerText = count.toLocaleString();
+
+		$('#chart-days-documented').append(div);
+		$('#chart-days-documented-legend').append(legend);
+		i++;
+	}
+
+
+
+
 }

@@ -29,3 +29,7 @@
 .datagrid-content .video-thumbnail {
 	width: 100%;
 }
+
+#chart-active-job-throughput {
+	height: 240px;
+}

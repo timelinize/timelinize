@@ -137,30 +137,30 @@ const tlz = {
 	},
 
 	colorClasses: [
-		"bg-blue",
-		"bg-azure",
-		"bg-indigo",
-		"bg-purple",
-		"bg-pink",
-		"bg-red",
-		"bg-orange",
-		"bg-yellow",
-		"bg-lime",
-		"bg-green",
-		"bg-teal",
-		"bg-cyan",
-		"bg-blue-lt",
-		"bg-azure-lt",
-		"bg-indigo-lt",
-		"bg-purple-lt",
-		"bg-pink-lt",
-		"bg-red-lt",
-		"bg-orange-lt",
-		"bg-yellow-lt",
-		"bg-lime-lt",
-		"bg-green-lt",
-		"bg-teal-lt",
-		"bg-cyan-lt"
+		"blue",
+		"azure",
+		"indigo",
+		"purple",
+		"pink",
+		"red",
+		"orange",
+		"yellow",
+		"lime",
+		"green",
+		"teal",
+		"cyan",
+		"blue-lt",
+		"azure-lt",
+		"indigo-lt",
+		"purple-lt",
+		"pink-lt",
+		"red-lt",
+		"orange-lt",
+		"yellow-lt",
+		"lime-lt",
+		"green-lt",
+		"teal-lt",
+		"cyan-lt"
 	],
 
 	// map of filepicker names to last settings/state (like path)
@@ -984,7 +984,7 @@ function entityDisplayNameAndAttr(entity) {
 
 function avatarColorClasses(i) {
 	const colorClass = tlz.colorClasses[i % tlz.colorClasses.length];
-	const classes = [colorClass];
+	const classes = ["bg-"+colorClass];
 	if (colorClass && !colorClass?.endsWith("-lt")) {
 		classes.push("text-white");
 	}
