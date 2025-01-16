@@ -62,9 +62,10 @@ async function jobPageMain() {
 		chartOptions = {
 			grid: {
 				top: 10,
-				bottom: 20,
-				left: 50,
-				right: 0,
+				bottom: 10,
+				left: 10,
+				right: 10,
+				containLabel: true
 			},
 			tooltip: {
 				trigger: 'axis',

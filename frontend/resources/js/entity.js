@@ -25,6 +25,8 @@ async function entityPageMain() {
 
 	$('#merge-entity').dataset.entityIDMerge = rowID;
 
+	const owner = await getOwner();
+
 	const entities = await app.SearchEntities({
 		repo: repoID,
 		row_id: [rowID],
@@ -43,12 +45,15 @@ async function entityPageMain() {
 	for (const attr of ent.attributes) {
 		if (attr.name == "birth_date") {
 			$('#birth-date').innerText = DateTime.fromSeconds(Number(attr.value)).toLocaleString(DateTime.DATE_FULL);
+			continue;
 		}
 		if (attr.name == "birth_place") {
 			$('#birth-place').innerText = attr.value;
+			continue;
 		}
 		if (attr.name == "gender") {
 			$('#gender').innerText = attr.value;
+			continue;
 		}
 		if (attr.name == "website") {
 			const container = document.createElement('div');
@@ -57,7 +62,37 @@ async function entityPageMain() {
 				$('#websites').innerHTML = '';
 			}
 			$('#websites').append(container);
+			continue;
 		}
+
+		if (attr.identity || attr.name == "_entity") {
+			const valueEl = cloneTemplate('#tpl-attribute-label');
+			valueEl.classList.add('attribute-value');
+			$('.form-check-label', valueEl).innerText = attr.value;
+
+			let groupEl = $(`.attribute-group.attribute-name-${attr.name}`);
+			if (!groupEl) {
+				const labelEl = cloneTemplate('#tpl-attribute-label');
+				labelEl.classList.add('attribute-label');
+				$('.form-check-label', labelEl).classList.add('strong');
+				$('.form-check-label', labelEl).innerText = tlz.attributeLabels[attr.name] || attr.name;
+
+				groupEl = document.createElement('div');
+				groupEl.classList.add('attribute-group', `attribute-name-${attr.name}`);
+				groupEl.append(labelEl);
+				$('#attribute-groups').append(groupEl);
+			}
+			
+			groupEl.append(valueEl);
+		}
+	}
+
+	// show the "You" badge next to help identify self
+	if (ent.id == owner.id) {
+		const badge = document.createElement('span');
+		badge.classList.add('badge', 'bg-purple-lt', 'ms-2');
+		badge.innerText = "You";
+		$('#name').append(badge);
 	}
 
 	// no need to block page load for this
@@ -94,13 +129,16 @@ async function entityPageMain() {
 	// console.log("TOTAL DATA:", totalData);
 
 
-	var chartDom = $('#chart2');
-	var myChart = echarts.init(chartDom);
-	var option;
+	$('#chart').chart = echarts.init($('#chart'));
 
-	option = {
+	let option = {
 		title: {
-			text: 'Stacked Area Chart'
+			text: 'Items by Attribute Over Time'
+		},
+		grid: {
+			top: 80,
+			left: 0,
+			right: 0
 		},
 		tooltip: {
 			trigger: 'axis',
@@ -120,7 +158,10 @@ async function entityPageMain() {
 				restore: {}
 			}
 		},
-		legend: {},
+		legend: {
+			type: 'scroll',
+			top: 35
+		},
 		xAxis: [
 			{
 				type: 'time'
@@ -141,7 +182,41 @@ async function entityPageMain() {
 		],
 		series: attributeStats2,
 	};
-
-	option && myChart.setOption(option);
-
+	$('#chart').chart.setOption(option);
 }
+
+
+// we have to specify the checkbox element specifically, otherwise we end up with double events firing (one on the checkbox, one on the span)
+on('click', '.attribute-label input[type=checkbox]', e => {
+	const checked =  $('input[type=checkbox]', e.target.closest('label')).checked;
+	const groupEl = e.target.closest('.attribute-group');
+	const action = checked ? 'legendSelect' : 'legendUnSelect';
+	const actionBatch = [];
+	$$('.attribute-value input[type=checkbox]', groupEl).forEach(el => {
+		el.checked = checked;
+		actionBatch.push({
+			name: el.nextElementSibling.innerText
+		});
+	});
+	$('#chart').chart.dispatchAction({
+		type: action,
+		batch: actionBatch
+	});
+});
+
+on('click', '.attribute-value input[type=checkbox]', e => {
+	const checked =  $('input[type=checkbox]', e.target.closest('label')).checked;
+	const value = $('.form-check-label', e.target.closest('label')).innerText;
+	const groupEl = e.target.closest('.attribute-group');
+
+	if (!$('.attribute-value input[type=checkbox]:checked')) {
+		$('.attribute-label input[type=checkbox]', groupEl).checked = false;
+	}
+
+	const action = checked ? 'legendSelect' : 'legendUnSelect';
+
+	$('#chart').chart.dispatchAction({
+		type: action,
+		name: value
+	});
+});

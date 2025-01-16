@@ -14,6 +14,28 @@
 	font-weight: 800;
 }
 
+#name .badge {
+	font-size: initial;
+}
+
 .summary-row {
 	font-size: 18px;
+}
+
+.attribute-group {
+	margin-bottom: 1em;
+}
+
+.attribute-group .attribute-label {
+	margin-bottom: .5em;
+}
+
+.attribute-value {
+	margin-left: .75em;
+	padding-left: 3.5em;
+	border-left: 2px solid var(--tblr-border-color);
+
+	padding-top: .5em;
+	padding-bottom: .5em;
+	margin-bottom: 0;
 }

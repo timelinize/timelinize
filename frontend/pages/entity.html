@@ -57,6 +57,9 @@
 	<div class="container-xl">
 		<ul class="nav nav-bordered mb-4">
 			<li class="nav-item">
+				<a class="nav-link" aria-current="page" href="#">Overview</a>
+			</li>
+			<li class="nav-item">
 				<a class="nav-link active" aria-current="page" href="#">Attributes</a>
 			</li>
 			<li class="nav-item">
@@ -69,46 +72,55 @@
 
 
 		<div class="row row-cards g-4">
-			<div class="col-12">
+			<div class="col-md-3" id="attribute-groups">
 
-				<div class="card">
-					<div class="card-header">
-					<h3 class="card-title">Basic profile</h3>
-					</div>
-					<div class="card-body">
-						<div class="datagrid">
-							<div class="datagrid-item">
-								<div class="datagrid-title">Birth date</div>
-								<div class="datagrid-content" id="birth-date">&mdash;</div>
-							</div>
-							<div class="datagrid-item">
-								<div class="datagrid-title">Birth place</div>
-								<div class="datagrid-content" id="birth-place">&mdash;</div>
-							</div>
-							<div class="datagrid-item">
-								<div class="datagrid-title">Gender</div>
-								<div class="datagrid-content" id="gender">&mdash;</div>
-							</div>
-							<div class="datagrid-item">
-								<div class="datagrid-title">Websites</div>
-								<div class="datagrid-content" id="websites">&mdash;</div>
+			</div>
+			<div class="col-md-9">
+				<div class="row row-cards">
+					
+					<div class="card">
+						<div class="card-header">
+						<h3 class="card-title">Basic profile</h3>
+						</div>
+						<div class="card-body">
+							<div class="datagrid">
+								<div class="datagrid-item">
+									<div class="datagrid-title">Birth date</div>
+									<div class="datagrid-content" id="birth-date">&mdash;</div>
+								</div>
+								<div class="datagrid-item">
+									<div class="datagrid-title">Birth place</div>
+									<div class="datagrid-content" id="birth-place">&mdash;</div>
+								</div>
+								<div class="datagrid-item">
+									<div class="datagrid-title">Gender</div>
+									<div class="datagrid-content" id="gender">&mdash;</div>
+								</div>
+								<div class="datagrid-item">
+									<div class="datagrid-title">Websites</div>
+									<div class="datagrid-content" id="websites">&mdash;</div>
+								</div>
 							</div>
 						</div>
 					</div>
-				</div>
 
-			</div>
-			<div class="col">
-
-				<div id="chart"></div>
-
-				<div class="card">
-					<div class="card-body">
-						<div id="chart2" style="height: 500px;"></div>
+					<div class="card">
+						<div class="card-body">
+							<div id="chart" style="height: 500px;"></div>
+						</div>
 					</div>
+				
 				</div>
 
 			</div>
 		</div>
 	</div>
 </div>
+
+
+<template id="tpl-attribute-label">
+	<label class="form-check">
+		<input type="checkbox" class="form-check-input" checked>
+		<span class="form-check-label"></span>
+	</label>
+</template>

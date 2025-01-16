@@ -327,8 +327,11 @@ async function dataSourceHourStats() {
 				},
 			},
 			grid: {
-				top: 10,
-				right: 0,
+				top: 15,
+				right: 10,
+				left: 10,
+				bottom: 30,
+				containLabel: true,
 			},
 			dataZoom: [
 				{

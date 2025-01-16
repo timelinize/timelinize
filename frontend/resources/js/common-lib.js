@@ -123,17 +123,22 @@ const tlz = {
 	},
 
 	attributeLabels: {
+		"_entity": "Entity ID",
 		"email_address": "Email address",
 		"phone_number": "Phone number",
 		"facebook_username": "Facebook",
 		"facebook_name": "Name on Facebook",
 		"google_photos_name": "Name on Google Photos",
 		"instagram_username": "Instagram",
+		"instagram_name": "Name on Instagram",
+		"instagram_bio": "Instagram bio",
 		"strava_athlete_id": "Strava",
 		"telegram_id": "Telegram",
 		"twitter_username": "Twitter",
 		"google_location_device": "Google Location Device",
-		"url": "Website"
+		"url": "Website",
+		"twitter_id": "Twitter ID",
+		"twitter_location": "Location in Twitter bio",
 	},
 
 	colorClasses: [
