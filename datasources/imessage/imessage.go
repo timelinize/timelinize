@@ -23,11 +23,11 @@ package imessage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -64,8 +64,11 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 // FileImport imports data from the given file or folder.
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	// start by adding contacts (TODO: this maybe should be separate? assumes we're on a Mac with the AddressBook DB)
-	if err := fimp.processContacts(ctx, params); err != nil {
-		return err
+	err := fimp.processContacts(ctx, params)
+	if errors.Is(err, fs.ErrNotExist) {
+		params.Log.Warn("no AddressBook DB found; won't be able to import associated contact list automatically", zap.Error(err))
+	} else if err != nil {
+		return fmt.Errorf("processing AddressBook DB for contact list: %w", err)
 	}
 
 	// open messages DB as read-only and prepare importer
@@ -80,12 +83,12 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	im := Importer{
 		DB: db,
 		FillOutAttachmentItem: func(_ context.Context, filename string, attachment *timeline.Item) {
-			chatDBFolderPath := filepath.FromSlash(filepath.Dir(chatDBPath(dirEntry)))
-			relativeFilename := filepath.FromSlash(strings.TrimPrefix(filename, "~/Library/Messages/"))
+			chatDBFolderPath := path.Dir(chatDBPath(dirEntry))
+			relativeFilename := strings.TrimPrefix(filename, "~/Library/Messages/")
 
 			attachment.OriginalLocation = relativeFilename
 			attachment.Content.Data = func(context.Context) (io.ReadCloser, error) {
-				return os.Open(filepath.Join(filepath.Clean(chatDBFolderPath), filepath.Clean(relativeFilename)))
+				return dirEntry.FS.Open(path.Join(path.Clean(chatDBFolderPath), path.Clean(relativeFilename)))
 			}
 		},
 	}
@@ -292,11 +295,11 @@ func chatDBPath(input timeline.DirEntry) string {
 	// To be 100% confident we should open chat.db and see if we can query it...
 	if !info.IsDir() &&
 		input.Name() == "chat.db" &&
-		timeline.FileExists(path.Join(path.Dir(input.Filename), "Attachments")) {
+		timeline.FileExistsFS(input.FS, path.Join(path.Dir(input.Filename), "Attachments")) {
 		return input.Filename
 	} else if info.IsDir() &&
-		timeline.FileExists(path.Join(input.Filename, "Attachments")) &&
-		timeline.FileExists(path.Join(input.Filename, "chat.db")) {
+		timeline.FileExistsFS(input.FS, path.Join(input.Filename, "Attachments")) &&
+		timeline.FileExistsFS(input.FS, path.Join(input.Filename, "chat.db")) {
 		return path.Join(input.Filename, "chat.db")
 	}
 	return ""

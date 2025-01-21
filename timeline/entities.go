@@ -595,13 +595,15 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 			q := `SELECT id, data_source_id FROM entity_attributes WHERE entity_id=? AND attribute_id=?`
 			args := []any{entity.ID, attrID}
 
-			// if this is an identity attribute, we need to select the row that portrays this identity;
-			// otherwise, we need to be sure to not care about the data source, otherwise we'll end up
-			// with essentially duplicate rows, causing repeated results in some queries (consider case
-			// where initial row insertion has data_source_id set because it's an identity; then future
-			// import has same entity ID and attribute ID, but data source is null because it's not an
-			// identity on this import's data source; we need to select whatever row may exist because
-			// it's not an identity to us)
+			// If this is an identity attribute, we need to select the row that portrays this identity
+			// if there is one, or select the existing row that doesn't yet portray / know about this
+			// identity... this is because an entity can have the same attribute be their identity on
+			// multiple data sources (like phone number, or email address, are often used by multiple
+			// data sources), and we want all of them to be represented. This can lead to duplicate
+			// results in search queries, though, unless they use proper GROUP BY clauses to deduplicate
+			// on the row ID of what is being searched. For example, search items should GROUP BY item
+			// row ID and relationship row ID to avoid duplicate "sent to" relationships and duplicate
+			// items in the search results.
 			if attr.Identity {
 				q += " AND (data_source_id=? OR data_source_id IS NULL)"
 				args = append(args, linkedDataSourceID)
@@ -614,7 +616,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 				return latentID{}, fmt.Errorf("checking for existing link of entity to attribute: %w (entity_id=%d attribute_id=%d)", err, entity.ID, attrID)
 			}
 
-			// TODO: I want to revise the autolink fields. I am not sure how useful they are presently. What actual information do we (want to) gain?
+			// autolink fields tell us about how an attribute was linked to an entity automatically
 			var autolinkImportID, autolinkAttrIDPtr *int64
 			if autolinkAttrID, ok := entityAutolinkAttrs[entity.ID]; ok {
 				autolinkAttrIDPtr = &autolinkAttrID

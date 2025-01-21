@@ -449,7 +449,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 
 	q := fmt.Sprintf(`SELECT %s, entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value`, itemDBColumns)
 	if params.OnlyTotal {
-		q = "SELECT count()"
+		q = "SELECT count(DISTINCT items.id)"
 	}
 	if params.GeoJSON {
 		// GeoJSON mode is intended to be more efficient; as such, only select coordinate data
@@ -734,6 +734,10 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		})
 	}
 
+	if !params.OnlyTotal {
+		q += "\n\t\tGROUP BY items.id"
+	}
+
 	if vectorSearch && !params.OnlyTotal {
 		q += "\n\t\tORDER BY embeddings.distance"
 	} else if params.Sort != SortNone {
@@ -878,6 +882,7 @@ func (tl *Timeline) expandRelationshipSingle(ctx context.Context, tx *sql.Tx, sr
 		LEFT JOIN entities AS from_entity   ON from_entity.id   = from_ea.entity_id
 		LEFT JOIN entities AS to_entity   ON to_entity.id   = to_ea.entity_id
 		WHERE (relationships.from_item_id=? OR relationships.to_item_id=?) AND items.hidden IS NULL
+		GROUP BY relationships.id
 		LIMIT 10`, sr.ItemRow.ID, sr.ItemRow.ID, sr.ItemRow.ID)
 	if err != nil {
 		return fmt.Errorf("querying db for relationships: %w", err)

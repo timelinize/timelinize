@@ -320,7 +320,7 @@ async function dataSourceHourStats() {
 				},
 				formatter: params => {
 					return `
-						<b>${hourDecimalToHumanTime(params.data[1])}</b>
+						<b>${params.data[0]}, ${hourDecimalToHumanTime(params.data[1])}&ndash;${hourDecimalToHumanTime((params.data[1]+1)%24)}</b>
 						<br>
 						<span style="color: ${params.color}; font-weight: bold">${params.seriesName}</span>:
 						${params.data[2]}`;
@@ -402,7 +402,15 @@ async function recentDataSourceStats() {
 		i++;
 	}
 
-
-
-
+	$('#days-documented-percent').innerText = `${daysSeenPct.toFixed(1).toLocaleString()}%`;
+	if (daysSeenPct > 75) {
+		$('#days-documented-percent').classList.add('text-green');
+		$('#days-documented-percent').classList.remove('text-red', 'text-orange');
+	} else if (daysSeenPct > 50) {
+		$('#days-documented-percent').classList.add('text-orange');
+		$('#days-documented-percent').classList.remove('text-red', 'text-green');
+	} else {
+		$('#days-documented-percent').classList.add('text-red');
+		$('#days-documented-percent').classList.remove('text-green', 'text-orange');
+	}
 }

@@ -35,6 +35,10 @@ on('click', '.import-dsgroup-opt-button', event => {
 	const dsoptContainer = event.target.closest('.file-import-plan-dsgroup');
 	bootstrap.Modal.getOrCreateInstance($(`#modal-import-dsopt-${dsoptContainer.ds.name}`)).show();
 });
+on('click', '.import-dsgroup-remove-button', event => {
+	const dsgroup = event.target.closest('.file-import-plan-dsgroup');
+	removeDsGroup(dsgroup);
+});
 
 // remove row and update UI elements
 on('click', '.dsgroup-remove-row', event => {
@@ -52,11 +56,15 @@ on('click', '.dsgroup-remove-row', event => {
 	
 	// remove entire DS group (and its DS options modal, if any) if no files left
 	if (dsgroup.filenames.length == 0) {
-		dsgroup.remove();
-		$(`#modal-import-dsopt-${dsgroup.ds.name}`)?.remove();
+		removeDsGroup(dsgroup);
 	} else {
 		updateFileCountDisplays(dsgroup);
 	}
+});
+
+function removeDsGroup(dsgroupElem) {
+	dsgroupElem.remove();
+	$(`#modal-import-dsopt-${dsgroupElem.ds.name}`)?.remove();
 
 	updateExpandCollapseAll();
 
@@ -64,7 +72,7 @@ on('click', '.dsgroup-remove-row', event => {
 	if (!$('.file-import-plan-dsgroup')) {
 		$('#start-import').classList.add('disabled');
 	}
-});
+}
 
 // TODO: when loader modal is dismissed, either by keyboard or a deliberate event, cancel the request
 
