@@ -41,7 +41,7 @@ func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
 		Name:            "imessage",
 		Title:           "iMessage",
-		Icon:            "imessage.svg", // TODO: get iMessage icon
+		Icon:            "imessage.svg",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})
