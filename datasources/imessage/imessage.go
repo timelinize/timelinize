@@ -23,7 +23,7 @@ package imessage
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/timelinize/timelinize/timeline"
+	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
 )
 
@@ -63,14 +64,6 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 
 // FileImport imports data from the given file or folder.
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	// start by adding contacts (TODO: this maybe should be separate? assumes we're on a Mac with the AddressBook DB)
-	err := fimp.processContacts(ctx, params)
-	if errors.Is(err, fs.ErrNotExist) {
-		params.Log.Warn("no AddressBook DB found; won't be able to import associated contact list automatically", zap.Error(err))
-	} else if err != nil {
-		return fmt.Errorf("processing AddressBook DB for contact list: %w", err)
-	}
-
 	// open messages DB as read-only and prepare importer
 	// note that the SQL APIs don't support io/fs APIs, so we cheat and just access the disk directly
 	dbPath := filepath.Join(dirEntry.FSRoot, filepath.FromSlash(chatDBPath(dirEntry)))
@@ -109,6 +102,15 @@ type Importer struct {
 	// the database to fill out the OriginalLocation,
 	// IntermediateLocation, and Content.Data fields
 	// on an attachment before it is added to the graph.
+	//
+	// Unique to this particular data source, the item's
+	// Content.Data function must be able to be reused.
+	// Generally, it is not assumed that the data will
+	// be read more than once, but to prevent duplicates
+	// (since, I have seen a message attachment be byte-
+	// for-byte duplicated, even though only one appears
+	// in the app), we may read the content once before
+	// sending it to the processor, which reads it again.
 	FillOutAttachmentItem func(ctx context.Context, filename string, attachmentItem *timeline.Item)
 
 	// Typically phone number; only used if
@@ -153,17 +155,13 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 			Metadata:       currentMessage.metadata(),
 		}
 
-		// if the message has no text, but has an attachment, make the (first) attachment
-		// the primary content of the message, i.e. the main/parent item
 		attachments := currentMessage.attachments(ctx, im, msgItem.Owner)
-		if msgItem.Content.Data == nil && len(attachments) > 0 {
-			msgItem.Content = attachments[0].Content
-			msgItem.OriginalLocation = attachments[0].OriginalLocation
-			msgItem.IntermediateLocation = attachments[0].IntermediateLocation
-			msgItem.Metadata.Merge(attachments[0].Metadata, timeline.MetaMergeReplace)
-			msgItem.Metadata["Attachment ID"] = attachments[0].ID
-			attachments = attachments[1:]
-		}
+
+		// don't fold the first attachment into an empty message item; that works
+		// for some data sources like SMS Backup & Restore where there's no message
+		// IDs and a bunch of references to them, but for this data source, that
+		// breaks correctness (unless we do lots of complex bookkeeping and rewrite
+		// the ID references and such)
 
 		ig := &timeline.Graph{Item: msgItem}
 		for _, attach := range attachments {
@@ -386,7 +384,8 @@ func (m message) sentTo() []*timeline.Entity {
 }
 
 func (m message) attachments(ctx context.Context, im Importer, sender timeline.Entity) []*timeline.Item {
-	var items []*timeline.Item //nolint:prealloc // bug filed: https://github.com/alexkohler/prealloc/issues/30
+	var items []*timeline.Item
+	hashes := make(map[string]struct{}) // to prevent duplicate attachments
 	for _, a := range m.attached {
 		if a.filename == nil {
 			continue
@@ -417,8 +416,36 @@ func (m message) attachments(ctx context.Context, im Importer, sender timeline.E
 			im.FillOutAttachmentItem(ctx, *a.filename, it)
 		}
 
-		items = append(items, it)
+		// if there is only one attachment, we can simply append
+		// it as an item; if there are more, we may need to
+		// deduplicate them. in rare situations, I have seen
+		// byte-for-byte duplicate photos in the db with different
+		// GUIDs and I can't explain why; this solution is hacky
+		// for sure, but we have the luxury of being able to reuse
+		// the Data function to read the file more than once, so
+		// we hash each attachment to remember it and avoid dupes
+		// (the processor will not be able to dedupe the items b/c
+		// they have different IDs... but it would only store one
+		// copy of the actual data file, but this is not good
+		// enough for us in this case)
+		if len(m.attached) == 1 {
+			items = append(items, it)
+		} else {
+			h := blake3.New()
+			rdr, err := it.Content.Data(ctx)
+			if err == nil {
+				_, _ = io.Copy(h, rdr)
+				rdr.Close()
+				sum := hex.EncodeToString(h.Sum(nil))
+				// only remember hash and keep the item if attachment data is unique
+				if _, seen := hashes[sum]; !seen {
+					hashes[sum] = struct{}{}
+					items = append(items, it)
+				}
+			}
+		}
 	}
+
 	return items
 }
 

@@ -59,10 +59,11 @@ func newLogger() *zap.Logger {
 
 	// the embedded core avoids a firehose of logs, but we still need an unsampled core for UI updates and such, where every message is critical
 	// (the critical messages are defined in the Check() method of our Core type)
-	const sampledLogInterval = 250 * time.Millisecond
+	const sampledLogInterval, sampledLiveJobProgressInterval, sampledLiveJobProgressCount = 250 * time.Millisecond, 100 * time.Millisecond, 2
 	return zap.New(&customCore{
-		Core:            zapcore.NewSamplerWithOptions(core, sampledLogInterval, 1, 0),
-		nonSamplingCore: core,
+		Core:                zapcore.NewSamplerWithOptions(core, sampledLogInterval, 1, 0),
+		nonSamplingCore:     core,
+		liveJobProgressCore: zapcore.NewSamplerWithOptions(core, sampledLiveJobProgressInterval, sampledLiveJobProgressCount, 0),
 	})
 }
 
@@ -136,7 +137,8 @@ func RemoveLogConn(conn *websocket.Conn) {
 // customCore wraps another zapcore.Core and prevents sampling based on logger name.
 type customCore struct {
 	zapcore.Core
-	nonSamplingCore zapcore.Core
+	nonSamplingCore     zapcore.Core
+	liveJobProgressCore zapcore.Core
 }
 
 func (c *customCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
@@ -144,9 +146,9 @@ func (c *customCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore
 		// always allow through, no sampling -- otherwise UI gets out of sync
 		return ce.AddCore(ent, c.nonSamplingCore)
 	}
-	// if ent.LoggerName == "job.action" && (ent.Message == "finished graph" || ent.Message == "finished thumbnail") {
-	// 	return c.streamCore.Check(ent, ce)
-	// }
+	if ent.LoggerName == "job.action" && (ent.Message == "finished graph" || ent.Message == "finished thumbnail") {
+		return c.liveJobProgressCore.Check(ent, ce)
+	}
 	return c.Core.Check(ent, ce)
 }
 
@@ -155,7 +157,8 @@ func (c *customCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore
 // promoted methods like Check()...
 func (c *customCore) With(fields []zapcore.Field) zapcore.Core {
 	return &customCore{
-		Core:            c.Core.With(fields),
-		nonSamplingCore: c.nonSamplingCore.With(fields),
+		Core:                c.Core.With(fields),
+		nonSamplingCore:     c.nonSamplingCore.With(fields),
+		liveJobProgressCore: c.liveJobProgressCore.With(fields),
 	}
 }

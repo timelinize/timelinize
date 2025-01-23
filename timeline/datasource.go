@@ -209,7 +209,7 @@ func (d DirEntry) TopDirReadDir(filename string) ([]fs.DirEntry, error) {
 
 // FullPath returns the full path of the directory entry, including the FS
 // root (if a known FS type from the archives package), and the filename
-// in the archive.
+// in the archive, as an OS filepath.
 func (d DirEntry) FullPath() string {
 	var root string
 	switch fsys := d.FS.(type) {
@@ -221,6 +221,8 @@ func (d DirEntry) FullPath() string {
 		root = fsys.Path
 	case *archives.DeepFS:
 		root = fsys.Root
+	default:
+		root = d.FSRoot
 	}
 	return filepath.Join(root, filepath.FromSlash(d.Filename))
 }

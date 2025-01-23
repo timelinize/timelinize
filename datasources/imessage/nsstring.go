@@ -56,12 +56,7 @@ func parseStreamTypedNSString(stream []byte) (string, error) {
 	// Drop prefix characters
 	// (TODO: would slicing, i.e. str[offset:] work?)
 	// (see also: https://github.com/yakuter/nsattrparser/blob/main/nsattrparser.go -- we arrived at very similar code independently, possibly with LLM help)
-	str, err := dropChars(offset, str)
-	if err != nil {
-		return "", err
-	}
-
-	return str, nil
+	return dropChars(offset, str)
 }
 
 // dropChars drops 'offset' characters from the front of a string.

@@ -407,13 +407,7 @@ a.disabled {
 }
 
 
-
-.message-reactions {
-	margin-top: .5em;
-	margin-bottom: -1em;
-}
-
-.message-reaction {
+.emoji {
 	font-family: "Twemoji Mozilla",
 		"Apple Color Emoji",
 		"Segoe UI Emoji",
@@ -421,14 +415,28 @@ a.disabled {
 		"Noto Color Emoji",
 		"EmojiOne Color",
 		"Android Emoji";
-	cursor: default;
-	background: var(--tblr-card-bg);
-	border-radius: 50%;
-	padding: .25em .5em;
-	box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
-	margin-left: -.35em; 
 }
 
+.message-reactions {
+	margin-top: .5em;
+	margin-bottom: -1em;
+}
+
+.message-reaction {
+	cursor: default;
+	background: var(--tblr-card-bg);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
+	font-size: 85%;
+	border-radius: .5rem;
+	padding: .5rem;
+	margin-right: .25rem;
+	line-height: .75;
+}
+
+.message-reaction .emoji {
+	vertical-align: sub;
+	font-size: 1.5em;
+}
 
 
 

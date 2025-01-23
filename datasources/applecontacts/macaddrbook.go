@@ -16,16 +16,14 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-package imessage
+package applecontacts
 
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 
@@ -33,51 +31,81 @@ import (
 	"go.uber.org/zap"
 )
 
-func (fimp *FileImporter) processContacts(ctx context.Context, opt timeline.ImportParams) error {
-	// macOS Mavericks and above, I think
-
-	// TODO: maybe the user should be able to pass in address book databases directly too
-	homeDir, err := os.UserHomeDir()
+func init() {
+	err := timeline.RegisterDataSource(timeline.DataSource{
+		Name:            "applecontacts",
+		Title:           "Apple Contacts",
+		Icon:            "applecontacts.png",
+		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
+	})
 	if err != nil {
-		return err
+		timeline.Log.Fatal("registering data source", zap.Error(err))
 	}
-
-	const addrBookFilename = "AddressBook-v22.abcddb"
-
-	addrBookDir := filepath.Join(homeDir, "Library", "Application Support", "AddressBook")
-	mainBook := filepath.Join(addrBookDir, addrBookFilename)
-
-	allBooks := []string{mainBook}
-
-	bookSources, err := os.ReadDir(filepath.Join(addrBookDir, "Sources"))
-	if err != nil {
-		return err
-	}
-	for _, entry := range bookSources {
-		if !entry.IsDir() {
-			continue
-		}
-		allBooks = append(allBooks, filepath.Join(addrBookDir, "Sources", entry.Name(), addrBookFilename))
-	}
-
-	for _, bookPath := range allBooks {
-		if err := fimp.processAddressBook(ctx, opt, bookPath); err != nil {
-			opt.Log.Error("could not process address book",
-				zap.String("db_path", bookPath),
-				zap.Error(err))
-		}
-	}
-
-	return nil
 }
 
-func (*FileImporter) processAddressBook(ctx context.Context, params timeline.ImportParams, bookPath string) error {
-	db, err := sql.Open("sqlite3", bookPath+"?mode=ro")
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+// FileImporter can import from the Apple Contacts database.
+type FileImporter struct{}
+
+// Recognize returns whether this file or folder is supported.
+func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	// first see if the file is an AddressBook DB directly
+	// fun fact, "abcddb" apparently means "Address Book CoreData Database"
+	if path.Ext(dirEntry.Name()) == addressBookFilename {
+		return timeline.Recognition{Confidence: 1}, nil
 	}
+	if path.Ext(dirEntry.Name()) == ".abcddb" {
+		return timeline.Recognition{Confidence: .85}, nil
+	}
+
+	// then see if the entry is a directory that contains addressbook data; the Contacts
+	// app stores its data across multiple database files if there is more than one source
+	// for the contacts (for example, another contact list connected from Google) and
+	// there's also metadata files per-person (abcdp) or per-group (abcdg) it seems, though
+	// I'm not sure what their purpose is
+	var confidence float64
+	if dirEntry.IsDir() && dirEntry.Name() == "AddressBook" {
+		confidence += .1
+	}
+	if info, err := fs.Stat(dirEntry.FS, addressBookFilename); err == nil && !info.IsDir() {
+		confidence += .7
+	}
+	if info, err := fs.Stat(dirEntry.FS, "Metadata"); err == nil && info.IsDir() {
+		confidence += .1
+	}
+	if info, err := fs.Stat(dirEntry.FS, "Sources"); err == nil && info.IsDir() {
+		confidence += .1
+	}
+
+	return timeline.Recognition{Confidence: confidence}, nil
+}
+
+// FileImport imports data from the given file or folder.
+func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	// if the given dirEntry is an address book database
+	if path.Ext(dirEntry.Name()) == addressBookFilename {
+		return fimp.processAddressBook(ctx, dirEntry, params)
+	}
+
+	// otherwise, this must be an AddressBook folder; look for abcddb files.
+	return fs.WalkDir(dirEntry.FS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Name() == addressBookFilename {
+			return fimp.processAddressBook(ctx, timeline.DirEntry{
+				DirEntry: d,
+				FS:       dirEntry.FS,
+				FSRoot:   dirEntry.FSRoot,
+				Filename: path,
+			}, params)
+		}
+		return nil
+	})
+}
+func (*FileImporter) processAddressBook(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	db, err := sql.Open("sqlite3", dirEntry.FullPath()+"?mode=ro")
 	if err != nil {
-		return fmt.Errorf("opening AddressBook DB at %s: %w", bookPath, err)
+		return fmt.Errorf("opening AddressBook DB at %s: %w", dirEntry.FullPath(), err)
 	}
 	defer db.Close()
 
@@ -246,3 +274,7 @@ func concat(sep string, vals []*string) string {
 	}
 	return sb.String()
 }
+
+// currently, we only support this version of the database, but we can add support for others later...
+// macOS Mavericks and above, I think
+const addressBookFilename = "AddressBook-v22.abcddb"

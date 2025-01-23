@@ -23,6 +23,7 @@ import (
 
 	tlcmd "github.com/timelinize/timelinize/cmd"
 	// plug in data sources
+	_ "github.com/timelinize/timelinize/datasources/applecontacts"
 	_ "github.com/timelinize/timelinize/datasources/contactlist"
 	_ "github.com/timelinize/timelinize/datasources/email"
 	_ "github.com/timelinize/timelinize/datasources/facebook"

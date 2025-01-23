@@ -1704,6 +1704,35 @@ function renderMessageItem(item, options) {
 		return sendersContainer;
 	}
 
+	// sometimes, a message may have no content and only have attachments
+	// (this is unfortunate, but often seems to be the case with iMessage;
+	// we can't just delete the 'parent' item because it has an ID that
+	// is referenced in various places)
+	// in that case, we can at least promote the first attachment in the
+	// display of the message so that it becomes the main content of the
+	// message, and any other attachments remain attached, without an
+	// empty item cluttering the view; this is what most chat/messaging
+	// apps do anyway, including iMessage
+	if (!item.data_text && !item.data_file && item.related) {
+		for (const [i, rel] of item.related.entries()) {
+			if (rel.label == 'attachment' && rel.to_item) {
+				// promote first attachment, so remove it from the related items list
+				item.related.splice(i, 1);
+				// combine any related items of the empty item with that of the related item
+				rel.to_item.related = rel.to_item.related ? item.related.concat(rel.to_item.related) : item.related;
+				// combine metadata
+				if (item.metadata && rel.to_item.metadata) {
+					rel.to_item.metadata = {...rel.to_item.metadata, ...item.metadata};
+				} else if (item.metadata) {
+					rel.to_item.metadata = item.metadata;
+				}
+				// finally, replace the item with the related item that we spliced out
+				item = rel.to_item;
+				break;
+			}
+		}
+	}
+
 	const elem = cloneTemplate('#tpl-message');
 	$('.message-sender', elem).innerText = item.entity?.name || item.entity?.attribute?.value;
 	if (item.entity?.id == 1) {
@@ -1782,7 +1811,13 @@ function renderMessageItem(item, options) {
 			for (const [reaction, rels] of Object.entries(reactions)) {
 				var reactElem = document.createElement('div');
 				reactElem.classList.add('message-reaction');
-				reactElem.textContent = reaction;
+				var emojiElem = document.createElement('span');
+				emojiElem.classList.add('emoji');
+				emojiElem.textContent = reaction;
+				reactElem.append(emojiElem);
+				if (rels.length > 1) {
+					reactElem.innerHTML += ` ${rels.length}`;
+				}
 				reactElem.title = `${reactionLabels[reaction] || reaction} (${rels.length}): `;
 				for (const rel of rels) {
 					reactElem.title += `${entityDisplayNameAndAttr(rel.from_entity).name}, `;
