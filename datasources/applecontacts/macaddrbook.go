@@ -87,7 +87,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	}
 
 	// otherwise, this must be an AddressBook folder; look for abcddb files.
-	return fs.WalkDir(dirEntry.FS, ".", func(path string, d fs.DirEntry, err error) error {
+	return fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
