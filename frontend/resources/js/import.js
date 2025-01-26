@@ -245,6 +245,12 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 	$('#page-content').append(dsOptModal);
 
 	// these can't be set up until after they're displayed
+	if (ds.name == "calendar") {
+		const entitySelect = newEntitySelect($('.calendar-owner', dsOptElem), 1);
+		const owner = await getOwner(tlz.openRepos[0]);
+		entitySelect.addOption(owner);
+		entitySelect.addItem(owner.id);
+	}
 	if (ds.name == "google_location") {
 		const entitySelect = newEntitySelect($('.google_location-owner', dsOptElem), 1);
 		const owner = await getOwner(tlz.openRepos[0]);
@@ -431,6 +437,13 @@ function dataSourceOptions(ds) {
 
 	let dsOpt;
 
+	if (ds.name == "calendar") {
+		dsOpt = {};
+		const owner = $('.calendar-owner', dsoptContainer).tomselect.getValue();
+		if (owner.length) {
+			dsOpt.owner_entity_id = Number(owner[0]);
+		}
+	}
 	if (ds.name == "smsbackuprestore") {
 		const ownerPhoneInput = $('.smsbackuprestore-owner-phone', dsoptContainer);
 		console.log("INPUT:", ownerPhoneInput)

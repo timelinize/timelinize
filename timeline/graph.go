@@ -1088,11 +1088,12 @@ var (
 	ClassSocial   = getClassification("social")
 	ClassLocation = getClassification("location")
 	ClassMedia    = getClassification("media")
-	// ClassScreen = getClassification("screen") // TODO: screenshot...?
+	// ClassScreen = getClassification("screen") // TODO: call it screenshot maybe...? but screen recordings...
 	ClassCollection = getClassification("collection")
 	ClassNote       = getClassification("note")
 	ClassDocument   = getClassification("document")
 	ClassBookmark   = getClassification("bookmark")
+	ClassEvent      = getClassification("event") // TODO: call it "schedule" instead?
 )
 
 func getClassification(name string) Classification {

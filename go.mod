@@ -6,6 +6,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/abema/go-mp4 v1.3.0
 	github.com/adrianmo/go-nmea v1.10.0
+	github.com/apognu/gocal v0.9.1
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/caddyserver/caddy/v2 v2.8.4
@@ -34,6 +35,7 @@ require (
 	dario.cat/mergo v1.0.1 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
+	github.com/ChannelMeter/iso8601duration v0.0.0-20150204201828-8da3af7a2a61 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.3.0 // indirect
 	github.com/Microsoft/go-winio v0.6.0 // indirect
