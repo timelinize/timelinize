@@ -159,11 +159,11 @@
 				<a class="btn btn-link link-secondary" data-bs-dismiss="modal">
 					Cancel
 				</a>
-				<label class="form-check ms-auto me-3">
+				<label class="form-check ms-auto me-3" title="Scan all subfolders for recognized files">
 					<input type="checkbox" id="recursive" class="form-check-input" checked>
 					<span class="form-check-label">Recursive</span>
 				</label>
-				<label class="form-check me-5">
+				<label class="form-check me-5" title="Scan within archive files (zip, tar, compressed tar, rar, etc.) for recognized files; this takes longer. Note that this is not required when the entire archive itself is recognized by a data source, only when files/folders within the archive need to be found.">
 					<input type="checkbox" id="traverse-archives" class="form-check-input">
 					<span class="form-check-label">Traverse archives (slower)</span>
 				</label>
@@ -252,6 +252,17 @@
 						<div class="col-auto">
 							<div class="btn-list">
 								<!-- I set the data-bs-* attributes this way to disable button from acting for the accordion; see https://stackoverflow.com/a/70664716/1048862 -->
+								<button class="btn import-dsgroup-opt-button" data-bs-toggle="collapse" data-bs-target>
+									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+									stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+									class="icon icon-tabler icons-tabler-outline icon-tabler-settings">
+										<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+										<path
+											d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
+										<path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+									</svg>
+									Options
+								</button>
 								<button class="btn import-dsgroup-remove-button btn-outline-danger" data-bs-toggle="collapse" data-bs-target>
 									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 										stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
@@ -265,17 +276,6 @@
 										<path d="M16.5 11.5l-5.1 5" />
 									</svg>
 									Remove all
-								</button>
-								<button class="btn import-dsgroup-opt-button" data-bs-toggle="collapse" data-bs-target>
-									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-										stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-										class="icon icon-tabler icons-tabler-outline icon-tabler-settings">
-										<path stroke="none" d="M0 0h24v24H0z" fill="none" />
-										<path
-											d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
-										<path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
-									</svg>
-									Options
 								</button>
 							</div>
 						</div>

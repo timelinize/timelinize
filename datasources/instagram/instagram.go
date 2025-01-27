@@ -51,7 +51,7 @@ type Client struct{}
 
 // Recognize returns whether the file or folder is recognized.
 func (Client) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
-	if timeline.FileExistsFS(dirEntry.FS, personalInformationPath) {
+	if timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, personalInformationPath)) {
 		return timeline.Recognition{Confidence: .9}, nil
 	}
 	return timeline.Recognition{}, nil

@@ -354,7 +354,6 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		// directory only, and counting the number of entries that
 		// each data source matched; then sort by most matches
 		var counts dataSourceCounts
-		// for _, p := range pairings[currentDirPairingsMarker:] {
 		for _, p := range currentPairings {
 			for _, match := range p.DataSources {
 				if match.DirThreshold > 0 {
@@ -398,18 +397,46 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			if archives.PathContainsArchive(filename) {
 				ftype = fileTypeArchive
 			}
-			pairings[dir] = []timeline.ProposedFileImport{
-				{
-					Filename:    filename,
-					FileType:    ftype,
-					DataSources: consolidatedMatches,
-				},
-			}
-			for d := range pairings {
-				if d != dir && strings.HasPrefix(d, dir) {
-					delete(pairings, d)
+
+			// we need to be careful not to wipe out matches from other data sources
+			// within this directory (imagine, for example, a folder of jpgs, with a
+			// single vcard file, where the jpgs are contact pictures; the media data
+			// source should not wipe out the vcard match!); these loops look scary,
+			// but all they do is remove the matches for individual files within the
+			// folder being consolidated, *only for the data sources that are collapsing
+			// the folder* - we leave the matches from data sources that don't
+			// support/qualify collapsing the folder, since they could still be useful
+			// (consider the vcard example).
+			// TODO: Since this logic allows data sources to overlap paths (e.g. media could claim a folder, and vcard could match a file inside it), maybe we should enable some UI interaction/notice to ensure this is desired, OR make an import planner option the user can set to control this
+			for d, p := range pairings {
+				if strings.HasPrefix(d, dir) {
+					for i := 0; i < len(p); i++ {
+						for j := 0; j < len(p[i].DataSources); j++ {
+							if hasDataSource(consolidatedMatches, p[i].DataSources[j].DataSource) {
+								p[i].DataSources = append(p[i].DataSources[:j], p[i].DataSources[j+1:]...)
+								j--
+							}
+						}
+						if len(p[i].DataSources) == 0 {
+							p = append(p[:i], p[i+1:]...)
+							pairings[d] = p
+							i--
+						}
+					}
+					if len(pairings[d]) == 0 {
+						delete(pairings, d)
+					}
 				}
 			}
+
+			// now that we've removed individual file matches from data sources within this
+			// folder that are being consolidated to the folder level, add the match that
+			// actually represents those data sources at the folder level
+			pairings[dir] = append(pairings[dir], timeline.ProposedFileImport{
+				Filename:    filename,
+				FileType:    ftype,
+				DataSources: consolidatedMatches,
+			})
 		}
 	}
 
@@ -557,6 +584,15 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 	}
 
 	return plan, nil
+}
+
+func hasDataSource(matches []timeline.DataSourceRecognition, target timeline.DataSource) bool {
+	for _, m := range matches {
+		if m.DataSource.Name == target.Name {
+			return true
+		}
+	}
+	return false
 }
 
 const (

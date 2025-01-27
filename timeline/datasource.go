@@ -186,7 +186,7 @@ type DirEntry struct {
 	// associated FS. Thus, it is not an OS path, it has no
 	// root component (no leading "/" or drive letter, for
 	// example), may be either a directory or a file, and may
-	// be "." or a true  filename. To always get the true
+	// be "." or a true filename. To always get the true
 	// filename, use the Name() method. (TODO: Verify this)
 	Filename string
 }

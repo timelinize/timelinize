@@ -751,4 +751,6 @@ type ProposedFileImport struct {
 	DataSources []DataSourceRecognition `json:"data_sources,omitempty"`
 }
 
-func (p ProposedFileImport) String() string { return p.Filename }
+func (p ProposedFileImport) String() string {
+	return fmt.Sprintf("{%s:%s %v}", p.FileType, p.Filename, p.DataSources)
+}
