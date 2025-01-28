@@ -179,7 +179,7 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 	var resp *http.Response
 	if a.serverRunning() {
 		httpClient := &http.Client{Timeout: 1 * time.Minute}
-		resp, err = httpClient.Do(req) //nolint:bodyclose // bug filed: https://github.com/timakin/bodyclose/issues/61
+		resp, err = httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("running command on server: %w", err)
 		}

@@ -42,8 +42,8 @@ import (
 type Graph struct {
 	// The (root) node of this graph.
 	// It is an error for both to be set.
-	Item   *Item
-	Entity *Entity
+	Item   *Item   `json:"item,omitempty"`
+	Entity *Entity `json:"entity,omitempty"`
 
 	// Edges contain pointers to other nodes on the graph
 	// and are described by a relationship. There must be a
@@ -52,7 +52,7 @@ type Graph struct {
 	// the edge as long as the edge specifies the other one
 	// (either To or From). The edge may also specify both
 	// To and From nodes regardless of this one.
-	Edges []Relationship
+	Edges []Relationship `json:"edges,omitempty"`
 
 	// Any state required by the data source to resume an
 	// identical import at this graph. It should represent
@@ -85,7 +85,7 @@ type Graph struct {
 	// down the pipeline (this is less efficient, though, since
 	// a checkpoint is only persisted to the DB once every so
 	// often, so not every graph needs a serialized checkpoint).
-	Checkpoint any
+	Checkpoint any `json:"checkpoint,omitempty"`
 
 	// state needed by processing pipeline
 	err error
@@ -95,7 +95,7 @@ type Graph struct {
 
 	// Used by the processing pipeline, particularly in interactive imports.
 	// THIS IS NOT FOR DATA SOURCES TO SET.
-	ProcessingID string
+	ProcessingID string `json:"processing_id,omitempty"`
 }
 
 // Size returns the number of nodes in the graph
@@ -195,7 +195,7 @@ func (g *Graph) String() string {
 // Item represents an item on the timeline.
 type Item struct {
 	// The unique ID of the item assigned by the data source.
-	ID string
+	ID string `json:"id,omitempty"`
 
 	// Item classification, i.e. the kind of thing it represents.
 	// This value adds semantic context to the item, which helps
@@ -204,7 +204,7 @@ type Item struct {
 	// For example, we display and think of chat messages very
 	// differently than we do memos-to-self, social media posts,
 	// and emails.
-	Classification Classification
+	Classification Classification `json:"classification,omitempty"`
 
 	// The timestamp when the item originated. If multiple
 	// timestamps are available, prefer the timestamp when the
@@ -212,54 +212,48 @@ type Item struct {
 	// example, a photograph is captured at one timestamp and
 	// posted online at another; prefer the first timestamp
 	// when it was originally captured.
-	Timestamp time.Time
+	Timestamp time.Time `json:"timestamp,omitempty"`
 
 	// An optional ending timestamp to make this item span
 	// time instead of being a point in time. If set, it must
 	// be a time after Timestamp. This gives an item duration.
-	Timespan time.Time
+	Timespan time.Time `json:"timespan,omitempty"`
 
 	// An optional ending timestamp indicating that the item's
 	// actual timestamp is between Timestamp and Timeframe, but
 	// it's not certain exactly when.
-	Timeframe time.Time
+	Timeframe time.Time `json:"timeframe,omitempty"`
 
 	// Approximate error of the time values.
-	TimeUncertainty time.Duration
+	TimeUncertainty time.Duration `json:"time_uncertainty,omitempty"`
 
 	// The coordinates where the item originated.
-	Location Location
+	Location Location `json:"location,omitempty"`
 
 	// The person who owns, created, or originated the item. At
 	// least one attribute is required: an identifying attribute
 	// like a user ID of the person on this data source.
-	Owner Entity
+	Owner Entity `json:"owne,omitempty"`
 
 	// If applicable, path to the item on the original data
 	// source, including the filename. Note that this can take
 	// on different formats depending on the data source; for
 	// example, iPhone backups provide paths relative to a
 	// domain, so the paths may be in the form "Domain:Path".
-	OriginalLocation string
+	OriginalLocation string `json:"original_location,omitempty"`
 
 	// If applicable, path to the item relative to the root of the
 	// import, including the filename.
-	IntermediateLocation string
+	IntermediateLocation string `json:"intermediate_location,omitempty"`
 
 	// The actual content of the item.
-	Content ItemData
+	Content ItemData `json:"content,omitempty"`
 
 	// Optional extra information about the item. Keys should
 	// be human-readable and formatted as natural titles or
 	// labels (e.g. "Description" instead of "desc") since
 	// viewers will typically just regurgitate this info as-is.
-	Metadata Metadata
-
-	// Annotations can bring something to the user's
-	// attention or at least be associated as metadata
-	// for curators or reviewers of the item.
-	// TODO: STILL WIP, EXPERIMENTAL.
-	Annotations []Annotation
+	Metadata Metadata `json:"metadata,omitempty"`
 
 	// When an item cannot be fully conveyed at the same time, or
 	// has to be given in pieces, telling the processor how to
@@ -272,7 +266,7 @@ type Item struct {
 	// words, each part of the same item that is conveyed to the
 	// processor must have the same retrieval key, and no other
 	// item globally must use the same key at any time.
-	Retrieval ItemRetrieval
+	Retrieval ItemRetrieval `json:"retrieval,omitempty"`
 
 	// Used for storing state during processing; either the
 	// text content of the item, or the source from which
@@ -308,7 +302,7 @@ type ItemRetrieval struct {
 	// that the JSON file's metadata is less correct sometimes, for some reason. So even
 	// though both have metadata, when importing from the actual image, we prefer that,
 	// and this tells the processor to do so.
-	PreferFields []string
+	PreferFields []string `json:"prefer_fields,omitempty"`
 }
 
 // SetKey sets the retrieval key for this item. It should be a globally unique
@@ -469,7 +463,7 @@ type ItemData struct {
 	// the filename is not unique in its destination within the repo,
 	// it will be made unique by modifying it. If this value is empty
 	// and a filename is needed, a usable name will be generated.
-	Filename string
+	Filename string `json:"filename,omitempty"`
 
 	// The MIME type of the bytes read from the Data field. If not
 	// set, it will be inferred by sniffing the data or using the
@@ -489,7 +483,7 @@ type ItemData struct {
 	// the purposes of mail, in our case we assume a more sensible default
 	// of "text/plain" because items in a timeline are not usually
 	// arbitrary binary blobs or executable programs.
-	MediaType string
+	MediaType string `json:"media_type,omitempty"`
 
 	// A function that returns a way to read the item's data. The
 	// returned ReadCloser will be closed when processing finishes.
@@ -946,10 +940,12 @@ func (l Location) String() string {
 // nodes will be preferred when viewing a timeline.
 type Relationship struct {
 	Relation
-	Value      any
-	From, To   *Graph
-	Start, End *time.Time
-	Metadata   Metadata
+	Value    any        `json:"value,omitempty"`
+	From     *Graph     `json:"from,omitempty"`
+	To       *Graph     `json:"to,omitempty"`
+	Start    *time.Time `json:"start,omitempty"`
+	End      *time.Time `json:"end,omitempty"`
+	Metadata Metadata   `json:"metadata,omitempty"`
 }
 
 // rawRelationships represents a relationship in DB terms.
@@ -996,18 +992,6 @@ type Relation struct {
 	// TODO: better name for this?
 	Subordinating bool `json:"subordinating"`
 }
-
-// Annotation is a note or something that needs attention.
-// TODO: still figuring these out
-type Annotation struct {
-	ReviewReasonID int64
-	Freeform       string
-	Metadata       any
-}
-
-// ReviewReason describes a reason a review might be needed.
-// TODO: very experimental
-type ReviewReason string
 
 // Classification represents item classes. Classifying items is used to
 // convey their semantic meaning or intent. For example, a text item

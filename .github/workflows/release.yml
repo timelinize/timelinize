@@ -7,7 +7,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu, windows, macos]
-        go-version: [1.22.x]
     runs-on: ${{ matrix.os }}-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,7 +14,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: stable
 
       # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
       # but I haven't looked into using it. We'd have to install the packages using
@@ -30,21 +29,16 @@ jobs:
              base-devel
              mingw-w64-x86_64-toolchain
              mingw-w64-x86_64-libvips
-             mingw-w64-x86_64-libheif
 
       - name: Install libraries (Linux)
         if: matrix.os == 'ubuntu'
-        # install libheif (and dependency libde265) from the PPA which is more
-        # current; Ubuntu's is too old, resulting in failed compilation
         run: |
-          sudo add-apt-repository ppa:strukturag/libheif
-          sudo add-apt-repository ppa:strukturag/libde265
           sudo apt-get update
-          sudo apt-get install -y libheif-dev libvips-dev
+          sudo apt-get install -y libvips-dev
 
       - name: Install libraries (macOS)
         if: matrix.os == 'macos'
-        run: brew install libheif vips
+        run: brew install vips
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.

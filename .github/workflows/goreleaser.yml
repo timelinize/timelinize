@@ -17,7 +17,6 @@ jobs:
           - windows-latest
           - macos-latest
           - macos-13
-        go-version: [1.23.x]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -33,7 +32,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: stable
           check-latest: true
 
       # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
@@ -49,24 +48,19 @@ jobs:
             base-devel
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-libvips
-            mingw-w64-x86_64-libheif
 
       - name: Install libraries (Linux)
         if: matrix.os == 'ubuntu-latest'
-        # install libheif (and dependency libde265) from the PPA which is more
-        # current; Ubuntu's is too old, resulting in failed compilation
         run: |
-          sudo add-apt-repository ppa:strukturag/libheif
-          sudo add-apt-repository ppa:strukturag/libde265
           sudo apt-get update
-          sudo apt-get install -y libheif-dev libvips-dev 
+          sudo apt-get install -y libvips-dev 
           sudo ldconfig
 
       - name: Install libraries (macOS)
         if: ${{ ( matrix.os == 'macos-latest' ) || ( matrix.os == 'macos-13' ) }}
         run: |
           brew install python || true # Problem in macOS Intel images https://github.com/actions/runner-images/issues/8500
-          brew install libheif vips
+          brew install vips
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
@@ -96,36 +90,36 @@ jobs:
         run: |
           sed -i.tmp -e 's/_GOOS_/darwin/g' .goreleaser.yml
 
-      # Installed heif version must match the version requested by go otherwise you get C. errors.
-      # As writing jammy (22.04) uses 1.17.6 https://launchpad.net/~strukturag/+archive/ubuntu/libheif
-      - name: Downgrade heif on linux to match ppa version & switch to linux only build
-        if: matrix.os == 'ubuntu-latest'
-        run: | 
-          go get github.com/strukturag/libheif@v1.17.6
-          sed -i 's/_GOOS_/linux/g' .goreleaser.yml
-          echo 'nfpms:' >> .goreleaser.yml
-          echo '  -' >> .goreleaser.yml
-          echo '    vendor: Dyanim LLC' >> .goreleaser.yml
-          echo '    homepage: https://dyanim.com/' >> .goreleaser.yml
-          echo '    maintainer: "Matt Holt <mholt@users.noreply.github.com>"' >> .goreleaser.yml
-          echo '    description: NA' >> .goreleaser.yml
-          echo '    license: Private' >> .goreleaser.yml
-          echo '    formats:' >> .goreleaser.yml
-          echo '      - apk' >> .goreleaser.yml
-          echo '      - deb' >> .goreleaser.yml
-          echo '      - rpm' >> .goreleaser.yml
-          echo '      - termux.deb' >> .goreleaser.yml
-          echo '      - archlinux' >> .goreleaser.yml
-          echo '    release: "1"' >> .goreleaser.yml
-          echo '    section: default' >> .goreleaser.yml
-          echo '    priority: extra' >> .goreleaser.yml
+      # # Installed heif version must match the version requested by go otherwise you get C. errors.
+      # # As writing jammy (22.04) uses 1.17.6 https://launchpad.net/~strukturag/+archive/ubuntu/libheif
+      # - name: Downgrade heif on linux to match ppa version & switch to linux only build
+      #   if: matrix.os == 'ubuntu-latest'
+      #   run: | 
+      #     go get github.com/strukturag/libheif@v1.17.6
+      #     sed -i 's/_GOOS_/linux/g' .goreleaser.yml
+      #     echo 'nfpms:' >> .goreleaser.yml
+      #     echo '  -' >> .goreleaser.yml
+      #     echo '    vendor: Dyanim LLC' >> .goreleaser.yml
+      #     echo '    homepage: https://dyanim.com/' >> .goreleaser.yml
+      #     echo '    maintainer: "Matt Holt <mholt@users.noreply.github.com>"' >> .goreleaser.yml
+      #     echo '    description: NA' >> .goreleaser.yml
+      #     echo '    license: Private' >> .goreleaser.yml
+      #     echo '    formats:' >> .goreleaser.yml
+      #     echo '      - apk' >> .goreleaser.yml
+      #     echo '      - deb' >> .goreleaser.yml
+      #     echo '      - rpm' >> .goreleaser.yml
+      #     echo '      - termux.deb' >> .goreleaser.yml
+      #     echo '      - archlinux' >> .goreleaser.yml
+      #     echo '    release: "1"' >> .goreleaser.yml
+      #     echo '    section: default' >> .goreleaser.yml
+      #     echo '    priority: extra' >> .goreleaser.yml
           
 
-      - name: Commit changes
-        run: |
-          # Sadly this breaks the compiled in git sha left via goreleaser
-          git add . && git commit --amend --no-edit
-          git tag -f "${{  github.ref_name }}"
+      # - name: Commit changes
+      #   run: |
+      #     # Sadly this breaks the compiled in git sha left via goreleaser
+      #     git add . && git commit --amend --no-edit
+      #     git tag -f "${{  github.ref_name }}"
 
       - name: Test
         run: go test ./...
