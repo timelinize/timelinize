@@ -20,9 +20,6 @@ jobs:
           go-version: stable
 
       - name: Install libraries (Linux)
-        # install libheif (and dependency libde265) from an unofficial PPA which
-        # is actually updated... Ubuntu's packages are too old, and strukturag's
-        # doesn't exist for 24.04
         run: |
           sudo apt-get update
           sudo apt-get install -y libvips-dev
@@ -36,11 +33,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-
-      # - name: downgrade heif
-      #   run: |
-      #     go get github.com/strukturag/libheif@v1.17.6
-      #     go mod tidy
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
