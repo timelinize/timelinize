@@ -15,7 +15,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: stable
 
       # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
       # but I haven't looked into using it. We'd have to install the packages using
