@@ -17,7 +17,6 @@ jobs:
           - windows-latest
           - macos-latest
           - macos-13
-        go-version: stable
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -33,7 +32,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: stable
           check-latest: true
 
       # TODO: The Windows Server 2022 runner apparently comes with msys2 installed

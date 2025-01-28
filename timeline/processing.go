@@ -255,9 +255,9 @@ func (p *processor) downloadGraphDataFiles(ctx context.Context, g *Graph, opts *
 			}
 		}()
 	}
-	if g.Item != nil && g.Item.Owner.NewPicture != nil {
-		// TODO: download the item owner's profile picture too, if available (though I don't know of anywhere this happens yet)
-	}
+	// TODO: download the item owner's profile picture too, if available (though I don't know of anywhere this happens yet)
+	// if g.Item != nil && g.Item.Owner.NewPicture != nil {
+	// }
 	for _, edge := range g.Edges {
 		if err := p.downloadGraphDataFiles(ctx, edge.From, opts); err != nil {
 			return err
