@@ -213,6 +213,7 @@ func (p *processor) assignGraphIDs(g *Graph) {
 	}
 }
 
+//nolint:unparam // TODO: file bug; opts is definitely used!
 func (p *processor) downloadGraphDataFiles(ctx context.Context, g *Graph, opts *InteractiveImport) error {
 	if g == nil {
 		return nil
