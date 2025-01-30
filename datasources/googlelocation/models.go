@@ -273,7 +273,7 @@ func (d degreeString) parse() (timeline.Location, error) {
 	if err != nil {
 		return timeline.Location{}, fmt.Errorf("not a valid degree string: bad latitude: %s: %w", latStr, err)
 	}
-	lon, err := strconv.ParseFloat(strings.TrimSpace(latStr), 64) // parse longitude (w/o spaces)
+	lon, err := strconv.ParseFloat(strings.TrimSpace(lonStr), 64) // parse longitude (w/o spaces)
 	if err != nil {
 		return timeline.Location{}, fmt.Errorf("not a valid degree string: bad longitude: %s: %w", lonStr, err)
 	}
