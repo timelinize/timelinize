@@ -22,7 +22,8 @@ package googlephotos
 
 import (
 	"context"
-	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -52,8 +53,8 @@ type FileImporter struct {
 // Recognize returns whether this file or folder is supported.
 func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	// prefer a Google Takeout archive with Google Photos data inside it
-	if dirEntry.IsDir() && timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, googlePhotosPath)) {
-		return timeline.Recognition{Confidence: 1}, nil
+	if dirEntry.IsDir() && strings.HasSuffix(filepath.ToSlash(dirEntry.FullPath()), googlePhotosPath) {
+		return timeline.Recognition{Confidence: .9}, nil
 	}
 	return timeline.Recognition{}, nil
 }

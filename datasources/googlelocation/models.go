@@ -28,19 +28,19 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-type onDeviceLocation struct {
+type onDeviceLocationiOS2024 struct {
 	EndTime   time.Time `json:"endTime"` // e.g. 2024-06-21T19:51:13.014-06:00
 	StartTime time.Time `json:"startTime"`
 	Activity  struct {
-		Start          geoString    `json:"start"`
-		End            geoString    `json:"end"`
-		TopCandidate   topCandidate `json:"topCandidate"`
-		DistanceMeters string       `json:"distanceMeters"`
+		Start          geoString           `json:"start"`
+		End            geoString           `json:"end"`
+		TopCandidate   topCandidateiOS2024 `json:"topCandidate"`
+		DistanceMeters string              `json:"distanceMeters"`
 	} `json:"activity,omitempty"`
 	Visit struct {
-		HierarchyLevel string       `json:"hierarchyLevel"`
-		TopCandidate   topCandidate `json:"topCandidate"`
-		Probability    string       `json:"probability"`
+		HierarchyLevel string              `json:"hierarchyLevel"`
+		TopCandidate   topCandidateiOS2024 `json:"topCandidate"`
+		Probability    string              `json:"probability"`
 	} `json:"visit,omitempty"`
 	TimelinePath []struct {
 		Point                              geoString `json:"point"`
@@ -48,7 +48,7 @@ type onDeviceLocation struct {
 	} `json:"timelinePath"`
 }
 
-func (l *onDeviceLocation) toItem(result *Location, opt *Options) *timeline.Item {
+func (l *onDeviceLocationiOS2024) toItem(result *Location, opt *Options) *timeline.Item {
 	entity := timeline.Entity{ID: opt.OwnerEntityID}
 
 	if opt.Device != "" {
@@ -88,7 +88,7 @@ func (l *onDeviceLocation) toItem(result *Location, opt *Options) *timeline.Item
 	}
 }
 
-type topCandidate struct {
+type topCandidateiOS2024 struct {
 	Type          string    `json:"type"`
 	Probability   string    `json:"probability"`
 	SemanticType  string    `json:"semanticType"`
@@ -114,6 +114,168 @@ func (g geoString) parse() (timeline.Location, error) {
 	lon, err := strconv.ParseFloat(lonStr, 64)
 	if err != nil {
 		return timeline.Location{}, fmt.Errorf("not a valid geo string: bad longitude: %s: %w", lonStr, err)
+	}
+	return timeline.Location{
+		Latitude:  &lat,
+		Longitude: &lon,
+	}, nil
+}
+
+// semanticSegmentAndroid2025 contains the primary majority of on-device location history from Android devices starting in about 2025.
+type semanticSegmentAndroid2025 struct {
+	StartTime    time.Time `json:"startTime"`
+	EndTime      time.Time `json:"endTime"`
+	TimelinePath []struct {
+		Point degreeString `json:"point"`
+		Time  time.Time    `json:"time"`
+	} `json:"timelinePath,omitempty"`
+	StartTimeTimezoneUTCOffsetMinutes int `json:"startTimeTimezoneUtcOffsetMinutes,omitempty"`
+	EndTimeTimezoneUTCOffsetMinutes   int `json:"endTimeTimezoneUtcOffsetMinutes,omitempty"`
+	Visit                             struct {
+		HierarchyLevel int                     `json:"hierarchyLevel"`
+		Probability    float64                 `json:"probability"`
+		TopCandidate   topCandidateAndroid2025 `json:"topCandidate"`
+	} `json:"visit,omitempty"`
+	Activity struct {
+		Start struct {
+			LatLng degreeString `json:"latLng"`
+		} `json:"start"`
+		End struct {
+			LatLng degreeString `json:"latLng"`
+		} `json:"end"`
+		DistanceMeters float64                 `json:"distanceMeters"`
+		Probability    float64                 `json:"probability"`
+		TopCandidate   topCandidateAndroid2025 `json:"topCandidate"`
+		Parking        struct {
+			Location struct {
+				LatLng degreeString `json:"latLng"`
+			} `json:"location"`
+			StartTime time.Time `json:"startTime"`
+		} `json:"parking"`
+	} `json:"activity,omitempty"`
+	TimelineMemory struct {
+		Trip struct {
+			DistanceFromOriginKms int `json:"distanceFromOriginKms"`
+			Destinations          []struct {
+				Identifier struct {
+					PlaceID string `json:"placeId"`
+				} `json:"identifier"`
+			} `json:"destinations"`
+		} `json:"trip"`
+	} `json:"timelineMemory,omitempty"`
+}
+
+// TODO: Use this?
+//
+//nolint:unused
+type rawSignalAndroid2025 struct {
+	Position struct {
+		LatLng               degreeString `json:"LatLng"`
+		AccuracyMeters       int          `json:"accuracyMeters"`
+		AltitudeMeters       float64      `json:"altitudeMeters"`
+		Source               string       `json:"source"`
+		Timestamp            string       `json:"timestamp"`
+		SpeedMetersPerSecond float64      `json:"speedMetersPerSecond"`
+	} `json:"position,omitempty"`
+	ActivityRecord struct {
+		ProbableActivities []struct {
+			Type       string  `json:"type"`
+			Confidence float64 `json:"confidence"`
+		} `json:"probableActivities"`
+		Timestamp time.Time `json:"timestamp"`
+	} `json:"activityRecord,omitempty"`
+	WifiScan struct {
+		DeliveryTime   time.Time `json:"deliveryTime"`
+		DevicesRecords []struct {
+			Mac     int64 `json:"mac"`
+			RawRSSI int   `json:"rawRssi"`
+		} `json:"devicesRecords"`
+	} `json:"wifiScan,omitempty"`
+}
+
+// TODO: Use this?
+//
+//nolint:unused
+type userLocationProfileAndroid2025 struct {
+	FrequentPlaces []struct {
+		PlaceID       string `json:"placeId"`
+		PlaceLocation string `json:"placeLocation"`
+		Label         string `json:"label"`
+	} `json:"frequentPlaces"`
+}
+
+type topCandidateAndroid2025 struct {
+	Type          string  `json:"type"`
+	PlaceID       string  `json:"placeId"`
+	SemanticType  string  `json:"semanticType"`
+	Probability   float64 `json:"probability"`
+	PlaceLocation struct {
+		LatLng degreeString `json:"latLng"`
+	} `json:"placeLocation"`
+}
+
+func (l *semanticSegmentAndroid2025) toItem(result *Location, opt *Options) *timeline.Item {
+	entity := timeline.Entity{ID: opt.OwnerEntityID}
+
+	if opt.Device != "" {
+		attr := timeline.Attribute{
+			Name:  "google_location_device",
+			Value: opt.Device,
+		}
+		entity.Attributes = []timeline.Attribute{attr}
+	}
+
+	meta := make(timeline.Metadata)
+
+	switch {
+	case l.Visit.TopCandidate.PlaceLocation.LatLng != "":
+		meta["Hierarchy level"] = l.Visit.HierarchyLevel
+		meta["Visit probability"] = l.Visit.Probability
+		meta["Visit probability"] = l.Visit.TopCandidate.Probability
+		meta["Visit semantic type"] = l.Visit.TopCandidate.SemanticType
+		meta["Visited place ID"] = l.Visit.TopCandidate.PlaceID
+
+	case l.Activity.Start.LatLng != "":
+		meta["Distance"] = l.Activity.DistanceMeters
+		if l.Activity.TopCandidate.Type != "unknown" || l.Activity.TopCandidate.Probability != 0 {
+			meta["Activity type"] = l.Activity.TopCandidate.Type
+			meta["Activity probability"] = l.Activity.TopCandidate.Probability
+		}
+	}
+
+	// if the result wasn't a cluster (which has a timespan), then we may know a timespan of
+	// this point if it came with an EndTime.
+	if result.Timespan.IsZero() && !l.EndTime.IsZero() {
+		result.Timespan = l.EndTime
+	}
+
+	meta.Merge(result.Metadata, timeline.MetaMergeReplace)
+
+	return &timeline.Item{
+		Classification: timeline.ClassLocation,
+		Timestamp:      result.Timestamp,
+		Timespan:       result.Timespan,
+		Location:       result.Location(),
+		Owner:          entity,
+		Metadata:       meta,
+	}
+}
+
+type degreeString string // EXAMPLE: "31.1234567°, -73.1234567°"
+
+func (d degreeString) parse() (timeline.Location, error) {
+	str := strings.ReplaceAll(string(d), "°", "") // remove degree symbols
+	latStr, lonStr, ok := strings.Cut(str, ",")   // split lat and lon (could still have spaces for now)
+	if !ok {
+		return timeline.Location{}, errors.New("not a valid degree string: missing comma separator")
+	}
+	lat, err := strconv.ParseFloat(strings.TrimSpace(latStr), 64) // parse longitude (w/o spaces)
+	if err != nil {
+		return timeline.Location{}, fmt.Errorf("not a valid degree string: bad latitude: %s: %w", latStr, err)
+	}
+	lon, err := strconv.ParseFloat(strings.TrimSpace(latStr), 64) // parse longitude (w/o spaces)
+	if err != nil {
+		return timeline.Location{}, fmt.Errorf("not a valid degree string: bad longitude: %s: %w", lonStr, err)
 	}
 	return timeline.Location{
 		Latitude:  &lat,

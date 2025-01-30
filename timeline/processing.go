@@ -1268,10 +1268,10 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 			ir.TimeOffset = &offsetSec
 		}
 	}
-	if !it.Timespan.IsZero() {
+	if !it.Timespan.IsZero() && !it.Timeframe.Equal(it.Timestamp) {
 		ir.Timespan = &it.Timespan
 	}
-	if !it.Timeframe.IsZero() {
+	if !it.Timeframe.IsZero() && !it.Timeframe.Equal(it.Timestamp) {
 		ir.Timeframe = &it.Timeframe
 	}
 	if it.TimeUncertainty > 0 {
