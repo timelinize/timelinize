@@ -7,10 +7,10 @@ builds:
     dir: .
     env:
       - CGO_ENABLED=1
-    # goos:
-    #   - _GOOS_
+    goos:
+      - '{{ .Runtime.Goos }}'
     goarch:
-      - amd64
+      - '{{ .Runtime.Goarch }}'
 checksum:
   name_template: '{{ .Runtime.Goos }}-{{ .Runtime.Goarch }}-checksums.txt'
 archives:
