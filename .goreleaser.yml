@@ -7,8 +7,8 @@ builds:
     dir: .
     env:
       - CGO_ENABLED=1
-    goos:
-      - _GOOS_
+    # goos:
+    #   - _GOOS_
     goarch:
       - amd64
 checksum:
