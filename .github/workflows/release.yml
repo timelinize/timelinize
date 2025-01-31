@@ -64,28 +64,28 @@ jobs:
       - name: Compress build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          export ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_linux_x64.tar.gz
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_linux_x64.tar.gz"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           tar -czvf "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
       - name: Compress build (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          set ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_windows_x64.zip
+          $env:ARTIFACT_NAME = "${{ env.APP_NAME }}_${{ github.ref_name }}_windows_x64.zip"
           echo "ARTIFACT_NAME=$env:ARTIFACT_NAME" >> $env:GITHUB_ENV
           7z a "$env:ARTIFACT_NAME" ${{ env.APP_NAME }}.exe -r
 
       - name: Compress build (macOS arm64)
         if: matrix.os == 'macos-latest'
         run: |
-          export ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_mac_arm64.zip
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_mac_arm64.zip"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
       - name: Compress build (macOS x64)
         if: matrix.os == 'macos-13'
         run: |
-          export ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_mac_x64.zip
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_mac_x64.zip"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
     
