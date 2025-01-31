@@ -1,9 +1,9 @@
-name: Release
+name: Latest builds
 
 on: [workflow_dispatch, push]
 
 jobs:
-  Release:
+  Build_and_release:
     env:
       APP_NAME: timelinize
     strategy:
@@ -99,7 +99,7 @@ jobs:
 
       # only do releases on tags; if another runner already made the release, we only upload the
       # artifact from this platform to it
-      - name: Publish release
+      - name: Publish release (tags only)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           gh release create --generate-notes --target ${{ github.sha }} "${{ github.ref_name }}" "${{ env.ARTIFACT_NAME }}" \
