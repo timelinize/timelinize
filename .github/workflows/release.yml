@@ -1,9 +1,9 @@
 name: Latest builds
 
-on: [workflow_dispatch, push]
+on: push
 
 jobs:
-  Build_and_release:
+  publish:
     env:
       APP_NAME: timelinize
     strategy:
