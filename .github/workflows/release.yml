@@ -84,7 +84,9 @@ jobs:
       #     files: timelinize-alpha-*
     
       - name: Publish release
-        run: gh release create --generate-notes ${{ github.ref }} timelinize-alpha-*
+        run: gh release create --generate-notes "${{ github.ref }}" timelinize-alpha-*
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       # - name: Upload artifact (macOS)
       #   if: matrix.os == 'macos-latest'
