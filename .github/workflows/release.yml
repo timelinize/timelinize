@@ -4,6 +4,8 @@ on: [workflow_dispatch]
 
 jobs:
   Release:
+    env:
+      APP_NAME: timelinize
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
@@ -58,55 +60,45 @@ jobs:
           go build
           echo "Success."
 
-      # We have to make our own tarballs for GitHub Actions to preserve executable bit when uploading >:(
-      # This causes them to be downloaded as .zip containing another archive but oh well.
-
-      - name: Compress build (macOS arm64)
-        if: matrix.os == 'macos-latest'
-        run: tar -czvf timelinize_${{ github.ref_name }}_mac_arm64.tar.gz timelinize
-
-      - name: Compress build (macOS amd64)
-        if: matrix.os == 'macos-13'
-        run: tar -czvf timelinize_${{ github.ref_name }}_mac_amd64.tar.gz timelinize
-
+      # use conventional tar archives for Linux; the others can be zip
       - name: Compress build (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: tar -czvf timelinize_${{ github.ref_name }}_linux_amd64.tar.gz timelinize
+        run: |
+          export ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_linux_x64.tar.gz
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          tar -czvf "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
       - name: Compress build (Windows)
         if: matrix.os == 'windows-latest'
-        run: 7z a timelinize_${{ github.ref_name }}_windows_amd64.zip timelinize.exe -r
-
-      # - name: Release
-      #   uses: softprops/action-gh-release@v2
-      #   # if: startsWith(github.ref, 'refs/tags/')
-      #   with:
-      #     files: timelinize-alpha-*
-    
-      - name: Publish release
         run: |
-          gh release create --generate-notes --target ${{ github.sha }} "${{ github.ref_name }}" timelinize_${{ github.ref_name }}_* \
-          || gh release upload "${{ github.ref_name }}" timelinize_${{ github.ref_name }}_*
+          export ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_windows_x64.zip
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          7z a "$ARTIFACT_NAME" ${{ env.APP_NAME }}.exe -r
+
+      - name: Compress build (macOS arm64)
+        if: matrix.os == 'macos-latest'
+        run: |
+          export ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_mac_arm64.zip
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
+
+      - name: Compress build (macOS x64)
+        if: matrix.os == 'macos-13'
+        run: |
+          export ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_mac_x64.zip
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
+    
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT_NAME }}
+
+      - name: Publish release
+        # if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          gh release create --generate-notes --target ${{ github.sha }} "${{ github.ref_name }}" "${{ env.ARTIFACT_NAME }}" \
+          || gh release upload "${{ github.ref_name }}" "${{ env.ARTIFACT_NAME }}"
         env:
           GH_TOKEN: ${{ github.token }}
-
-      # - name: Upload artifact (macOS)
-      #   if: matrix.os == 'macos-latest'
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: timelinize-alpha-macos.tar.gz
-      #     path: "*.tar.gz"
-      
-      # - name: Upload artifact (Linux)
-      #   if: matrix.os == 'ubuntu-latest'
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: timelinize-alpha-linux-amd64.tar.gz
-      #     path: "*.tar.gz"
-
-      # - name: Upload artifact (Windows)
-      #   if: matrix.os == 'windows-latest'
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: timelinize-alpha-windows.zip
-      #     path: "*.zip"
