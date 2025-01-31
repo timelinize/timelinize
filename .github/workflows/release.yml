@@ -1,13 +1,15 @@
-name: Release
+name: Latest builds
 
-on: [workflow_dispatch]
+on: push
 
 jobs:
-  Release:
+  publish:
+    env:
+      APP_NAME: timelinize
     strategy:
       matrix:
-        os: [ubuntu, windows, macos]
-    runs-on: ${{ matrix.os }}-latest
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -20,7 +22,7 @@ jobs:
       # but I haven't looked into using it. We'd have to install the packages using
       # its shell, but I'm not sure how to do that.
       - name: Install MSYS2 (Windows)
-        if: matrix.os == 'windows'
+        if: matrix.os == 'windows-latest'
         uses: msys2/setup-msys2@v2
         with:
           # TODO: Enable this for more current packages, I guess? But it takes longer.
@@ -31,20 +33,20 @@ jobs:
              mingw-w64-x86_64-libvips
 
       - name: Install libraries (Linux)
-        if: matrix.os == 'ubuntu'
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y libvips-dev
 
       - name: Install libraries (macOS)
-        if: matrix.os == 'macos'
+        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-13' }}
         run: brew install vips
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
       # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
       - name: Update PATH (Windows)
-        if: matrix.os == 'windows'
+        if: matrix.os == 'windows-latest'
         shell: bash
         run: echo "D:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
 
@@ -57,39 +59,50 @@ jobs:
           echo "Building..."
           go build
           echo "Success."
-
-      # We have to make our own tarballs for GitHub Actions to preserve executable bit when uploading >:(
-      # This causes them to be downloaded as .zip containing another archive but oh well.
-
-      - name: Compress build (macOS)
-        if: matrix.os == 'macos'
-        run: tar -czvf timelinize-alpha-macos.tar.gz timelinize
+      
+      # use conventional archive formats for each platform
 
       - name: Compress build (Linux)
-        if: matrix.os == 'ubuntu'
-        run: tar -czvf timelinize-alpha-linux.tar.gz timelinize
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_linux_x64.tar.gz"
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          tar -czvf "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
       - name: Compress build (Windows)
-        if: matrix.os == 'windows'
-        run: 7z a timelinize-alpha-windows.zip timelinize.exe -r
+        if: matrix.os == 'windows-latest'
+        run: |
+          $env:ARTIFACT_NAME = "${{ env.APP_NAME }}_${{ github.ref_name }}_windows_x64.zip"
+          echo "ARTIFACT_NAME=$env:ARTIFACT_NAME" >> $env:GITHUB_ENV
+          7z a "$env:ARTIFACT_NAME" ${{ env.APP_NAME }}.exe -r
 
-      - name: Upload artifact (macOS)
-        if: matrix.os == 'macos'
-        uses: actions/upload-artifact@v4
-        with:
-          name: timelinize-alpha-macos.tar.gz
-          path: "*.tar.gz"
-      
-      - name: Upload artifact (Linux)
-        if: matrix.os == 'ubuntu'
-        uses: actions/upload-artifact@v4
-        with:
-          name: timelinize-alpha-linux-amd64.tar.gz
-          path: "*.tar.gz"
+      - name: Compress build (macOS arm64)
+        if: matrix.os == 'macos-latest'
+        run: |
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_mac_arm64.zip"
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
-      - name: Upload artifact (Windows)
-        if: matrix.os == 'windows'
+      - name: Compress build (macOS x64)
+        if: matrix.os == 'macos-13'
+        run: |
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_mac_x64.zip"
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
+    
+      # always create an artifact so users can conveniently download updated builds to test patches
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: timelinize-alpha-windows.zip
-          path: "*.zip"
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT_NAME }}
+
+      # only do releases on tags; if another runner already made the release, we only upload the
+      # artifact from this platform to it
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          gh release create --generate-notes --target ${{ github.sha }} "${{ github.ref_name }}" "${{ env.ARTIFACT_NAME }}" \
+          || gh release upload "${{ github.ref_name }}" "${{ env.ARTIFACT_NAME }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
