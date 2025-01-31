@@ -63,19 +63,19 @@ jobs:
 
       - name: Compress build (macOS arm64)
         if: matrix.os == 'macos-latest'
-        run: tar -czvf timelinize_alpha_mac_arm64.tar.gz timelinize
+        run: tar -czvf timelinize_${{ github.ref_name }}_mac_arm64.tar.gz timelinize
 
       - name: Compress build (macOS amd64)
         if: matrix.os == 'macos-13'
-        run: tar -czvf timelinize_alpha_mac_amd64.tar.gz timelinize
+        run: tar -czvf timelinize_${{ github.ref_name }}_mac_amd64.tar.gz timelinize
 
       - name: Compress build (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: tar -czvf timelinize_alpha_linux_amd64.tar.gz timelinize
+        run: tar -czvf timelinize_${{ github.ref_name }}_linux_amd64.tar.gz timelinize
 
       - name: Compress build (Windows)
         if: matrix.os == 'windows-latest'
-        run: 7z a timelinize_alpha_windows_amd64.zip timelinize.exe -r
+        run: 7z a timelinize_${{ github.ref_name }}_windows_amd64.zip timelinize.exe -r
 
       # - name: Release
       #   uses: softprops/action-gh-release@v2
@@ -85,8 +85,8 @@ jobs:
     
       - name: Publish release
         run: |
-          gh release create --generate-notes --target ${{ github.sha }} "${{ github.ref_name }}" timelinize_alpha_* \
-          || gh release upload "${{ github.ref_name }}" timelinize_alpha_*
+          gh release create --generate-notes --target ${{ github.sha }} "${{ github.ref_name }}" "timelinize_${{ github.ref_name }}_*" \
+          || gh release upload "${{ github.ref_name }}" "timelinize_${{ github.ref_name }}_*"
         env:
           GH_TOKEN: ${{ github.token }}
 
