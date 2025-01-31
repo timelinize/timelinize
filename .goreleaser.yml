@@ -7,10 +7,11 @@ builds:
     dir: .
     env:
       - CGO_ENABLED=1
+    # I really wish goos and gooarch supported templating... our hack is to use sed on these
     goos:
-      - '{{ .Runtime.Goos }}'
+      - _GOOS_
     goarch:
-      - '{{ .Runtime.Goarch }}'
+      - _GOARCH_
 checksum:
   name_template: '{{ .Runtime.Goos }}-{{ .Runtime.Goarch }}-checksums.txt'
 archives:
