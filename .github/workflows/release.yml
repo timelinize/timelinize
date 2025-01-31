@@ -84,7 +84,7 @@ jobs:
       #     files: timelinize-alpha-*
     
       - name: Publish release
-        run: gh release create --generate-notes "${{ github.ref }}" timelinize-alpha-*
+        run: gh release create --generate-notes "${{ github.ref }}" timelinize_alpha_*
         env:
           GH_TOKEN: ${{ github.token }}
 
