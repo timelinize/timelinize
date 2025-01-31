@@ -72,8 +72,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
           set ARTIFACT_NAME=${{ env.APP_NAME }}_${{ github.ref_name }}_windows_x64.zip
-          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
-          7z a "$ARTIFACT_NAME" ${{ env.APP_NAME }}.exe -r
+          echo "ARTIFACT_NAME=$env:ARTIFACT_NAME" >> $env:GITHUB_ENV
+          7z a "$env:ARTIFACT_NAME" ${{ env.APP_NAME }}.exe -r
 
       - name: Compress build (macOS arm64)
         if: matrix.os == 'macos-latest'
