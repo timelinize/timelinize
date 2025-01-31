@@ -85,8 +85,8 @@ jobs:
     
       - name: Publish release
         run: |
-          gh release create --generate-notes --target ${{ github.sha }} "${{ github.ref_name }}" "timelinize_${{ github.ref_name }}_*" \
-          || gh release upload "${{ github.ref_name }}" "timelinize_${{ github.ref_name }}_*"
+          gh release create --generate-notes --target ${{ github.sha }} "${{ github.ref_name }}" timelinize_${{ github.ref_name }}_* \
+          || gh release upload "${{ github.ref_name }}" timelinize_${{ github.ref_name }}_*
         env:
           GH_TOKEN: ${{ github.token }}
 
