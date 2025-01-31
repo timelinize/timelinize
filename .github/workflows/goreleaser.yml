@@ -73,30 +73,30 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Configure for Linux-only build
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sed -i 's/_GOOS_/linux/g' .goreleaser.yml
-          sed -i 's/_GOARCH_/amd64/g' .goreleaser.yml
+      # - name: Configure for Linux-only build
+      #   if: matrix.os == 'ubuntu-latest'
+      #   run: |
+      #     sed -i 's/_GOOS_/linux/g' .goreleaser.yml
+      #     sed -i 's/_GOARCH_/amd64/g' .goreleaser.yml
 
-      - name: Configure for Windows-only build
-        if: matrix.os == 'windows-latest'
-        run: |
-          sed -i 's/_GOOS_/windows/g' .goreleaser.yml
-          sed -i 's/_GOARCH_/amd64/g' .goreleaser.yml
+      # - name: Configure for Windows-only build
+      #   if: matrix.os == 'windows-latest'
+      #   run: |
+      #     sed -i 's/_GOOS_/windows/g' .goreleaser.yml
+      #     sed -i 's/_GOARCH_/amd64/g' .goreleaser.yml
 
-      - name: Configure for macOS-only build (ARM)
-        if: matrix.os == 'macos-latest'
-        run: |
-          sed -i.tmp -e 's/_GOOS_/darwin/g' .goreleaser.yml
-          # https://github.com/actions/runner-images?tab=readme-ov-file#available-images macos-14 is arm unless large.
-          sed -i.tmp -e 's/_GOARCH_/arm64/g' .goreleaser.yml
+      # - name: Configure for macOS-only build (ARM)
+      #   if: matrix.os == 'macos-latest'
+      #   run: |
+      #     sed -i.tmp -e 's/_GOOS_/darwin/g' .goreleaser.yml
+      #     # https://github.com/actions/runner-images?tab=readme-ov-file#available-images macos-14 is arm unless large.
+      #     sed -i.tmp -e 's/_GOARCH_/arm64/g' .goreleaser.yml
 
-      - name: Configure for macOS-only build (x64)
-        if: matrix.os == 'macos-13'
-        run: |
-          sed -i.tmp -e 's/_GOOS_/darwin/g' .goreleaser.yml
-          sed -i.tmp -e 's/_GOARCH_/amd64/g' .goreleaser.yml
+      # - name: Configure for macOS-only build (x64)
+      #   if: matrix.os == 'macos-13'
+      #   run: |
+      #     sed -i.tmp -e 's/_GOOS_/darwin/g' .goreleaser.yml
+      #     sed -i.tmp -e 's/_GOARCH_/amd64/g' .goreleaser.yml
 
       # # Installed heif version must match the version requested by go otherwise you get C. errors.
       # # As writing jammy (22.04) uses 1.17.6 https://launchpad.net/~strukturag/+archive/ubuntu/libheif
@@ -122,12 +122,12 @@ jobs:
       #     echo '    priority: extra' >> .goreleaser.yml
           
 
-      # Sadly this breaks the compiled in git sha left via goreleaser
-      # Issue opened: https://github.com/goreleaser/goreleaser/issues/5505
-      - name: Commit changes
-        run: |
-          git add . && git commit --amend --no-edit
-          git tag -f "${{  github.ref_name }}"
+      # # Sadly this breaks the compiled in git sha left via goreleaser
+      # # Issue opened: https://github.com/goreleaser/goreleaser/issues/5505
+      # - name: Commit changes
+      #   run: |
+      #     git add . && git commit --amend --no-edit
+      #     git tag -f "${{  github.ref_name }}"
 
       - name: Test
         run: go test ./...
@@ -137,6 +137,6 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: release --clean --single-target
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

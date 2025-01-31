@@ -7,7 +7,7 @@ builds:
     dir: .
     env:
       - CGO_ENABLED=1
-    # I really wish goos and gooarch supported templating... our hack is to use sed on these
+    # We don't set goos and goarch because we invoke with --single-target to restrict build to current platform only
     goos:
       - _GOOS_
     goarch:
@@ -18,7 +18,7 @@ archives:
   -
     format_overrides:
       - goos: windows
-        format: zip
+        formats: zip
 changelog:
   sort: asc
   filters:
