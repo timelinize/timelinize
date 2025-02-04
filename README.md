@@ -59,49 +59,6 @@ See the website for [installation instructions](https://timelinize.com/docs/inst
 See our [project wiki](https://github.com/timelinize/timelinize/wiki/) for instructions on [compiling from source](https://github.com/timelinize/timelinize/wiki/Develop).
 
 
-#### Installing dependencies on Windows
-
-This is the easiest way I have found to get the project compiling on Windows, but let me know if there's a better way.
-
-0. Make sure you don't already have MSYS2 installed and C:\msys64 does not exist.
-1. Install MSYS2: https://www.msys2.org/ - don't run after installing, since it likely brings up the wrong shell (UCRT; we want MINGW64 - yes, UCRT is recommended as it's more modern, but I don't feel confident that our dependencies are available as UCRT packages yet).
-2. Run the MSYS2 MINGW64 application (this is MSYS2's MINGW64 [environment](https://www.msys2.org/docs/environments/)).
-3. Install mingw64 with relevant tools, and libvips, and libheif:
-	```
-	pacman -S --needed base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-libvips mingw-w64-x86_64-libheif
-	```
-4. Go to Windows environment variables setting for your account, and make sure:
-	- `Path` has `C:\msys64\mingw64\bin`
-	- `PKG_CONFIG_PATH` has `C:\msys64\mingw64\lib\pkgconfig`
-5. Restart any running programs/terminals/shells, then run `gcc --version` to prove that `gcc` works. `vips` and `heif-*` commands should also work. It is likely that the libraries are also installed properly then too.
-6. Running `go build` should then succeed, assuming the env variables above are set properly. You might need to set `CGO_ENABLED=1` (`$env:CGO_ENABLED = 1`)
-
-NOTE: Setting the `CC` env var to the path of MSYS's MINGW64 gcc isn't sufficient if a different `gcc` is in the `PATH`. You will need to _prepend_ the correct gcc folder to the PATH!
-
-For compilation targeting the same platform (OS and architecture) as your dev machine, `go build` should suffice.
-
-### Compile
-
-Once you have the necessary dependencies installed, you can simply run `go build` from the project folder:
-
-```bash
-$ go build
-```
-
-and a binary will be placed in the current directory.
-
-Or, to start the server and open a web browser diretly:
-
-```bash
-$ go run main.go
-```
-
-To only start the server and not open a web browser:
-
-```bash
-$ go run main.go serve
-```
-
 ## Command line interface
 
 Timelinize has a symmetric HTTP API and CLI. When an HTTP API endpoint is created in the code, it automatically adds to the command line as well.
