@@ -1,3 +1,5 @@
+# This is a community-maintained Makefile; it is not officially supported by the project
+# owner; so please feel free to use it and help improve and maintain it if it is useful!
 
 OS_NAME=$(shell go env GOOS)
 OS_ARCH=$(shell go env GOARCH)
@@ -9,7 +11,7 @@ VIPS_DEP=vips
 VIPS_WHICH=$(shell command -v $(VIPS_DEP))
 
 BIN_ROOT=$(PWD)/.bin
-BIN_NAME=timeline
+BIN_NAME=timelinize
 BIN_NAME_NATIVE=$(BIN_NAME)_$(OS_NAME)_$(OS_ARCH)
 ifeq ($(OS_NAME),windows)
 	BIN_NAME_NATIVE=$(BIN_NAME)_$(OS_NAME)_$(OS_ARCH).exe
