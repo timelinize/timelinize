@@ -893,8 +893,9 @@ func (l Location) String() string {
 
 	if l.Longitude != nil {
 		s.WriteString(strconv.FormatFloat(*l.Longitude, 'f', -1, 64))
+		s.WriteString(", ")
 	} else {
-		s.WriteRune('?')
+		s.WriteString("?, ")
 	}
 
 	if l.Altitude != nil {

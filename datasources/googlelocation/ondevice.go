@@ -26,6 +26,17 @@ import (
 	"time"
 )
 
+/*
+The 2024/2025 on-device location histories have the following differences between Android and iOS:
+
+1. 	On iOS, semanticSegments that have a timelinePath are all grouped at the end of the array.
+	The chronological ordering is reset at the start of the group.
+2. 	On iOS, timelinePath points are formatted like "geo:12.123456,-123.123456" but on Android
+	they are formatted like "12.1234567°, -123.1234567°" (notice one more digit of precision).
+3. 	On iOS, timelinePath points are only timestampped with a "durationMinutesOffsetFromStartTime"
+	field (which is a string), whereas on Android, each point has its own complete timestamp.
+*/
+
 type onDeviceiOS2024Decoder struct {
 	*json.Decoder
 
@@ -149,14 +160,15 @@ func (dec *onDeviceiOS2024Decoder) NextLocation(_ context.Context) (*Location, e
 type onDeviceAndroid2025Decoder struct {
 	*json.Decoder
 
-	// some objects have multiple location data points, so we "stick" the current
-	// one until we've gotten through all the points on it
-	multiLoc *semanticSegmentAndroid2025
+	// some objects have multiple location data points (timelinePath) so
+	// we "stick" it here and just chop off each one as we process them
+	// TODO: group all points belonging to this segment, somehow (maybe a collection relation, like an item could be a Collection class that represents the path)
+	currentSegment *semanticSegmentAndroid2025
 }
 
 func (dec *onDeviceAndroid2025Decoder) NextLocation(_ context.Context) (*Location, error) {
-	handleTimelinePathPoint := func() (*Location, error) {
-		vertex := dec.multiLoc.TimelinePath[0]
+	handleTimelinePathSegment := func() (*Location, error) {
+		vertex := dec.currentSegment.TimelinePath[0]
 
 		coord, err := vertex.Point.parse()
 		if err != nil {
@@ -164,52 +176,49 @@ func (dec *onDeviceAndroid2025Decoder) NextLocation(_ context.Context) (*Locatio
 		}
 
 		loc := &Location{
-			Original:    dec.multiLoc,
+			Original:    dec.currentSegment,
 			LatitudeE7:  int64(*coord.Latitude * float64(placesMult)),
 			LongitudeE7: int64(*coord.Longitude * float64(placesMult)),
-			Timestamp:   dec.multiLoc.StartTime,
-			Timespan:    dec.multiLoc.EndTime,
+			Timestamp:   vertex.Time,
 		}
 
-		// TODO: This format doesn't put timelinepaths all grouped together
-		// // if this is the first path point, then indicate that to the
-		// // location processor so that it resets its state and allows
-		// // going back in time -- but we only indicate this once,
-		// // when we actually step back in time to start the new part
-		// // of the stream that goes forward in time again
-		// if !dec.doingPaths {
-		// 	dec.doingPaths = true // this sentinel ensures we only reset once
-		// 	loc.ResetTrack = true
-		// }
-
 		// pop off the point we just retrieved
-		dec.multiLoc.TimelinePath = dec.multiLoc.TimelinePath[1:]
-		if len(dec.multiLoc.TimelinePath) == 0 {
-			dec.multiLoc = nil
+		dec.currentSegment.TimelinePath = dec.currentSegment.TimelinePath[1:]
+
+		// clean up the stickied segment when we're through the whole path
+		if len(dec.currentSegment.TimelinePath) == 0 {
+			// we can assume the last point in the path ended at
+			// the end time of the segment containing this path
+			if dec.currentSegment.EndTime.After(loc.Timestamp) {
+				loc.Timespan = dec.currentSegment.EndTime
+			}
+
+			// finished with path, so clear stickied segment
+			dec.currentSegment = nil
 		}
 
 		return loc, nil
 	}
 
 	// see if a data point is "stickied" that has more locations we need to get through
-	if dec.multiLoc != nil {
+	if dec.currentSegment != nil {
 		switch {
-		case dec.multiLoc.Activity.End.LatLng != "":
-			coord, err := dec.multiLoc.Activity.End.LatLng.parse()
+		case dec.currentSegment.Activity.End.LatLng != "":
+			coord, err := dec.currentSegment.Activity.End.LatLng.parse()
 			if err != nil {
 				return nil, err
 			}
 			loc := &Location{
-				Original:    dec.multiLoc,
+				Original:    dec.currentSegment,
 				LatitudeE7:  int64(*coord.Latitude * float64(placesMult)),
 				LongitudeE7: int64(*coord.Longitude * float64(placesMult)),
-				Timestamp:   dec.multiLoc.EndTime,
+				Timestamp:   dec.currentSegment.EndTime,
 			}
-			dec.multiLoc = nil
+			dec.currentSegment = nil
 			return loc, nil
 
-		case len(dec.multiLoc.TimelinePath) > 0:
-			return handleTimelinePathPoint()
+		case len(dec.currentSegment.TimelinePath) > 0:
+			return handleTimelinePathSegment()
 		}
 	}
 
@@ -248,23 +257,23 @@ func (dec *onDeviceAndroid2025Decoder) NextLocation(_ context.Context) (*Locatio
 
 		case seg.Activity.Start.LatLng != "" && seg.Activity.End.LatLng != "":
 			// two locations; the next location will be this one's End value
-			dec.multiLoc = seg
+			dec.currentSegment = seg
 
-			coord, err := dec.multiLoc.Activity.Start.LatLng.parse()
+			coord, err := dec.currentSegment.Activity.Start.LatLng.parse()
 			if err != nil {
 				return nil, err
 			}
 			return &Location{
-				Original:    dec.multiLoc,
+				Original:    dec.currentSegment,
 				LatitudeE7:  int64(*coord.Latitude * float64(placesMult)),
 				LongitudeE7: int64(*coord.Longitude * float64(placesMult)),
-				Timestamp:   dec.multiLoc.StartTime,
+				Timestamp:   dec.currentSegment.StartTime,
 			}, nil
 
 		case len(seg.TimelinePath) > 0:
 			// many locations; pop the first one and process it
-			dec.multiLoc = seg
-			return handleTimelinePathPoint()
+			dec.currentSegment = seg
+			return handleTimelinePathSegment()
 		}
 	}
 

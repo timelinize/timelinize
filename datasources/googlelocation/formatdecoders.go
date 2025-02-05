@@ -188,7 +188,6 @@ func (fi *FileImporter) decodeOnDevice2025AndroidFormat(ctx context.Context, dir
 		}
 
 		item := result.Original.(*semanticSegmentAndroid2025).toItem(result, fi.dsOpt)
-
 		if fi.opt.Timeframe.ContainsItem(item, false) {
 			params.Pipeline <- &timeline.Graph{Item: item, Checkpoint: checkpoint{FormatAndroid2025: i}}
 		}
