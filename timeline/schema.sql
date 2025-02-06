@@ -27,9 +27,15 @@ CREATE TABLE IF NOT EXISTS "repo" (
 -- consistency for rows that refer to a data source enforced by the DB itself, using more compact
 -- IDs than the program's string names.
 CREATE TABLE IF NOT EXISTS "data_sources" (
-	"id" INTEGER PRIMARY KEY, -- row ID, used only for DB consistency
-	"name" TEXT NOT NULL UNIQUE   -- programming ID, e.g. "google_photos" as used in the application code
-) STRICT;
+	"id" INTEGER PRIMARY KEY, -- row ID, used only for DB consistency, applies only to this DB
+	"name" TEXT NOT NULL UNIQUE   -- programming ID, e.g. "google_photos" as used in the application code and across different timeline DBs
+	"title" TEXT NOT NULL, -- human-readable name/label
+	"description" TEXT,
+	"media" BLOB, -- icon image, usually square dimensions
+	"media_type" TEXT, -- MIME type of the icon
+	"standard" BOOLEAN NOT NULL DEFAULT false,
+	""
+);
 
 CREATE TABLE IF NOT EXISTS "jobs" (
 	"id" INTEGER PRIMARY KEY,
@@ -84,7 +90,7 @@ CREATE TABLE IF NOT EXISTS "entities" (
 	"hidden" INTEGER, -- if owner would like to forget about this person, don't show in search results, etc.
 	"deleted" INTEGER, -- timestamp when item was moved to trash and can be purged after some amount of time after that
 	FOREIGN KEY ("type_id") REFERENCES "entity_types"("id") ON UPDATE CASCADE,
-	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE
+	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
 
 -- Attributes describe entities. An attribute has a name and a value. The name for a particular
@@ -120,8 +126,8 @@ CREATE TABLE IF NOT EXISTS "entity_attributes" (
 	"id" INTEGER PRIMARY KEY,
 	"entity_id" INTEGER NOT NULL,
 	"attribute_id" INTEGER NOT NULL,
-	"data_source_id" INTEGER, -- if set, the attribute defines the entity's identity on this data source
-	"job_id" INTEGER, -- the ID of the import that originated this row (linkage between entity and attribute)
+	"data_source_id" INTEGER, -- if set, the attribute defines the entity's identity on this data source (a row of a certain entity_id and attribute_id can be duplicated if they are identities on different data sources)
+	"job_id" INTEGER, -- the ID of the import that originated this row (originated the linkage between entity and attribute)
 	-- these next two fields explain how the row came into being, by inferring the association from another attribute
 	"autolink_job_id" INTEGER,    -- if set, the import that motivated linking this attribute as the entity's ID on the data source
 	"autolink_attribute_id" INTEGER, -- if set, the other attribute by which this attribute was automatically linked as the entity's ID on the data source
@@ -134,13 +140,6 @@ CREATE TABLE IF NOT EXISTS "entity_attributes" (
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL,
 	FOREIGN KEY ("autolink_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL,
 	FOREIGN KEY ("autolink_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE SET NULL
-	-- a person can have multiple attributes, and an attribute can be shared by multiple people (though rare;
-	-- usually that's just for shared accounts, which have to be manually linked to the persons by the user)
-	-- but a person can reuse the same attribute as identity on different data sources, so we need the third
-	-- field data_source_id in this constraint, however sqlite treats NULLs as distinct (argh!!!) and since
-	-- data_source_id is only populated when the attribute is also an identity, it may be NULL; so instead
-	-- we could use a trick and create a "partial index" ("CREATE UNIQUE INDEX ... WHERE ...") that applies
-	-- a separate unique constraint on only the first two fields if the last one is NULL... but that's a TODO:.
 ) STRICT;
 
 -- A classification describes what kind of thing an item is, for example a text message, tweet, email, or location.
@@ -305,35 +304,41 @@ CREATE TABLE IF NOT EXISTS "tagged" (
 	FOREIGN KEY ("relationship_id") REFERENCES "relationships"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
--- TODO: Still figuring out how to structure this...
--- Structured annotations on individual imports, items, entities, or attributes
--- that may contain useful information when organizing a timeline.
+-- TODO: I might get rid of this. This table would become user-created commentary on items/entities... but those could be items themselves...
 CREATE TABLE IF NOT EXISTS "notes" (
 	"id" INTEGER PRIMARY KEY,
+	-- only one of the following ID fields should be populated per row
+	"item_id" INTEGER,
+	"entity_id" INTEGER,
+	"content" TEXT, -- a user-friendly description that doesn't fit the DB structure
+	"metadata" TEXT, -- optional metadata structured as JSON
+	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
+	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE
+) STRICT;
+
+-- A log of changes, notices, warnings, or errors pertaining  to elements of the timeline.
+CREATE TABLE IF NOT EXISTS "logs" (
+	"id" INTEGER PRIMARY KEY,
+	"level" INTEGER, -- 0=update/modification 1=notice 2=error
+	"message" TEXT,
+	"metadata" TEXT, -- optional metadata structured as JSON
+	"timestamp" INTEGER, -- unix timestamp milliseconds
 	-- only one of the following ID fields should be populated per row
 	"job_id" INTEGER,
 	"item_id" INTEGER,
 	"entity_id" INTEGER,
 	"attribute_id" INTEGER,
 	"relationship_id" INTEGER,
-	"review_code_id" INTEGER, -- a review by the user is recommended/requested
-	"freeform" TEXT, -- a user-friendly description that doesn't fit the DB structure
-	"metadata" TEXT, -- optional metadata structured as JSON
+	"entity_attribute_id" INTEGER,
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("relationship_id") REFERENCES "relationships"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("review_code_id") REFERENCES "review_codes"("id") ON UPDATE CASCADE ON DELETE CASCADE
+	FOREIGN KEY ("entity_attribute_id") REFERENCES "entity_attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
--- TODO: still WIP... may not use this...
-CREATE TABLE IF NOT EXISTS "review_codes" (
-	"id" INTEGER PRIMARY KEY,
-	"reason" TEXT NOT NULL
-) STRICT;
-
--- TODO: Still WIP / might not use this...
+-- TODO: Still WIP...
 CREATE TABLE IF NOT EXISTS "settings" (
 	"key" TEXT PRIMARY KEY,
 	"title" TEXT,

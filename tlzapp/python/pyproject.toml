@@ -1,8 +1,7 @@
 [project]
-name = "ml-server"
+name = "python-server"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "Facilitates functionality better provided by Python libraries"
 requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0.3",

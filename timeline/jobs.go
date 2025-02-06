@@ -775,7 +775,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 	return nil
 }
 
-func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64) ([]Job, error) {
+func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64, mostRecent int) ([]Job, error) {
 	jobs := make([]Job, len(jobIDs))
 
 	for i, id := range jobIDs {

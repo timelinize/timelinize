@@ -98,13 +98,14 @@ func (s *server) handleCharts(w http.ResponseWriter, r *http.Request) error {
 }
 
 type jobsPayload struct {
-	RepoID string  `json:"repo_id"`
-	JobIDs []int64 `json:"job_ids"`
+	RepoID     string  `json:"repo_id"`
+	JobIDs     []int64 `json:"job_ids"`
+	MostRecent int     `json:"most_recent"`
 }
 
 func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) error {
 	payload := r.Context().Value(ctxKeyPayload).(*jobsPayload)
-	jobs, err := s.app.Jobs(payload.RepoID, payload.JobIDs)
+	jobs, err := s.app.Jobs(payload.RepoID, payload.JobIDs, payload.MostRecent)
 	return jsonResponse(w, jobs, err)
 }
 

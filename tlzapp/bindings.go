@@ -851,13 +851,13 @@ func (a App) DeleteItems(repo string, itemRowIDs []int64, options timeline.Delet
 	return tl.DeleteItems(a.ctx, itemRowIDs, options)
 }
 
-func (a App) Jobs(repo string, jobIDs []int64) ([]timeline.Job, error) {
+func (a App) Jobs(repo string, jobIDs []int64, mostRecent int) ([]timeline.Job, error) {
 	if repo != "" {
 		tl, err := getOpenTimeline(repo)
 		if err != nil {
 			return nil, err
 		}
-		return tl.GetJobs(a.ctx, jobIDs)
+		return tl.GetJobs(a.ctx, jobIDs, mostRecent)
 	}
 	return nil, errors.New("TODO: Getting jobs other than by specific IDs not yet implemented")
 }

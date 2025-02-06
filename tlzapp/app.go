@@ -24,6 +24,7 @@ package tlzapp
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -35,7 +36,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/exec"
-	"runtime"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -56,12 +57,13 @@ type App struct {
 	server   server
 	mlServer *exec.Cmd
 
-	// a reference to the embedded website assets; due to
-	// limitations in the go embed tool, it has to be
-	// in a parent directory of what is being embedded,
-	// so we pass in a reference to it for the app,
-	// mainly to pass along to a new app if the config
-	// is changed and the app is restarted
+	// references to embedded assets... due to limitations
+	// in the go embed tool, the vars have to be in a parent
+	// directory of what is being embedded, so we pass in
+	// reference to it for the app, since this package isn't
+	// in the root of the project, and also to pass along to
+	// a new app if the config is changed and the app is
+	// restarted
 	embeddedWebsite fs.FS
 }
 
@@ -245,87 +247,47 @@ func (a *App) MustServe() error {
 	return a.serve()
 }
 
-// TODO: This is not ideal, but I'm just throwing this together temporarily to get us up and running quickly and easily.
-// We should have a less externally-dependent way of getting this running. :)
-func installPython(ctx context.Context) error {
-	if _, err := exec.LookPath("uv"); err == nil {
+func (a *App) startPythonServer() error {
+	// see if python assets already exist; they should be in the
+	// data dir in a subfolder named the same as the embedded
+	// folder in our code base (if not, then something is wrong)
+	dataDir := AppDataDir()
+	entries, err := fs.ReadDir(embeddedPython, ".")
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 || !entries[0].IsDir() {
+		a.log.Warn("embedded python assets have unexpected structure; semantic features will be unavailable")
+	}
+
+	// embedded assets need to be written to disk so that the python environment
+	// can see the dependencies, download and install them, etc, even though the
+	// actual script could be piped to stdin; but we still need a project folder
+	// because of the dependencies -- easiest way to ensure they exist and are
+	// up-to-date is to just delete them and re-write them (there shouldn't be
+	// much)
+	if err = os.RemoveAll(dataDir); err != nil {
 		return nil
 	}
-
-	switch runtime.GOOS {
-	case "darwin", "linux":
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://astral.sh/uv/install.sh", nil)
-		if err != nil {
-			return err
-		}
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("downloading installer script: got HTTP status %d", resp.StatusCode)
-		}
-
-		const maxScriptSize = 1024 * 256
-		respBody := io.LimitReader(resp.Body, maxScriptSize)
-
-		cmd := exec.Command("sh")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		inPipe, err := cmd.StdinPipe()
-		if err != nil {
-			return err
-		}
-
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		if _, err := io.Copy(inPipe, respBody); err != nil {
-			return err
-		}
-		inPipe.Close()
-		if err := cmd.Wait(); err != nil {
-			return err
-		}
-
-		// TODO: Figure out how to update the PATH or at least get the 'uv' path so we can execute it right away;
-		// currently we have to restart the shell Timelinize is running in
-
-	case osWindows:
-		cmd := exec.Command("powershell", "-c", "irm https://astral.sh/uv/install.ps1 | iex")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return err
-		}
-
-	default:
-		return fmt.Errorf("OS not supported for auto-installation of ML environment: %s", runtime.GOOS)
+	if err := os.CopyFS(dataDir, embeddedPython); err != nil {
+		return err
 	}
 
-	return nil
-}
-
-func (a *App) startMLServer() error {
-	// TODO: This has to be distributable somehow; maybe embed it into the binary and then write it to an application dir or something
+	if _, err := exec.LookPath("uv"); err != nil {
+		a.log.Warn("uv is not installed and in PATH; semantic features will be unavailable", zap.Error(err))
+		return nil
+	}
 	cmd := exec.Command("uv", "run", "server.py")
-	cmd.Dir = "ml"
+	cmd.Dir = filepath.Join(dataDir, entries[0].Name())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	a.mlServer = cmd
+	// TODO: need to be sure this stops when our program stops
 	return cmd.Start()
 }
 
 func (a *App) serve() error {
-	// TODO: Eventually this will be configurable, but seems like a good idea to do at first
-	if err := installPython(a.ctx); err != nil {
-		return fmt.Errorf("setting up ML environment: %w", err)
-	}
-
-	if err := a.startMLServer(); err != nil {
+	if err := a.startPythonServer(); err != nil {
 		return fmt.Errorf("starting ML server: %w", err)
 	}
 
@@ -520,3 +482,6 @@ const lowestErrorStatus = 400
 const osWindows = "windows"
 
 const defaultAdminAddr = "127.0.0.1:12002"
+
+//go:embed python
+var embeddedPython embed.FS
