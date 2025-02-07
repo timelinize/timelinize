@@ -58,8 +58,7 @@ func main() {
 //
 // This is only defined here because goembed can't embed something
 // from a parent directory, and I just don't care to have the folder
-// nested within something else. We can move things around later
-// though.
+// nested within another folder right now.
 //
 //go:embed all:frontend
 var embeddedWebsite embed.FS

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"sync"
@@ -149,7 +150,7 @@ func (cfg *Config) syncOpenRepos() error {
 func DefaultConfigFilePath() string {
 	cfgDir, err := os.UserConfigDir()
 	if err == nil {
-		return filepath.Join(cfgDir, "timelinize", "config.json")
+		return filepath.Join(cfgDir, "Timelinize", "config.json")
 	}
 	cfgDir, err = os.UserHomeDir()
 	if err == nil {
@@ -170,4 +171,75 @@ func DefaultCacheDir() string {
 		return filepath.Join(homeDir, ".timelinize", "cache")
 	}
 	return filepath.Join(".timelinize", "cache")
+}
+
+// AppDataDir returns a directory path that is suitable for storing
+// application data on disk. It uses the environment for finding the
+// best place to store data, and appends a "timelinize" or "Timelinize"
+// (depending on OS and environment) subdirectory.
+//
+// For a base directory path:
+// If XDG_DATA_HOME is set, it returns: $XDG_DATA_HOME/timelinize; otherwise,
+// on Windows it returns: %AppData%/Timelinize,
+// on Mac: $HOME/Library/Application Support/Timelinize,
+// on Plan9: $home/lib/timelinize,
+// on Android: $HOME/timelinize,
+// and on everything else: $HOME/.local/share/timelinize.
+//
+// If a data directory cannot be determined, it returns "./timelinize"
+// (this is not ideal, and the environment should be fixed).
+//
+// The data directory (before appending the app name) is not guaranteed to
+// be different from AppConfigDir().
+//
+// Ref: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+func AppDataDir() string {
+	if basedir := os.Getenv("XDG_DATA_HOME"); basedir != "" {
+		return filepath.Join(basedir, "timelinize")
+	}
+	switch runtime.GOOS {
+	case "windows":
+		appData := os.Getenv("AppData")
+		if appData != "" {
+			return filepath.Join(appData, "Timelinize")
+		}
+	case "darwin":
+		home := homeDirUnsafe()
+		if home != "" {
+			return filepath.Join(home, "Library", "Application Support", "Timelinize")
+		}
+	case "android":
+		home := homeDirUnsafe()
+		if home != "" {
+			return filepath.Join(home, "timelinize")
+		}
+	default:
+		home := homeDirUnsafe()
+		if home != "" {
+			return filepath.Join(home, ".local", "share", "timelinize")
+		}
+	}
+	return "." + string(os.PathSeparator) + "timelinize"
+}
+
+// homeDirUnsafe is a low-level function that returns
+// the user's home directory from environment
+// variables. Careful: if it cannot be determined, an
+// empty string is returned. If not accounting for
+// that case, use HomeDir() instead; otherwise you
+// may end up using the root of the file system.
+func homeDirUnsafe() string {
+	home := os.Getenv("HOME")
+	if home == "" && runtime.GOOS == "windows" {
+		drive := os.Getenv("HOMEDRIVE")
+		path := os.Getenv("HOMEPATH")
+		home = drive + path
+		if drive == "" || path == "" {
+			home = os.Getenv("USERPROFILE")
+		}
+	}
+	if home == "" && runtime.GOOS == "plan9" {
+		home = os.Getenv("home")
+	}
+	return home
 }

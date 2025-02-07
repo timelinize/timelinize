@@ -50,14 +50,14 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, 
 		return 0, fmt.Errorf("JSON-encoding job action: %w", err)
 	}
 
-	var name JobName
+	var jobType JobType
 	switch action.(type) {
 	case *ImportJob:
-		name = JobNameImport
+		jobType = JobTypeImport
 	case thumbnailJob:
-		name = JobNameThumbnails
+		jobType = JobTypeThumbnails
 	case embeddingJob:
-		name = JobNameEmbeddings
+		jobType = JobTypeEmbeddings
 	default:
 		return 0, fmt.Errorf("unexpected job action: %#v", action)
 	}
@@ -81,7 +81,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, 
 
 	// this value is not the one that gets run, it is only used for storing
 	job := Job{
-		Name:        name,
+		Type:        jobType,
 		Config:      string(config),
 		Start:       startPtr,
 		Total:       totalPtr,
@@ -110,7 +110,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, 
 	Log.Named("job.status").Info("created",
 		zap.String("repo_id", tl.ID().String()),
 		zap.Int64("id", jobID),
-		zap.String("name", string(job.Name)),
+		zap.String("type", string(job.Type)),
 		zap.Time("created", time.Now()),
 		zap.Timep("start", job.Start),
 		zap.Int64p("parent_job_id", parentJobIDPtr))
@@ -159,10 +159,10 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
 
 	var id int64
 	err = tx.QueryRowContext(tl.ctx, `
-		INSERT INTO jobs (name, configuration, hash, hostname, start, total, repeat, parent_job_id)
+		INSERT INTO jobs (type, configuration, hash, hostname, start, total, repeat, parent_job_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id`,
-		job.Name, job.Config, job.Hash, job.Hostname, start, job.Total, job.Repeat, job.ParentJobID).Scan(&id)
+		job.Type, job.Config, job.Hash, job.Hostname, start, job.Total, job.Repeat, job.ParentJobID).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("inserting new job row: %w", err)
 	}
@@ -174,7 +174,7 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
 // timeline database when calling this function!
 func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, parentAndChildJobs bool) (Job, error) {
 	q := `SELECT
-	id, name, configuration, hash, state, hostname,
+	id, type, name, configuration, hash, state, hostname,
 	created, updated, start, ended,
 	message, total, progress, checkpoint,
 	repeat, parent_job_id
@@ -212,7 +212,7 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, parent
 		var created, updated, start, end *int64
 
 		err = rows.Scan(
-			&job.ID, &job.Name, &job.Config, &job.Hash, &job.State, &job.Hostname,
+			&job.ID, &job.Type, &job.Name, &job.Config, &job.Hash, &job.State, &job.Hostname,
 			&created, &updated, &start, &end,
 			&job.Message, &job.Total, &job.Progress, &job.Checkpoint,
 			&job.Repeat, &job.ParentJobID)
@@ -377,33 +377,33 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID int64) error
 func (tl *Timeline) runJob(row Job) error {
 	// create the job action by deserializing the config into its assocated struct
 	var action JobAction
-	switch row.Name {
-	case JobNameImport:
+	switch row.Type {
+	case JobTypeImport:
 		var importJob *ImportJob
 		if err := json.Unmarshal([]byte(row.Config), &importJob); err != nil {
 			return fmt.Errorf("unmarshaling import job config: %w", err)
 		}
 		action = importJob
-	case JobNameThumbnails:
+	case JobTypeThumbnails:
 		var thumbnailJob thumbnailJob
 		if err := json.Unmarshal([]byte(row.Config), &thumbnailJob); err != nil {
 			return fmt.Errorf("unmarshaling thumbnail job config: %w", err)
 		}
 		action = thumbnailJob
-	case JobNameEmbeddings:
+	case JobTypeEmbeddings:
 		var embeddingJob embeddingJob
 		if err := json.Unmarshal([]byte(row.Config), &embeddingJob); err != nil {
 			return fmt.Errorf("unmarshaling embedding job config: %w", err)
 		}
 		action = embeddingJob
 	default:
-		return fmt.Errorf("unknown job name '%s'", row.Name)
+		return fmt.Errorf("unknown job type '%s'", row.Type)
 	}
 
 	baseLogger := Log.Named("job").With(
 		zap.String("repo_id", tl.ID().String()),
 		zap.Int64("id", row.ID),
-		zap.String("name", string(row.Name)),
+		zap.String("type", string(row.Type)),
 		zap.Time("created", row.Created),
 		zap.Timep("start", row.Start))
 
@@ -532,10 +532,10 @@ func (tl *Timeline) runJob(row Job) error {
 		err = tx.QueryRowContext(tl.ctx,
 			`SELECT id
 			FROM jobs
-			WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
+			WHERE (state=? OR state=?) AND (hostname=? OR type!=?)
 			ORDER BY start, created
 			LIMIT 1`,
-			JobQueued, JobInterrupted, hostname, JobNameImport).Scan(&nextJobID)
+			JobQueued, JobInterrupted, hostname, JobTypeImport).Scan(&nextJobID)
 		if nextJobID > 0 {
 			err := tl.startJob(tl.ctx, tx, nextJobID)
 			if err != nil {
@@ -775,7 +775,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 	return nil
 }
 
-func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64) ([]Job, error) {
+func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64, mostRecent int) ([]Job, error) {
 	jobs := make([]Job, len(jobIDs))
 
 	for i, id := range jobIDs {
@@ -871,7 +871,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
 	statusLog := Log.Named("job.status").With(
 		zap.String("repo_id", tl.ID().String()),
 		zap.Int64("id", job.ID),
-		zap.String("name", string(job.Name)),
+		zap.String("type", string(job.Type)),
 		zap.Time("created", job.Created),
 		zap.Timep("start", job.Start))
 	inactiveJob := &ActiveJob{
@@ -1008,7 +1008,8 @@ type Job struct {
 	RepoID string `json:"repo_id"`
 
 	ID          int64          `json:"id"`
-	Name        JobName        `json:"name"`
+	Type        JobType        `json:"type"`
+	Name        string         `json:"name,omitempty"`
 	Config      string         `json:"config,omitempty"` // JSON encoding of, for instance, ImportParameters, etc.
 	Hash        []byte         `json:"hash,omitempty"`
 	State       JobState       `json:"state"`
@@ -1031,7 +1032,7 @@ type Job struct {
 
 func (j Job) hash() []byte {
 	h := blake3.New()
-	_, _ = h.WriteString(string(j.Name))
+	_, _ = h.WriteString(string(j.Type))
 	_, _ = h.WriteString(j.Config)
 	if j.Hostname != nil {
 		_, _ = h.WriteString(*j.Hostname)
@@ -1054,12 +1055,12 @@ type JobAction interface {
 	Run(job *ActiveJob, checkpoint []byte) error
 }
 
-type JobName string
+type JobType string
 
 const (
-	JobNameImport     JobName = "import"
-	JobNameThumbnails JobName = "thumbnails"
-	JobNameEmbeddings JobName = "embeddings"
+	JobTypeImport     JobType = "import"
+	JobTypeThumbnails JobType = "thumbnails"
+	JobTypeEmbeddings JobType = "embeddings"
 )
 
 type JobState string

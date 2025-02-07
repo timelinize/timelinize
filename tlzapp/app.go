@@ -24,6 +24,7 @@ package tlzapp
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -35,7 +36,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/exec"
-	"runtime"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -54,14 +55,15 @@ type App struct {
 	commands map[string]Endpoint
 
 	server   server
-	mlServer *exec.Cmd
+	pyServer *exec.Cmd
 
-	// a reference to the embedded website assets; due to
-	// limitations in the go embed tool, it has to be
-	// in a parent directory of what is being embedded,
-	// so we pass in a reference to it for the app,
-	// mainly to pass along to a new app if the config
-	// is changed and the app is restarted
+	// references to embedded assets... due to limitations
+	// in the go embed tool, the vars have to be in a parent
+	// directory of what is being embedded, so we pass in
+	// reference to it for the app, since this package isn't
+	// in the root of the project, and also to pass along to
+	// a new app if the config is changed and the app is
+	// restarted
 	embeddedWebsite fs.FS
 }
 
@@ -108,7 +110,7 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 		shutdownTimelines()
 
 		// stop python server (will wait for it below)
-		if err := newApp.mlServer.Process.Kill(); err != nil {
+		if err := newApp.pyServer.Process.Kill(); err != nil {
 			newApp.log.Error("could not terminate ML server", zap.Error(err))
 		}
 
@@ -122,7 +124,7 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 		}
 
 		// finish waiting for python server to exit
-		if state, err := newApp.mlServer.Process.Wait(); err != nil {
+		if state, err := newApp.pyServer.Process.Wait(); err != nil {
 			newApp.log.Error("ML server", zap.Error(err), zap.String("state", state.String()))
 		}
 	}
@@ -245,87 +247,64 @@ func (a *App) MustServe() error {
 	return a.serve()
 }
 
-// TODO: This is not ideal, but I'm just throwing this together temporarily to get us up and running quickly and easily.
-// We should have a less externally-dependent way of getting this running. :)
-func installPython(ctx context.Context) error {
-	if _, err := exec.LookPath("uv"); err == nil {
+func (a *App) startPythonServer() error {
+	// nothing to do if uv isn't installed
+	if _, err := exec.LookPath("uv"); err != nil {
+		a.log.Warn("uv is not installed in PATH; semantic features will be unavailable (to fix: install uv, then restart app)", zap.Error(err))
 		return nil
 	}
 
-	switch runtime.GOOS {
-	case "darwin", "linux":
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://astral.sh/uv/install.sh", nil)
-		if err != nil {
-			return err
-		}
+	// the subfolder in the embedded directory wherein the Python project lives;
+	// the contents of this folder are dumped to disk, and may replace what is
+	// already in that folder on disk (to accommodate changes/updates); the
+	// virtual env must be in a different folder (via UV_PROJECT_ENVIRONMENT)
+	const scriptSubfolder = "server"
 
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
+	// get the name of the embedded folder
+	entries, err := fs.ReadDir(embeddedPython, ".")
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 || !entries[0].IsDir() {
+		return errors.New("embedded python assets have unexpected structure; semantic features will be unavailable")
+	}
+	embedFolderName := entries[0].Name()
 
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("downloading installer script: got HTTP status %d", resp.StatusCode)
-		}
+	// embedded assets need to be written to disk so that the python environment
+	// can operate: it needs to know the uv project manifest, the dependencies,
+	// and a place to put the virtualenv (venv). By default, uv would put the
+	// .venv folder in the project directory, but that would make updating the
+	// scripts tricky, since we couldn't just delete the whole thing and re-write
+	// the files (we don't want to delete the venv, it's usually a big cache); so
+	// we need to put the files we embed into a separate subfolder from the venv;
+	// we can do this easily with an environment variable to relocate the venv,
+	// and have the scripts/project in their own subfolder, in the app data dir.
+	dataDir := AppDataDir()
+	projectPath := filepath.Join(dataDir, embedFolderName, scriptSubfolder)
+	venvPath := filepath.Join(dataDir, embedFolderName, "venv")
 
-		const maxScriptSize = 1024 * 256
-		respBody := io.LimitReader(resp.Body, maxScriptSize)
-
-		cmd := exec.Command("sh")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		inPipe, err := cmd.StdinPipe()
-		if err != nil {
-			return err
-		}
-
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		if _, err := io.Copy(inPipe, respBody); err != nil {
-			return err
-		}
-		inPipe.Close()
-		if err := cmd.Wait(); err != nil {
-			return err
-		}
-
-		// TODO: Figure out how to update the PATH or at least get the 'uv' path so we can execute it right away;
-		// currently we have to restart the shell Timelinize is running in
-
-	case osWindows:
-		cmd := exec.Command("powershell", "-c", "irm https://astral.sh/uv/install.ps1 | iex")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return err
-		}
-
-	default:
-		return fmt.Errorf("OS not supported for auto-installation of ML environment: %s", runtime.GOOS)
+	// clear out old project/script files (this ensures they stay current)
+	// then write the embedded files in their place
+	if err = os.RemoveAll(projectPath); err != nil {
+		return nil
+	}
+	if err := os.CopyFS(dataDir, embeddedPython); err != nil {
+		return err
 	}
 
-	return nil
-}
-
-func (a *App) startMLServer() error {
-	// TODO: This has to be distributable somehow; maybe embed it into the binary and then write it to an application dir or something
+	// run the python server such that the venv is relocated to its own
+	// folder outside the project folder (but still in the app data dir)
 	cmd := exec.Command("uv", "run", "server.py")
-	cmd.Dir = "ml"
+	cmd.Dir = projectPath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	a.mlServer = cmd
-	return cmd.Start()
+	cmd.Env = append(os.Environ(), "UV_PROJECT_ENVIRONMENT="+venvPath)
+	a.pyServer = cmd
+	return cmd.Start() // TODO: need to be sure this stops when our program stops
 }
 
 func (a *App) serve() error {
-	// TODO: Eventually this will be configurable, but seems like a good idea to do at first
-	if err := installPython(a.ctx); err != nil {
-		return fmt.Errorf("setting up ML environment: %w", err)
-	}
-
-	if err := a.startMLServer(); err != nil {
+	if err := a.startPythonServer(); err != nil {
 		return fmt.Errorf("starting ML server: %w", err)
 	}
 
@@ -520,3 +499,6 @@ const lowestErrorStatus = 400
 const osWindows = "windows"
 
 const defaultAdminAddr = "127.0.0.1:12002"
+
+//go:embed python
+var embeddedPython embed.FS
