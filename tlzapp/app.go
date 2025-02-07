@@ -292,6 +292,8 @@ func (a *App) startPythonServer() error {
 		return err
 	}
 
+	a.log.Info("starting python server to enable semantic features", zap.String("dir", projectPath))
+
 	// run the python server such that the venv is relocated to its own
 	// folder outside the project folder (but still in the app data dir)
 	cmd := exec.Command("uv", "run", "server.py")

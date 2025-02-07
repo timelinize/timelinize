@@ -208,35 +208,10 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, parent
 	// which is the "main"/parent job later (the result set is not usually more
 	// than a few rows)
 	for rows.Next() {
-		var job Job
-		var created, updated, start, end *int64
-
-		err = rows.Scan(
-			&job.ID, &job.Type, &job.Name, &job.Config, &job.Hash, &job.State, &job.Hostname,
-			&created, &updated, &start, &end,
-			&job.Message, &job.Total, &job.Progress, &job.Checkpoint,
-			&job.Repeat, &job.ParentJobID)
+		job, err := scanJob(rows, tlID)
 		if err != nil {
-			return job, fmt.Errorf("scanning job fields: %w", err)
+			return Job{}, err
 		}
-
-		if created != nil {
-			job.Created = time.UnixMilli(*created)
-		}
-		if updated != nil {
-			ts := time.UnixMilli(*updated)
-			job.Updated = &ts
-		}
-		if start != nil {
-			ts := time.UnixMilli(*start)
-			job.Start = &ts
-		}
-		if end != nil {
-			ts := time.UnixMilli(*end)
-			job.Ended = &ts
-		}
-		job.RepoID = tlID
-
 		jobs = append(jobs, job)
 	}
 	if err := rows.Err(); err != nil {
@@ -775,36 +750,76 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 	return nil
 }
 
+// GetJobs loads the jobs with the specified IDs, or by the most recent jobs, whichever is set.
+// Both technically can be set, but why?
 func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64, mostRecent int) ([]Job, error) {
-	jobs := make([]Job, len(jobIDs))
+	var jobs []Job
 
-	for i, id := range jobIDs {
+	// load most recent jobs
+	if mostRecent > 0 {
+		q := `SELECT
+	id, type, name, configuration, hash, state, hostname,
+	created, updated, start, ended,
+	message, total, progress, checkpoint,
+	repeat, parent_job_id
+	FROM jobs
+	ORDER BY created DESC
+	LIMIT ?`
+
+		var rows *sql.Rows
+		var err error
+		rows, err = tl.db.QueryContext(ctx, q, mostRecent)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		tlID := tl.id.String()
+
+		for rows.Next() {
+			job, err := scanJob(rows, tlID)
+			if err != nil {
+				return nil, err
+			}
+			jobs = append(jobs, job)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		if len(jobs) == 0 {
+			return nil, sql.ErrNoRows
+		}
+	}
+
+	// load specific jobs by ID
+	for _, id := range jobIDs {
 		tl.dbMu.RLock()
 		job, err := tl.loadJob(ctx, nil, id, true)
 		tl.dbMu.RUnlock()
 		if err != nil {
 			return nil, fmt.Errorf("loading job %d: %w", id, err)
 		}
-		job.RepoID = tl.id.String()
+		jobs = append(jobs, job)
+	}
 
+	for i := range jobs {
 		// if job is running, we can provide more recent information than what
 		// was last synced to the DB, which may be out-of-date at the moment
-		if job.State == JobStarted {
+		if jobs[i].State == JobStarted {
 			tl.activeJobsMu.RLock()
-			activeJob, ok := tl.activeJobs[job.ID]
+			activeJob, ok := tl.activeJobs[jobs[i].ID]
 			tl.activeJobsMu.RUnlock()
 			if ok {
 				// we don't use a RWMutex because this mutex is write-heavy
 				activeJob.mu.Lock()
-				job.Progress = activeJob.currentProgress
-				job.Message = activeJob.currentMessage
-				job.Total = activeJob.currentTotal
+				jobs[i].Progress = activeJob.currentProgress
+				jobs[i].Message = activeJob.currentMessage
+				jobs[i].Total = activeJob.currentTotal
 				activeJob.mu.Unlock()
 			}
 		}
-
-		jobs[i] = job
 	}
+
 	return jobs, nil
 }
 
@@ -997,6 +1012,39 @@ func (tl *Timeline) StartJob(ctx context.Context, jobID int64, startOver bool) e
 	}
 
 	return tx.Commit()
+}
+
+func scanJob(rows *sql.Rows, repoID string) (Job, error) {
+	var job Job
+	var created, updated, start, end *int64
+
+	err := rows.Scan(
+		&job.ID, &job.Type, &job.Name, &job.Config, &job.Hash, &job.State, &job.Hostname,
+		&created, &updated, &start, &end,
+		&job.Message, &job.Total, &job.Progress, &job.Checkpoint,
+		&job.Repeat, &job.ParentJobID)
+	if err != nil {
+		return job, fmt.Errorf("scanning job fields: %w", err)
+	}
+
+	if created != nil {
+		job.Created = time.UnixMilli(*created)
+	}
+	if updated != nil {
+		ts := time.UnixMilli(*updated)
+		job.Updated = &ts
+	}
+	if start != nil {
+		ts := time.UnixMilli(*start)
+		job.Start = &ts
+	}
+	if end != nil {
+		ts := time.UnixMilli(*end)
+		job.Ended = &ts
+	}
+	job.RepoID = repoID
+
+	return job, nil
 }
 
 // Job is only to be used for shuttling job data in and out of the DB,
