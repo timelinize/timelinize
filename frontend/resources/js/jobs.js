@@ -132,7 +132,7 @@ function jobProgressUpdate(job) {
 	// update chart(s) only if job is running
 	tlz.jobStats[job.id].live = job.state == "started";
 
-	if (job.name == "import")
+	if (job.type == "import")
 	{
 		for (const elem of $$(`.job-title.job-id-${job.id}`)) {
 			elem.innerText = "Import job";
@@ -154,7 +154,7 @@ function jobProgressUpdate(job) {
 				</svg>`;
 		}
 	}
-	else if (job.name == "thumbnails")
+	else if (job.type == "thumbnails")
 	{
 		for (const elem of $$(`.job-title.job-id-${job.id}`)) {
 			elem.innerText = "Generate thumbnails";
@@ -178,7 +178,7 @@ function jobProgressUpdate(job) {
 				</svg>`;
 		}
 	}
-	else if (job.name == "embeddings")
+	else if (job.type == "embeddings")
 	{
 		for (const elem of $$(`.job-title.job-id-${job.id}`)) {
 			elem.innerText = "Generate embeddings";

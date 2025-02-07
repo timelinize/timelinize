@@ -125,7 +125,7 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 
-	query := `INSERT OR IGNORE INTO "data_sources" ("name") VALUES`
+	query := `INSERT OR IGNORE INTO "data_sources" ("name", "title", "description") VALUES`
 
 	vals := make([]any, 0, len(dataSources))
 	var count int
@@ -134,8 +134,8 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 		if count > 0 {
 			query += ","
 		}
-		query += " (?)"
-		vals = append(vals, ds.Name)
+		query += " (?, ?, ?)"
+		vals = append(vals, ds.Name, ds.Title, ds.Description)
 		count++
 	}
 

@@ -1057,7 +1057,7 @@ type Job struct {
 
 	ID          int64          `json:"id"`
 	Type        JobType        `json:"type"`
-	Name        string         `json:"name,omitempty"`
+	Name        *string        `json:"name,omitempty"`
 	Config      string         `json:"config,omitempty"` // JSON encoding of, for instance, ImportParameters, etc.
 	Hash        []byte         `json:"hash,omitempty"`
 	State       JobState       `json:"state"`
