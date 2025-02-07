@@ -150,7 +150,7 @@ func (cfg *Config) syncOpenRepos() error {
 func DefaultConfigFilePath() string {
 	cfgDir, err := os.UserConfigDir()
 	if err == nil {
-		return filepath.Join(cfgDir, "timelinize", "config.json")
+		return filepath.Join(cfgDir, "Timelinize", "config.json")
 	}
 	cfgDir, err = os.UserHomeDir()
 	if err == nil {

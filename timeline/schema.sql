@@ -28,18 +28,18 @@ CREATE TABLE IF NOT EXISTS "repo" (
 -- IDs than the program's string names.
 CREATE TABLE IF NOT EXISTS "data_sources" (
 	"id" INTEGER PRIMARY KEY, -- row ID, used only for DB consistency, applies only to this DB
-	"name" TEXT NOT NULL UNIQUE   -- programming ID, e.g. "google_photos" as used in the application code and across different timeline DBs
+	"name" TEXT NOT NULL UNIQUE, -- programming ID, e.g. "google_photos" as used in the application code and across different timeline DBs
 	"title" TEXT NOT NULL, -- human-readable name/label
 	"description" TEXT,
-	"media" BLOB, -- icon image, usually square dimensions
+	"media" BLOB, -- icon/image, square dimensions work best
 	"media_type" TEXT, -- MIME type of the icon
-	"standard" BOOLEAN NOT NULL DEFAULT false,
-	""
+	"standard" BOOLEAN NOT NULL DEFAULT false -- true for data sources that come hard-coded with the app
 );
 
 CREATE TABLE IF NOT EXISTS "jobs" (
 	"id" INTEGER PRIMARY KEY,
-	"name" TEXT NOT NULL, -- import, thumbnails, etc...
+	"type" TEXT NOT NULL, -- import, thumbnails, etc...
+	"name" TEXT, -- an optional user-assigned name
 	"configuration" TEXT, -- encoded as JSON
 	"hash" BLOB, -- for preventing duplicate jobs; opaque to everything except the code creating the job
 	"state" TEXT NOT NULL DEFAULT 'queued', -- queued, started, paused, aborted, succeeded, failed
@@ -131,9 +131,8 @@ CREATE TABLE IF NOT EXISTS "entity_attributes" (
 	-- these next two fields explain how the row came into being, by inferring the association from another attribute
 	"autolink_job_id" INTEGER,    -- if set, the import that motivated linking this attribute as the entity's ID on the data source
 	"autolink_attribute_id" INTEGER, -- if set, the other attribute by which this attribute was automatically linked as the entity's ID on the data source
-	-- TODO: rename to start/end as with relationships table?
-	"timeframe_start" INTEGER, -- when the attribute started applying to the entity
-	"timeframe_end" INTEGER,   -- when the attribute stopped applyiing to the entity
+	"start" INTEGER, -- when the attribute started applying to the entity
+	"end" INTEGER,   -- when the attribute stopped applyiing to the entity
 	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE,
@@ -191,7 +190,6 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"note" TEXT,      -- optional user-added information
 	"starred" INTEGER, -- like a bookmark; TODO: different numbers indicate different kinds of stars or something?
 	"thumb_hash" BLOB, -- bytes of the ThumbHash that represent a visual preview of the item (https://evanw.github.io/thumbhash/ and https://github.com/evanw/thumbhash)
-	-- TODO: unique on these two hashes?
 	"original_id_hash" BLOB, -- a hash of the data source and original ID of the item, also used for duplicate detection, optionally stored when item is deleted
 	"initial_content_hash" BLOB, -- a hash computed during initial import, used for duplicate detection (remains same even if item is modified by user)
 	"retrieval_key" BLOB UNIQUE, -- an optional opaque value that indicates this item may not be fully populated in a single import; not an ID but still a unique identifier
@@ -246,11 +244,10 @@ CREATE TABLE IF NOT EXISTS "relations" (
 	"subordinating" BOOLEAN NOT NULL DEFAULT false -- if true, item on the end of directed relation does not make sense on its own, e.g. attachment or motion picture
 ); -- not STRICT due to boolean type
 
--- A curation is a user-created document with rich text formatting (basically HTML;
+-- A story is a user-created document with rich text formatting (basically HTML;
 -- including hrefs to other items/entities). It can also embed timeline data, which
 -- embeddings are stored in the curation_elements table.
--- TODO: rename to 'stories'?
-CREATE TABLE IF NOT EXISTS "curations" (
+CREATE TABLE IF NOT EXISTS "stories" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT,
 	"description" TEXT,
@@ -259,10 +256,10 @@ CREATE TABLE IF NOT EXISTS "curations" (
 	"modified" INTEGER NOT NULL DEFAULT (unixepoch())
 ) STRICT;
 
--- Elements of curations. An element can be rich text (HTML; including hrefs to other items/entities);
+-- Elements of stories. An element can be rich text (HTML; including hrefs to other items/entities);
 -- an embedded item, entity, or collection; or a query that loads a dynamic set of items, entities, or
 -- collections. Rich text content can be provided together with embedded data as an annotation.
-CREATE TABLE IF NOT EXISTS "curation_elements" (
+CREATE TABLE IF NOT EXISTS "story_elements" (
 	"id" INTEGER PRIMARY KEY,
 	"curation_id" INTEGER NOT NULL,
 	-- only one of the following 5 fields should be populated
@@ -338,7 +335,6 @@ CREATE TABLE IF NOT EXISTS "logs" (
 	FOREIGN KEY ("entity_attribute_id") REFERENCES "entity_attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
--- TODO: Still WIP...
 CREATE TABLE IF NOT EXISTS "settings" (
 	"key" TEXT PRIMARY KEY,
 	"title" TEXT,

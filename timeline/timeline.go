@@ -415,7 +415,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		FROM jobs
 		WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
 		ORDER BY start, created
-		LIMIT 3`, JobQueued, JobInterrupted, hostname, JobNameImport)
+		LIMIT 3`, JobQueued, JobInterrupted, hostname, JobTypeImport)
 	if err != nil {
 		return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
 	}

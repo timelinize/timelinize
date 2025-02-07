@@ -55,7 +55,7 @@ type App struct {
 	commands map[string]Endpoint
 
 	server   server
-	mlServer *exec.Cmd
+	pyServer *exec.Cmd
 
 	// references to embedded assets... due to limitations
 	// in the go embed tool, the vars have to be in a parent
@@ -110,7 +110,7 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 		shutdownTimelines()
 
 		// stop python server (will wait for it below)
-		if err := newApp.mlServer.Process.Kill(); err != nil {
+		if err := newApp.pyServer.Process.Kill(); err != nil {
 			newApp.log.Error("could not terminate ML server", zap.Error(err))
 		}
 
@@ -124,7 +124,7 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 		}
 
 		// finish waiting for python server to exit
-		if state, err := newApp.mlServer.Process.Wait(); err != nil {
+		if state, err := newApp.pyServer.Process.Wait(); err != nil {
 			newApp.log.Error("ML server", zap.Error(err), zap.String("state", state.String()))
 		}
 	}
@@ -248,42 +248,59 @@ func (a *App) MustServe() error {
 }
 
 func (a *App) startPythonServer() error {
-	// see if python assets already exist; they should be in the
-	// data dir in a subfolder named the same as the embedded
-	// folder in our code base (if not, then something is wrong)
-	dataDir := AppDataDir()
+	// nothing to do if uv isn't installed
+	if _, err := exec.LookPath("uv"); err != nil {
+		a.log.Warn("uv is not installed in PATH; semantic features will be unavailable (to fix: install uv, then restart app)", zap.Error(err))
+		return nil
+	}
+
+	// the subfolder in the embedded directory wherein the Python project lives;
+	// the contents of this folder are dumped to disk, and may replace what is
+	// already in that folder on disk (to accommodate changes/updates); the
+	// virtual env must be in a different folder (via UV_PROJECT_ENVIRONMENT)
+	const scriptSubfolder = "server"
+
+	// get the name of the embedded folder
 	entries, err := fs.ReadDir(embeddedPython, ".")
 	if err != nil {
 		return err
 	}
 	if len(entries) != 1 || !entries[0].IsDir() {
-		a.log.Warn("embedded python assets have unexpected structure; semantic features will be unavailable")
+		return errors.New("embedded python assets have unexpected structure; semantic features will be unavailable")
 	}
+	embedFolderName := entries[0].Name()
 
 	// embedded assets need to be written to disk so that the python environment
-	// can see the dependencies, download and install them, etc, even though the
-	// actual script could be piped to stdin; but we still need a project folder
-	// because of the dependencies -- easiest way to ensure they exist and are
-	// up-to-date is to just delete them and re-write them (there shouldn't be
-	// much)
-	if err = os.RemoveAll(dataDir); err != nil {
+	// can operate: it needs to know the uv project manifest, the dependencies,
+	// and a place to put the virtualenv (venv). By default, uv would put the
+	// .venv folder in the project directory, but that would make updating the
+	// scripts tricky, since we couldn't just delete the whole thing and re-write
+	// the files (we don't want to delete the venv, it's usually a big cache); so
+	// we need to put the files we embed into a separate subfolder from the venv;
+	// we can do this easily with an environment variable to relocate the venv,
+	// and have the scripts/project in their own subfolder, in the app data dir.
+	dataDir := AppDataDir()
+	projectPath := filepath.Join(dataDir, embedFolderName, scriptSubfolder)
+	venvPath := filepath.Join(dataDir, embedFolderName, "venv")
+
+	// clear out old project/script files (this ensures they stay current)
+	// then write the embedded files in their place
+	if err = os.RemoveAll(projectPath); err != nil {
 		return nil
 	}
 	if err := os.CopyFS(dataDir, embeddedPython); err != nil {
 		return err
 	}
 
-	if _, err := exec.LookPath("uv"); err != nil {
-		a.log.Warn("uv is not installed and in PATH; semantic features will be unavailable", zap.Error(err))
-		return nil
-	}
+	// run the python server such that the venv is relocated to its own
+	// folder outside the project folder (but still in the app data dir)
 	cmd := exec.Command("uv", "run", "server.py")
-	cmd.Dir = filepath.Join(dataDir, entries[0].Name())
+	cmd.Dir = projectPath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	a.mlServer = cmd
-	// TODO: need to be sure this stops when our program stops
-	return cmd.Start()
+	cmd.Env = append(os.Environ(), "UV_PROJECT_ENVIRONMENT="+venvPath)
+	a.pyServer = cmd
+	return cmd.Start() // TODO: need to be sure this stops when our program stops
 }
 
 func (a *App) serve() error {
