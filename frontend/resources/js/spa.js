@@ -158,10 +158,10 @@ async function navigateSPA(addrBarDestination) {
 				await tlz.currentPageController.load();
 			}
 
-			// Render data source filter dropdowns
-			$$('.filter .tl-data-source-dropdown').forEach(e => {
-				renderFilterDropdown(e, "Data sources", 'data_sources');
-			});
+			// Render data source filter inputs (we don't use forEach here because it does not await async functions!)
+			for (const e of $$('.filter select.tl-data-source')) {
+				await newDataSourceSelect(e);
+			};
 
 			// Render item classification filter dropdowns
 			$$('.filter .tl-item-class-dropdown').forEach(e => {
@@ -275,15 +275,6 @@ async function updateRepoOwners() {
 	return true;
 }
 
-async function updateDataSources() {
-	const dsArray = await app.DataSources();
-	tlz.dataSources = {};
-	for (const ds of dsArray) {
-		tlz.dataSources[ds.name] = ds;
-	}
-	store('data_sources', tlz.dataSources);
-}
-
 async function updateItemClasses() {
 	const clArray = await app.ItemClassifications(tlz.openRepos[0].instance_id);
 	const classes = {};
@@ -295,11 +286,6 @@ async function updateItemClasses() {
 
 
 async function initialize() {
-	// make a local cache of the data sources and classifications, since we'll use them so often
-	if (!tlz.dataSources) {
-		await updateDataSources();
-	}
-
 	// classifications are stored in the database, so get open repos first and attach owner info
 	tlz.openRepos = await app.OpenRepositories();
 

@@ -16,7 +16,7 @@ func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
 		Name:            "calendar",
 		Title:           "Calendar",
-		Icon:            "calendar.png",
+		Icon:            "calendar.svg",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})

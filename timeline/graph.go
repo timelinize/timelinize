@@ -742,8 +742,9 @@ type ItemRow struct {
 	Deleted            *time.Time `json:"deleted,omitempty"`
 
 	// From view "extended_items"
-	DataSourceName *string `json:"data_source_name"`
-	Classification *string `json:"classification"`
+	DataSourceName  *string `json:"data_source_name"`
+	DataSourceTitle *string `json:"data_source_title"`
+	Classification  *string `json:"classification"`
 
 	// not in the DB, but attached here for logging purposes
 	howStored itemStoreResult
@@ -800,7 +801,7 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 		&ir.Location.CoordinateSystem, &ir.Location.CoordinateUncertainty, &ir.Note, &ir.Starred,
 		&ir.ThumbHash, &ir.OriginalIDHash, &ir.InitialContentHash, &ir.RetrievalKey,
 		&ir.Hidden, &deleted,
-		&ir.DataSourceName, &className}
+		&ir.DataSourceName, &ir.DataSourceTitle, &className}
 	allTargets := append(itemTargets, targetsAfterItemCols...) //nolint:gocritic // I am explicitly self-documenting how the first batch of targets are for the item, then there's the rest
 
 	err := row.Scan(allTargets...)
@@ -847,7 +848,7 @@ items.timestamp, items.timespan, items.timeframe, items.time_offset, items.time_
 items.data_id, items.data_type, items.data_text, items.data_file, items.data_hash, items.metadata,
 items.longitude, items.latitude, items.altitude, items.coordinate_system, items.coordinate_uncertainty,
 items.note, items.starred, items.thumb_hash, items.original_id_hash, items.initial_content_hash,
-items.retrieval_key, items.hidden, items.deleted, data_source_name, classification_name`
+items.retrieval_key, items.hidden, items.deleted, data_source_name, data_source_title, classification_name`
 
 // Location represents a precise coordinate on a planetary body.
 // By default, standard Earth GPS lon/lat coordinates are assumed.

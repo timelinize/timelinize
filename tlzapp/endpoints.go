@@ -69,12 +69,6 @@ func (a *App) registerCommands() {
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Loads a conversation.",
 		},
-		"data-source": {
-			Handler: a.server.handleDataSource,
-			Method:  http.MethodPost,
-			Payload: "",
-			Help:    "Returns information about a specific data source.",
-		},
 		"data-sources": {
 			Handler: a.server.handleGetDataSources,
 			Method:  http.MethodGet,

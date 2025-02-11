@@ -41,12 +41,17 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-// serveFrontend serves resources to the UI in this URL format:
-// / repo / {repoID} / data|assets|thumbnail|image|transcode|motion-photo|dl / {dataFilePath_or_thumbnailItemID.jpg_or_itemID}
+// serveFrontend serves frontend assets, such as repository resources,
+// data source images, and the static website files.
 func (s server) serveFrontend(w http.ResponseWriter, r *http.Request) error {
 	if strings.HasPrefix(r.URL.Path, "/repo/") {
 		// serve timeline item data files, assets, thumbnails, and more
 		return s.handleRepoResource(w, r)
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/ds-image/") {
+		// serve data source image; not specific to any particular repo
+		return s.dataSourceImage(w, r)
 	}
 
 	// otherwise, serve static site
@@ -101,6 +106,8 @@ func (s server) serveFrontend(w http.ResponseWriter, r *http.Request) error {
 	return rec.WriteResponse()
 }
 
+// handleRepoResource serves resources to the UI in this URL format:
+// / repo / {repoID} / data|assets|thumbnail|image|transcode|motion-photo|dl / {dataFilePath_or_thumbnailItemID.jpg_or_itemID}
 func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error {
 	const minParts, maxParts = 5, 6
 	parts := strings.SplitN(r.URL.Path, "/", maxParts)
@@ -538,6 +545,7 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 			RepoID                string          `json:"repo_id,omitempty"`
 			ItemID                int64           `json:"item_id,omitempty"`
 			DataSourceName        *string         `json:"data_source_name,omitempty"`
+			DataSourceTitle       *string         `json:"data_source_title,omitempty"`
 			Stored                time.Time       `json:"stored,omitempty"`
 			Filename              *string         `json:"filename,omitempty"`
 			Timestamp             *time.Time      `json:"timestamp,omitempty"`
@@ -563,6 +571,7 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 				RepoID:                tl.ID().String(),
 				ItemID:                itemRow.ID,
 				DataSourceName:        itemRow.DataSourceName,
+				DataSourceTitle:       itemRow.DataSourceTitle,
 				Stored:                itemRow.Stored,
 				Filename:              itemRow.Filename,
 				Timestamp:             itemRow.Timestamp,
@@ -594,6 +603,29 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 
 	http.ServeContent(w, r, filename, modified, content)
 	return nil
+}
+
+func (s server) dataSourceImage(w http.ResponseWriter, r *http.Request) error {
+	parts := strings.Split(r.URL.Path, "/")
+	const expectedNumParts = 3
+	if len(parts) != expectedNumParts {
+		return fmt.Errorf("expected URL to have %d components, got: %v", expectedNumParts, parts)
+	}
+	dsName := parts[2]
+
+	all, err := s.app.DataSources(r.Context(), dsName)
+	if err != nil {
+		return err
+	}
+	if len(all) != 1 {
+		return errors.New("data source not found: " + dsName)
+	}
+	ds := all[0]
+
+	w.Header().Set("Content-Type", ds.MediaType)
+	_, err = w.Write(ds.Media)
+
+	return err
 }
 
 func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, inputVideoFilePath string, inputVideoStream io.Reader, obfuscate bool) error {

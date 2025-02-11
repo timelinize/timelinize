@@ -356,6 +356,7 @@ CREATE VIEW IF NOT EXISTS "extended_items" AS
 	SELECT
 		items.*,
 		data_sources.name AS data_source_name,
+		data_sources.title AS data_source_title,
 		classifications.name AS classification_name,
 		-- TODO: verify these are useful fields and make the dashboard queries more efficient
 		cast(strftime('%j', date(round(timestamp/1000), 'unixepoch')) AS INTEGER) AS day_of_year,

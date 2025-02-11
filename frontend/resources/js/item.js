@@ -141,8 +141,8 @@ async function itemPageMain() {
 	}
 	$('#item-stored').innerText = DateTime.fromISO(item.stored).toLocaleString(DateTime.DATETIME_MED_WITH_SECONDS);
 
-	$('#data-source-icon').style.backgroundImage = `url('/resources/images/data-sources/${tlz.dataSources[item.data_source_name].icon}')`;
-	$('#data-source-title').innerText = tlz.dataSources[item.data_source_name].title;
+	$('#data-source-icon').style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
+	$('#data-source-title').innerText = item.data_source_title;
 
 	// only show minimap if big map is not displayed
 	if (!$('.map-container') && item.latitude && item.longitude) {

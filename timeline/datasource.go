@@ -32,8 +32,26 @@ import (
 	"github.com/mholt/archives"
 )
 
+type DataSourceRow struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Media       []byte `json:"-"`
+	MediaType   string `json:"-"`
+	Standard    bool   `json:"standard"`
+
+	// Not part of the DB row, but useful to associate with
+	// the struct so that future lookups can easily know
+	// which repo has this data source in it; if multiple
+	// repos do, any one should suffice as they should be
+	// identical (in theory).
+	RepoID string `json:"repo_id"`
+}
+
 // DataSource has information about a
 // data source that can be registered.
+// TODO: remove JSON tags? it shouldn't be serialized going forward, I don't think
 type DataSource struct {
 	// A snake_cased name of the service
 	// that uniquely identifies it from
@@ -113,16 +131,6 @@ func RegisterDataSource(ds DataSource) error {
 	return nil
 }
 
-// GetDataSource gets the data source with the given name (not database row ID).
-func GetDataSource(name string) (DataSource, error) {
-	for _, ds := range dataSources {
-		if ds.Name == name {
-			return ds, nil
-		}
-	}
-	return DataSource{}, fmt.Errorf("data source not found: %s", name)
-}
-
 // AllDataSources returns all registered data sources sorted by ID strings.
 func AllDataSources() []DataSource {
 	sources := make([]DataSource, 0, len(dataSources))
@@ -133,6 +141,54 @@ func AllDataSources() []DataSource {
 		return sources[i].Name < sources[j].Name
 	})
 	return sources
+}
+
+func (tl *Timeline) DataSources(ctx context.Context, targetDSName string) ([]DataSourceRow, error) {
+	repoID := tl.id.String()
+
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
+
+	var args []any
+	q := "SELECT id, name, title, description, media, media_type, standard FROM data_sources"
+	if targetDSName != "" {
+		q += " WHERE name=? LIMIT 1"
+		args = []any{targetDSName}
+	}
+
+	rows, err := tl.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var all []DataSourceRow
+	for rows.Next() {
+		ds := DataSourceRow{RepoID: repoID}
+		err = rows.Scan(&ds.ID, &ds.Name, &ds.Title, &ds.Description, &ds.Media, &ds.MediaType, &ds.Standard)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, ds)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return all, nil
+}
+
+func (tl *Timeline) DataSourceImage(ctx context.Context, dsName string) ([]byte, string, error) {
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
+
+	var img []byte
+	var mimeType string
+
+	err := tl.db.QueryRowContext(ctx,
+		"SELECT media, media_type FROM data_sources WHERE name=? LIMIT 1", dsName).Scan(&img, &mimeType)
+
+	return img, mimeType, err
 }
 
 // TODO: WIP...

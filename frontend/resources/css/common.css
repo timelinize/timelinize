@@ -47,7 +47,14 @@ a parent div. this takes care of that by removing the >. */
 }
 
 
-
+/* override tabler-vendors */
+.ts-wrapper.multi .ts-control > div {
+	/* for some reason, the vertical margin they add to
+	these elements makes the tomselect item "chips" take
+	up too much space and throw off vertical alignment */
+	margin-top: 0;
+	margin-bottom: 0;
+}
 
 
 
@@ -237,6 +244,16 @@ header .logo {
 	white-space: nowrap;
 }
 
+.ts-wrapper img {
+	height: 1.5em;
+	max-width: 1.5em;
+}
+
+.navbar .ts-wrapper {
+	/* prevent tomselects from growing unbounded horizontally */
+	width: 250px;
+}
+
 .dropdown-menu {
 	max-height: 75vh;
 	/* TODO: overflow-y: auto is needed here, but that breaks other dropdowns' overflow-x! (like the Timelinize dropdown menu) */
@@ -350,7 +367,6 @@ label.dropdown-item,
 a {
 	cursor: pointer;
 }
-
 
 
 

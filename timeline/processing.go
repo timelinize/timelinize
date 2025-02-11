@@ -1242,6 +1242,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 
 	ir.DataSourceID = &p.dsRowID
 	ir.DataSourceName = &p.ds.Name
+	ir.DataSourceTitle = &p.ds.Title
 	ir.JobID = &p.ij.job.id
 	if attrID != 0 {
 		ir.AttributeID = &attrID

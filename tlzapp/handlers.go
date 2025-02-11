@@ -239,14 +239,9 @@ func (s *server) handleBuildInfo(w http.ResponseWriter, _ *http.Request) error {
 	return jsonResponse(w, s.app.BuildInfo(), nil)
 }
 
-func (s *server) handleGetDataSources(w http.ResponseWriter, _ *http.Request) error {
-	return jsonResponse(w, s.app.DataSources(), nil)
-}
-
-func (s *server) handleDataSource(w http.ResponseWriter, r *http.Request) error {
-	dsID := r.Context().Value(ctxKeyPayload).(*string)
-	ds, err := s.app.DataSource(*dsID)
-	return jsonResponse(w, ds, err)
+func (s *server) handleGetDataSources(w http.ResponseWriter, r *http.Request) error {
+	allDS, err := s.app.DataSources(r.Context(), "")
+	return jsonResponse(w, allDS, err)
 }
 
 type openRepoPayload struct {

@@ -127,8 +127,8 @@ async function itemsMain() {
 
 		const tpl = cloneTemplate('#tpl-item');
 
-		$('.ds-icon', tpl).style.backgroundImage = `url('/resources/images/data-sources/${tlz.dataSources[item.data_source_name].icon}')`;
-		$('.ds-icon', tpl).title = `Imported from ${tlz.dataSources[item.data_source_name].title}`;
+		$('.ds-icon', tpl).style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
+		$('.ds-icon', tpl).title = `Imported from ${item.data_source_title}`;
 
 		$('.item-id', tpl).innerText = item.id;
 		$('a.item-id', tpl).href = itemLink;

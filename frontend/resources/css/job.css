@@ -33,3 +33,7 @@
 #chart-active-job-throughput {
 	height: 240px;
 }
+
+.table img {
+	height: 1.75em;
+}

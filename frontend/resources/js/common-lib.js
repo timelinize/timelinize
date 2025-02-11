@@ -30,8 +30,6 @@ const Duration = luxon.Duration;
 const tlz = {
 	openRepos: load('open_repos') || [],
 
-	dataSources: load('data_sources'),
-
 	itemClassIconPaths: {
 		email: `
 			<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
@@ -484,6 +482,45 @@ function renderFilterDropdown(containerEl, title, loadKey) {
 
 	containerEl.replaceChildren(tpl);
 }
+
+
+async function newDataSourceSelect(selectEl) {
+	if ($(selectEl).tomselect) {
+		return $(selectEl).tomselect;
+	}
+
+	var dsList = await app.DataSources();
+
+	for (const ds of dsList) {
+		const optEl = document.createElement('option');
+		optEl.value = ds.name;
+		optEl.innerText = ds.title;
+		optEl.dataset.customProperties = `<img src="/ds-image/${ds.name}">`;
+		$(selectEl).append(optEl);
+	}
+
+	function renderTomSelectItemAndOption(data, escape) {
+		if (data.customProperties) {
+			return `<div><span class="dropdown-item-indicator">${data.customProperties}</span>${escape(data.text)}</div>`;
+		}
+		return `<div>${escape(data.text)}</div>`;
+	}
+
+	const ts  = await new TomSelect($(selectEl), {
+		maxItems: null,
+		render: {
+			item: renderTomSelectItemAndOption,
+			option: renderTomSelectItemAndOption
+		}
+	});
+
+	// Clear input after selecting matching option from list
+	// (I have no idea why this isn't the default behavior)
+	ts.on('item_add', () => ts.control_input.value = '' );
+
+	return ts;
+}
+
 
 
 
@@ -1744,8 +1781,8 @@ function renderMessageItem(item, options) {
 	}
 	$('.message-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
 	$('.message-avatar', elem).innerHTML = avatar(true, item.entity);
-	$('.data-source-icon', elem).style.backgroundImage = `url('/resources/images/data-sources/${tlz.dataSources[item.data_source_name].icon}')`;
-	$('.data-source-icon', elem).title = tlz.dataSources[item.data_source_name].title;
+	$('.data-source-icon', elem).style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
+	$('.data-source-icon', elem).title = item.data_source_title;
 	$('.view-item-link', elem).href = `/items/${item.repo_id}/${item.id}`;
 
 	if (options?.withToRelations && item.related) {
@@ -2058,7 +2095,7 @@ const PreviewModal = (function() {
 			$('#modal-preview .media-owner-name').innerText = entityDisplayNameAndAttr(item.entity).name;
 			$('#modal-preview .text-secondary').innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
 
-			$('#modal-preview .modal-title').innerHTML = `<span class="avatar avatar-xs rounded me-2" style="background-image: url('/resources/images/data-sources/${tlz.dataSources[item.data_source_name].icon}')"></span>`;
+			$('#modal-preview .modal-title').innerHTML = `<span class="avatar avatar-xs rounded me-2" style="background-image: url('/ds-image/${item.data_source_name}')"></span>`;
 			$('#modal-preview .modal-title').appendChild(document.createTextNode(item?.filename || baseFilename(item?.data_file)));
 			$('#modal-preview .subheader').innerText = `# ${item.id}`;
 
@@ -2186,11 +2223,6 @@ function newEntitySelect(element, maxItems, noWrap) {
 				weight: 0.5
 			},
 		],
-
-		copyClassesToDropdown: false, // TODO: figure out exactly what this does and whether we need it
-		optionClass: 'dropdown-item',
-		dropdownClass: 'dropdown-menu ts-dropdown',
-
 		load: function(query, callback) {
 			const params = {
 				repo: tlz.openRepos[0].instance_id,
@@ -2321,16 +2353,14 @@ function filterToQueryString() {
 	}
 
 	// data sources
-	const checkedDataSources = $$('.tl-data-source-dropdown input:checked');
-	const allDataSources = $$('.tl-data-source-dropdown input')
-	if (checkedDataSources.length < allDataSources.length) {
-		const dataSources = [];
-		for (const elem of checkedDataSources) {
-			dataSources.push(elem.value);
+	if ($('.tl-data-source.tomselected')) {
+		const ts = $('.filter .tl-data-source.tomselected').tomselect;
+		const val = ts.getValue();
+		if (Array.isArray(val) && val.length) {
+			qs.set("data_source", val.join(','));
+		} else {
+			qs.delete("data_source");
 		}
-		qs.set('data_source', dataSources);
-	} else {
-		qs.delete('data_source');
 	}
 
 	// item types
@@ -2402,7 +2432,7 @@ async function queryStringToFilter() {
 		});
 		if (entities?.length) {
 			$('.entity-input').tomselect.addOption(entities[0]);
-			$('.entity-input').tomselect.addItem(entities[0].id); // TODO: on page load, this triggers "change" which causes a re-render... ideally we shouldn't be listening for that event yet
+			$('.entity-input').tomselect.addItem(entities[0].id, true); // true = don't fire event (the updated filter gets submitted later)
 		}
 	}
 	if ($('#selected-entities-only') && qs.get("only_entity")) {
@@ -2412,19 +2442,16 @@ async function queryStringToFilter() {
 	}
 
 	// data sources
-	if ($('.tl-data-source-dropdown')) {
-		const dataSources = qs.get("data_source");
-		if (typeof dataSources !== 'undefined') {
-			// check all by default
-			for (var elem of $$('.tl-data-source-dropdown input[type=checkbox]')) {
-				elem.checked = true;
-			}
+	if ($('.tl-data-source') && qs.get("data_source")) {
+		const qsDS = qs.get("data_source");
+		const tsControl = $('.tl-data-source').tomselect;
+		if ($('.tl-data-source.tomselected')) {
+			tsControl.setValue(qsDS.split(','), true); // true = don't fire event (the updated filter gets submitted later)
 		} else {
-			// check only specified ones
-			for (const ds of dataSources.split(",")) {
-				$(`.tl-data-source-dropdown input[type=checkbox][value="${ds}"]`).checked = true;
-			}
-		}
+			tsControl.on('initialize', () => {
+				tsControl.setValue(qsDS.split(','), true);
+			});
+		};
 	}
 
 	// classes (item types)
@@ -2531,12 +2558,13 @@ function commonFilterSearchParams(params) {
 	}
 
 	// data sources
-	const checkedDataSources = $$('.filter .tl-data-source-dropdown input:checked');
-	const allDataSources = $$('.filter .tl-data-source-dropdown input')
-	if (!params.data_source && checkedDataSources.length < allDataSources.length) {
-		params.data_source = [];
-		for (const elem of checkedDataSources) {
-			params.data_source.push(elem.value);
+	if (!params.data_source && $('.filter .tl-data-source.tomselected')) {
+		const ts = $('.filter .tl-data-source.tomselected').tomselect;
+		const val = ts.getValue();
+		if (Array.isArray(val) && val.length) {
+			params.data_source = val;
+		} else if (val?.length > 0) {
+			params.data_source = [val];
 		}
 	}
 

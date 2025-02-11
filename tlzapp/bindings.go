@@ -208,62 +208,62 @@ func (a App) GetEntity(repoID string, entityID int64) (timeline.Entity, error) {
 	return tl.LoadEntity(entityID)
 }
 
-func (a App) AddAccount(repoID string, dataSourceID string, auth bool, dsOpt json.RawMessage) (timeline.Account, error) {
-	tl, err := getOpenTimeline(repoID)
-	if err != nil {
-		return timeline.Account{}, err
-	}
+// func (a App) AddAccount(repoID string, dataSourceID string, auth bool, dsOpt json.RawMessage) (timeline.Account, error) {
+// 	tl, err := getOpenTimeline(repoID)
+// 	if err != nil {
+// 		return timeline.Account{}, err
+// 	}
 
-	ds, err := timeline.GetDataSource(dataSourceID)
-	if err != nil {
-		return timeline.Account{}, err
-	}
+// 	ds, err := timeline.GetDataSource(dataSourceID)
+// 	if err != nil {
+// 		return timeline.Account{}, err
+// 	}
 
-	// // for the 'files' data source, the default user ID can and probably should be user@hostname.
-	// if payload.DataSource == files.DataSourceID && payload.Owner.UserID == "" {
-	// 	var username, hostname string
+// 	// for the 'files' data source, the default user ID can and probably should be user@hostname.
+// 	if payload.DataSource == files.DataSourceID && payload.Owner.UserID == "" {
+// 		var username, hostname string
 
-	// 	u, err := user.Current()
-	// 	if err == nil {
-	// 		username = u.Username
-	// 	} else {
-	// 		s.log.Error("looking up current user", zap.Error(err))
-	// 	}
+// 		u, err := user.Current()
+// 		if err == nil {
+// 			username = u.Username
+// 		} else {
+// 			s.log.Error("looking up current user", zap.Error(err))
+// 		}
 
-	// 	hostname, err = os.Hostname()
-	// 	if err != nil {
-	// 		s.log.Error("looking up hostname", zap.Error(err))
-	// 	}
+// 		hostname, err = os.Hostname()
+// 		if err != nil {
+// 			s.log.Error("looking up hostname", zap.Error(err))
+// 		}
 
-	// 	// set some sane, slightly recognizable defaults, I guess
-	// 	if username == "" {
-	// 		if payload.Owner.Name != "" {
-	// 			username = payload.Owner.Name
-	// 		} else {
-	// 			username = "me"
-	// 		}
-	// 	}
-	// 	if hostname == "" {
-	// 		hostname = "localhost"
-	// 	}
+// 		// set some sane, slightly recognizable defaults, I guess
+// 		if username == "" {
+// 			if payload.Owner.Name != "" {
+// 				username = payload.Owner.Name
+// 			} else {
+// 				username = "me"
+// 			}
+// 		}
+// 		if hostname == "" {
+// 			hostname = "localhost"
+// 		}
 
-	// 	payload.Owner.UserID = username + "@" + hostname
-	// }
+// 		payload.Owner.UserID = username + "@" + hostname
+// 	}
 
-	acct, err := tl.AddAccount(a.ctx, dataSourceID, dsOpt)
-	if err != nil {
-		return timeline.Account{}, err
-	}
+// 	acct, err := tl.AddAccount(a.ctx, dataSourceID, dsOpt)
+// 	if err != nil {
+// 		return timeline.Account{}, err
+// 	}
 
-	if auth {
-		err = ds.NewAPIImporter().Authenticate(a.ctx, acct, dsOpt)
-		if err != nil {
-			return timeline.Account{}, err
-		}
-	}
+// 	if auth {
+// 		err = ds.NewAPIImporter().Authenticate(a.ctx, acct, dsOpt)
+// 		if err != nil {
+// 			return timeline.Account{}, err
+// 		}
+// 	}
 
-	return acct, nil
-}
+// 	return acct, nil
+// }
 
 func (a App) RepositoryIsEmpty(repo string) (bool, error) {
 	tl, err := getOpenTimeline(repo)
@@ -703,12 +703,37 @@ func (a *App) SearchEntities(params timeline.EntitySearchParams) ([]timeline.Ent
 	return results, nil
 }
 
-func (a *App) DataSources() []timeline.DataSource {
-	return timeline.AllDataSources()
-}
+func (a *App) DataSources(ctx context.Context, targetDSName string) ([]timeline.DataSourceRow, error) {
+	openTimelinesMu.RLock()
+	defer openTimelinesMu.RUnlock()
 
-func (a *App) DataSource(name string) (timeline.DataSource, error) {
-	return timeline.GetDataSource(name)
+	// use a map for deduplication first
+	allMap := make(map[string]timeline.DataSourceRow)
+
+	for _, tl := range openTimelines {
+		tlDSes, err := tl.DataSources(ctx, targetDSName)
+		if err != nil {
+			return nil, err
+		}
+		for _, tlDS := range tlDSes {
+			allMap[tlDS.Name] = tlDS
+		}
+		if len(tlDSes) > 0 && targetDSName != "" {
+			break // found what we're looking for
+		}
+	}
+
+	// then turn the map which has no duplicates into a slice
+	all := make([]timeline.DataSourceRow, 0, len(allMap))
+	for _, ds := range allMap {
+		all = append(all, ds)
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Title < all[j].Title
+	})
+
+	return all, nil
 }
 
 func (a *App) ItemClassifications(repo string) ([]timeline.Classification, error) {

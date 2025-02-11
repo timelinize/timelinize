@@ -113,7 +113,7 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 			dsGroupElem.ds = ds;
 			dsGroupElem.fileCounts = {'file': 0, 'dir': 0, 'archive': 0};
 			dsGroupElem.filenames = [];
-			$('.dsgroup-icon', dsGroupElem).style.backgroundImage = `url('/resources/images/data-sources/${ds.icon}')`;
+			$('.dsgroup-icon', dsGroupElem).style.backgroundImage = `url('/ds-image/${ds.name}')`;
 			$('.dsgroup-name', dsGroupElem).innerText = ds.title;
 
 			// each file listing in a DS group is a uniquely-ID'ed collapsible region
@@ -225,7 +225,7 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 		dsOptModal = cloneTemplate('#tpl-modal-import-dsopt');
 		dsOptModal.id = `modal-import-dsopt-${ds.name}`;
 	}
-	$('.avatar', dsOptModal).style.backgroundImage = `url('/resources/images/data-sources/${ds.icon}')`;
+	$('.avatar', dsOptModal).style.backgroundImage = `url('/ds-image/${ds.icon}')`;
 	$('.modal-title', dsOptModal).append(document.createTextNode(ds.title));
 
 	const dsOptElem = cloneTemplate(`#tpl-dsopt-${ds.name}`);

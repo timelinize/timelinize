@@ -23,7 +23,10 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"io/fs"
+	"mime"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -31,6 +34,7 @@ import (
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3" // register the sqlite3 driver
+	"github.com/timelinize/timelinize/datasources"
 	"go.uber.org/zap"
 )
 
@@ -125,7 +129,7 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 
-	query := `INSERT OR IGNORE INTO "data_sources" ("name", "title", "description") VALUES`
+	query := `INSERT OR IGNORE INTO "data_sources" ("name", "title", "description", "media", "media_type", "standard") VALUES`
 
 	vals := make([]any, 0, len(dataSources))
 	var count int
@@ -134,8 +138,39 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 		if count > 0 {
 			query += ","
 		}
-		query += " (?, ?, ?)"
-		vals = append(vals, ds.Name, ds.Title, ds.Description)
+		query += " (?, ?, ?, ?, ?, ?)"
+
+		var media []byte
+		var mediaType *string
+		if ds.Icon != "" {
+			var err error
+			media, err = fs.ReadFile(datasources.Images, "_images/"+ds.Icon)
+			if err != nil {
+				return fmt.Errorf("reading data source icon: %w", err)
+			}
+			ct := mime.TypeByExtension(path.Ext(ds.Icon))
+			if ct == "" {
+				switch strings.ToLower(path.Ext(ds.Icon)) {
+				case ".svg":
+					ct = "image/svg+xml"
+				case ".jpg", ".jpeg", ".jpe":
+					ct = "image/jpeg"
+				case ".png":
+					ct = "image/png"
+				case ".ico":
+					ct = "image/x-icon" // debatable whether it should be that, or "image/vnd.microsoft.icon"
+				case ".webp":
+					ct = "image/webp"
+				case ".avif":
+					ct = "image/webp"
+				case ".gif":
+					ct = "image/gif"
+				}
+			}
+			mediaType = &ct
+		}
+
+		vals = append(vals, ds.Name, ds.Title, ds.Description, media, mediaType, true)
 		count++
 	}
 

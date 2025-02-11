@@ -105,9 +105,6 @@ const app = {
 	CloseRepository(repo_id) {
 		return post("/api/close-repository", repo_id);
 	},
-	DataSource(dsID) {
-		return post("/api/data-source", dsID);
-	},
 	DataSources() {
 		return get("/api/data-sources");
 	},
