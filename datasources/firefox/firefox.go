@@ -142,6 +142,9 @@ func (f *Firefox) process(ctx context.Context, path string, itemChan chan<- *tim
 
 		select {
 		case <-ctx.Done():
+			if ctx.Err() == context.Canceled {
+				return nil
+			}
 			return ctx.Err()
 		default:
 			item := &timeline.Item{
