@@ -103,7 +103,6 @@
 
     [linters-settings.depguard.rules.Main]
     files = ["$all", "!$test"]
-    listMode = "Strict"
     allow = [
         "$gostd",
 	    "github.com/dhowden/tag",
@@ -135,7 +134,6 @@
 
     [linters-settings.depguard.rules.Tests]
     files = ["$test"]
-    listMode = "Lax"
 
         # this has to be a list of objects to prevent golangci-lint from panicking (
         [[linters-settings.depguard.rules.Tests.deny]]
