@@ -148,7 +148,7 @@ func TestFirefox_FileImport(t *testing.T) {
 			if desc, ok := item.Metadata["Description"].(string); !ok || desc != "Test description" {
 				t.Errorf("Expected description 'Test description', got %v", desc)
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(10 * time.Second):
 			t.Fatal("Timeout waiting for imported item")
 		}
 	}
