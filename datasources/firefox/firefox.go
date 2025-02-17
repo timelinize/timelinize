@@ -44,6 +44,7 @@ func init() {
 		Name:            DataSourceID,
 		Title:           DataSourceName,
 		Icon:            "firefox.svg",
+		Description:     "Firefox places.sqlite database importer",
 		NewFileImporter: func() timeline.FileImporter { return new(Firefox) },
 	})
 	if err != nil {
