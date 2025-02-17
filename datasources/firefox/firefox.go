@@ -94,7 +94,7 @@ func (f *Firefox) process(ctx context.Context, path string, itemChan chan<- *tim
 
 		_, err = io.Copy(destFile, sourceFile)
 		if err != nil {
-			return fmt.Errorf("copying file contents: %w", err)
+			return fmt.Errorf("copying file contents from %s to %s: %w", src, dst, err)
 		}
 
 		return nil
