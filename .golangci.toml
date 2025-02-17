@@ -55,7 +55,6 @@
         "staticcheck",
         "stylecheck",
         "tagalign",
-        "tenv",
         "unconvert",
         "unparam",
         "unused",
