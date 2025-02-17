@@ -415,7 +415,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		FROM jobs
 		WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
 		ORDER BY start, created
-		LIMIT 3`, JobQueued, JobInterrupted, hostname, JobNameImport)
+		LIMIT 3`, JobQueued, JobInterrupted, hostname, JobTypeImport)
 	if err != nil {
 		return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
 	}
@@ -515,6 +515,31 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 	err = tx.QueryRowContext(ctx, `SELECT id FROM relations WHERE label=? LIMIT 1`, rel.Label).Scan(&relID)
 	if err != nil {
 		return fmt.Errorf("loading relation ID: %w (rawRelationship=%s)", err, rel)
+	}
+
+	// make sure the relationship is unique; we don't use UNIQUE constraints in the DB because this
+	// check is a little more complex with the potential timeframes; and we only need 1 index to
+	// make it reasonably fast, rather than multiple on the different to/from fields
+	// (I found SELECT 1 to be faster than SELECT count(), but maybe that was just a fluke?)
+	var dupe bool
+	err = tx.QueryRowContext(ctx, `
+		SELECT 1
+		FROM relationships
+		WHERE relation_id=?
+			AND from_item_id IS ?
+			AND to_item_id IS ?
+			AND from_attribute_id IS ?
+			AND to_attribute_id IS ?
+			AND ((? IS NULL OR start >= ?) AND (? IS NULL OR end <= ?))
+		LIMIT 1`, relID,
+		rel.fromItemID, rel.toItemID,
+		rel.fromAttributeID, rel.toAttributeID,
+		rel.start, rel.start, rel.end, rel.end).Scan(&dupe)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("checking for duplicate relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
+	}
+	if dupe {
+		return nil // already in DB
 	}
 
 	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO relationships
@@ -740,6 +765,75 @@ func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
 
 	// TODO: why would we need to commit a read-only tx?
 	return p, tx.Commit()
+}
+
+func (tl *Timeline) NextGraphFromImport(jobID int64) (*Graph, error) {
+	ij, err := tl.loadInteractiveImportJob(jobID)
+	if err != nil {
+		return nil, err
+	}
+
+	// see if graph is already being processed interactively
+	graphPath := filepath.Join(ij.tempGraphFolder(), "root.graph")
+	if FileExists(graphPath) {
+		var g *Graph
+		file, err := os.Open(graphPath)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		if err = json.NewDecoder(file).Decode(&g); err != nil {
+			return nil, err
+		}
+		return g, nil
+	}
+
+	// TODO: see if there's already one that has been received
+	g := <-ij.ProcessingOptions.Interactive.Graphs
+	return g.Graph, nil
+}
+
+func (tl *Timeline) SubmitGraph(jobID int64, g *Graph, skip bool) error {
+	ij, err := tl.loadInteractiveImportJob(jobID)
+	if err != nil {
+		return err
+	}
+	if !skip {
+		ij.pMu.Lock()
+		proc := ij.p
+		ij.pMu.Unlock()
+		if err := proc.pipeline(tl.ctx, []*Graph{g}); err != nil {
+			return err
+		}
+	}
+	graphPath := ij.tempGraphFolder()
+	if err := os.RemoveAll(graphPath); err != nil {
+		return fmt.Errorf("clearing graph's state in temp folder: %s: %w", graphPath, err)
+	}
+	return nil
+}
+
+func (tl *Timeline) loadInteractiveImportJob(jobID int64) (*ImportJob, error) {
+	tl.activeJobsMu.RLock()
+	job, ok := tl.activeJobs[jobID]
+	tl.activeJobsMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("job %d is not active", jobID)
+	}
+	job.mu.Lock()
+	state := job.currentState
+	job.mu.Unlock()
+	if state != JobStarted {
+		return nil, fmt.Errorf("job %d is not running (currently %s)", jobID, state)
+	}
+	ij, ok := job.action.(*ImportJob)
+	if !ok {
+		return nil, fmt.Errorf("job %d is %T, not ImportJob", jobID, job.action)
+	}
+	if ij.ProcessingOptions.Interactive == nil {
+		return nil, fmt.Errorf("job %d is not an interactive import", jobID)
+	}
+	return ij, nil
 }
 
 // DeleteOptions configures how to perform a delete.
@@ -1091,7 +1185,7 @@ type ProcessingOptions struct {
 	// Note: Some fields are described in aggregate, such as data and location.
 	ItemFieldUpdates map[string]fieldUpdatePolicy `json:"item_field_updates,omitempty"`
 
-	// TODO: WIP
+	// TODO: WIP (Should this be in importjob or processingoptions?)
 	Interactive *InteractiveImport `json:"interactive,omitempty"`
 
 	// How many items to process in one database transaction. This is a minimum value,
@@ -1106,7 +1200,12 @@ type ProcessingOptions struct {
 }
 
 type InteractiveImport struct {
-	Graphs chan<- *Graph `json:"-"`
+	Graphs chan *InteractiveGraph `json:"-"`
+}
+
+type InteractiveGraph struct {
+	Graph         *Graph
+	DataFileReady chan struct{}
 }
 
 // fieldUpdatePolicy values specify how to update a field/column of an item in the DB.

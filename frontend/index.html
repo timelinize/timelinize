@@ -26,11 +26,17 @@
 
 		<link rel="icon" href="/resources/images/favicon.png">
 
-		<link rel="stylesheet" href="/resources/css/vendor/mapbox-gl-js-v3.6.0.min.css">
-		<script src="/resources/js/vendor/mapbox-gl-js-v3.6.0.min.js"></script>
+		<!-- Mapbox GL JS -->
+		<link rel="stylesheet" href="/resources/css/vendor/mapbox-gl-js-v3.9.1.min.css">
+		<script src="/resources/js/vendor/mapbox-gl-js-v3.9.1.min.js"></script>
+
+		<!-- Mapbox GL Draw with the Geodesic plugin (which gives us circle drawing) -->
+		<link rel="stylesheet" href="/resources/css/vendor/mapbox-gl-draw-v1.5.0.css">
+		<script src="/resources/js/vendor/mapbox-gl-draw-v1.5.0.min.js"></script>
+		<script src="/resources/js/vendor/mapbox-gl-draw-geodesic-v2.3.1.umd.min.js"></script>
 
 		<!-- First vendored styles, then Tabler, then ours -->
-		<link rel="stylesheet" href="/resources/css/vendor/tom-select-v2.2.2.css">
+		<link rel="stylesheet" href="/resources/css/vendor/tom-select.min.css">
 		<link rel="stylesheet" href="/resources/css/vendor/air-datepicker.min.css">
 		<link rel="stylesheet" href="/resources/css/vendor/nouislider.v15.6.1.css">
 		<link rel="stylesheet" href="/resources/css/vendor/tabler.min.css">
@@ -40,7 +46,7 @@
 
 		<!-- First vendored scripts, then Tabler, then ours -->
 		<script src="/resources/js/vendor/luxon.v3.5.0.min.js"></script>
-		<script src="/resources/js/vendor/apexcharts.min.js"></script>
+		<script src="/resources/js/vendor/echarts-v5.6.0.min.js"></script>
 		<script src="/resources/js/vendor/nouislider.v15.6.1.min.js"></script>
 		<script src="/resources/js/vendor/air-datepicker.min.js"></script>
 		<script src="/resources/js/vendor/tom-select.base.min.js"></script>
@@ -49,10 +55,7 @@
 		<script src="/resources/js/vendor/thumbhash.js"></script>
 		<script src="/resources/js/vendor/marked.min.js"></script>
 		<script src="/resources/js/vendor/purify.min.js"></script>
-		<!-- <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta17/dist/js/tabler.min.js"></script> -->
 		<script src="/resources/js/vendor/tabler.min.js"></script>
-		<!-- <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
-		<script src="https://cdn.jsdelivr.net/npm/@easepick/bundle@1.2.0/dist/index.umd.min.js"></script> -->
 
 		<!-- TODO: these should ideally NOT be deferred; separate out DOM-specific code that runs at page load -->
 		<script src="/resources/js/app.js"></script>
@@ -81,10 +84,12 @@
 		<script src="/resources/js/entity.js"></script>
 		<script src="/resources/js/gallery.js"></script>
 		<script src="/resources/js/import.js"></script>
+		<script src="/resources/js/input.js"></script>
 		<script src="/resources/js/item.js"></script>
 		<script src="/resources/js/items.js"></script>
 		<script src="/resources/js/job.js"></script>
 		<script src="/resources/js/map.js"></script>
+		<script src="/resources/js/settings.js"></script>
 		<script src="/resources/js/setup.js"></script>
 		<script src="/resources/js/timeline.js"></script>
 	
@@ -313,7 +318,7 @@
 										</span>
 									</a>
 									<div class="dropdown-menu dropdown-menu-card"
-										style="--tblr-dropdown-min-width: 700px;" data-bs-theme="light">
+										style="--tblr-dropdown-min-width: 700px; --tblr-dropdown-border-width: 0;" data-bs-theme="light">
 										<div class="card">
 			
 			

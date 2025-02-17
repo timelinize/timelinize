@@ -172,12 +172,24 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				})
 			}
 
-			photoURL := card.PreferredValue(vcard.FieldPhoto)
-			if photoURL == "" {
-				photoURL = card.PreferredValue(vcard.FieldLogo)
+			// for a picture, see if there's a sidecar file that matches the name (this is the case for Google Takeout exports)
+			if p.Name != "" {
+				sidecarFilename := path.Join(path.Dir(dirEntry.Filename), p.Name+".jpg")
+				if timeline.FileExistsFS(dirEntry.FS, sidecarFilename) {
+					p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+						return dirEntry.FS.Open(sidecarFilename)
+					}
+				}
 			}
-			if photoURL != "" {
-				p.NewPicture = timeline.DownloadData(photoURL)
+			// otherwise, try downloading the picture from a URL in the vcard, although the link is often dead
+			if p.NewPicture == nil {
+				photoURL := card.PreferredValue(vcard.FieldPhoto)
+				if photoURL == "" {
+					photoURL = card.PreferredValue(vcard.FieldLogo)
+				}
+				if photoURL != "" {
+					p.NewPicture = timeline.DownloadData(photoURL)
+				}
 			}
 
 			// the following fields are less common or useful, but still good to have if specified

@@ -132,7 +132,7 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(jsonBytes)))
 	status := errVal.HTTPStatus
-	if status < lowestErrorStatus {
+	if status < http.StatusOK {
 		status = http.StatusInternalServerError
 	}
 	w.WriteHeader(status)

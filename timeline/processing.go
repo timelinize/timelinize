@@ -33,11 +33,13 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -79,9 +81,7 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 			}
 
 			if len(batch) > 0 {
-				err := p.pipeline(ctx, batch, &recursiveState{
-					procOpt: po,
-				})
+				err := p.pipeline(ctx, batch)
 				if err != nil {
 					p.log.Error("batch pipeline", zap.Error(err))
 				}
@@ -149,11 +149,10 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 					continue
 				}
 				if po.Interactive != nil {
-					// TODO: emit log indicating to frontend that we have a graph ready
-					// po.Interactive.Graphs <- &InteractiveGraph{
-					// 	Graph:         g,
-					// 	DataFileReady: make(chan struct{}),
-					// }
+					if err := p.interactiveGraph(ctx, g, po.Interactive); err != nil {
+						p.log.Error("sending interactive graph", zap.Error(err))
+					}
+					continue
 				}
 				addToBatch(g)
 			}
@@ -163,8 +162,151 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 	return wg, ch
 }
 
-func (p *processor) pipeline(ctx context.Context, batch []*Graph, rs *recursiveState) error {
-	err := p.phase1(ctx, rs, batch)
+func (p *processor) interactiveGraph(ctx context.Context, root *Graph, opts *InteractiveImport) error {
+	p.assignGraphIDs(root)
+
+	if err := p.saveInteractiveGraphFromRootNode(root); err != nil {
+		return err
+	}
+
+	// download the data from the graph in the background while we present the initial structure to the user
+	if err := p.downloadGraphDataFiles(ctx, root, opts); err != nil {
+		return err
+	}
+
+	p.log.Info("graph ready", zap.String("graph_id", root.ProcessingID))
+
+	opts.Graphs <- &InteractiveGraph{
+		Graph:         root,
+		DataFileReady: make(chan struct{}),
+	}
+
+	return errors.New("TODO: WIP")
+}
+
+func (p *processor) saveInteractiveGraphFromRootNode(rootNode *Graph) error {
+	graphPath := p.tempGraphFolder()
+	if err := os.MkdirAll(graphPath, 0700); err != nil {
+		return err
+	}
+	file, err := os.Create(filepath.Join(graphPath, "root.graph"))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err := json.NewEncoder(file).Encode(rootNode); err != nil {
+		return err
+	}
+	return file.Sync()
+}
+
+func (p *processor) assignGraphIDs(g *Graph) {
+	if g == nil {
+		return
+	}
+	if g.ProcessingID == "" {
+		g.ProcessingID = uuid.New().String()
+	}
+	for _, edge := range g.Edges {
+		p.assignGraphIDs(edge.From)
+		p.assignGraphIDs(edge.To)
+	}
+}
+
+//nolint:unparam // TODO: file bug; opts is definitely used!
+func (p *processor) downloadGraphDataFiles(ctx context.Context, g *Graph, opts *InteractiveImport) error {
+	if g == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if (g.Item != nil && g.Item.Content.Data != nil) ||
+		(g.Entity != nil && g.Entity.NewPicture != nil) {
+		go func() {
+			// TODO: Use CoW (write to a .tmp or .dl file first, then rename when finished, so we can know if it is complete)
+			file, err := p.openInteractiveGraphDataFile(g)
+			if err != nil {
+				p.log.Error("opening graph data file", zap.Error(err))
+				return
+			}
+			defer file.Close()
+
+			// open the reader for either the item data or the entity picture
+			var dataReader io.ReadCloser
+			if g.Item != nil && g.Item.Content.Data != nil {
+				dataReader, err = g.Item.Content.Data(ctx)
+			} else if g.Entity != nil && g.Entity.NewPicture != nil {
+				dataReader, err = g.Entity.NewPicture(ctx)
+			}
+			if err != nil {
+				p.log.Error("opening data reader from graph", zap.Error(err))
+				return
+			}
+			defer dataReader.Close()
+
+			// now copy the data to the file
+			if _, err := io.Copy(file, dataReader); err != nil {
+				p.log.Error("copying data to temporary file", zap.Error(err))
+				return
+			}
+			if err := file.Sync(); err != nil {
+				p.log.Error("syncing data file", zap.Error(err))
+			}
+		}()
+	}
+	// TODO: download the item owner's profile picture too, if available (though I don't know of anywhere this happens yet)
+	// if g.Item != nil && g.Item.Owner.NewPicture != nil {
+	// }
+	for _, edge := range g.Edges {
+		if err := p.downloadGraphDataFiles(ctx, edge.From, opts); err != nil {
+			return err
+		}
+		if err := p.downloadGraphDataFiles(ctx, edge.To, opts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *processor) openInteractiveGraphDataFile(g *Graph) (*os.File, error) {
+	// We store interactive graph data files, temporarily while the user is
+	// interacting with the graph, somewhat deep in the system temp folder.
+	// It's in a system temp folder because import jobs are not typically
+	// portable; especially starting on one system and continuing on another,
+	// though I guess we could simply change the path to be something within
+	// the timeline if desired. Still, this seems more proper at least for now.
+	tmpFilePath := filepath.Join(p.tempGraphFolder(), g.ProcessingID+".graph.data")
+
+	// ensure folder tree exists or we're gonna have a bad time
+	if err := os.MkdirAll(filepath.Dir(tmpFilePath), 0700); err != nil {
+		return nil, err
+	}
+
+	return os.Create(tmpFilePath)
+}
+
+func (p *processor) tempGraphFolder() string {
+	return filepath.Join(
+		os.TempDir(),
+		"timelinize",
+		fmt.Sprintf("job-%d", p.ij.job.ID()))
+}
+
+func (p *processor) pipeline(ctx context.Context, batch []*Graph) error {
+	// During large imports, I've found that running ANALYZE every so often
+	// can be helpful for improving performance, since an import is much more
+	// than just an INSERT, there's lots of SELECTs along the way that use
+	// indexes. For example, in my tests importing about a quarter million
+	// messages (relation-heavy, since they are sent to an attribute), which
+	// I repeated twice, it would take 30 minutes to import without ANALYZE.
+	// But when running ANALYZE every so often, it only took 23 minutes.
+	p.rootGraphCount += len(batch)
+	if p.rootGraphCount%15000 < len(batch) {
+		p.tl.optimizeDB(p.log.Named("optimizer"))
+	}
+
+	err := p.phase1(ctx, batch)
 	if err != nil {
 		return err
 	}
@@ -185,7 +327,7 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph, rs *recursiveS
 }
 
 // phase1 inserts items into the database and preps data files for writing.
-func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Graph) error {
+func (p *processor) phase1(ctx context.Context, batch []*Graph) error {
 	// TODO: maybe if we first go through the batch in a readlock, we can determine what are
 	// duplicates, before acquiring a write lock, and that could help for faster resumption
 	// (especially if we have even more workers)
@@ -199,7 +341,7 @@ func (p *processor) phase1(ctx context.Context, rs *recursiveState, batch []*Gra
 	defer tx.Rollback()
 
 	for _, g := range batch {
-		if err = p.processGraph(ctx, tx, rs, g); err != nil {
+		if err = p.processGraph(ctx, tx, g); err != nil {
 			p.log.Error("processing graph", zap.String("graph", g.String()), zap.Error(err))
 			g.err = err
 		}
@@ -377,7 +519,7 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 	return nil
 }
 
-func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursiveState, ig *Graph) error {
+func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, ig *Graph) error {
 	if ig == nil {
 		return nil
 	}
@@ -397,7 +539,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 		}
 	case ig.Item != nil:
 		var err error
-		ig.rowID, err = p.processItem(ctx, tx, ig.Item, state)
+		ig.rowID, err = p.processItem(ctx, tx, ig.Item)
 		if err != nil {
 			return fmt.Errorf("processing item node: %w", err)
 		}
@@ -405,7 +547,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 
 	// process connected nodes
 	for _, r := range ig.Edges {
-		err := p.processRelationship(ctx, tx, r, ig, state)
+		err := p.processRelationship(ctx, tx, r, ig)
 		if err != nil {
 			p.log.Error("processing relationship",
 				zap.Int64("item_or_attribute_row_id", ig.rowID.id()),
@@ -416,17 +558,17 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, state *recursi
 	return nil
 }
 
-func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item, state *recursiveState) (latentID, error) {
+func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item) (latentID, error) {
 	// skip item if outside of timeframe (data source should do this for us, but
 	// ultimately we should enforce it: it just means the data source is being
 	// less efficient than it could be)
 	// TODO: also consider Timespan
 	if !it.Timestamp.IsZero() {
-		if !state.procOpt.Timeframe.Contains(it.Timestamp) {
+		if !p.ij.ProcessingOptions.Timeframe.Contains(it.Timestamp) {
 			p.log.Warn("ignoring item outside of designated timeframe (data source should not send this item; it is probably being less efficient than it could be)",
 				zap.String("item_id", it.ID),
-				zap.Timep("tf_since", state.procOpt.Timeframe.Since),
-				zap.Timep("tf_until", state.procOpt.Timeframe.Until),
+				zap.Timep("tf_since", p.ij.ProcessingOptions.Timeframe.Since),
+				zap.Timep("tf_until", p.ij.ProcessingOptions.Timeframe.Until),
 				zap.Time("item_timestamp", it.Timestamp),
 			)
 			return latentID{}, errors.New("item is outside of designated timeframe")
@@ -665,11 +807,7 @@ const (
 	itemUpdated  itemStoreResult = "updated"
 )
 
-type recursiveState struct {
-	procOpt ProcessingOptions
-}
-
-func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relationship, ig *Graph, state *recursiveState) error {
+func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relationship, ig *Graph) error {
 	// both sides can be set, or if this graph has a node then just
 	// one needs to be set; but at least one of these needs always
 	// to be set since we need a node on both sides of an edge
@@ -702,13 +840,13 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 
 	// if the relationship explicitly has a "from" node set, use that;
 	// otherwise, assume this node is the "from" side
-	if err := p.linkRelation(ctx, ig, state, tx, r, &rawRel, relationFrom); err != nil {
+	if err := p.linkRelation(ctx, ig, tx, r, &rawRel, relationFrom); err != nil {
 		return err
 	}
 
 	// if the relationship explicitly has a "to" node set, use that;
 	// otherwise, assume this node is the "to" side
-	if err := p.linkRelation(ctx, ig, state, tx, r, &rawRel, relationTo); err != nil {
+	if err := p.linkRelation(ctx, ig, tx, r, &rawRel, relationTo); err != nil {
 		return err
 	}
 
@@ -723,14 +861,14 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 // I know this function is hard to read, but I initially had this inline above, and the linter complained it was duplicated code,
 // despite the whole "from-to" parts being different; it's just annoying enough to have to change what you are assigning to that
 // I didn't want to refactor this, but I did it anyway, I hope the linter is happy.
-func (p *processor) linkRelation(ctx context.Context, ig *Graph, state *recursiveState, tx *sql.Tx, r Relationship, rawRel *rawRelationship, fromOrTo string) error {
+func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r Relationship, rawRel *rawRelationship, fromOrTo string) error {
 	otherGraph := r.From
 	if fromOrTo == relationTo {
 		otherGraph = r.To
 	}
 
 	if otherGraph != nil {
-		err := p.processGraph(ctx, tx, state, otherGraph)
+		err := p.processGraph(ctx, tx, otherGraph)
 		if err != nil {
 			return fmt.Errorf("%s node: %w", fromOrTo, err)
 		}
@@ -880,6 +1018,21 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		if dbItem.DataText == nil && dbItem.DataFile == nil && (it.dataText != nil || it.Content.Data != nil) {
 			dataFile = true
 			updateOverrides["data"] = updatePolicyPreferIncoming
+		}
+
+		// if incoming item is linked to an owner attribute, but the one in the DB is null,
+		// prefer the incoming attribute/owner
+		if dbItem.AttributeID == nil {
+			var hasIDAttr bool
+			for _, attr := range it.Owner.Attributes {
+				if attr.Identity {
+					hasIDAttr = true
+					break
+				}
+			}
+			if hasIDAttr {
+				updateOverrides["attribute_id"] = updatePolicyPreferIncoming
+			}
 		}
 
 		// reprocess the item row if there's new data to be added
@@ -1089,6 +1242,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 
 	ir.DataSourceID = &p.dsRowID
 	ir.DataSourceName = &p.ds.Name
+	ir.DataSourceTitle = &p.ds.Title
 	ir.JobID = &p.ij.job.id
 	if attrID != 0 {
 		ir.AttributeID = &attrID
@@ -1115,10 +1269,10 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 			ir.TimeOffset = &offsetSec
 		}
 	}
-	if !it.Timespan.IsZero() {
+	if !it.Timespan.IsZero() && !it.Timeframe.Equal(it.Timestamp) {
 		ir.Timespan = &it.Timespan
 	}
-	if !it.Timeframe.IsZero() {
+	if !it.Timeframe.IsZero() && !it.Timeframe.Equal(it.Timestamp) {
 		ir.Timeframe = &it.Timeframe
 	}
 	if it.TimeUncertainty > 0 {

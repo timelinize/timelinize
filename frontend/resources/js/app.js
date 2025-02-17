@@ -17,7 +17,7 @@
 */
 
 // AJQuery: https://github.com/coolaj86/ajquery.js (modified slightly by me)
-function $(sel, el) { return ((typeof el === 'string' ? $(el) : el) || document).querySelector(sel); }
+function $(sel, el) { return typeof sel === 'string' ? ((typeof el === 'string' ? $(el) : el) || document).querySelector(sel) : sel; }
 function $$(sel, el) { return (el || document).querySelectorAll(sel); }
 
 
@@ -99,11 +99,11 @@ const app = {
 	CancelJobs(repo_id, job_ids) {
 		return post("/api/cancel-jobs", { repo_id, job_ids });
 	},
+	ChangeSettings(settings) {
+		return post("/api/change-settings", settings);
+	},
 	CloseRepository(repo_id) {
 		return post("/api/close-repository", repo_id);
-	},
-	DataSource(dsID) {
-		return post("/api/data-source", dsID);
 	},
 	DataSources() {
 		return get("/api/data-sources");
@@ -133,14 +133,17 @@ const app = {
 	LoadConversation(params) {
 		return post("/api/conversation", params);
 	},
-	LoadItemStats(name, repo_id, data) {
-		return get("/api/stats", { name, repo_id, ...data });
+	ChartStats(name, repo_id, data) {
+		return get("/api/charts", { name, repo_id, ...data });
 	},
 	LoadRecentConversations(params) {
 		return post("/api/recent-conversations", params);
 	},
 	MergeEntities(repo_id, base_entity_id, other_entity_ids) {
 		return post("/api/merge-entities", { repo_id, base_entity_id, other_entity_ids });
+	},
+	NextGraph(repo_id, job_id) {
+		return get("/api/next-graph", { repo_id, job_id });
 	},
 	OpenRepository(repo_path, create) {
 		return post("/api/open-repository", { repo_path, create });
@@ -165,6 +168,12 @@ const app = {
 	},
 	SearchEntities(params) {
 		return post("/api/search-entities", params);
+	},
+	GetSettings() {
+		return get("/api/settings");
+	},
+	SubmitGraph(repo_id, job_id, graph, skip) {
+		return post("/api/submit-graph", { repo_id, job_id, graph, skip });
 	},
 	StartJob(repo_id, job_id, start_over) {
 		return post("/api/start-job", { repo_id, job_id, start_over });

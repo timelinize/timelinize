@@ -25,10 +25,11 @@ async function entityPageMain() {
 
 	$('#merge-entity').dataset.entityIDMerge = rowID;
 
+	const owner = await getOwner();
+
 	const entities = await app.SearchEntities({
 		repo: repoID,
-		row_id: [ rowID ],
-		// count_items: true, // TODO: this is broken (counts are wrong)
+		row_id: [rowID],
 		limit: 1,
 	});
 
@@ -37,92 +38,185 @@ async function entityPageMain() {
 	const ent = entities[0];
 	
 	$('#entity-id').innerText = ent.id;
-	$('.entity-type').innerHTML = entityTypes[ent.type];
-	$('.picture').innerHTML = avatar(true, ent, 'avatar-xxl avatar-rounded');
-	$('.name').innerText = ent.name;
+	$('#entity-type').innerHTML = entityTypes[ent.type];
+	$('#picture').innerHTML = avatar(true, ent, 'avatar-xxl');
+	$('#name').innerText = ent.name || "Unknown";
 
 	for (const attr of ent.attributes) {
-		if (attr.name == "_entity") continue;
-		const tpl = cloneTemplate('#tpl-attribute');
-		$('.attribute-name', tpl).innerText = attr.name;
-		$('.attribute-value', tpl).innerText = attr.value;
-		if (!attr.identity) {
-			$('.ribbon', tpl).remove();
+		if (attr.name == "birth_date") {
+			$('#birth-date').innerText = DateTime.fromSeconds(Number(attr.value)).toLocaleString(DateTime.DATE_FULL);
+			continue;
 		}
-		$('#attributes').append(tpl);
+		if (attr.name == "birth_place") {
+			$('#birth-place').innerText = attr.value;
+			continue;
+		}
+		if (attr.name == "gender") {
+			$('#gender').innerText = attr.value;
+			continue;
+		}
+		if (attr.name == "website") {
+			const container = document.createElement('div');
+			container.innerText = attr.value;
+			if ($('#websites').children.length == 0) {
+				$('#websites').innerHTML = '';
+			}
+			$('#websites').append(container);
+			continue;
+		}
+
+		if (attr.identity || attr.name == "_entity") {
+			const valueEl = cloneTemplate('#tpl-attribute-label');
+			valueEl.classList.add('attribute-value');
+			$('.form-check-label', valueEl).innerText = attr.value;
+
+			let groupEl = $(`.attribute-group.attribute-name-${attr.name}`);
+			if (!groupEl) {
+				const labelEl = cloneTemplate('#tpl-attribute-label');
+				labelEl.classList.add('attribute-label');
+				$('.form-check-label', labelEl).classList.add('strong');
+				$('.form-check-label', labelEl).innerText = tlz.attributeLabels[attr.name] || attr.name;
+
+				groupEl = document.createElement('div');
+				groupEl.classList.add('attribute-group', `attribute-name-${attr.name}`);
+				groupEl.append(labelEl);
+				$('#attribute-groups').append(groupEl);
+			}
+			
+			groupEl.append(valueEl);
+		}
 	}
 
-	// const labels = [];
-	// const data = [];
-	// for (const attr of ent.attributes) {
-	// 	labels.push(attr.value);
-	// 	data.push(attr.item_count || 0);
+	// show the "You" badge next to help identify self
+	if (ent.id == owner.id) {
+		const badge = document.createElement('span');
+		badge.classList.add('badge', 'bg-purple-lt', 'ms-2');
+		badge.innerText = "You";
+		$('#name').append(badge);
+	}
+
+	// no need to block page load for this
+	app.SearchItems({
+		entity_id: [rowID],
+		only_total: true,
+		flat: true
+	}).then(result => {
+		$('#num-items').innerText = `${result.total.toLocaleString()} items`;
+	});
+
+
+	///////////////////////////////////////////////////////////////////////////////
+
+	const attributeStats2 = await app.ChartStats("attributes_stacked_area", tlz.openRepos[0].instance_id, {entity_id: rowID});
+	console.log("ATTRIBUTE STATS:", attributeStats2);
+	for (const series of attributeStats2) {
+		series.type = 'bar';
+		// series.barWidth = '100%';
+		// series.smooth = true;
+		series.stack = 'total';
+		// series.areaStyle = {};
+		series.emphasis = {	focus: 'series' };
+	}
+
+	// const totalData = [];
+	// for (const series of attributeStats2) {
+	// 	let sum = 0;
+	// 	for (let j = 0; j < series.data.length; ++j) {
+	// 		sum += series.data[j][1];
+	// 	}
+	// 	totalData.push(sum);
 	// }
-
-	// console.log(labels, data);
-
-	// new ApexCharts($('#chart-item-counts-by-attribute'), {
-	// 	chart: {
-	// 		type: "bar",
-	// 		fontFamily: 'inherit',
-	// 		height: 200,
-	// 		parentHeightOffset: 0,
-	// 		toolbar: {
-	// 			show: false,
-	// 		},
-	// 		animations: {
-	// 			enabled: false
-	// 		},
-	// 	},
-	// 	plotOptions: {
-	// 		bar: {
-	// 			barHeight: '50%',
-	// 			 horizontal: true,
-	// 		}
-	// 	},
-	// 	dataLabels: {
-	// 		enabled: false,
-	// 	},
-	// 	fill: {
-	// 		opacity: 1,
-	// 	},
-	// 	series: [{
-	// 		name: "Item count",
-	// 		data: data
-	// 	}],
-	// 	tooltip: {
-	// 		theme: 'dark'
-	// 	},
-	// 	grid: {
-	// 		padding: {
-	// 			top: -20,
-	// 			right: 0,
-	// 			left: -4,
-	// 			bottom: -4
-	// 		},
-	// 		show: false
-	// 		// strokeDashArray: 4,
-	// 	},
-	// 	xaxis: {
-	// 		labels: {
-	// 			padding: 0,
-	// 		},
-	// 		tooltip: {
-	// 			enabled: false
-	// 		},
-	// 		axisBorder: {
-	// 			show: false,
-	// 		},
-	// 		// type: 'datetime',
-	// 	},
-	// 	yaxis: {
-	// 		labels: {
-	// 			padding: 4
-	// 		}
-	// 	},
-	// 	labels: labels,
-	// 	colors: [tabler.getColor("primary")],
-	// }).render();
+	// console.log("TOTAL DATA:", totalData);
 
 
+	$('#chart').chart = echarts.init($('#chart'));
+
+	let option = {
+		title: {
+			text: 'Items by Attribute Over Time'
+		},
+		grid: {
+			top: 80,
+			left: 0,
+			right: 0
+		},
+		tooltip: {
+			trigger: 'axis',
+			axisPointer: {
+				type: 'shadow',
+				label: {
+					backgroundColor: '#6a7985'
+				}
+			}
+		},
+		toolbox: {
+			feature: {
+				saveAsImage: {},
+				dataZoom: {
+					yAxisIndex: 'none'
+				},
+				restore: {}
+			}
+		},
+		legend: {
+			type: 'scroll',
+			top: 35
+		},
+		xAxis: [
+			{
+				type: 'time'
+			}
+		],
+		yAxis: [
+			{
+				type: 'value'
+			}
+		],
+		dataZoom: [
+			{
+				type: 'inside'
+			},
+			{
+				type: 'slider'
+			}
+		],
+		series: attributeStats2,
+	};
+	$('#chart').chart.setOption(option);
 }
+
+
+// we have to specify the checkbox element specifically, otherwise we end up with double events firing (one on the checkbox, one on the span)
+on('click', '.attribute-label input[type=checkbox]', e => {
+	const checked =  $('input[type=checkbox]', e.target.closest('label')).checked;
+	const groupEl = e.target.closest('.attribute-group');
+	const action = checked ? 'legendSelect' : 'legendUnSelect';
+	const actionBatch = [];
+	$$('.attribute-value input[type=checkbox]', groupEl).forEach(el => {
+		el.checked = checked;
+		actionBatch.push({
+			name: el.nextElementSibling.innerText
+		});
+	});
+	$('#chart').chart.dispatchAction({
+		type: action,
+		batch: actionBatch
+	});
+});
+
+on('click', '.attribute-value input[type=checkbox]', e => {
+	const checked =  $('input[type=checkbox]', e.target.closest('label')).checked;
+	const value = $('.form-check-label', e.target.closest('label')).innerText;
+	const groupEl = e.target.closest('.attribute-group');
+
+	if (!$('.attribute-value input[type=checkbox]:checked')) {
+		$('.attribute-label input[type=checkbox]', groupEl).checked = false;
+	}
+
+	const action = checked ? 'legendSelect' : 'legendUnSelect';
+
+	$('#chart').chart.dispatchAction({
+		type: action,
+		name: value
+	});
+});

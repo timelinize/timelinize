@@ -1,9 +1,4 @@
-.DS_Store
-
 _gitignore/
 _storage/
-dist/
-
-.bin
-My Timeline
-My Takeouts
+My timeline
+.DS_Store

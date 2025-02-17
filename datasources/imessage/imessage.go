@@ -23,17 +23,18 @@ package imessage
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/timelinize/timelinize/timeline"
+	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
 )
 
@@ -41,7 +42,7 @@ func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
 		Name:            "imessage",
 		Title:           "iMessage",
-		Icon:            "imessage.svg", // TODO: get iMessage icon
+		Icon:            "imessage.svg",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})
@@ -63,11 +64,6 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 
 // FileImport imports data from the given file or folder.
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	// start by adding contacts (TODO: this maybe should be separate? assumes we're on a Mac with the AddressBook DB)
-	if err := fimp.processContacts(ctx, params); err != nil {
-		return err
-	}
-
 	// open messages DB as read-only and prepare importer
 	// note that the SQL APIs don't support io/fs APIs, so we cheat and just access the disk directly
 	dbPath := filepath.Join(dirEntry.FSRoot, filepath.FromSlash(chatDBPath(dirEntry)))
@@ -80,12 +76,12 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	im := Importer{
 		DB: db,
 		FillOutAttachmentItem: func(_ context.Context, filename string, attachment *timeline.Item) {
-			chatDBFolderPath := filepath.FromSlash(filepath.Dir(chatDBPath(dirEntry)))
-			relativeFilename := filepath.FromSlash(strings.TrimPrefix(filename, "~/Library/Messages/"))
+			chatDBFolderPath := path.Dir(chatDBPath(dirEntry))
+			relativeFilename := strings.TrimPrefix(filename, "~/Library/Messages/")
 
 			attachment.OriginalLocation = relativeFilename
 			attachment.Content.Data = func(context.Context) (io.ReadCloser, error) {
-				return os.Open(filepath.Join(filepath.Clean(chatDBFolderPath), filepath.Clean(relativeFilename)))
+				return dirEntry.FS.Open(path.Join(path.Clean(chatDBFolderPath), path.Clean(relativeFilename)))
 			}
 		},
 	}
@@ -106,6 +102,15 @@ type Importer struct {
 	// the database to fill out the OriginalLocation,
 	// IntermediateLocation, and Content.Data fields
 	// on an attachment before it is added to the graph.
+	//
+	// Unique to this particular data source, the item's
+	// Content.Data function must be able to be reused.
+	// Generally, it is not assumed that the data will
+	// be read more than once, but to prevent duplicates
+	// (since, I have seen a message attachment be byte-
+	// for-byte duplicated, even though only one appears
+	// in the app), we may read the content once before
+	// sending it to the processor, which reads it again.
 	FillOutAttachmentItem func(ctx context.Context, filename string, attachmentItem *timeline.Item)
 
 	// Typically phone number; only used if
@@ -118,8 +123,9 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 	rows, err := im.DB.QueryContext(ctx,
 		`SELECT
 			m.ROWID, m.guid, m.text, m.attributedBody, m.service, m.date, m.date_read, m.date_delivered,
-			m.is_from_me, m.is_spam, m.associated_message_guid, m.associated_message_type, m.destination_caller_id,
-			m.reply_to_guid, m.thread_originator_guid,
+			m.is_from_me, m.is_spam,
+			m.associated_message_guid, m.associated_message_type, m.associated_message_emoji,
+			m.destination_caller_id, m.reply_to_guid, m.thread_originator_guid,
 			h.id, h.country, h.service,
 			chat_h.id, chat_h.country, chat_h.service,
 			a.guid, a.created_date, a.filename, a.mime_type, a.transfer_name
@@ -149,18 +155,13 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 			Metadata:       currentMessage.metadata(),
 		}
 
-		// if the message has no text, but has an attachment, make the (first) attachment
-		// the primary content of the message, i.e. the main/parent item
 		attachments := currentMessage.attachments(ctx, im, msgItem.Owner)
-		if msgItem.Content.Data == nil && len(attachments) > 0 {
-			// log.Println("ATTACHMENT AS MAIN:", msgItem.ID, attachments[0].ID)
-			msgItem.Content = attachments[0].Content
-			msgItem.OriginalLocation = attachments[0].OriginalLocation
-			msgItem.IntermediateLocation = attachments[0].IntermediateLocation
-			msgItem.Metadata.Merge(attachments[0].Metadata, timeline.MetaMergeReplace)
-			msgItem.Metadata["Attachment ID"] = attachments[0].ID
-			attachments = attachments[1:]
-		}
+
+		// don't fold the first attachment into an empty message item; that works
+		// for some data sources like SMS Backup & Restore where there's no message
+		// IDs and a bunch of references to them, but for this data source, that
+		// breaks correctness (unless we do lots of complex bookkeeping and rewrite
+		// the ID references and such)
 
 		ig := &timeline.Graph{Item: msgItem}
 		for _, attach := range attachments {
@@ -198,7 +199,8 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 
 		err := rows.Scan(
 			&msg.rowid, &msg.guid, &msg.text, &msg.attributedBody, &msg.service, &msg.date, &msg.dateRead,
-			&msg.dateDelivered, &msg.isFromMe, &msg.isSpam, &msg.associatedMessageGUID, &msg.associatedMessageType,
+			&msg.dateDelivered, &msg.isFromMe, &msg.isSpam,
+			&msg.associatedMessageGUID, &msg.associatedMessageType, &msg.associatedMessageEmoji,
 			&msg.destinationCallerID, &msg.replyToGUID, &msg.threadOriginatorGUID, &msg.handle.id,
 			&msg.handle.country, &msg.handle.service, &joinedH.id, &joinedH.country, &joinedH.service,
 			&attach.guid, &attach.createdDate, &attach.filename, &attach.mimeType, &attach.transferName)
@@ -220,8 +222,14 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		// if message is a reaction handle it separately
 		if msg.associatedMessageGUID != nil && msg.associatedMessageType != nil {
 			reaction := messageReactions[*msg.associatedMessageType]
+			// TODO: a message type of 3006 means removing the reaction placed with a message of type 2006.
+			if *msg.associatedMessageType == 2006 && msg.associatedMessageEmoji != nil {
+				reaction = *msg.associatedMessageEmoji
+			}
 			reactor := msg.sender()
 
+			// oftentimes, the associated_message_guid values are prefixed by a string like "p:0/" or
+			// "bp:" but I don't know what they're for, and apparently we can ignore them for our purposes
 			_, associatedGUID, cut := strings.Cut(*msg.associatedMessageGUID, "/")
 			if !cut {
 				_, associatedGUID, cut = strings.Cut(*msg.associatedMessageGUID, ":")
@@ -285,11 +293,11 @@ func chatDBPath(input timeline.DirEntry) string {
 	// To be 100% confident we should open chat.db and see if we can query it...
 	if !info.IsDir() &&
 		input.Name() == "chat.db" &&
-		timeline.FileExists(path.Join(path.Dir(input.Filename), "Attachments")) {
+		timeline.FileExistsFS(input.FS, path.Join(path.Dir(input.Filename), "Attachments")) {
 		return input.Filename
 	} else if info.IsDir() &&
-		timeline.FileExists(path.Join(input.Filename, "Attachments")) &&
-		timeline.FileExists(path.Join(input.Filename, "chat.db")) {
+		timeline.FileExistsFS(input.FS, path.Join(input.Filename, "Attachments")) &&
+		timeline.FileExistsFS(input.FS, path.Join(input.Filename, "chat.db")) {
 		return path.Join(input.Filename, "chat.db")
 	}
 	return ""
@@ -312,8 +320,9 @@ type message struct {
 	normalizedCallerID  string
 
 	// message reactions
-	associatedMessageGUID *string
-	associatedMessageType *int
+	associatedMessageGUID  *string
+	associatedMessageType  *int
+	associatedMessageEmoji *string
 
 	replyToGUID          *string // always seems to be set, even if not an explicit reply via user gesture
 	threadOriginatorGUID *string // I think this is only set when the user explicitly makes a thread (by replying)
@@ -375,7 +384,8 @@ func (m message) sentTo() []*timeline.Entity {
 }
 
 func (m message) attachments(ctx context.Context, im Importer, sender timeline.Entity) []*timeline.Item {
-	var items []*timeline.Item //nolint:prealloc // bug filed: https://github.com/alexkohler/prealloc/issues/30
+	var items []*timeline.Item
+	hashes := make(map[string]struct{}) // to prevent duplicate attachments
 	for _, a := range m.attached {
 		if a.filename == nil {
 			continue
@@ -406,8 +416,36 @@ func (m message) attachments(ctx context.Context, im Importer, sender timeline.E
 			im.FillOutAttachmentItem(ctx, *a.filename, it)
 		}
 
-		items = append(items, it)
+		// if there is only one attachment, we can simply append
+		// it as an item; if there are more, we may need to
+		// deduplicate them. in rare situations, I have seen
+		// byte-for-byte duplicate photos in the db with different
+		// GUIDs and I can't explain why; this solution is hacky
+		// for sure, but we have the luxury of being able to reuse
+		// the Data function to read the file more than once, so
+		// we hash each attachment to remember it and avoid dupes
+		// (the processor will not be able to dedupe the items b/c
+		// they have different IDs... but it would only store one
+		// copy of the actual data file, but this is not good
+		// enough for us in this case)
+		if len(m.attached) == 1 {
+			items = append(items, it)
+		} else {
+			h := blake3.New()
+			rdr, err := it.Content.Data(ctx)
+			if err == nil {
+				_, _ = io.Copy(h, rdr)
+				rdr.Close()
+				sum := hex.EncodeToString(h.Sum(nil))
+				// only remember hash and keep the item if attachment data is unique
+				if _, seen := hashes[sum]; !seen {
+					hashes[sum] = struct{}{}
+					items = append(items, it)
+				}
+			}
+		}
 	}
+
 	return items
 }
 
@@ -520,11 +558,11 @@ func entityWithID(id string) timeline.Entity {
 
 // TODO: These but in the 3000s are for removing the reaction.
 var messageReactions = map[int]string{
-	2000: "\u2764\uFE0F", // red heart, but it appears black otherwise: ❤️
+	2000: "\u2764\uFE0F", // red heart, but it appears black without the modifier: ❤️
 	2001: "👍",
 	2002: "👎",
 	2003: "😂",
-	2004: "\u203C\uFE0F", // red double-exclamation, but it appears plain black otherwise: ‼️
+	2004: "\u203C\uFE0F", // red double-exclamation, but it appears plain black without the modifier: ‼️
 	2005: "❓",
 }
 

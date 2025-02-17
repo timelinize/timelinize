@@ -188,7 +188,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			item := &timeline.Item{
 				Classification:       class,
 				Owner:                owner,
-				IntermediateLocation: dirEntry.Filename,
+				IntermediateLocation: fpath,
 				Content: timeline.ItemData{
 					Filename: d.Name(),
 					Data: func(_ context.Context) (io.ReadCloser, error) {

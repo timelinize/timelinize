@@ -30,8 +30,6 @@ const Duration = luxon.Duration;
 const tlz = {
 	openRepos: load('open_repos') || [],
 
-	dataSources: load('data_sources'),
-
 	itemClassIconPaths: {
 		email: `
 			<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
@@ -127,18 +125,53 @@ const tlz = {
 	},
 
 	attributeLabels: {
+		"_entity": "Entity ID",
 		"email_address": "Email address",
 		"phone_number": "Phone number",
 		"facebook_username": "Facebook",
 		"facebook_name": "Name on Facebook",
 		"google_photos_name": "Name on Google Photos",
 		"instagram_username": "Instagram",
+		"instagram_name": "Name on Instagram",
+		"instagram_bio": "Instagram bio",
 		"strava_athlete_id": "Strava",
 		"telegram_id": "Telegram",
 		"twitter_username": "Twitter",
 		"google_location_device": "Google Location Device",
-		"url": "Website"
+		"url": "Website",
+		"twitter_id": "Twitter ID",
+		"twitter_location": "Location in Twitter bio",
 	},
+
+	colorClasses: [
+		"blue",
+		"azure",
+		"indigo",
+		"purple",
+		"pink",
+		"red",
+		"orange",
+		"yellow",
+		"lime",
+		"green",
+		"teal",
+		"cyan",
+		"blue-lt",
+		"azure-lt",
+		"indigo-lt",
+		"purple-lt",
+		"pink-lt",
+		"red-lt",
+		"orange-lt",
+		"yellow-lt",
+		"lime-lt",
+		"green-lt",
+		"teal-lt",
+		"cyan-lt"
+	],
+
+	// map of filepicker names to last settings/state (like path)
+	filePickers: {},
 
 	// counter for IDs of collapsable regions which may be dynamically created
 	collapseCounter: 0,
@@ -169,17 +202,14 @@ const tlz = {
 				}, 1000);
 			}
 		}
-	}
+	},
+
+	// these values are used for moving the map to containers
+	// closest to the cursor; the set makes the distance search
+	// more efficient by limiting it to those in the viewport
+	mapsInViewport: new Set(),
+	nearestMapElem: null
 };
-
-// set all the predefined intervals
-for (const key in tlz.intervals) {
-	tlz.intervals[key].interval = tlz.intervals[key].set();
-}
-
-get('/api/build-info').then(bi => {
-	tlz.buildInfo = bi;
-});
 
 // Icons associated with each class of item.
 tlz.itemClassIcons = {
@@ -240,100 +270,146 @@ tlz.itemClassIcons = {
 	</svg>`
 };
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// set up map singleton
-// TODO: Users should provide their own Mapbox tokens.
-mapboxgl.accessToken = 'pk.eyJ1IjoiZHlhbmltIiwiYSI6ImNsYXNqcDVrYjF2OGwzcG1xaDB5YmlhZmQifQ.Y6QIKhjU0NeccKS6Rs8YqA';
-
-// TODO: move this into tl object, probably?
-tlz.map = new mapboxgl.Map({
-	container: document.createElement('div'),
-	style: `mapbox://styles/mapbox/standard?optimized=true`,
-	antialias: true
-});
-tlz.map._container.id = 'map'; // the container element we specified above is stored at tlz.map._container
-tlz.map.tl_navControl = new mapboxgl.NavigationControl();
-tlz.map.tl_containers = new Map(); // JS map, not geo map
-tlz.map.tl_data = {
-	markers: [], // stores markers that are currently on the map
-	layers: {},  // layers currently on the map, keyed by ID
-	sources: {}  // sources currently on the map, keyed by ID
-};
-tlz.map.tl_addNavControl = function() {
-	if (!tlz.map.hasControl(tlz.map.tl_navControl)) {
-		tlz.map.addControl(tlz.map.tl_navControl);
-	}
-};
-tlz.map.tl_addMarker = function(marker) {
-	tlz.map.tl_data.markers.push(marker);
-	marker.addTo(tlz.map);
-};
-tlz.map.tl_removeMarker = function(marker) {
-	const idx = tlz.map.tl_data.markers.indexOf(marker);
-	if (idx > -1) {
-		marker.remove();
-		tlz.map.tl_data.markers.splice(idx, 1);
-	}
-};
-tlz.map.tl_addLayer = function(layer, underLayerID) {
-	tlz.map.tl_data.layers[layer.id] = layer;
-	if (underLayerID && !tlz.map.getLayer(underLayerID)) {
-		underLayerID = null;
-	}
-	tlz.map.addLayer(layer, underLayerID);
-};
-tlz.map.tl_removeLayer = function(layerID) {
-	delete tlz.map.tl_data.layers[layerID];
-	if (tlz.map.getLayer(layerID)) {
-		tlz.map.removeLayer(layerID);
-	}
-};
-tlz.map.tl_addSource = function(id, source) {
-	tlz.map.tl_data.sources[id] = source;
-	tlz.map.addSource(id, source);
-};
-tlz.map.tl_removeSource = function(sourceID) {
-	delete tlz.map.tl_data.sources[sourceID];
-	if (tlz.map.getSource(sourceID)) {
-		tlz.map.removeSource(sourceID);
-	}
-};
-tlz.map.tl_clearMarkers = function() {
-	tlz.map.tl_data.markers.forEach(marker => marker.remove());
-	tlz.map.tl_data.markers = [];
+// set all the predefined intervals
+for (const key in tlz.intervals) {
+	tlz.intervals[key].interval = tlz.intervals[key].set();
 }
-tlz.map.tl_clear = function() {
-	tlz.map.tl_clearMarkers();
-	for (const layerID in tlz.map.tl_data.layers) {
-		tlz.map.tl_removeLayer(layerID);
-	}
-	for (const sourceID in tlz.map.tl_data.sources) {
-		tlz.map.tl_removeLayer(sourceID);
-	}
-	tlz.map.setPadding({left: 0, top: 0});
-};
-// tlz.map.loaded() doesn't always return true after 'load' event fires, not clear why; TODO: maybe create issue to ask?
-tlz.map.tl_isLoaded = false;
-tlz.map.on('load', () => tlz.map.tl_isLoaded = true);
 
+get('/api/build-info').then(bi => {
+	tlz.buildInfo = bi;
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// sets up map singleton; should be done after settings but before first page load
+function initMapSingleton() {
+	const defaultMapboxToken = 'pk.eyJ1IjoiZHlhbmltIiwiYSI6ImNsYXNqcDVrYjF2OGwzcG1xaDB5YmlhZmQifQ.Y6QIKhjU0NeccKS6Rs8YqA';
+	mapboxgl.accessToken = tlz.settings?.application?.mapbox_api_key || defaultMapboxToken;
+
+	tlz.map = new mapboxgl.Map({
+		container: document.createElement('div'),
+		style: `mapbox://styles/mapbox/standard?optimized=true`,
+		antialias: true
+	});
+	tlz.map._container.id = 'map'; // the container element we specified above in the Map constructor is stored at tlz.map._container
+	tlz.map.tl_navControl = new mapboxgl.NavigationControl();
+	tlz.map.tl_containers = new Map(); // JS map, not geo map
+	tlz.map.tl_data = {
+		markers: [], // stores markers that are currently on the map
+		layers: {},  // layers currently on the map, keyed by ID
+		sources: {}  // sources currently on the map, keyed by ID
+	};
+	tlz.map.tl_addNavControl = function() {
+		if (!tlz.map.hasControl(tlz.map.tl_navControl)) {
+			tlz.map.addControl(tlz.map.tl_navControl);
+		}
+	};
+	tlz.map.tl_addMarker = function(marker) {
+		tlz.map.tl_data.markers.push(marker);
+		marker.addTo(tlz.map);
+	};
+	tlz.map.tl_removeMarker = function(marker) {
+		const idx = tlz.map.tl_data.markers.indexOf(marker);
+		if (idx > -1) {
+			marker.remove();
+			tlz.map.tl_data.markers.splice(idx, 1);
+		}
+	};
+	tlz.map.tl_addLayer = function(layer, underLayerID) {
+		tlz.map.tl_data.layers[layer.id] = layer;
+		if (underLayerID && !tlz.map.getLayer(underLayerID)) {
+			underLayerID = null;
+		}
+		tlz.map.addLayer(layer, underLayerID);
+	};
+	tlz.map.tl_removeLayer = function(layerID) {
+		delete tlz.map.tl_data.layers[layerID];
+		if (tlz.map.getLayer(layerID)) {
+			tlz.map.removeLayer(layerID);
+		}
+	};
+	tlz.map.tl_addSource = function(id, source) {
+		tlz.map.tl_data.sources[id] = source;
+		tlz.map.addSource(id, source);
+	};
+	tlz.map.tl_removeSource = function(sourceID) {
+		delete tlz.map.tl_data.sources[sourceID];
+		if (tlz.map.getSource(sourceID)) {
+			tlz.map.removeSource(sourceID);
+		}
+	};
+	tlz.map.tl_clearMarkers = function() {
+		tlz.map.tl_data.markers.forEach(marker => marker.remove());
+		tlz.map.tl_data.markers = [];
+	}
+	tlz.map.tl_clear = function() {
+		tlz.map.tl_clearMarkers();
+		for (const layerID in tlz.map.tl_data.layers) {
+			tlz.map.tl_removeLayer(layerID);
+		}
+		for (const sourceID in tlz.map.tl_data.sources) {
+			tlz.map.tl_removeLayer(sourceID);
+		}
+		tlz.map.setPadding({left: 0, top: 0});
+	};
+
+	// tlz.map.loaded() doesn't always return true after 'load' event fires, not clear why; TODO: maybe create issue to ask?
+	tlz.map.tl_isLoaded = false;
+	tlz.map.on('load', () => tlz.map.tl_isLoaded = true);
+
+	tlz.map.on('style.load', async () => {
+		// update the lighting every minute to match the current time of day
+		updateMapLighting();
+		setInterval(updateMapLighting, 60000);
+
+		// add terrain source, but don't set it on the map unless enabled
+		tlz.map.tl_addSource('mapbox-dem', {
+			type: 'raster-dem',
+			// TODO: what's the difference between these?
+			url: 'mapbox://mapbox.terrain-rgb'
+			// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
+		});
+
+		applyTerrain();
+
+		// changing the style obliterates layers
+		tlz.openRepos.forEach(repo => {
+			if (mapData.heatmap) {
+				renderHeatmap();
+			}
+			if (mapData.results) {
+				renderMapData();
+			}
+		});
+	});
+
+
+	tlz.map.on('click', e => {
+		if ($('#proximity-toggle')?.classList?.contains('active')) {
+			$('#proximity').value = `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`;
+			$('#proximity').dataset.lat = e.lngLat.lat;
+			$('#proximity').dataset.lon = e.lngLat.lng;
+			$('#proximity').dispatchEvent(new Event('change', { bubbles: true }));
+			$('#proximity-toggle').classList.remove('active');
+			$('.mapboxgl-canvas-container').style.cursor = '';
+		}
+	});
+}
 
 
 
@@ -417,6 +493,45 @@ function renderFilterDropdown(containerEl, title, loadKey) {
 }
 
 
+async function newDataSourceSelect(selectEl) {
+	if ($(selectEl).tomselect) {
+		return $(selectEl).tomselect;
+	}
+
+	var dsList = await app.DataSources();
+
+	for (const ds of dsList) {
+		const optEl = document.createElement('option');
+		optEl.value = ds.name;
+		optEl.innerText = ds.title;
+		optEl.dataset.customProperties = `<img src="/ds-image/${ds.name}">`;
+		$(selectEl).append(optEl);
+	}
+
+	function renderTomSelectItemAndOption(data, escape) {
+		if (data.customProperties) {
+			return `<div><span class="dropdown-item-indicator">${data.customProperties}</span>${escape(data.text)}</div>`;
+		}
+		return `<div>${escape(data.text)}</div>`;
+	}
+
+	const ts  = await new TomSelect($(selectEl), {
+		maxItems: null,
+		render: {
+			item: renderTomSelectItemAndOption,
+			option: renderTomSelectItemAndOption
+		}
+	});
+
+	// Clear input after selecting matching option from list
+	// (I have no idea why this isn't the default behavior)
+	ts.on('item_add', () => ts.control_input.value = '' );
+
+	return ts;
+}
+
+
+
 
 
 
@@ -485,10 +600,15 @@ function newDatePicker(opts) {
 			days: '<span><strong>MMMM</strong> <span class="text-secondary">yyyy</span></span>',
 			months: '<strong>yyyy</strong>'
 		},
-		onShow() {
+		onShow(isFinished) {
+			if (isFinished) return false;
 			lastVal = dateInputElem.value;
 		},
-		onHide() {
+		onHide(isFinished) {
+			// gets called twice apparently (!?) once when it has started
+			// being hidden and once when it has finished being hidden
+			if (isFinished) return;
+
 			if (dateInputElem.value != lastVal) {
 				lastVal = dateInputElem.value;
 				trigger(dateInputElem, 'change');
@@ -599,7 +719,7 @@ function newDatePicker(opts) {
 // FILE PICKER
 ///////////////////
 
-async function newFilePicker(options) {
+async function newFilePicker(name, options) {
 	const filePicker = cloneTemplate('#tpl-file-picker');
 	filePicker.options = options; // keeps track of its configuration
 	filePicker.filepaths = {}; // keeps track of which files are currently selected
@@ -672,7 +792,7 @@ async function newFilePicker(options) {
 
 
 	// TODO: should 'options' be set when the picker is made? or for every file listing like it is now...
-	filePicker.navigate = async function (dir = "", options) {
+	filePicker.navigate = async function (dir = tlz.filePickers?.[name], options) {
 		// merge navigate options with those specified for the file picker
 		options = {...filePicker.options, ...options}
 
@@ -682,7 +802,6 @@ async function newFilePicker(options) {
 		}
 
 		const listing = await app.FileListing(dir, options);
-		console.log("LISTING:", listing);
 
 		// only navigate if the location is different or refresh is forced
 		if (filePicker.dir && listing.dir == filePicker.dir && !options?.refresh) {
@@ -690,6 +809,7 @@ async function newFilePicker(options) {
 		}
 
 		filePicker.dir = listing.dir;
+		tlz.filePickers[name] = listing.dir;
 
 		// let listeners know we are navigating
 		const event = new CustomEvent("navigate", {
@@ -886,6 +1006,9 @@ function itemImgSrc(item, thumbnail = false) {
 	if (item.data_file.startsWith("http://") || item.data_file.startsWith("https://")) {
 		return item.data_file;
 	}
+	if (item.data_type == "image/gif") {
+		thumbnail = false; // just show the actual gif
+	}
 	const params = new URLSearchParams({
 		data_id: item.data_id || "",
 		data_file: item.data_file,
@@ -911,34 +1034,8 @@ function entityDisplayNameAndAttr(entity) {
 }
 
 function avatarColorClasses(i) {
-	const colors = [
-		"bg-blue",
-		"bg-azure",
-		"bg-indigo",
-		"bg-purple",
-		"bg-pink",
-		"bg-red",
-		"bg-orange",
-		"bg-yellow",
-		"bg-lime",
-		"bg-green",
-		"bg-teal",
-		"bg-cyan",
-		"bg-blue-lt",
-		"bg-azure-lt",
-		"bg-indigo-lt",
-		"bg-purple-lt",
-		"bg-pink-lt",
-		"bg-red-lt",
-		"bg-orange-lt",
-		"bg-yellow-lt",
-		"bg-lime-lt",
-		"bg-green-lt",
-		"bg-teal-lt",
-		"bg-cyan-lt"
-	];
-	const colorClass = colors[i % colors.length];
-	const classes = [colorClass];
+	const colorClass = tlz.colorClasses[i % tlz.colorClasses.length];
+	const classes = ["bg-"+colorClass];
 	if (colorClass && !colorClass?.endsWith("-lt")) {
 		classes.push("text-white");
 	}
@@ -1642,13 +1739,19 @@ function miniDisplayMessages(items) {
 	const card = document.createElement('div');
 	card.classList.add('card');
 
-	const container = document.createElement('div');
-	container.classList.add('list-group', 'card-list-group', 'messages-list-group');
+	const cardBody = document.createElement('div');
+	cardBody.classList.add('chat', 'card-body');
+
+	const chatBubbles = document.createElement('div');
+	chatBubbles.classList.add('chat-bubbles');
+	
 	for (const item of items) {
-		container.append(renderMessageItem(item, {withToRelations: true}));
+		chatBubbles.append(renderMessageItem(item, {withToRelations: true}));
 	}
 
-	card.append(container);
+	cardBody.append(chatBubbles);
+	card.append(cardBody);
+	
 
 	return {
 		icon: `
@@ -1671,19 +1774,54 @@ function renderMessageItem(item, options) {
 				continue;
 			const entityEl = document.createElement('div');
 			entityEl.classList.add('fw-bold');
-			entityEl.innerText = rel.to_entity.name;
+			entityEl.innerText = rel.to_entity.name || rel.to_entity.attribute.value;
 			sendersContainer.append(entityEl);
 		}
 		return sendersContainer;
 	}
 
+	// sometimes, a message may have no content and only have attachments
+	// (this is unfortunate, but often seems to be the case with iMessage;
+	// we can't just delete the 'parent' item because it has an ID that
+	// is referenced in various places)
+	// in that case, we can at least promote the first attachment in the
+	// display of the message so that it becomes the main content of the
+	// message, and any other attachments remain attached, without an
+	// empty item cluttering the view; this is what most chat/messaging
+	// apps do anyway, including iMessage
+	if (!item.data_text && !item.data_file && item.related) {
+		for (const [i, rel] of item.related.entries()) {
+			if (rel.label == 'attachment' && rel.to_item) {
+				// promote first attachment, so remove it from the related items list
+				item.related.splice(i, 1);
+				// combine any related items of the empty item with that of the related item
+				rel.to_item.related = rel.to_item.related ? item.related.concat(rel.to_item.related) : item.related;
+				// combine metadata
+				if (item.metadata && rel.to_item.metadata) {
+					rel.to_item.metadata = {...rel.to_item.metadata, ...item.metadata};
+				} else if (item.metadata) {
+					rel.to_item.metadata = item.metadata;
+				}
+				// finally, replace the item with the related item that we spliced out
+				item = rel.to_item;
+				break;
+			}
+		}
+	}
+
 	const elem = cloneTemplate('#tpl-message');
-	$('.message-sender', elem).innerText = item.entity?.name;
+	$('.message-sender', elem).innerText = item.entity?.name || item.entity?.attribute?.value;
+	if (item.entity?.id == 1) {
+		// if current user (presumably, entity ID 1 -- though this could change later) is
+		// the sender, then put their own chats along the right, I guess, with the avatar
+		// on the outside (far right)
+		$('.align-items-top', elem).classList.add('flex-row-reverse');
+		$('.chat-bubble', elem).classList.add('chat-bubble-me');
+	}
 	$('.message-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
 	$('.message-avatar', elem).innerHTML = avatar(true, item.entity);
-	$('.message-avatar .avatar', elem).classList.add('avatar-sm');
-	$('.data-source-icon', elem).style.backgroundImage = `url('/resources/images/data-sources/${tlz.dataSources[item.data_source_name].icon}')`;
-	$('.data-source-icon', elem).title = tlz.dataSources[item.data_source_name].title;
+	$('.data-source-icon', elem).style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
+	$('.data-source-icon', elem).title = item.data_source_title;
 	$('.view-item-link', elem).href = `/items/${item.repo_id}/${item.id}`;
 
 	if (options?.withToRelations && item.related) {
@@ -1743,16 +1881,26 @@ function renderMessageItem(item, options) {
 		};
 
 		// render any reactions we accumulated
-		for (const [reaction, rels] of Object.entries(reactions)) {
-			var reactElem = document.createElement('div');
-			reactElem.classList.add('message-reaction');
-			reactElem.textContent = reaction;
-			reactElem.title = `${reactionLabels[reaction] || reaction} (${rels.length}): `;
-			for (const rel of rels) {
-				reactElem.title += `${entityDisplayNameAndAttr(rel.from_entity).name}, `;
+		if (Object.keys(reactions).length) {
+			$('.message-reactions', elem).classList.remove('d-none');
+
+			for (const [reaction, rels] of Object.entries(reactions)) {
+				var reactElem = document.createElement('div');
+				reactElem.classList.add('message-reaction');
+				var emojiElem = document.createElement('span');
+				emojiElem.classList.add('emoji');
+				emojiElem.textContent = reaction;
+				reactElem.append(emojiElem);
+				if (rels.length > 1) {
+					reactElem.innerHTML += ` ${rels.length}`;
+				}
+				reactElem.title = `${reactionLabels[reaction] || reaction} (${rels.length}): `;
+				for (const rel of rels) {
+					reactElem.title += `${entityDisplayNameAndAttr(rel.from_entity).name}, `;
+				}
+				reactElem.title = reactElem.title.slice(0, -2); // trim off trailing comma and space
+				$('.message-reactions', elem).appendChild(reactElem);
 			}
-			reactElem.title = reactElem.title.slice(0, -2); // trim off trailing comma and space
-			$('.message-reactions', elem).appendChild(reactElem);
 		}
 
 	}
@@ -1762,9 +1910,13 @@ function renderMessageItem(item, options) {
 
 
 function timelineGroups(items, options) {
+	if (!items) return [];
+	
 	const groups = [];
 	let lastLocGroupIdx;
 	for (const item of items) {
+		if (!item) continue;
+
 		// TODO: only do social as conversation if it has a sent relation...
 		item._category = item.classification || "unknown"; // in case item is not classified, still have a category, otherwise no group is made and an error occurs below (see #36)
 		if (item.classification == 'message'
@@ -1982,7 +2134,7 @@ const PreviewModal = (function() {
 			$('#modal-preview .media-owner-name').innerText = entityDisplayNameAndAttr(item.entity).name;
 			$('#modal-preview .text-secondary').innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
 
-			$('#modal-preview .modal-title').innerHTML = `<span class="avatar avatar-xs rounded me-2" style="background-image: url('/resources/images/data-sources/${tlz.dataSources[item.data_source_name].icon}')"></span>`;
+			$('#modal-preview .modal-title').innerHTML = `<span class="avatar avatar-xs rounded me-2" style="background-image: url('/ds-image/${item.data_source_name}')"></span>`;
 			$('#modal-preview .modal-title').appendChild(document.createTextNode(item?.filename || baseFilename(item?.data_file)));
 			$('#modal-preview .subheader').innerText = `# ${item.id}`;
 
@@ -2059,8 +2211,8 @@ function itemPreviews(items) {
 ////////////////////////////////////////////////////
 
 function newEntitySelect(element, maxItems, noWrap) {
-	if (element.tomselect) {
-		return element.tomselect;
+	if ($(element).tomselect) {
+		return $(element).tomselect;
 	}
 
 	function tomSelectRenderItemAndOption(entity, escape) {
@@ -2110,11 +2262,6 @@ function newEntitySelect(element, maxItems, noWrap) {
 				weight: 0.5
 			},
 		],
-
-		copyClassesToDropdown: false, // TODO: figure out exactly what this does and whether we need it
-		optionClass: 'dropdown-item',
-		dropdownClass: 'dropdown-menu ts-dropdown',
-
 		load: function(query, callback) {
 			const params = {
 				repo: tlz.openRepos[0].instance_id,
@@ -2229,8 +2376,6 @@ function filterToQueryString() {
 		const val = ts.getValue();
 		if (Array.isArray(val) && val.length) {
 			qs.set("entity", val.join(','));
-		} else if (val) {
-			qs.set("entity", val);
 		} else {
 			qs.delete("entity");
 		}
@@ -2247,16 +2392,14 @@ function filterToQueryString() {
 	}
 
 	// data sources
-	const checkedDataSources = $$('.tl-data-source-dropdown input:checked');
-	const allDataSources = $$('.tl-data-source-dropdown input')
-	if (checkedDataSources.length < allDataSources.length) {
-		const dataSources = [];
-		for (const elem of checkedDataSources) {
-			dataSources.push(elem.value);
+	if ($('.tl-data-source.tomselected')) {
+		const ts = $('.filter .tl-data-source.tomselected').tomselect;
+		const val = ts.getValue();
+		if (Array.isArray(val) && val.length) {
+			qs.set("data_source", val.join(','));
+		} else {
+			qs.delete("data_source");
 		}
-		qs.set('data_source', dataSources);
-	} else {
-		qs.delete('data_source');
 	}
 
 	// item types
@@ -2328,7 +2471,7 @@ async function queryStringToFilter() {
 		});
 		if (entities?.length) {
 			$('.entity-input').tomselect.addOption(entities[0]);
-			$('.entity-input').tomselect.addItem(entities[0].id); // TODO: on page load, this triggers "change" which causes a re-render... ideally we shouldn't be listening for that event yet
+			$('.entity-input').tomselect.addItem(entities[0].id, true); // true = don't fire event (the updated filter gets submitted later)
 		}
 	}
 	if ($('#selected-entities-only') && qs.get("only_entity")) {
@@ -2338,19 +2481,16 @@ async function queryStringToFilter() {
 	}
 
 	// data sources
-	if ($('.tl-data-source-dropdown')) {
-		const dataSources = qs.get("data_source");
-		if (typeof dataSources !== 'undefined') {
-			// check all by default
-			for (var elem of $$('.tl-data-source-dropdown input[type=checkbox]')) {
-				elem.checked = true;
-			}
+	if ($('.tl-data-source') && qs.get("data_source")) {
+		const qsDS = qs.get("data_source");
+		const tsControl = $('.tl-data-source').tomselect;
+		if ($('.tl-data-source.tomselected')) {
+			tsControl.setValue(qsDS.split(','), true); // true = don't fire event (the updated filter gets submitted later)
 		} else {
-			// check only specified ones
-			for (const ds of dataSources.split(",")) {
-				$(`.tl-data-source-dropdown input[type=checkbox][value="${ds}"]`).checked = true;
-			}
-		}
+			tsControl.on('initialize', () => {
+				tsControl.setValue(qsDS.split(','), true);
+			});
+		};
 	}
 
 	// classes (item types)
@@ -2457,12 +2597,13 @@ function commonFilterSearchParams(params) {
 	}
 
 	// data sources
-	const checkedDataSources = $$('.filter .tl-data-source-dropdown input:checked');
-	const allDataSources = $$('.filter .tl-data-source-dropdown input')
-	if (!params.data_source && checkedDataSources.length < allDataSources.length) {
-		params.data_source = [];
-		for (const elem of checkedDataSources) {
-			params.data_source.push(elem.value);
+	if (!params.data_source && $('.filter .tl-data-source.tomselected')) {
+		const ts = $('.filter .tl-data-source.tomselected').tomselect;
+		const val = ts.getValue();
+		if (Array.isArray(val) && val.length) {
+			params.data_source = val;
+		} else if (val?.length > 0) {
+			params.data_source = [val];
 		}
 	}
 

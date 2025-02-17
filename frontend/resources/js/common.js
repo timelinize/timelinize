@@ -2,35 +2,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Toggle all checkboxes in dropdown list
 on('click', '.dropdown-menu .select-all, .dropdown-menu .select-none', (e) => {
 	const menu = e.target.closest('.dropdown-menu');
@@ -41,8 +12,17 @@ on('click', '.dropdown-menu .select-all, .dropdown-menu .select-none', (e) => {
 });
 
 
-
-
+// For some reason, the "Clear" and "Apply" Air Datepicker buttons
+// will submit a parent form, when clicked... but I do not know why
+// the other buttons don't, nor do I know why it only happened on
+// the Items and Gallery pages. Form tags can be semantically useful
+// so I don't want to never use them, but we also can't allow the
+// browser to submit the form when we're using the datepicker.
+on('submit', 'form', e => {
+	if (e.submitter.classList.contains('air-datepicker-button')) {
+		e.preventDefault();
+	}
+});
 
 
 function classInfo(name) {
@@ -173,7 +153,6 @@ function updateFilterResults() {
 }
 
 // when filter inputs change, update query string and re-render page
-// TODO: update to do server-side rendering...
 on('change',
 	`.filter-input:not(.nonfilter),
 	.filter input:not(.nonfilter),
@@ -329,8 +308,6 @@ function connectLog() {
 			return;
 		}
 
-		console.log("LOG:", l);
-
 		if (l.logger == "job.status") {
 			// if this job has a parent that happens to be on the screen showing
 			// previews of its children, make sure this job is rendered so it
@@ -365,6 +342,9 @@ function connectLog() {
 		}
 
 		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.id}`)) {
+			// this page is for this import job, so display its table
+			$('.job-import-stream-container').classList.remove('d-none');
+			
 			const tableElem = $(`.job-import-stream.job-id-${l.id}`);
 			const rowElem = cloneTemplate('#tpl-job-import-stream-row');
 
@@ -407,7 +387,7 @@ function connectLog() {
 			$('.import-stream-row-id', rowElem).innerText = l.row_id || "";
 			$('.import-stream-row-type', rowElem).innerHTML = graphType;
 			$('.import-stream-row-status', rowElem).innerHTML = howStored;
-			$('.import-stream-row-data-source', rowElem).innerText = l.data_source_name ? tlz.dataSources[l.data_source_name].title : "";
+			$('.import-stream-row-data-source', rowElem).innerHTML = `<img src="/ds-image/${l.data_source_name}">`;
 			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "";
 			$('.import-stream-row-entity', rowElem).innerText = l.entity || "";
 			$('.import-stream-row-content', rowElem).innerText = l.preview || maxlenStr(l.filename, 25) || "";
@@ -422,6 +402,25 @@ function connectLog() {
 			const MAX_STREAM_TABLE_ROWS = 15;
 			for (let i = MAX_STREAM_TABLE_ROWS; i < $$('tbody tr', tableElem).length; i++) {
 				$$('tbody tr', tableElem)[i].remove();
+			}
+		} else if (l.logger == "job.action" && l.msg == "finished thumbnail" && $(`.job-thumbnail-stream.job-id-${l.id}`)) {
+			// this page is for this thumbnail job, so display its output
+			$('.job-thumbnail-stream-container').classList.remove('d-none');
+
+			
+			
+			const gridElem = $(`.job-thumbnail-stream.job-id-${l.id}`);
+			const cellElem = cloneTemplate('#tpl-job-thumbnail-stream-cell');
+
+			$('.datagrid-content', cellElem).append(itemContentElement({
+				...l,
+			}, { thumbnail: true }))
+
+			gridElem.prepend(cellElem);
+
+			const MAX_STREAM_GRID_CELLS = 12;
+			for (let i = MAX_STREAM_GRID_CELLS; i < $$('.datagrid-item', gridElem).length; i++) {
+				$$('.datagrid-item', gridElem)[i].remove();
 			}
 		}
 	};
@@ -460,62 +459,115 @@ connectLog();
 
 
 // This intersection observer is intended for map placeholder elements only.
-const mapIntersectionObs = new IntersectionObserver((entries, opts) => {
+tlz.mapIntersectionObs = new IntersectionObserver((entries, opts) => {
 	entries.forEach(entry => {
 		if (entry.isIntersecting) {
-
-			// when the map is rendered to the page, make sure it resizes properly, then render this map's data
-			// See https://stackoverflow.com/a/66172042/1048862 (several answers exist, most are kind of hacky)
-			var observer = new ResizeObserver(function(arg) {
-				tlz.map.resize();
-
-				// clear map data
-				tlz.map.tl_clear();
-
-				const renderMapData = function() {
-					if (entry.target.getAttribute("tl-onload")) {
-						eval(entry.target.getAttribute("tl-onload"));
-					} else if (typeof tlz.map.tl_containers.get(entry.target) === 'function') {
-						tlz.map.tl_containers.get(entry.target)();
-					}
-				};
-
-				// render new data
-				if (tlz.map.tl_isLoaded) {
-					renderMapData();
-				} else {
-					tlz.map.on('load', async () => {
-						// // Custom atmosphere styling
-						// map.setFog({
-						// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
-						// 	'high-color': 'rgb(36, 92, 223)', // Blue sky / upper atmosphere
-						// 	'horizon-blend': 0.4 // Exaggerate atmosphere (default is .1)
-						// });
-						renderMapData();
-					});
-				}
-
-				// we're done, so no need to observe anymore
-				observer.disconnect();
-			});
-			observer.observe(entry.target);
-
-			const currentPlaceholder = tlz.map._container.previousElementSibling;
-
-			if ($('.map-placeholder', entry.target)) {
-				$('.map-placeholder', entry.target).classList.add('d-none');
-			}
-			entry.target.append($('#map') || tlz.map._container);
-
-			currentPlaceholder?.classList.remove('d-none');
-
+			tlz.mapsInViewport.add(entry.target);
 		} else {
-			// TODO: anything?
+			tlz.mapsInViewport.delete(entry.target);
 		}
 	});
-}, {
-	root: null, // default is viewport
-	rootMargin: '-40% 0% -40% 0%', // center of viewport
-	threshold: 0 // percentage of element that intersects; triggers callback; must be zero for rootMargin
+	if (tlz.mapsInViewport.size == 1) {
+		moveMapInto(tlz.mapsInViewport.values().next().value);
+	}
 });
 
+
+
+
+
+// These next blocks move the map to the map container nearest the mouse pointer
+
+function getDistanceToRect(mouseX, mouseY, rect) {
+	const dx = Math.max(rect.left - mouseX, mouseX - rect.right);
+	const dy = Math.max(rect.top - mouseY, mouseY - rect.bottom);
+	return Math.sqrt(dx**2 + dy**2);
+}
+
+function getNearestMapPlaceholderElement(mouseX, mouseY) {
+	let nearestElement;
+	let nearestDistance = Infinity;
+
+	tlz.mapsInViewport.forEach(element => {
+		const rect = element.getBoundingClientRect();
+		const distance = getDistanceToRect(mouseX, mouseY, rect);
+
+		if (distance < nearestDistance) {
+			nearestDistance = distance;
+			nearestElement = element;
+		}
+	});
+
+	return nearestElement;
+}
+
+document.addEventListener('mousemove', event => {
+	if (tlz.mapsInViewport.size > 1) {
+		const nearestElement = getNearestMapPlaceholderElement(event.clientX, event.clientY);
+		moveMapInto(nearestElement);
+	}
+});
+
+function moveMapInto(mapContainerElem) {
+	// no-op if there is nothing to move the map into, or if it's the same element
+	if (!mapContainerElem || mapContainerElem == tlz.nearestMapElem) {
+		return;
+	}
+	
+	const prevMapElem = tlz.nearestMapElem;
+	tlz.nearestMapElem = mapContainerElem;
+
+	// when the map is rendered to the page, make sure it resizes properly, then render this map's data
+	// See https://stackoverflow.com/a/66172042/1048862 (several answers exist, most are kind of hacky)
+	var observer = new ResizeObserver(function(arg) {
+		tlz.map.resize();
+
+		// clear map data
+		tlz.map.tl_clear();
+
+		const renderMapData = function() {
+			if (mapContainerElem.getAttribute("tl-onload")) {
+				eval(mapContainerElem.getAttribute("tl-onload"));
+			} else if (typeof tlz.map.tl_containers.get(mapContainerElem) === 'function') {
+				tlz.map.tl_containers.get(mapContainerElem)();
+			}
+		};
+
+		// render new data
+		if (tlz.map.tl_isLoaded) {
+			renderMapData();
+		} else {
+			tlz.map.on('load', async () => {
+				// // Custom atmosphere styling
+				// map.setFog({
+				// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
+				// 	'high-color': 'rgb(36, 92, 223)', // Blue sky / upper atmosphere
+				// 	'horizon-blend': 0.4 // Exaggerate atmosphere (default is .1)
+				// });
+				renderMapData();
+			});
+		}
+
+		// we're done, so no need to observe anymore
+		observer.disconnect();
+	});
+	observer.observe(mapContainerElem);
+
+	const currentPlaceholder = tlz.map._container.previousElementSibling;
+
+	if ($('.map-placeholder', mapContainerElem)) {
+		$('.map-placeholder', mapContainerElem).classList.add('d-none');
+	}
+	
+	mapContainerElem.append($('#map') || tlz.map._container);
+	
+	currentPlaceholder?.classList.remove('d-none');
+
+	// inform document listeners that the map has moved containers
+	document.dispatchEvent(new CustomEvent("mapMoved", {
+		detail: {
+			previousElement: prevMapElem,
+			currentElement: mapContainerElem
+		}
+	}));
+}

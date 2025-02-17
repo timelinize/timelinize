@@ -23,8 +23,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -62,6 +64,10 @@ type ImportJob struct {
 	newEntityCount                                              *int64
 
 	job *ActiveJob
+
+	// interactive jobs need access to the current processor to send graphs ready for processing
+	p   *processor
+	pMu *sync.Mutex
 
 	Plan              ImportPlan        `json:"plan,omitempty"`
 	ProcessingOptions ProcessingOptions `json:"processing_options,omitempty"`
@@ -110,16 +116,20 @@ func (ij ImportJob) checkpoint(estimatedSize *int64, outer, inner int, ds any) e
 // 	return
 // }
 
-func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
-	// TODO: are these racey?
+func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 	ij.job = job
 	ij.itemCount = new(int64)
 	ij.newItemCount = new(int64)
 	ij.updatedItemCount = new(int64)
 	ij.skippedItemCount = new(int64)
 	ij.newEntityCount = new(int64)
+	ij.pMu = new(sync.Mutex)
 
 	estimating := ij.EstimateTotal
+
+	if ij.ProcessingOptions.Interactive != nil {
+		ij.ProcessingOptions.Interactive.Graphs = make(chan *InteractiveGraph)
+	}
 
 	var chkpt importJobCheckpoint
 	if checkpoint != nil {
@@ -212,6 +222,9 @@ func (ij ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 					log:      logger,
 					progress: logger.Named("progress"),
 				}
+				ij.pMu.Lock()
+				ij.p = &p
+				ij.pMu.Unlock()
 
 				// Create the file system from which this file/dir will be accessed. It must be
 				// a DeepFS since the filename might refer to a path inside an archive file.
@@ -489,7 +502,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 // generateThumbnailsForImportedItems generates thumbnails for qualifying items
 // that were a part of the import associated with this processor. It should be
 // run after the import completes.
-// TODO: What about generating thumbnails for... just anything that needs one
+// TODO: What about generating thumbnails for... just anything that needs one -- this is actually going to be important for jobs that have errors and stuff (an empty list should imply all that qualify)
 func (ij ImportJob) generateThumbnailsForImportedItems() {
 	var job thumbnailJob
 
@@ -650,6 +663,14 @@ func (ij ImportJob) generateEmbeddingsForImportedItems() {
 	}
 }
 
+func (ij ImportJob) tempGraphFolder() string {
+	return filepath.Join(
+		os.TempDir(),
+		"timelinize",
+		fmt.Sprintf("job-%d", ij.job.ID()),
+		"interactive")
+}
+
 // couldBeMarkdown is a very naive Markdown detector. I'm trying to avoid regexp for performance,
 // but this implementation is (admittedly) mildly effective. May have lots of false positives.
 func couldBeMarkdown(input []byte) bool {
@@ -730,4 +751,6 @@ type ProposedFileImport struct {
 	DataSources []DataSourceRecognition `json:"data_sources,omitempty"`
 }
 
-func (p ProposedFileImport) String() string { return p.Filename }
+func (p ProposedFileImport) String() string {
+	return fmt.Sprintf("{%s:%s %v}", p.FileType, p.Filename, p.DataSources)
+}

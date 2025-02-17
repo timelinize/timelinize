@@ -75,7 +75,7 @@ async function loadAndRenderMapData() {
 
 		// prepare map data: associate each coordinate with its information & color
 		let newMapData = { items: [], params: params, totalDistance: 0 };
-		for (let i = 0; i < results.items.length; i++) {
+		for (let i = 0; i < results.items?.length; i++) {
 			const item = results.items[i];
 			
 			if (!canRenderOnMap(item)) {
@@ -449,7 +449,7 @@ async function renderMapData(newMapData) {
 			});
 			dataPoint.adjacent = results.items;
 
-			if (!dataPoint.adjacent.length) {
+			if (!dataPoint.adjacent?.length) {
 				return;
 			}
 
@@ -511,31 +511,6 @@ function updateMapLighting() {
 }
 
 
-tlz.map.on('style.load', async () => {
-	// update the lighting every minute to match the current time of day
-	updateMapLighting();
-	setInterval(updateMapLighting, 60000);
-
-	// add terrain source, but don't set it on the map unless enabled
-	tlz.map.tl_addSource('mapbox-dem', {
-		type: 'raster-dem',
-		// TODO: what's the difference between these?
-		url: 'mapbox://mapbox.terrain-rgb'
-		// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
-	});
-
-	applyTerrain();
-
-	// changing the style obliterates layers
-	tlz.openRepos.forEach(repo => {
-		if (mapData.heatmap) {
-			renderHeatmap();
-		}
-		if (mapData.results) {
-			renderMapData();
-		}
-	});
-});
 
 // TODO: this adds buildings, if we want that...
 function addBuildings() {
@@ -620,7 +595,7 @@ on('click', '#bbox-toggle', event => {
 		$('.mapboxgl-canvas-container').style.cursor = 'crosshair';
 
 		// when user clicks down on map, start drawing process
-		tlz.map.on('mousedown', mouseDown);
+		tlz.map.on('mousedown', onMouseDown);
 
 		const canvas = tlz.map.getCanvasContainer();
 
@@ -631,7 +606,7 @@ on('click', '#bbox-toggle', event => {
 		// Variable for the draw box element.
 		let box;
 
-		function mouseDown(e) {
+		function onMouseDown(e) {
 			// TODO: if space is held down (keyCode 32 -- probably needed in keyDown event), don't draw the box: pan instead
 
 			tlz.map.on('mousemove', onMouseMove);
@@ -695,7 +670,7 @@ on('click', '#bbox-toggle', event => {
 			tlz.map.dragPan.enable();
 			tlz.map.boxZoom.enable();
 
-			tlz.map.off('mousedown', mouseDown);
+			tlz.map.off('mousedown', onMouseDown);
 			tlz.map.off('mousemove', onMouseMove);
 			tlz.map.off('mouseup', onMouseUp);
 
@@ -731,17 +706,6 @@ function hideMapPageInfoCard() {
 on('click', '#proximity-toggle', event => {
 	$('.mapboxgl-canvas-container').style.cursor =
 		$('#proximity-toggle').classList.contains('active') ? 'crosshair' : '';
-});
-
-tlz.map.on('click', e => {
-	if ($('#proximity-toggle')?.classList?.contains('active')) {
-		$('#proximity').value = `${e.lngLat.lat.toFixed(5)}, ${e.lngLat.lng.toFixed(5)}`;
-		$('#proximity').dataset.lat = e.lngLat.lat;
-		$('#proximity').dataset.lon = e.lngLat.lng;
-		$('#proximity').dispatchEvent(new Event('change', { bubbles: true }));
-		$('#proximity-toggle').classList.remove('active');
-		$('.mapboxgl-canvas-container').style.cursor = '';
-	}
 });
 
 on('change', '#bbox', e => {
@@ -1031,6 +995,7 @@ function renderHeatmap() {
 }
 
 
+// Returns the distance between two coordinates in kilometers.
 // from https://stackoverflow.com/a/48805273/1048862
 // NOTE: We use [lon, lat] order because that's what Mapbox uses, so the rest of our code uses this order too.
 function haversineDistance([lon1, lat1], [lon2, lat2], miles = false) {

@@ -96,9 +96,10 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	fimp.dsOpt = params.DataSourceOptions.(*Options)
 	fimp.opt = params
+	fimp.root = dirEntry.FSRoot
 
 	// we can't open a SQLite DB using io/fs interfaces, so we have to just utilize disk directly.
-	dbPath := filepath.Join(dirEntry.FSRoot, filepath.FromSlash(dirEntry.Filename), "Manifest.db")
+	dbPath := filepath.Join(fimp.root, filepath.FromSlash(dirEntry.Filename), "Manifest.db")
 	db, err := sql.Open("sqlite3", dbPath+"?mode=ro")
 	if err != nil {
 		return fmt.Errorf("opening manifest DB: %w", err)

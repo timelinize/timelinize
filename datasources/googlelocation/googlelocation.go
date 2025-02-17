@@ -94,31 +94,15 @@ type FileImporter struct {
 }
 
 // Recognize returns whether the file is supported.
-func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
-	if dirEntry.IsDir() {
-		// see if it's a Takeout-structured location history (a folder with Records.json in it)
-		pathToTry := path.Join(dirEntry.Filename, "Records.json")
-		if strings.Contains(dirEntry.Name(), "Location History") && timeline.FileExistsFS(dirEntry.FS, pathToTry) {
-			return timeline.Recognition{Confidence: 1}, nil
-		}
-	} else if dirEntry.Name() == "location-history.json" { // avoid opening all JSON files (can be slow esp. in archives)
-		//  check for the newer on-device-only location history file from Q2 2024.
-		f, err := dirEntry.Open()
-		if err != nil {
-			return timeline.Recognition{}, err
-		}
-		defer f.Close()
-		dec := json.NewDecoder(f)
-		if token, err := dec.Token(); err == nil {
-			if _, ok := token.(json.Delim); ok {
-				var loc onDeviceLocation
-				if err := dec.Decode(&loc); err == nil {
-					if !loc.StartTime.IsZero() && !loc.EndTime.IsZero() {
-						return timeline.Recognition{Confidence: 1}, nil
-					}
-				}
-			}
-		}
+func (fi FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	if rec := fi.recognizeLegacyTakeoutFormat(dirEntry); rec.Confidence > 0 {
+		return rec, nil
+	}
+	if rec, err := fi.recognizeOnDevice2024iOSFormat(dirEntry); rec.Confidence > 0 || err != nil {
+		return rec, err
+	}
+	if rec, err := fi.recognizeOnDevice2025AndroidFormat(dirEntry); rec.Confidence > 0 || err != nil {
+		return rec, err
 	}
 	return timeline.Recognition{}, nil
 }
@@ -135,122 +119,32 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		return fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", fi.dsOpt.Simplification)
 	}
 
-	// load prior checkpoint, if set, or if not, prepare an empty checkpoint
-	if params.Checkpoint == nil {
-		fi.checkpoint.Legacy.Positions = make(map[int64]int)
-	} else {
+	// load prior checkpoint, if set
+	if params.Checkpoint != nil {
 		err := json.Unmarshal(params.Checkpoint, &fi.checkpoint)
 		if err != nil {
 			return fmt.Errorf("decoding checkpoint: %w", err)
 		}
 	}
-	fi.checkpoint.Legacy.Mutex = new(sync.Mutex)
 
-	// see if this is a (now-legacy) Takeout archive of location history
-	if dirEntry.IsDir() {
-		// try to load settings file; this helps us identify devices; however
-		// this list is often incomplete, especially if user has removed them
-		// from their Google account
-		settings, err := loadSettingsFromTakeoutArchive(dirEntry)
-		if err != nil && errors.Is(err, fs.ErrNotExist) {
-			params.Log.Warn("no Settings.json file found; some information may be lacking")
-		}
-
-		// key device settings to their device tag for future storage in DB
-		fi.dsOpt.devices = make(map[int64]deviceSettings)
-		for _, dev := range settings.DeviceSettings {
-			fi.dsOpt.devices[dev.DeviceTag] = dev
-		}
-
-		// The data looks much better when we only process one path
-		// at a time (a path being the points belonging to a DeviceTag),
-		// so in order to do this, we iterate the input multiple times
-		// concurrently - once per device. In this main goroutine we
-		// simply look for the first device and "claim" it. As iteration
-		// continues, the first device tag after that which is different
-		// and unclaimed is claimed for a new goroutine, and a new
-		// goroutine is spawned to scan the dataset for just that device;
-		// and this process continues until all discovered devices have
-		// been claimed. We limit the number of max goroutines to prevent
-		// unbounded memory growth.
-		fi.seenDevices = make(map[int64]struct{})
-		fi.seenDevicesMu = new(sync.Mutex)
-
-		const maxGoroutines = 128
-		fi.wg = new(sync.WaitGroup)
-		fi.throttle = make(chan struct{}, maxGoroutines)
-
-		fi.wg.Add(1)
-		err = fi.processFile(ctx, &decoder{fi: fi})
-		if err != nil {
-			return fmt.Errorf("top scan processing %s: %w", dirEntry.Filename, err)
-		}
-		fi.wg.Done()
-
-		fi.wg.Wait()
-
-		return nil
-	}
-
-	// otherwise, this is a location history file that is the newer
-	// on-device location history export starting from Q2 2024
-
-	f, err := dirEntry.Open()
-	if err != nil {
+	// delegate decoding+processing to the detected format decoder
+	if ok, err := fi.decodeOnDevice2025AndroidFormat(ctx, dirEntry, params); ok {
 		return err
 	}
-	defer f.Close()
-
-	dec := json.NewDecoder(f)
-
-	// consume opening '['
-	if token, err := dec.Token(); err != nil {
+	if ok, err := fi.decodeOnDevice2024iOSFormat(ctx, dirEntry, params); ok {
 		return err
-	} else if tkn, ok := token.(json.Delim); !ok || tkn != '[' {
-		return fmt.Errorf("unexpected opening token: %v", token)
 	}
-
-	onDevDec := &onDeviceDecoder{Decoder: dec}
-	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.Simplification)
-	if err != nil {
+	if ok, err := fi.decodeLegacyTakeoutFormat(ctx, dirEntry, params); ok {
 		return err
 	}
 
-	var i int
-	for {
-		if err := fi.ctx.Err(); err != nil {
-			return err
-		}
-
-		result, err := locProc.NextLocation(ctx)
-		if err != nil {
-			return err
-		}
-		if result == nil {
-			break
-		}
-
-		// fast-forward to checkpoint, if set
-		if fi.checkpoint.Format2024 > 0 && i < fi.checkpoint.Format2024 {
-			i++
-			continue
-		}
-
-		item := result.Original.(*onDeviceLocation).toItem(result, fi.dsOpt)
-
-		if fi.opt.Timeframe.ContainsItem(item, false) {
-			params.Pipeline <- &timeline.Graph{Item: item, Checkpoint: checkpoint{Format2024: i}}
-		}
-
-		i++
-	}
-
-	return nil
+	return errors.New("location history format not detected")
 }
 
 type checkpoint struct {
-	Legacy     safePositionsMap `json:"legacy,omitempty"` // map of device tag to position/index
-	Format2024 int              `json:"format_2024,omitempty"`
+	Legacy            *safePositionsMap `json:"legacy,omitempty"` // map of device tag to position/index
+	FormatiOS2024     int               `json:"format_ios_2024,omitempty"`
+	FormatAndroid2025 int               `json:"format_android_2025,omitempty"`
 }
 
 type decoder struct {
@@ -446,11 +340,11 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 // happens concurrently with us; so it implements MarshalJSON() to obtains the
 // same lock we use.
 type safePositionsMap struct {
-	*sync.Mutex `json:"-"`
-	Positions   map[int64]int `json:"positions,omitempty"` // used for unmarshaling/restoring the checkpoint, since we custom-marshal this struct
+	sync.Mutex `json:"-"`
+	Positions  map[int64]int `json:"positions,omitempty"` // used for unmarshaling/restoring the checkpoint, since we custom-marshal this struct
 }
 
-func (spm safePositionsMap) MarshalJSON() ([]byte, error) {
+func (spm *safePositionsMap) MarshalJSON() ([]byte, error) {
 	// can't marshal the whole struct itself since this method gets called and
 	// deadlocks, so we marshal the positions map and then craft the JSON manually
 
@@ -470,15 +364,6 @@ func (spm safePositionsMap) MarshalJSON() ([]byte, error) {
 
 	return result, nil
 }
-
-// // timeDelta returns the difference between times a and b,
-// // but always returns a positive duration (absolute value).
-// func timeDelta(a, b time.Time) time.Duration {
-// 	if a.After(b) {
-// 		return a.Sub(b)
-// 	}
-// 	return b.Sub(a)
-// }
 
 // FloatToIntE7 converts a float into the equivalent integer value
 // with the decimal point moved right 7 places by string manipulation

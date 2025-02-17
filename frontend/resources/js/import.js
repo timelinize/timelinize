@@ -1,6 +1,6 @@
 // TODO: Presumably, these handlers will need to be generalized if we ever want to reuse our filepicker modal
 on('show.bs.modal', '#modal-file-picker', async event => {
-	const filePicker = await newFilePicker();
+	const filePicker = await newFilePicker("import");
 	filePicker.classList.add('fw-normal');
 	
 	const container = $('.modal-body', event.target);
@@ -35,6 +35,10 @@ on('click', '.import-dsgroup-opt-button', event => {
 	const dsoptContainer = event.target.closest('.file-import-plan-dsgroup');
 	bootstrap.Modal.getOrCreateInstance($(`#modal-import-dsopt-${dsoptContainer.ds.name}`)).show();
 });
+on('click', '.import-dsgroup-remove-button', event => {
+	const dsgroup = event.target.closest('.file-import-plan-dsgroup');
+	removeDsGroup(dsgroup);
+});
 
 // remove row and update UI elements
 on('click', '.dsgroup-remove-row', event => {
@@ -52,11 +56,15 @@ on('click', '.dsgroup-remove-row', event => {
 	
 	// remove entire DS group (and its DS options modal, if any) if no files left
 	if (dsgroup.filenames.length == 0) {
-		dsgroup.remove();
-		$(`#modal-import-dsopt-${dsgroup.ds.name}`)?.remove();
+		removeDsGroup(dsgroup);
 	} else {
 		updateFileCountDisplays(dsgroup);
 	}
+});
+
+function removeDsGroup(dsgroupElem) {
+	dsgroupElem.remove();
+	$(`#modal-import-dsopt-${dsgroupElem.ds.name}`)?.remove();
 
 	updateExpandCollapseAll();
 
@@ -64,7 +72,7 @@ on('click', '.dsgroup-remove-row', event => {
 	if (!$('.file-import-plan-dsgroup')) {
 		$('#start-import').classList.add('disabled');
 	}
-});
+}
 
 // TODO: when loader modal is dismissed, either by keyboard or a deliberate event, cancel the request
 
@@ -105,7 +113,7 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 			dsGroupElem.ds = ds;
 			dsGroupElem.fileCounts = {'file': 0, 'dir': 0, 'archive': 0};
 			dsGroupElem.filenames = [];
-			$('.dsgroup-icon', dsGroupElem).style.backgroundImage = `url('/resources/images/data-sources/${ds.icon}')`;
+			$('.dsgroup-icon', dsGroupElem).style.backgroundImage = `url('/ds-image/${ds.name}')`;
 			$('.dsgroup-name', dsGroupElem).innerText = ds.title;
 
 			// each file listing in a DS group is a uniquely-ID'ed collapsible region
@@ -217,7 +225,7 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 		dsOptModal = cloneTemplate('#tpl-modal-import-dsopt');
 		dsOptModal.id = `modal-import-dsopt-${ds.name}`;
 	}
-	$('.avatar', dsOptModal).style.backgroundImage = `url('/resources/images/data-sources/${ds.icon}')`;
+	$('.avatar', dsOptModal).style.backgroundImage = `url('/ds-image/${ds.icon}')`;
 	$('.modal-title', dsOptModal).append(document.createTextNode(ds.title));
 
 	const dsOptElem = cloneTemplate(`#tpl-dsopt-${ds.name}`);
@@ -237,6 +245,12 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 	$('#page-content').append(dsOptModal);
 
 	// these can't be set up until after they're displayed
+	if (ds.name == "calendar") {
+		const entitySelect = newEntitySelect($('.calendar-owner', dsOptElem), 1);
+		const owner = await getOwner(tlz.openRepos[0]);
+		entitySelect.addOption(owner);
+		entitySelect.addItem(owner.id);
+	}
 	if (ds.name == "google_location") {
 		const entitySelect = newEntitySelect($('.google_location-owner', dsOptElem), 1);
 		const owner = await getOwner(tlz.openRepos[0]);
@@ -379,6 +393,7 @@ on('click', '#start-import', async event => {
 				// 	"metadata": 2,
 				// 	"location": 2
 				// }
+				interactive: $('#interactive').checked ? {} : null
 			},
 			estimate_total: $('#estimate-total').checked
 		}
@@ -403,8 +418,14 @@ on('click', '#start-import', async event => {
 		duration: 2000
 	});
 
-	// redirect to job status, I guess
-	navigateSPA(`/jobs/${repoID}/${result.job_id}`);
+	if (importParams.job.processing_options.interactive) {
+		// take user to page where they can begin their interactive import
+		navigateSPA(`/input?repo_id=${repoID}&job_id=${result.job_id}`);
+	} else {
+		// otherwise, redirect to job status, I guess
+		navigateSPA(`/jobs/${repoID}/${result.job_id}`);
+	}
+
 });
 
 function dataSourceOptions(ds) {
@@ -416,6 +437,13 @@ function dataSourceOptions(ds) {
 
 	let dsOpt;
 
+	if (ds.name == "calendar") {
+		dsOpt = {};
+		const owner = $('.calendar-owner', dsoptContainer).tomselect.getValue();
+		if (owner.length) {
+			dsOpt.owner_entity_id = Number(owner[0]);
+		}
+	}
 	if (ds.name == "smsbackuprestore") {
 		const ownerPhoneInput = $('.smsbackuprestore-owner-phone', dsoptContainer);
 		console.log("INPUT:", ownerPhoneInput)

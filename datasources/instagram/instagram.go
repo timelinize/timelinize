@@ -51,7 +51,7 @@ type Client struct{}
 
 // Recognize returns whether the file or folder is recognized.
 func (Client) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
-	if timeline.FileExistsFS(dirEntry.FS, personalInformationPath) {
+	if timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, personalInformationPath)) {
 		return timeline.Recognition{Confidence: .9}, nil
 	}
 	return timeline.Recognition{}, nil
@@ -106,7 +106,7 @@ func (c *Client) FileImport(_ context.Context, dirEntry timeline.DirEntry, param
 			return dirEntry.FS.Open(picFilename)
 		}
 	}
-	if personalInfo.DateOfBirth.Value != "" {
+	if personalInfo.DateOfBirth.Value != "" && personalInfo.DateOfBirth.Value != "1919-01-01" { // for some weird reason their default is 1919??
 		bd, err := time.Parse("2006-01-02", personalInfo.DateOfBirth.Value)
 		if err == nil {
 			owner.Attributes = append(owner.Attributes, timeline.Attribute{

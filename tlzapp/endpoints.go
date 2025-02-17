@@ -51,6 +51,12 @@ func (a *App) registerCommands() {
 			Payload: jobsPayload{},
 			Help:    "Cancels active jobs.",
 		},
+		"change-settings": {
+			Handler: a.server.handleChangeSettings,
+			Method:  http.MethodPost,
+			Payload: changeSettingsPayload{},
+			Help:    "Changes settings.",
+		},
 		"close-repository": {
 			Handler: a.server.handleCloseRepo,
 			Method:  http.MethodPost,
@@ -62,12 +68,6 @@ func (a *App) registerCommands() {
 			Method:  http.MethodPost,
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Loads a conversation.",
-		},
-		"data-source": {
-			Handler: a.server.handleDataSource,
-			Method:  http.MethodPost,
-			Payload: "",
-			Help:    "Returns information about a specific data source.",
 		},
 		"data-sources": {
 			Handler: a.server.handleGetDataSources,
@@ -133,6 +133,11 @@ func (a *App) registerCommands() {
 			Payload: mergeEntitiesPayload{},
 			Help:    "Merge two entities together.",
 		},
+		"next-graph": {
+			Handler: a.server.handleNextGraph,
+			Method:  http.MethodGet,
+			Help:    "Gets the next graph from an interactive import.",
+		},
 		"open-repositories": {
 			Handler: a.server.handleRepos,
 			Method:  http.MethodGet,
@@ -168,6 +173,17 @@ func (a *App) registerCommands() {
 			Payload: "",
 			Help:    "Returns whether the repository is empty or not.",
 		},
+		"settings": {
+			Handler: a.server.handleSettings,
+			Method:  http.MethodGet,
+			Help:    "Returns settings for the application and opened timelines.",
+		},
+		"submit-graph": {
+			Handler: a.server.handleSubmitGraph,
+			Method:  http.MethodPost,
+			Payload: submitGraphPayload{},
+			Help:    "Submits a graph for processing during an interactive import.",
+		},
 		"search-entities": {
 			Handler: a.server.handleSearchEntities,
 			Method:  http.MethodPost,
@@ -186,10 +202,10 @@ func (a *App) registerCommands() {
 			Payload: jobPayload{},
 			Help:    "Starts a job.",
 		},
-		"stats": {
-			Handler: a.server.handleStats,
+		"charts": {
+			Handler: a.server.handleCharts,
 			Method:  http.MethodGet,
-			Help:    "Returns statistics about the timeline.",
+			Help:    "Returns statistics about the timeline for use in charts.",
 		},
 		"unpause-job": {
 			Handler: a.server.handleUnpauseJob,

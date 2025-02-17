@@ -41,12 +41,17 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-// serveFrontend serves resources to the UI in this URL format:
-// / repo / {repoID} / data|assets|thumbnail|image|transcode|motion-photo|dl / {dataFilePath_or_thumbnailItemID.jpg_or_itemID}
+// serveFrontend serves frontend assets, such as repository resources,
+// data source images, and the static website files.
 func (s server) serveFrontend(w http.ResponseWriter, r *http.Request) error {
 	if strings.HasPrefix(r.URL.Path, "/repo/") {
 		// serve timeline item data files, assets, thumbnails, and more
 		return s.handleRepoResource(w, r)
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/ds-image/") {
+		// serve data source image; not specific to any particular repo
+		return s.dataSourceImage(w, r)
 	}
 
 	// otherwise, serve static site
@@ -85,7 +90,7 @@ func (s server) serveFrontend(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 
-	if err := executeTemplate(rec, r); err != nil {
+	if err := executeTemplate(rec, r, s.app); err != nil {
 		return err
 	}
 
@@ -101,6 +106,8 @@ func (s server) serveFrontend(w http.ResponseWriter, r *http.Request) error {
 	return rec.WriteResponse()
 }
 
+// handleRepoResource serves resources to the UI in this URL format:
+// / repo / {repoID} / data|assets|thumbnail|image|transcode|motion-photo|dl / {dataFilePath_or_thumbnailItemID.jpg_or_itemID}
 func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error {
 	const minParts, maxParts = 5, 6
 	parts := strings.SplitN(r.URL.Path, "/", maxParts)
@@ -325,8 +332,15 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 
 	thumbReader := bytes.NewReader(thumb.Content)
 	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
-	if obfuscate && strings.HasPrefix(thumbType, "video/") {
-		return s.transcodeVideo(r.Context(), w, "", thumbReader, obfuscate)
+	if obfuscate {
+		if strings.HasPrefix(thumbType, "image/") {
+			return Error{
+				Err:        errors.New("obfuscation mode enabled: image thumbnail can just be thumbhash"),
+				HTTPStatus: http.StatusNoContent,
+			}
+		} else if strings.HasPrefix(thumbType, "video/") {
+			return s.transcodeVideo(r.Context(), w, "", thumbReader, obfuscate)
+		}
 	}
 
 	http.ServeContent(w, r, thumb.Name, thumb.ModTime, bytes.NewReader(thumb.Content))
@@ -531,6 +545,7 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 			RepoID                string          `json:"repo_id,omitempty"`
 			ItemID                int64           `json:"item_id,omitempty"`
 			DataSourceName        *string         `json:"data_source_name,omitempty"`
+			DataSourceTitle       *string         `json:"data_source_title,omitempty"`
 			Stored                time.Time       `json:"stored,omitempty"`
 			Filename              *string         `json:"filename,omitempty"`
 			Timestamp             *time.Time      `json:"timestamp,omitempty"`
@@ -556,6 +571,7 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 				RepoID:                tl.ID().String(),
 				ItemID:                itemRow.ID,
 				DataSourceName:        itemRow.DataSourceName,
+				DataSourceTitle:       itemRow.DataSourceTitle,
 				Stored:                itemRow.Stored,
 				Filename:              itemRow.Filename,
 				Timestamp:             itemRow.Timestamp,
@@ -589,10 +605,34 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 	return nil
 }
 
+func (s server) dataSourceImage(w http.ResponseWriter, r *http.Request) error {
+	parts := strings.Split(r.URL.Path, "/")
+	const expectedNumParts = 3
+	if len(parts) != expectedNumParts {
+		return fmt.Errorf("expected URL to have %d components, got: %v", expectedNumParts, parts)
+	}
+	dsName := parts[2]
+
+	all, err := s.app.DataSources(r.Context(), dsName)
+	if err != nil {
+		return err
+	}
+	if len(all) != 1 {
+		return errors.New("data source not found: " + dsName)
+	}
+	ds := all[0]
+
+	w.Header().Set("Content-Type", ds.MediaType)
+	_, err = w.Write(ds.Media)
+
+	return err
+}
+
 func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, inputVideoFilePath string, inputVideoStream io.Reader, obfuscate bool) error {
 	// TODO: potentially use Accept header to make this dynamic
 	const format = "video/webm"
 	w.Header().Set("Content-Type", format)
+	// TODO: Safari sends "Range: bytes=0-1" before it requests the whole video, I think it expects a Content-Range header. can we use ServeContent to make it work on Safari?
 
 	if err := s.app.Transcode(ctx, inputVideoFilePath, inputVideoStream, format, w, obfuscate); err != nil {
 		return fmt.Errorf("video transcode error: %#w", err)
@@ -601,7 +641,7 @@ func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, input
 	return nil
 }
 
-func executeTemplate(rr *responseRecorder, r *http.Request) error {
+func executeTemplate(rr *responseRecorder, r *http.Request, app *App) error {
 	var data any
 	if dataFunc, ok := templateData[r.URL.Path]; ok && dataFunc != nil {
 		var err error
@@ -610,7 +650,7 @@ func executeTemplate(rr *responseRecorder, r *http.Request) error {
 			return err
 		}
 	}
-	if err := executeTemplateInBuffer(r.URL.Path, rr.Buffer(), data); err != nil {
+	if err := executeTemplateInBuffer(r.URL.Path, rr.Buffer(), data, app); err != nil {
 		// TODO: make it possible for templates to return errors with a specific status code
 		return err
 	}
@@ -618,8 +658,8 @@ func executeTemplate(rr *responseRecorder, r *http.Request) error {
 	return nil
 }
 
-func executeTemplateInBuffer(tplName string, buf *bytes.Buffer, data any) error {
-	tpl := newTemplate(tplName)
+func executeTemplateInBuffer(tplName string, buf *bytes.Buffer, data any, app *App) error {
+	tpl := newTemplate(tplName, app)
 
 	_, err := tpl.Parse(buf.String())
 	if err != nil {
@@ -631,7 +671,7 @@ func executeTemplateInBuffer(tplName string, buf *bytes.Buffer, data any) error 
 	return tpl.Execute(buf, data)
 }
 
-func newTemplate(tplName string) *template.Template {
+func newTemplate(tplName string, app *App) *template.Template {
 	tpl := template.New(tplName).Option("missingkey=zero")
 
 	// add sprig library
@@ -641,7 +681,7 @@ func newTemplate(tplName string) *template.Template {
 	tpl.Funcs(template.FuncMap{
 		"N":       tplFuncIntIter,
 		"now":     time.Now,
-		"include": tplFuncInclude,
+		"include": app.tplFuncInclude,
 	})
 
 	return tpl
@@ -655,17 +695,17 @@ func tplFuncIntIter(n int) []struct{} {
 // and renders it in place. Note that included files are NOT escaped, so you
 // should only include trusted files. If it is not trusted, be sure to use
 // escaping functions in your template.
-func tplFuncInclude(filename string) (string, error) {
+func (a *App) tplFuncInclude(filename string) (string, error) {
 	bodyBuf := bufPool.Get().(*bytes.Buffer)
 	bodyBuf.Reset()
 	defer bufPool.Put(bodyBuf)
 
-	err := readFileToBuffer(http.FS(app.frontend), filename, bodyBuf)
+	err := readFileToBuffer(http.FS(a.server.frontend), filename, bodyBuf)
 	if err != nil {
 		return "", err
 	}
 
-	err = executeTemplateInBuffer(filename, bodyBuf, nil)
+	err = executeTemplateInBuffer(filename, bodyBuf, nil, a)
 	if err != nil {
 		return "", err
 	}

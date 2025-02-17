@@ -57,12 +57,14 @@ func newLogger() *zap.Logger {
 		zapcore.NewCore(jsonEncoder, websocketsOut, zap.InfoLevel),  // sent to web frontend / UI
 	)
 
-	// avoid a firehose of logs
-	const firstNMsgs, everyNthMsg = 10, 100
-	core = zapcore.NewSamplerWithOptions(core, time.Second, firstNMsgs, everyNthMsg)
-
-	const streamInterval = 250 * time.Millisecond
-	return zap.New(&customCore{Core: core, streamCore: zapcore.NewSamplerWithOptions(core, streamInterval, 1, 0)})
+	// the embedded core avoids a firehose of logs, but we still need an unsampled core for UI updates and such, where every message is critical
+	// (the critical messages are defined in the Check() method of our Core type)
+	const sampledLogInterval, sampledLiveJobProgressInterval, sampledLiveJobProgressCount = 250 * time.Millisecond, 100 * time.Millisecond, 2
+	return zap.New(&customCore{
+		Core:                zapcore.NewSamplerWithOptions(core, sampledLogInterval, 1, 0),
+		nonSamplingCore:     core,
+		liveJobProgressCore: zapcore.NewSamplerWithOptions(core, sampledLiveJobProgressInterval, sampledLiveJobProgressCount, 0),
+	})
 }
 
 // multiConnWriter is like io.multiWriter from the standard lib,
@@ -76,16 +78,12 @@ func newLogger() *zap.Logger {
 // specifically closed connections will result in that connection
 // being removed from the pool.
 type multiConnWriter struct {
-	// appCtx  context.Context // must be a Wails application context
 	conns   []*websocket.Conn
-	connsMu sync.RWMutex // also protects appCtx
+	connsMu sync.RWMutex
 }
 
 func (mw *multiConnWriter) Write(p []byte) (n int, err error) {
 	mw.connsMu.RLock()
-	// if mw.appCtx != nil {
-	// 	runtime.EventsEmit(mw.appCtx, "log", string(p))
-	// }
 	for _, w := range mw.conns {
 		err = w.WriteMessage(websocket.TextMessage, p)
 		// the handler that added this connection to the pool should
@@ -139,16 +137,28 @@ func RemoveLogConn(conn *websocket.Conn) {
 // customCore wraps another zapcore.Core and prevents sampling based on logger name.
 type customCore struct {
 	zapcore.Core
-	streamCore zapcore.Core
+	nonSamplingCore     zapcore.Core
+	liveJobProgressCore zapcore.Core
 }
 
 func (c *customCore) Check(ent zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
 	if ent.LoggerName == "job.status" {
 		// always allow through, no sampling -- otherwise UI gets out of sync
-		return ce.AddCore(ent, c.Core)
+		return ce.AddCore(ent, c.nonSamplingCore)
 	}
-	if ent.LoggerName == "job.action" && ent.Message == "finished graph" {
-		return c.streamCore.Check(ent, ce)
+	if ent.LoggerName == "job.action" && (ent.Message == "finished graph" || ent.Message == "finished thumbnail") {
+		return c.liveJobProgressCore.Check(ent, ce)
 	}
 	return c.Core.Check(ent, ce)
+}
+
+// With is a promotion of the embedded Core.With() method so that we can ensure
+// derivative loggers are our type, not the embedded type, to preserve our other
+// promoted methods like Check()...
+func (c *customCore) With(fields []zapcore.Field) zapcore.Core {
+	return &customCore{
+		Core:                c.Core.With(fields),
+		nonSamplingCore:     c.nonSamplingCore.With(fields),
+		liveJobProgressCore: c.liveJobProgressCore.With(fields),
+	}
 }

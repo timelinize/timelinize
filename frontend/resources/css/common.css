@@ -7,9 +7,14 @@
 
 /*
 
-MY OWN TABLER (BETA 19, 20, 21) FIXES
+MY OWN TABLER (BETA 19, 20, 21, 22) FIXES
 
 */
+
+/* that single-story "a" looks terrible IMO, so disable cv11. See all Inter font features here: https://rsms.me/inter/#features */
+body {
+	font-feature-settings: "liga" 0, "calt" 1, "cv03", "cv04";
+}
 
 /* vertical spacing fix... ? hopefully not bad; ca. Tabler beta 20 */
 .row-cards {
@@ -42,7 +47,14 @@ a parent div. this takes care of that by removing the >. */
 }
 
 
-
+/* override tabler-vendors */
+.ts-wrapper.multi .ts-control > div {
+	/* for some reason, the vertical margin they add to
+	these elements makes the tomselect item "chips" take
+	up too much space and throw off vertical alignment */
+	margin-top: 0;
+	margin-bottom: 0;
+}
 
 
 
@@ -190,14 +202,6 @@ header .logo {
 	display: block;
 }
 
-.page-wrapper .page-header-overlap {
-	margin-top: 0;
-	padding-top: 15px;
-	position: relative;
-	background: var(--tblr-navbar-bg);
-	--tblr-navbar-bg: var(--tblr-bg-surface);
-}
-
 .navbar-minimal {
 	background: rgba(233, 239, 244, .6);
 	-webkit-backdrop-filter: blur(4px);
@@ -240,6 +244,16 @@ header .logo {
 	white-space: nowrap;
 }
 
+.ts-wrapper img {
+	height: 1.5em;
+	max-width: 1.5em;
+}
+
+.navbar .ts-wrapper {
+	/* prevent tomselects from growing unbounded horizontally */
+	width: 250px;
+}
+
 .dropdown-menu {
 	max-height: 75vh;
 	/* TODO: overflow-y: auto is needed here, but that breaks other dropdowns' overflow-x! (like the Timelinize dropdown menu) */
@@ -257,6 +271,11 @@ form .dropdown-menu {
 	font-size: small;
 	text-align: center;
 	display: block;
+}
+
+/* necessary after upgrading to Tabler v1.0.0-beta.21 -- not sure why though */
+.icon {
+	min-width: var(--tblr-icon-size);
 }
 
 
@@ -287,7 +306,9 @@ audio {
 	box-shadow: none;
 }
 
-
+dfn {
+	text-decoration: underline dashed;
+}
 
 
 
@@ -351,7 +372,6 @@ a {
 
 
 
-
 .input-group .form-select {
 	width: auto;
 	padding-left: 1rem;
@@ -370,6 +390,10 @@ a {
 .static-menu .dropdown-menu .dropdown-header {
 	background: inherit;
 	top: calc(-1 * var(--tblr-dropdown-padding-y));
+}
+
+.btn-dark {
+	--tblr-btn-border-color: #485f7a;
 }
 
 .pagination .btn-list {
@@ -399,13 +423,7 @@ a.disabled {
 }
 
 
-
-.message-reactions {
-	margin-top: .5em;
-	margin-bottom: -1em;
-}
-
-.message-reaction {
+.emoji {
 	font-family: "Twemoji Mozilla",
 		"Apple Color Emoji",
 		"Segoe UI Emoji",
@@ -413,14 +431,28 @@ a.disabled {
 		"Noto Color Emoji",
 		"EmojiOne Color",
 		"Android Emoji";
-	cursor: default;
-	background: var(--tblr-card-bg);
-	border-radius: 50%;
-	padding: .25em .5em;
-	box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
-	margin-left: -.35em; 
 }
 
+.message-reactions {
+	margin-top: .5em;
+	margin-bottom: -1em;
+}
+
+.message-reaction {
+	cursor: default;
+	background: var(--tblr-card-bg);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, .15);
+	font-size: 85%;
+	border-radius: .5rem;
+	padding: .5rem;
+	margin-right: .25rem;
+	line-height: .75;
+}
+
+.message-reaction .emoji {
+	vertical-align: sub;
+	font-size: 1.5em;
+}
 
 
 
@@ -704,18 +736,6 @@ the one that it is stuck to when scrolling */
 	}
 }
 
-/* since we do column-reverse, we need to reverse the last-child logic... */
-/* .messages-list-group .list-group-item:last-child {
-	border-bottom: var(--tblr-list-group-border-width) solid var(--tblr-list-group-border-color);
-}
-.messages-list-group .list-group-item:first-child {
-	border-bottom: 0;
-} */
-.messages-list-group {
-	/* flex-direction: column-reverse; */
-	max-height: 300px; /* TODO: 235px? */
-	overflow-y: auto;
-}
 .message-content {
 	word-break: break-word;
 }

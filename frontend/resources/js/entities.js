@@ -145,7 +145,11 @@ on('change', '.select-entity', e => {
 });
 
 on('click', '#confirm-merge-entities', async e => {
+	const button = $('#confirm-merge-entities');
+
 	const done = function() {
+		button.classList.remove('disabled');
+		$('spinner', button)?.remove();
 		bootstrap.Modal.getInstance('#modal-merge-multiple-entities').hide();
 	};
 	
@@ -159,7 +163,6 @@ on('click', '#confirm-merge-entities', async e => {
 	// show loading indicator on button and disable clicks until done
 	const spinner = document.createElement('spinner');
 	spinner.classList.add('spinner-border', 'spinner-border-sm', 'me-2');
-	const button = $('#confirm-merge-entities');
 	button.prepend(spinner);
 	button.classList.add('disabled');
 
@@ -168,7 +171,13 @@ on('click', '#confirm-merge-entities', async e => {
 	keepID = ids.shift();
 
 	// perform merge
-	await app.MergeEntities(tlz.openRepos[0].instance_id, keepID, ids);	
+	await app.MergeEntities(tlz.openRepos[0].instance_id, keepID, ids);
+
+	notify({
+		type: "success",
+		title: `${ids.length+1} entit${ids.length+1 == 1 ? "y" : "ies"} merged`,
+		duration: 2000
+	});
 	
 	
 	// close modal and update list

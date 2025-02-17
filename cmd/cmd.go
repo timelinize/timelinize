@@ -38,8 +38,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var app *tlzapp.App
-
 func Main(embeddedWebsite fs.FS) {
 	cfg, err := loadConfigFile()
 	if err != nil {
@@ -48,7 +46,7 @@ func Main(embeddedWebsite fs.FS) {
 
 	ctx := context.Background()
 
-	app, err = tlzapp.Init(ctx, cfg, embeddedWebsite)
+	app, err := tlzapp.New(ctx, cfg, embeddedWebsite)
 	if err != nil {
 		timeline.Log.Fatal("failed to run application", zap.Error(err))
 	}
@@ -56,7 +54,7 @@ func Main(embeddedWebsite fs.FS) {
 	flag.Parse()
 
 	// implement standard (CLI-only) flags
-	subCommand, subCommandFunc := getStandardSubcommand()
+	subCommand, subCommandFunc := getStandardSubcommand(app)
 	if subCommandFunc != nil {
 		if err := checkFlagParsing(); err != nil {
 			timeline.Log.Fatal("possible syntax error detected", zap.Error(err))
@@ -78,9 +76,8 @@ func Main(embeddedWebsite fs.FS) {
 	}
 
 	// start the application server
-	// TODO: customized listen address? -- load the config file and get the listen address from there
 	// TODO: Use a host like tlz.localhost to serve HTTP/2 over HTTPS... just need to automate the CA and cert... - or maybe a public domain like timelinize.app or timelinize.run or something
-	startedServer, err := app.Serve(os.Getenv("TLZ_ADMIN_ADDR"))
+	startedServer, err := app.Serve()
 	if err != nil {
 		timeline.Log.Fatal("could not start server", zap.Error(err))
 	}
@@ -137,7 +134,25 @@ func openWebBrowser(loc string) error {
 	return cmd.Run()
 }
 
-func getStandardSubcommand() (string, func() error) {
+// Gets CLI-only commands.
+func getStandardSubcommand(app *tlzapp.App) (string, func() error) {
+	standardCommands := map[string]func() error{
+		"serve": func() error {
+			if err := app.MustServe(); err != nil {
+				return err
+			}
+			select {}
+		},
+		"help": func() error { //nolint:unparam // bug filed: https://github.com/mvdan/unparam/issues/82
+			fmt.Println(app.CommandLineHelp())
+			return nil
+		},
+		"version": func() error {
+			fmt.Println("TODO: print version")
+			return nil
+		},
+	}
+
 	if len(flag.Args()) > 0 {
 		subCommand := flag.Arg(0)
 		subCommandFunc, ok := standardCommands[subCommand]
@@ -167,22 +182,6 @@ func checkFlagParsing() error {
 		return errors.New("it looks like you intended to specify flags, but none were parsed; make sure flags go before positional arguments")
 	}
 	return nil
-}
-
-// standardCommands are CLI-only commands.
-var standardCommands = map[string]func() error{
-	"serve": func() error {
-		// TODO: customized listen address?
-		if err := app.MustServe(os.Getenv("TLZ_ADMIN_ADDR")); err != nil {
-			return err
-		}
-		select {}
-	},
-	"help": func() error { //nolint:unparam // bug filed: https://github.com/mvdan/unparam/issues/82
-		fmt.Println(app.CommandLineHelp())
-		return nil
-	},
-	// TODO: a 'version' command
 }
 
 func loadConfigFile() (*tlzapp.Config, error) {

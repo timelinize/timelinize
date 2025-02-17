@@ -1,20 +1,33 @@
 // render functions should be synchronous (async should be awaited) so that the page load isn't janky.
 tlz.pageControllers = {
 	"/pages/conversations.html": {
-		async render() {
+		async load() {
 			await conversationsPageMain();
+		},
+		async render() {
+			await renderConversationsPage();
 		}
 	},
 
 	"/pages/dashboard.html": {
 		load() {
 			$('.navbar').classList.add('navbar-overlap');
+			$('.navbar').dataset.bsTheme = "dark";
+
+			const ctaButton = $('.nav-item .btn-outline-primary');
+			ctaButton.classList.remove('btn-outline-primary');
+			ctaButton.classList.add('btn-primary');
 		},
 		async render() {
 			await renderDashboard();
 		},
 		unload() {
 			$('.navbar').classList.remove('navbar-overlap');
+			delete($('.navbar').dataset.bsTheme);
+
+			const ctaButton = $('.nav-item .btn-primary');
+			ctaButton.classList.remove('btn-primary');
+			ctaButton.classList.add('btn-outline-primary');
 		}
 
 		// TODO: build a real dashboard, you fool
@@ -95,6 +108,28 @@ tlz.pageControllers = {
 		}
 	},
 
+	"/pages/settings.html": {
+		async load() {
+			changeSettingsTab(window.location.hash || "#general");
+
+			// next, load settings and populate fields
+
+			tlz.settings = await app.GetSettings();
+			console.log("SETTINGS:", tlz.settings);
+
+			// general
+			$('#mapbox-api-key').value = tlz.settings?.application?.mapbox_api_key || "";
+
+			// demo mode (obfuscation)
+			const obfs = tlz.settings?.application?.obfuscation;
+			$('#demo-mode-enabled').checked = obfs?.enabled == true;
+			$('#data-file-names').checked = obfs?.data_files == true;
+
+			// advanced
+			$('#website-dir').value = tlz.settings?.application?.website_dir || "";
+		}
+	},
+
 	"/pages/entities.html": {
 		async render() {
 			await entitiesPageMain();
@@ -148,6 +183,12 @@ tlz.pageControllers = {
 				noApply: true
 			}));
 		}
+	},
+
+	"/pages/input.html": {
+		async render() {
+			inputPageMain();
+		},
 	},
 
 	"/pages/item.html": {

@@ -50,14 +50,16 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, 
 		return 0, fmt.Errorf("JSON-encoding job action: %w", err)
 	}
 
-	var name JobName
+	var jobType JobType
 	switch action.(type) {
-	case ImportJob:
-		name = JobNameImport
+	case *ImportJob:
+		jobType = JobTypeImport
 	case thumbnailJob:
-		name = JobNameThumbnails
+		jobType = JobTypeThumbnails
 	case embeddingJob:
-		name = JobNameEmbeddings
+		jobType = JobTypeEmbeddings
+	default:
+		return 0, fmt.Errorf("unexpected job action: %#v", action)
 	}
 
 	var repeatPtr *time.Duration
@@ -79,7 +81,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, 
 
 	// this value is not the one that gets run, it is only used for storing
 	job := Job{
-		Name:        name,
+		Type:        jobType,
 		Config:      string(config),
 		Start:       startPtr,
 		Total:       totalPtr,
@@ -103,11 +105,12 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, 
 
 	// TODO: This log is a bit of a hack; it's to notify the UI that a new job
 	// has been created, so it can be shown in the UI if relevant; but the
-	// longer-term status logger doesn't get made until runJob...
+	// longer-term status logger doesn't get made until runJob... so we have
+	// to make a logger with the same name and many of the same fields...
 	Log.Named("job.status").Info("created",
 		zap.String("repo_id", tl.ID().String()),
 		zap.Int64("id", jobID),
-		zap.String("name", string(job.Name)),
+		zap.String("type", string(job.Type)),
 		zap.Time("created", time.Now()),
 		zap.Timep("start", job.Start),
 		zap.Int64p("parent_job_id", parentJobIDPtr))
@@ -156,10 +159,10 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
 
 	var id int64
 	err = tx.QueryRowContext(tl.ctx, `
-		INSERT INTO jobs (name, configuration, hash, hostname, start, total, repeat, parent_job_id)
+		INSERT INTO jobs (type, configuration, hash, hostname, start, total, repeat, parent_job_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id`,
-		job.Name, job.Config, job.Hash, job.Hostname, start, job.Total, job.Repeat, job.ParentJobID).Scan(&id)
+		job.Type, job.Config, job.Hash, job.Hostname, start, job.Total, job.Repeat, job.ParentJobID).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("inserting new job row: %w", err)
 	}
@@ -171,7 +174,7 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
 // timeline database when calling this function!
 func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, parentAndChildJobs bool) (Job, error) {
 	q := `SELECT
-	id, name, configuration, hash, state, hostname,
+	id, type, name, configuration, hash, state, hostname,
 	created, updated, start, ended,
 	message, total, progress, checkpoint,
 	repeat, parent_job_id
@@ -205,35 +208,10 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, parent
 	// which is the "main"/parent job later (the result set is not usually more
 	// than a few rows)
 	for rows.Next() {
-		var job Job
-		var created, updated, start, end *int64
-
-		err = rows.Scan(
-			&job.ID, &job.Name, &job.Config, &job.Hash, &job.State, &job.Hostname,
-			&created, &updated, &start, &end,
-			&job.Message, &job.Total, &job.Progress, &job.Checkpoint,
-			&job.Repeat, &job.ParentJobID)
+		job, err := scanJob(rows, tlID)
 		if err != nil {
-			return job, fmt.Errorf("scanning job fields: %w", err)
+			return Job{}, err
 		}
-
-		if created != nil {
-			job.Created = time.UnixMilli(*created)
-		}
-		if updated != nil {
-			ts := time.UnixMilli(*updated)
-			job.Updated = &ts
-		}
-		if start != nil {
-			ts := time.UnixMilli(*start)
-			job.Start = &ts
-		}
-		if end != nil {
-			ts := time.UnixMilli(*end)
-			job.Ended = &ts
-		}
-		job.RepoID = tlID
-
 		jobs = append(jobs, job)
 	}
 	if err := rows.Err(); err != nil {
@@ -374,33 +352,33 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID int64) error
 func (tl *Timeline) runJob(row Job) error {
 	// create the job action by deserializing the config into its assocated struct
 	var action JobAction
-	switch row.Name {
-	case JobNameImport:
-		var importJob ImportJob
+	switch row.Type {
+	case JobTypeImport:
+		var importJob *ImportJob
 		if err := json.Unmarshal([]byte(row.Config), &importJob); err != nil {
 			return fmt.Errorf("unmarshaling import job config: %w", err)
 		}
 		action = importJob
-	case JobNameThumbnails:
+	case JobTypeThumbnails:
 		var thumbnailJob thumbnailJob
 		if err := json.Unmarshal([]byte(row.Config), &thumbnailJob); err != nil {
 			return fmt.Errorf("unmarshaling thumbnail job config: %w", err)
 		}
 		action = thumbnailJob
-	case JobNameEmbeddings:
+	case JobTypeEmbeddings:
 		var embeddingJob embeddingJob
 		if err := json.Unmarshal([]byte(row.Config), &embeddingJob); err != nil {
 			return fmt.Errorf("unmarshaling embedding job config: %w", err)
 		}
 		action = embeddingJob
 	default:
-		return fmt.Errorf("unknown job name '%s'", row.Name)
+		return fmt.Errorf("unknown job type '%s'", row.Type)
 	}
 
 	baseLogger := Log.Named("job").With(
 		zap.String("repo_id", tl.ID().String()),
 		zap.Int64("id", row.ID),
-		zap.String("name", string(row.Name)),
+		zap.String("type", string(row.Type)),
 		zap.Time("created", row.Created),
 		zap.Timep("start", row.Start))
 
@@ -529,10 +507,10 @@ func (tl *Timeline) runJob(row Job) error {
 		err = tx.QueryRowContext(tl.ctx,
 			`SELECT id
 			FROM jobs
-			WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
+			WHERE (state=? OR state=?) AND (hostname=? OR type!=?)
 			ORDER BY start, created
 			LIMIT 1`,
-			JobQueued, JobInterrupted, hostname, JobNameImport).Scan(&nextJobID)
+			JobQueued, JobInterrupted, hostname, JobTypeImport).Scan(&nextJobID)
 		if nextJobID > 0 {
 			err := tl.startJob(tl.ctx, tx, nextJobID)
 			if err != nil {
@@ -685,6 +663,7 @@ func (j *ActiveJob) flushProgress(logger *zap.Logger) {
 			zap.Timep("checkpointed", j.lastCheckpoint),
 			zap.Int64p("parent_job_id", j.parentJobID))
 		j.lastFlush = time.Now()
+		_ = logger.Sync() // ensure it gets written promptly
 	}
 }
 
@@ -771,57 +750,156 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 	return nil
 }
 
-func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64) ([]Job, error) {
-	jobs := make([]Job, len(jobIDs))
+// GetJobs loads the jobs with the specified IDs, or by the most recent jobs, whichever is set.
+// Both technically can be set, but why?
+func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64, mostRecent int) ([]Job, error) {
+	var jobs []Job //nolint:prealloc // false positive! can't always know how many we'll have in this case
 
-	for i, id := range jobIDs {
+	// load most recent jobs
+	if mostRecent > 0 {
+		q := `SELECT
+	id, type, name, configuration, hash, state, hostname,
+	created, updated, start, ended,
+	message, total, progress, checkpoint,
+	repeat, parent_job_id
+	FROM jobs
+	ORDER BY created DESC
+	LIMIT ?`
+
+		var rows *sql.Rows
+		var err error
+		rows, err = tl.db.QueryContext(ctx, q, mostRecent)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		tlID := tl.id.String()
+
+		for rows.Next() {
+			job, err := scanJob(rows, tlID)
+			if err != nil {
+				return nil, err
+			}
+			jobs = append(jobs, job)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		if len(jobs) == 0 {
+			return nil, sql.ErrNoRows
+		}
+	}
+
+	// load specific jobs by ID
+	for _, id := range jobIDs {
 		tl.dbMu.RLock()
 		job, err := tl.loadJob(ctx, nil, id, true)
 		tl.dbMu.RUnlock()
 		if err != nil {
 			return nil, fmt.Errorf("loading job %d: %w", id, err)
 		}
-		job.RepoID = tl.id.String()
+		jobs = append(jobs, job)
+	}
 
+	for i := range jobs {
 		// if job is running, we can provide more recent information than what
 		// was last synced to the DB, which may be out-of-date at the moment
-		if job.State == JobStarted {
+		if jobs[i].State == JobStarted {
 			tl.activeJobsMu.RLock()
-			activeJob, ok := tl.activeJobs[job.ID]
+			activeJob, ok := tl.activeJobs[jobs[i].ID]
 			tl.activeJobsMu.RUnlock()
 			if ok {
 				// we don't use a RWMutex because this mutex is write-heavy
 				activeJob.mu.Lock()
-				job.Progress = activeJob.currentProgress
-				job.Message = activeJob.currentMessage
-				job.Total = activeJob.currentTotal
+				jobs[i].Progress = activeJob.currentProgress
+				jobs[i].Message = activeJob.currentMessage
+				jobs[i].Total = activeJob.currentTotal
 				activeJob.mu.Unlock()
 			}
 		}
-
-		jobs[i] = job
 	}
+
 	return jobs, nil
 }
 
 func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
 	tl.activeJobsMu.Lock()
-	job, ok := tl.activeJobs[jobID]
+	activeJob, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.Unlock()
-	if !ok {
-		return fmt.Errorf("job %d is either inactive or does not exist", jobID)
+	if ok {
+		// job is actively running -- fun! we get to cancel it,
+		// and our job is actually easier this way
+		activeJob.cancel()
+
+		// wait for job action to return; this ensures its
+		// state has been synced to the DB and it has been
+		// removed from the map of active jobs
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-activeJob.done:
+		}
+
+		return nil
 	}
 
-	job.cancel()
+	// the job is not actively running; it could have been paused
+	// from a prior execution of the program, for example; or maybe
+	// it is still queued and they just want to prevent it from
+	// running; etc, let's check the DB
 
-	// wait for job action to return; this ensures its
-	// state has been synced to the DB and it has been
-	// removed from the map of active jobs
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-job.done:
+	tl.dbMu.Lock()
+	defer tl.dbMu.Unlock()
+
+	tx, err := tl.db.Begin()
+	if err != nil {
+		return err
 	}
+	defer tx.Rollback()
+
+	job, err := tl.loadJob(ctx, tx, jobID, false)
+	if err != nil {
+		return fmt.Errorf("loading job %d from database: %w", jobID, err)
+	}
+
+	switch job.State {
+	case JobQueued, JobStarted, JobPaused, JobInterrupted:
+		// Started and Interrupted should probably not be encountered since
+		// running jobs should be active (taken care of above by canceling
+		// its context), and we should resume interrupted jobs at startup,
+		// but might as well allow them here since it's no matter
+		job.State = JobAborted
+		_, err = tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE id=?`, job.State, jobID) // TODO: LIMIT 1
+		if err != nil {
+			return fmt.Errorf("updating job state: %w", err)
+		}
+	default:
+		return fmt.Errorf("job %d is in state %s, which cannot be canceled", jobID, job.State)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing transaction: %w", err)
+	}
+
+	// update any UI elements that may be showing info about this inactive job
+	statusLog := Log.Named("job.status").With(
+		zap.String("repo_id", tl.ID().String()),
+		zap.Int64("id", job.ID),
+		zap.String("type", string(job.Type)),
+		zap.Time("created", job.Created),
+		zap.Timep("start", job.Start))
+	inactiveJob := &ActiveJob{
+		id:              job.ID,
+		statusLog:       statusLog,
+		parentJobID:     job.ParentJobID,
+		currentState:    job.State,
+		currentProgress: job.Progress,
+		currentTotal:    job.Total,
+		currentMessage:  job.Message,
+		lastCheckpoint:  job.Updated,
+	}
+	inactiveJob.flushProgress(statusLog)
 
 	return nil
 }
@@ -936,6 +1014,39 @@ func (tl *Timeline) StartJob(ctx context.Context, jobID int64, startOver bool) e
 	return tx.Commit()
 }
 
+func scanJob(rows *sql.Rows, repoID string) (Job, error) {
+	var job Job
+	var created, updated, start, end *int64
+
+	err := rows.Scan(
+		&job.ID, &job.Type, &job.Name, &job.Config, &job.Hash, &job.State, &job.Hostname,
+		&created, &updated, &start, &end,
+		&job.Message, &job.Total, &job.Progress, &job.Checkpoint,
+		&job.Repeat, &job.ParentJobID)
+	if err != nil {
+		return job, fmt.Errorf("scanning job fields: %w", err)
+	}
+
+	if created != nil {
+		job.Created = time.UnixMilli(*created)
+	}
+	if updated != nil {
+		ts := time.UnixMilli(*updated)
+		job.Updated = &ts
+	}
+	if start != nil {
+		ts := time.UnixMilli(*start)
+		job.Start = &ts
+	}
+	if end != nil {
+		ts := time.UnixMilli(*end)
+		job.Ended = &ts
+	}
+	job.RepoID = repoID
+
+	return job, nil
+}
+
 // Job is only to be used for shuttling job data in and out of the DB,
 // it should not be assumed to accurately reflect the current state of the
 // job. Mainly used for inserting a job row and getting a job row for the
@@ -945,7 +1056,8 @@ type Job struct {
 	RepoID string `json:"repo_id"`
 
 	ID          int64          `json:"id"`
-	Name        JobName        `json:"name"`
+	Type        JobType        `json:"type"`
+	Name        *string        `json:"name,omitempty"`
 	Config      string         `json:"config,omitempty"` // JSON encoding of, for instance, ImportParameters, etc.
 	Hash        []byte         `json:"hash,omitempty"`
 	State       JobState       `json:"state"`
@@ -968,7 +1080,7 @@ type Job struct {
 
 func (j Job) hash() []byte {
 	h := blake3.New()
-	_, _ = h.WriteString(string(j.Name))
+	_, _ = h.WriteString(string(j.Type))
 	_, _ = h.WriteString(j.Config)
 	if j.Hostname != nil {
 		_, _ = h.WriteString(*j.Hostname)
@@ -991,12 +1103,12 @@ type JobAction interface {
 	Run(job *ActiveJob, checkpoint []byte) error
 }
 
-type JobName string
+type JobType string
 
 const (
-	JobNameImport     JobName = "import"
-	JobNameThumbnails JobName = "thumbnails"
-	JobNameEmbeddings JobName = "embeddings"
+	JobTypeImport     JobType = "import"
+	JobTypeThumbnails JobType = "thumbnails"
+	JobTypeEmbeddings JobType = "embeddings"
 )
 
 type JobState string

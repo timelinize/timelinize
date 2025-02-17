@@ -23,7 +23,10 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"io/fs"
+	"mime"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -31,6 +34,7 @@ import (
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3" // register the sqlite3 driver
+	"github.com/timelinize/timelinize/datasources"
 	"go.uber.org/zap"
 )
 
@@ -125,7 +129,7 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 
-	query := `INSERT OR IGNORE INTO "data_sources" ("name") VALUES`
+	query := `INSERT OR IGNORE INTO "data_sources" ("name", "title", "description", "media", "media_type", "standard") VALUES`
 
 	vals := make([]any, 0, len(dataSources))
 	var count int
@@ -134,8 +138,39 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 		if count > 0 {
 			query += ","
 		}
-		query += " (?)"
-		vals = append(vals, ds.Name)
+		query += " (?, ?, ?, ?, ?, ?)"
+
+		var media []byte
+		var mediaType *string
+		if ds.Icon != "" {
+			var err error
+			media, err = fs.ReadFile(datasources.Images, "_images/"+ds.Icon)
+			if err != nil {
+				return fmt.Errorf("reading data source icon: %w", err)
+			}
+			ct := mime.TypeByExtension(path.Ext(ds.Icon))
+			if ct == "" {
+				switch strings.ToLower(path.Ext(ds.Icon)) {
+				case ".svg":
+					ct = "image/svg+xml"
+				case ".jpg", ".jpeg", ".jpe":
+					ct = "image/jpeg"
+				case ".png":
+					ct = "image/png"
+				case ".ico":
+					ct = "image/x-icon" // debatable whether it should be that, or "image/vnd.microsoft.icon"
+				case ".webp":
+					ct = "image/webp"
+				case ".avif":
+					ct = "image/webp"
+				case ".gif":
+					ct = "image/gif"
+				}
+			}
+			mediaType = &ct
+		}
+
+		vals = append(vals, ds.Name, ds.Title, ds.Description, media, mediaType, true)
 		count++
 	}
 
@@ -270,18 +305,28 @@ func provisionThumbsDB(ctx context.Context, thumbsDB *sql.DB, repoID uuid.UUID) 
 	return nil
 }
 
+// explainQueryPlan prints out the query and its plan. You MUST acquire a lock on the dbMu first.
+//
 //nolint:unused
-func (tl *Timeline) explainQueryPlan(ctx context.Context, q string, args ...any) {
+func (tl *Timeline) explainQueryPlan(ctx context.Context, tx *sql.Tx, q string, args ...any) {
 	logger := Log.Named("query_planner")
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-	fmt.Fprint(w, "\nQUERY PLAN FOR:\n============================================================================================\n")
-	fmt.Fprint(w, q)
-	fmt.Fprint(w, "\n============================================================================================\n")
+	fmt.Fprintln(w, "\nQUERY PLAN FOR:\n============================================================================================")
+	fmt.Fprintln(w, q)
+	fmt.Fprintln(w, "============================================================================================")
+	fmt.Fprintln(w, args...)
+	fmt.Fprintln(w, "============================================================================================")
 
-	tl.dbMu.RLock()
-	rows, err := tl.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+q, args...)
-	tl.dbMu.RUnlock()
+	explainQ := "EXPLAIN QUERY PLAN " + q
+
+	var rows *sql.Rows
+	var err error
+	if tx == nil {
+		rows, err = tl.db.QueryContext(ctx, explainQ, args...)
+	} else {
+		rows, err = tx.QueryContext(ctx, explainQ, args...)
+	}
 	if err != nil {
 		logger.Error("explaining query plan", zap.Error(err))
 		return
@@ -302,5 +347,6 @@ func (tl *Timeline) explainQueryPlan(ctx context.Context, q string, args ...any)
 		return
 	}
 
+	fmt.Fprintln(w, "============================================================================================")
 	w.Flush()
 }

@@ -19,21 +19,32 @@
 package timeline
 
 import (
+	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 )
 
-// PeriodicStats represents period statistics.
-// TODO: This is very much an experimental, WIP type... might need to generalize it or make way more of these
-type PeriodicStats struct {
-	Period string `json:"period"`
-	Count  int    `json:"count"`
+func (tl *Timeline) Chart(ctx context.Context, chartName string, params url.Values) (any, error) {
+	switch chartName {
+	case "periodical":
+		return tl.chartRecentItems(ctx, params)
+	case "classifications":
+		return tl.chartItemTypes(ctx)
+	case "datasources":
+		return tl.chartDataSourceUsage(ctx)
+	case "attributes_stacked_area":
+		return tl.AttributeStats(ctx, params)
+	case "recent_data_sources":
+		return tl.chartRecentDaysItemCount(ctx, params)
+	default:
+		return nil, fmt.Errorf("unknown chart name: %s", chartName)
+	}
 }
 
-// RecentItemStats returns period statistics about recent items.
-func (tl *Timeline) RecentItemStats(params url.Values) ([]PeriodicStats, error) {
+func (tl *Timeline) chartRecentItems(ctx context.Context, params url.Values) (any, error) {
 	period := params.Get("period")
 
 	var dateAdjust, startOf, periodColumn string
@@ -79,13 +90,18 @@ func (tl *Timeline) RecentItemStats(params url.Values) ([]PeriodicStats, error) 
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
-	rows, err := tl.db.Query(query)
+	rows, err := tl.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var results []PeriodicStats
+	type periodicStats struct {
+		Period string `json:"period"`
+		Count  int    `json:"count"`
+	}
+
+	var results []periodicStats
 	for rows.Next() {
 		var group string
 		var count int
@@ -100,7 +116,7 @@ func (tl *Timeline) RecentItemStats(params url.Values) ([]PeriodicStats, error) 
 			}
 			group = time.Month(monthInt).String()
 		}
-		results = append(results, PeriodicStats{group, count})
+		results = append(results, periodicStats{group, count})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -109,24 +125,22 @@ func (tl *Timeline) RecentItemStats(params url.Values) ([]PeriodicStats, error) 
 	return results, nil
 }
 
-// ClassificationStat holds counts of item classes.
-type ClassificationStat struct {
-	ClassificationName string `json:"x"`
-	Count              int    `json:"y"`
-}
-
-// ItemTypeStats returns info about items by their classifications.
-func (tl *Timeline) ItemTypeStats() ([]ClassificationStat, error) {
+func (tl *Timeline) chartItemTypes(ctx context.Context) (any, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
-	rows, err := tl.db.Query("SELECT classification_name, count() FROM extended_items GROUP BY classification_id")
+	rows, err := tl.db.QueryContext(ctx, "SELECT classification_name, count() FROM extended_items GROUP BY classification_id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var results []ClassificationStat
+	type classificationStat struct {
+		ClassificationName string `json:"name"`
+		Count              int    `json:"value"`
+	}
+
+	var results []classificationStat
 	for rows.Next() {
 		var className *string
 		var count int
@@ -138,7 +152,58 @@ func (tl *Timeline) ItemTypeStats() ([]ClassificationStat, error) {
 			classNameStr := "unknown"
 			className = &classNameStr
 		}
-		results = append(results, ClassificationStat{*className, count})
+		results = append(results, classificationStat{*className, count})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func (tl *Timeline) chartRecentDaysItemCount(ctx context.Context, params url.Values) (any, error) {
+	days, err := strconv.Atoi(params.Get("days"))
+	if err != nil {
+		return nil, err
+	}
+
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
+
+	const msPerDay = int(24 * time.Hour / time.Millisecond)
+
+	minTime := msPerDay * days
+
+	// the LIMIT is arbitrary, just to prevent an accidentally huge resultset
+	rows, err := tl.db.QueryContext(ctx, `
+		SELECT
+			strftime('%Y-%m-%d', date(timestamp/1000, 'unixepoch')) AS date,
+			data_source_name,
+			count()
+		FROM extended_items
+		WHERE timestamp > unixepoch()*1000 - ?
+		GROUP BY date, data_source_name
+		LIMIT 2000`, minTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type recentDaysCount struct {
+		Date           string `json:"date"`
+		DataSourceName string `json:"data_source_name"`
+		Count          int    `json:"count"`
+	}
+
+	var results []recentDaysCount
+	for rows.Next() {
+		var date, dsName string
+		var count int
+		err := rows.Scan(&date, &dsName, &count)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, recentDaysCount{date, dsName, count})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -163,22 +228,8 @@ ORDER BY timestamp
 LIMIT 1000;
 */
 
-// DSUsageSeries correlates data source name with a series of statistics.
-type DSUsageSeries struct {
-	Name string        `json:"name"`
-	Data []DSUsageStat `json:"data"`
-}
-
-// DSUsageStat is a data point containing the date, hour of day, and number of items.
-type DSUsageStat struct {
-	// DataSource string `json:"data_source"`
-	Date  string `json:"x"`
-	Hour  int    `json:"y"`
-	Count int    `json:"z"`
-}
-
-// DataSourceUsageStats returns the counts by data source.
-func (tl *Timeline) DataSourceUsageStats() ([]DSUsageSeries, error) {
+// chartDataSourceUsage returns the counts by data source.
+func (tl *Timeline) chartDataSourceUsage(ctx context.Context) (any, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
@@ -199,7 +250,7 @@ func (tl *Timeline) DataSourceUsageStats() ([]DSUsageSeries, error) {
 	// the readability of the chart. Finally, we limit to 1000 results to avoid burdening the frontend.
 	// Another idea is to not constrain by timestamp and instead to sample every Nth row, for example
 	// (but still would want to ensure timestamp is not null).
-	rows, err := tl.db.Query(`
+	rows, err := tl.db.QueryContext(ctx, `
 		SELECT
 			data_source_name,
 			date(timestamp/1000, 'unixepoch') AS date,
@@ -209,18 +260,22 @@ func (tl *Timeline) DataSourceUsageStats() ([]DSUsageSeries, error) {
 			END AS hour,
 			count()
 		FROM extended_items
-		WHERE timestamp > unixepoch((SELECT date(timestamp/1000, 'unixepoch') FROM items ORDER BY timestamp DESC LIMIT 1), '-365 days')*1000
-		GROUP BY strftime('%W', date(timestamp/1000, 'unixepoch')), hour
+		WHERE timestamp > unixepoch((SELECT date(timestamp/1000, 'unixepoch') FROM items ORDER BY timestamp DESC LIMIT 1), '-730 days')*1000
+		GROUP BY strftime('%Y %W', date(timestamp/1000, 'unixepoch')), hour
 		ORDER BY data_source_name, timestamp
-		LIMIT 1000`)
+		LIMIT 2000`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var all []DSUsageSeries
+	type dsUsageSeries struct {
+		Name string  `json:"name"`
+		Data [][]any `json:"data"` // inner dimension is [x, y, z] or, specifically, [date, hour, count]
+	}
 
-	// var results []dsUsageStat
+	var all []dsUsageSeries
+
 	for rows.Next() {
 		var date, dsName string
 		var hour, count int
@@ -229,14 +284,101 @@ func (tl *Timeline) DataSourceUsageStats() ([]DSUsageSeries, error) {
 			return nil, err
 		}
 		if len(all) == 0 || all[len(all)-1].Name != dsName {
-			all = append(all, DSUsageSeries{Name: dsName})
+			all = append(all, dsUsageSeries{Name: dsName})
 		}
-		all[len(all)-1].Data = append(all[len(all)-1].Data, DSUsageStat{date, hour, count})
-		// results = append(results, dsUsageStat{date, hour, count})
+		all[len(all)-1].Data = append(all[len(all)-1].Data, []any{date, hour, count})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
 	return all, nil
+}
+
+// AttributeStats returns the counts of items by month for attributes of an entity.
+func (tl *Timeline) AttributeStats(ctx context.Context, params url.Values) (any, error) {
+	entityID, err := strconv.Atoi(params.Get("entity_id"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid entity ID; must be integer: %w", err)
+	}
+
+	tl.dbMu.RLock()
+	defer tl.dbMu.RUnlock()
+
+	rows, err := tl.db.QueryContext(ctx, `
+		SELECT
+			strftime('%Y', date(items.timestamp/1000, 'unixepoch')) AS year,
+			strftime('%m', date(items.timestamp/1000, 'unixepoch')) AS month,
+			attributes.name,
+			attributes.value,
+			count(items.id) AS num
+		FROM entity_attributes
+		JOIN attributes ON attributes.id = entity_attributes.attribute_id
+		JOIN items ON items.attribute_id = attributes.id
+		WHERE entity_attributes.entity_id = ? AND items.timestamp IS NOT NULL
+		GROUP BY year, month, entity_attributes.attribute_id
+		ORDER BY year, month, attributes.value`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type attributeStatsSeries struct {
+		Name string    `json:"name"` // attribute value
+		Data [][]int64 `json:"data"`
+
+		AttributeName string `json:"attribute_name"` // attribute name is not used by the chart lib, but by our script
+	}
+
+	seriesMap := make(map[string]attributeStatsSeries)
+
+	var earliest, latest time.Time
+
+	for rows.Next() {
+		var year, month int
+		var count int64
+		var attrName, attrValue string
+		err := rows.Scan(&year, &month, &attrName, &attrValue, &count)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seriesMap[attrValue]; !ok {
+			seriesMap[attrValue] = attributeStatsSeries{Name: attrValue, AttributeName: attrName}
+		}
+		monthYear := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+		if monthYear.Before(earliest) || earliest.IsZero() {
+			earliest = monthYear
+		}
+		if monthYear.After(latest) || latest.IsZero() {
+			latest = monthYear
+		}
+		series := seriesMap[attrValue]
+		series.Data = append(series.Data, []int64{monthYear.UnixMilli(), count})
+		seriesMap[attrValue] = series
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	///////
+	for k, series := range seriesMap {
+		var seriesIdx int
+		for ts := earliest; !ts.After(latest); ts = ts.AddDate(0, 1, 0) {
+			if seriesIdx >= len(series.Data) {
+				series.Data = append(series.Data, []int64{ts.UnixMilli(), 0})
+			}
+			if ts.UnixMilli() < series.Data[seriesIdx][0] {
+				series.Data = slices.Insert(series.Data, seriesIdx, []int64{ts.UnixMilli(), 0})
+			}
+			seriesIdx++
+		}
+		seriesMap[k] = series
+	}
+	///////
+
+	results := make([]attributeStatsSeries, 0, len(seriesMap))
+	for _, series := range seriesMap {
+		results = append(results, series)
+	}
+
+	return results, nil
 }

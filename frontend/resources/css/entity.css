@@ -1,5 +1,7 @@
 .avatar-xxl {
-	--tblr-avatar-size: 16rem;
+	--tblr-avatar-size: 6rem;
+	--tblr-avatar-font-size: 3rem;
+	--tblr-avatar-icon-size: 4rem;
 }
 
 #entity-id::before {
@@ -7,11 +9,33 @@
 	margin-right: .25rem;
 }
 
-.name {
-	font-size: 38px;
-	/* font-weight: 800; */
+#name {
+	font-size: 34px;
+	font-weight: 800;
 }
 
-.entity-type {
+#name .badge {
+	font-size: initial;
+}
+
+.summary-row {
 	font-size: 18px;
+}
+
+.attribute-group {
+	margin-bottom: 1em;
+}
+
+.attribute-group .attribute-label {
+	margin-bottom: .5em;
+}
+
+.attribute-value {
+	margin-left: .75em;
+	padding-left: 3.5em;
+	border-left: 2px solid var(--tblr-border-color);
+
+	padding-top: .5em;
+	padding-bottom: .5em;
+	margin-bottom: 0;
 }

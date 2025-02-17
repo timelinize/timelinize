@@ -21,6 +21,7 @@ package tlzapp
 
 import (
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"time"
@@ -74,8 +75,8 @@ type server struct {
 
 	log *zap.Logger
 
-	adminLn  net.Listener // plaintext, no authentication (loopback-only by default)
-	remoteLn net.Listener // authenticated endpoint (optional)
+	adminLn    net.Listener // plaintext, no authentication (loopback-only by default)
+	httpServer *http.Server
 
 	// enforce CORS and prevent DNS rebinding for the unauthenticated admin listener
 	allowedHosts   []string
@@ -83,77 +84,8 @@ type server struct {
 
 	mux         *http.ServeMux
 	staticFiles http.Handler
+	frontend    fs.FS // the file system that static assets are served from
 }
-
-// TODO:
-// addRouteWithMetrics("/debug/pprof/", handlerLabel, http.HandlerFunc(pprof.Index))
-// 	addRouteWithMetrics("/debug/pprof/cmdline", handlerLabel, http.HandlerFunc(pprof.Cmdline))
-// 	addRouteWithMetrics("/debug/pprof/profile", handlerLabel, http.HandlerFunc(pprof.Profile))
-// 	addRouteWithMetrics("/debug/pprof/symbol", handlerLabel, http.HandlerFunc(pprof.Symbol))
-// 	addRouteWithMetrics("/debug/pprof/trace", handlerLabel, http.HandlerFunc(pprof.Trace))
-// 	addRouteWithMetrics("/debug/vars", handlerLabel, expvar.Handler())
-
-// // TODO: figure this out
-// func newServer(listen string, app *application.App) *server {
-// 	s := &server{
-// 		listenAddr: listen,
-// 		httpMux:    http.NewServeMux(),
-// 		// cliMux:        apicli.NewMux("http://" + listen),
-// 		log:           app.Logger().Named("http").With(zap.String("address", listen)),
-// 		app:           app,
-// 		staticHandler: app.StaticWebsiteHandler(),
-// 	}
-// 	s.fillAllowedHosts()   // restrict allowed Host headers to mitigate DNS rebinding attacks
-// 	s.fillAllowedOrigins() // for CORS enforcement
-
-// 	// addRoute := func(method, reqpath string, handler handlerFunc) {
-// 	addRoute := func(endpoint Endpoint) {
-// 		handler = s.enforceHost(handler)                    // simple DNS rebinding mitigation
-// 		handler = s.enforceOriginAndMethod(method, handler) // simple CORS + cross-origin mitigation
-// 		s.httpMux.HandleFunc(reqpath, httpWrap(handler))
-// 	}
-// 	addRouteCLI := func(method, reqpath string, ct apicli.ContentType, handler handlerFunc) {
-// 		s.cliMux.Endpoint(method, path.Base(reqpath), ct)
-// 		addRoute(method, reqpath, handler)
-// 	}
-// 	addJSONRoute := func(method, reqpath string, handler handlerFunc) {
-// 		addRouteCLI(method, reqpath, apicli.JSON, func(w http.ResponseWriter, r *http.Request) error {
-// 			if ct := r.Header.Get("Content-Type"); ct != "application/json" {
-// 				return Error{
-// 					Err:        fmt.Errorf("unknown content-type value '%s' for this route", ct),
-// 					HTTPStatus: http.StatusBadRequest,
-// 					Message:    "This endpoint expects JSON.",
-// 				}
-// 			}
-// 			return handler(w, r)
-// 		})
-// 	}
-
-// 	// static file server for website
-// 	addRoute(http.MethodGet, "/", s.enforceHost(s.handleStaticWebsite))
-
-// 	// static file server for timeline data files: /repo/
-// 	// addRoute(http.MethodGet, "/repo/", s.enforceHost(s.app.HandleStaticRepoFiles))
-
-// 	addRoute(http.MethodGet, "/api/logs", s.handleLogs) // websocket
-// 	addRouteCLI(http.MethodGet, "/api/repos", apicli.None, s.handleRepos)
-// 	addRouteCLI(http.MethodGet, "/api/data-sources", apicli.None, s.handleGetDataSources)
-// 	addRouteCLI(http.MethodGet, "/api/jobs", apicli.None, s.handleShowJobs)
-// 	addJSONRoute(http.MethodDelete, "/api/cancel-job", s.handleCancelJob)
-// 	addJSONRoute(http.MethodPost, "/api/open", s.handleOpenRepo)
-// 	addJSONRoute(http.MethodPost, "/api/close", s.handleCloseRepo)
-// 	// addJSONRoute(http.MethodPost, "/api/accounts", s.handleGetAccounts) // TODO: re-enable when we get to this
-// 	addJSONRoute(http.MethodPost, "/api/add-account", s.handleAddAccount)
-// 	addJSONRoute(http.MethodPost, "/api/auth-account", s.handleAuthAccount)
-// 	addJSONRoute(http.MethodPost, "/api/recognize", s.handleRecognize)
-// 	addJSONRoute(http.MethodPost, "/api/import", s.handleImport)
-// 	addJSONRoute(http.MethodPost, "/api/search-items", s.handleSearchItems)
-// 	addJSONRoute(http.MethodPost, "/api/search-people", s.handleSearchPeople)
-// 	addRouteCLI(http.MethodGet, "/api/file-selector-roots", apicli.None, s.handleGetFileSelectorRoots)
-// 	addJSONRoute(http.MethodPost, "/api/file-listing", s.handleFileListing)
-
-// 	return s
-// }
 
 func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// don't do any actual handling yet; just set up the request middleware stuff, logging, etc...

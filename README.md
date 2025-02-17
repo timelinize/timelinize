@@ -40,8 +40,8 @@ These were captured using a dev repository of mine filled with a subset of my re
 
 ## How it works
 
-1. [Obtain your data.](https://timelinize.com/docs/setup/data-preparation) This usually involves exporting your data from apps, online accounts, or devices. For example, requesting an archive from Google Takeout. (Apple iCloud, Facebook, Twitter/X, Strava, Instagram, etc. all offer similar features for GDPR compliance.) Do this early/soon, because some services take days to provide your data.
-2. Import your data using Timelinize. You don't need to extract or decompress .tar or .zip archives; Timelinize will attempt to recognize your data in its original format and folder structure. All the data you import is indexed in a SQLite database and stored on disk organized by date, without obfuscation or anything complicated.
+1. [Obtain your data.](https://timelinize.com/docs/data-preparation) This usually involves exporting your data from apps, online accounts, or devices. For example, requesting an archive from Google Takeout. (Apple iCloud, Facebook, Twitter/X, Strava, Instagram, etc. all offer similar functionality for GDPR compliance.) Do this early/soon, because some services take days to provide your data.
+2. Import your data using Timelinize. You don't need to extract or decompress .tar or .zip archives; Timelinize will attempt to recognize your data in its original format and folder structure. All the data you import is indexed in a SQLite database and stored on disk organized by date -- no obfuscation or proprietary formats; you can simply browse your files if you wish.
 3. Explore and organize! Timelinize has a UI that portrays data using various projections and filters. It can recall moments from your past and help you view your life more comprehensively. (It's a great living family history tool.)
 4. Repeat steps 1-3 as often as desired. Timelinize will skip any existing data that is the same and only import new content. You could do this every few weeks or months for busy accounts that are most important to you.
 
@@ -50,149 +50,18 @@ These were captured using a dev repository of mine filled with a subset of my re
 
 ## Download and run
 
-### From release binaries
+Download the [latest release](https://github.com/timelinize/timelinize/releases/latest) for your platform.
 
-> [!IMPORTANT]
-> Please ensure [you have the necessary dependencies installed](https://timelinize.com/docs/setup/system-requirements) or Timelinize will not function properly.
+See the website for [installation instructions](https://timelinize.com/docs/install).
 
-After you have the system requirements installed, you can download and run Timelinize from the latest [Release action](https://github.com/timelinize/timelinize/actions/workflows/release.yml). Click the most recent job and then choose the artifact at the bottom of the page that matches your platform.
+## Develop
 
-[Because of limitations in GitHub Actions](https://github.com/actions/upload-artifact?tab=readme-ov-file#zip-archives), all artifacts get downloaded as .zip files even though the artifact is already compressed, so you may have to double-extract the download.
+See our [project wiki](https://github.com/timelinize/timelinize/wiki/) for instructions on [compiling from source](https://github.com/timelinize/timelinize/wiki/Develop).
 
-**While Timelinize is in development, it's a good idea to start over with a new timeline repository every time you upgrade your build. The schema is still changing!**
-
-I recommend running from the command line even if you can double-click to run, so that you can see the log/error output. Logs are also available in your browser dev tools console.
-
-### Using Docker images
-
-```
-docker run -p12002:12002 \
-           -v /path/to/repo:/repo \
-           -v /path/to/config:/app/.config/timelinize \
-           ghcr.io/timelinize/timelinize
-```
-
-That will run Timelinize on port `12002`, with the data repository mounted at `/path/to/repo` (change it to suite your needs) and the configuration directory mounted at `/path/to/config` (change it).
-When using Docker bind mounts like above, make sure the directories exist on your host machine and that they belong to the user ID 1000.
-
-> [!NOTE]
-> Because Timelinize is running inside a Docker container, it won't have access to your host's filesystem. You will need to mount the directories you want to access as volumes, to be able to load data into Timelinize.
-
-## Build from source
-
-Timelinize compiles for Windows, Mac, and Linux.
-
-The Makefile installs all dependencies and cross compiles to a single binary in the .bin folder.
-
-```sh
-
-make all
-
-make run
-
-```
-
-Although Timelinize is written in Go, advanced media-related features such as video transcoding and thumbnail generation (and in the future, indexing with on-device machine learning) are best done with external dependencies. When building from source, you need to make sure the _development packages/versions of those dependencies_ are installed! Also, the latest version of Go is required.
-
-### Dev dependencies
-
-Note that, on some platforms, the compilation dependencies may be different from the dependencies needed to run an already-built binary (for example, on Ubuntu you need `libvips-dev` to compile, but on end user machines, you just need `libvips`).
-
-- [Go](https://go.dev) (latest version; do not use Debian or Ubuntu package managers)
-- [ffmpeg](https://ffmpeg.org/download.html) (executable must be in PATH)
-- libvips-dev
-	- Arch: `sudo pacman -S libvips`
-	- Ubuntu: `sudo apt install -y libvips-dev`
-	- macOS: `brew install libvips`
-- libheif (I think libheif is sometimes automatically installed when you install libvips)
-	- Ubuntu: `sudo add-apt-repository ppa:vpa1977/libheif && sudo apt update && sudo apt install libheif-dev libheif1`
-	- Arch: `sudo pacman -S libheif` (if not already installed)
-
-#### Installing dependencies on Windows
-
-This is the easiest way I have found to get the project compiling on Windows, but let me know if there's a better way.
-
-0. Make sure you don't already have MSYS2 installed and C:\msys64 does not exist.
-1. Install MSYS2: https://www.msys2.org/ - don't run after installing, since it likely brings up the wrong shell (UCRT; we want MINGW64 - yes, UCRT is recommended as it's more modern, but I don't feel confident that our dependencies are available as UCRT packages yet).
-2. Run the MSYS2 MINGW64 application (this is MSYS2's MINGW64 [environment](https://www.msys2.org/docs/environments/)).
-3. Install mingw64 with relevant tools, and libvips, and libheif:
-	```
-	pacman -S --needed base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-libvips mingw-w64-x86_64-libheif
-	```
-4. Go to Windows environment variables setting for your account, and make sure:
-	- `Path` has `C:\msys64\mingw64\bin`
-	- `PKG_CONFIG_PATH` has `C:\msys64\mingw64\lib\pkgconfig`
-5. Restart any running programs/terminals/shells, then run `gcc --version` to prove that `gcc` works. `vips` and `heif-*` commands should also work. It is likely that the libraries are also installed properly then too.
-6. Running `go build` should then succeed, assuming the env variables above are set properly. You might need to set `CGO_ENABLED=1` (`$env:CGO_ENABLED = 1`)
-
-NOTE: Setting the `CC` env var to the path of MSYS's MINGW64 gcc isn't sufficient if a different `gcc` is in the `PATH`. You will need to _prepend_ the correct gcc folder to the PATH!
-
-For compilation targeting the same platform (OS and architecture) as your dev machine, `go build` should suffice.
-
-### Compile
-
-Once you have the necessary dependencies installed, you can simply run `go build` from the project folder:
-
-```bash
-$ go build
-```
-
-and a binary will be placed in the current directory.
-
-Or, to start the server and open a web browser diretly:
-
-```bash
-$ go run main.go
-```
-
-To only start the server and not open a web browser:
-
-```bash
-$ go run main.go serve
-```
-
-### Cross-compile
-
-The use of cgo makes cross-compilation a little tricky, but doable, thanks to `zig`.
-
-Mac is the only platform I know of that can cross-compile to all the other major platforms.
-
-Make sure `zig` is installed. This makes cross-compiling C/C++ a breeze.
-
-To strip symbol tables and other debugging info, add `-ldflags "-s -w"` to these `go build` commands for a smaller binary. (This is not desirable for production builds.)
-
-#### From Mac...
-
-##### to Linux (amd64 / x86-64):
-
-```bash
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 CC="zig cc -target x86_64-linux" CXX="zig c++ -target x86_64-linux" go build
-```
-
-##### to Linux (arm64):
-
-```bash
-CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC="zig cc -target aarch64-linux" CXX="zig c++ -target aarch64-linux" go build
-```
-
-##### to Windows (amd64 / x86-64):
-
-```bash
-CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows" go build
-```
-
-
-#### From Linux...
-
-##### to Windows (amd64 / x86-64):
-
-```bash
-CGO_ENABLED=1 GOOS=windows CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows" go build
-```
 
 ## Command line interface
 
-Timelinize has a symmetric HTTP API and CLI. When an HTTP API endpoint is created, it automatically adds to the command line as well.
+Timelinize has a symmetric HTTP API and CLI. When an HTTP API endpoint is created in the code, it automatically adds to the command line as well.
 
 Run `timelinize help` (or `go run main.go help` if you're running from source) to view the list of commands, which are also HTTP endpoints. JSON or form inputs are converted to command line args/flags that represent the JSON schema or form fields.
 

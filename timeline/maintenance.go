@@ -63,7 +63,7 @@ func (tl *Timeline) maintenanceLoop() {
 	deletionTicker := time.NewTicker(time.Minute)
 	defer deletionTicker.Stop()
 
-	const analyzeInterval = 8 * time.Hour
+	const analyzeInterval = 24 * time.Hour
 	analyzeTicker := time.NewTicker(analyzeInterval)
 	defer analyzeTicker.Stop()
 

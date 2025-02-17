@@ -27,7 +27,7 @@ function advanceToPersonForm() {
 
 // TODO: Presumably, these handlers will need to be generalized if we ever want to reuse our filepicker modal
 on('show.bs.modal', '#modal-timeline-folder', async event => {
-	const filePicker = await newFilePicker({
+	const filePicker = await newFilePicker("repo", {
 		only_dirs: true
 	});
 	filePicker.classList.add('fw-normal');
@@ -74,7 +74,6 @@ on('click', '#continue', async () => {
 			// otherwise, if there is at least one person, return to app
 			await navigateSPA('/');
 
-			console.log("NOTIFYING", $('#alert-container'));
 			notify({
 				type: "success",
 				title: "Timeline opened",

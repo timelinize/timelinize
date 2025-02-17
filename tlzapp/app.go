@@ -24,6 +24,7 @@ package tlzapp
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"expvar"
@@ -35,15 +36,106 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/exec"
-	"runtime"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
 
-var app *App
+type App struct {
+	ctx    context.Context
+	cancel context.CancelFunc // shuts down the app
+
+	cfg *Config
+	log *zap.Logger
+
+	commands map[string]Endpoint
+
+	server   server
+	pyServer *exec.Cmd
+
+	// references to embedded assets... due to limitations
+	// in the go embed tool, the vars have to be in a parent
+	// directory of what is being embedded, so we pass in
+	// reference to it for the app, since this package isn't
+	// in the root of the project, and also to pass along to
+	// a new app if the config is changed and the app is
+	// restarted
+	embeddedWebsite fs.FS
+}
+
+func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) {
+	cfg.fillDefaults()
+
+	var frontend fs.FS
+	if cfg.WebsiteDir == "" {
+		// embedded file systems have a top level folder that is annoying for us
+		// because it means all requests for these static resources need to be
+		// prefixed by the dir name, as if that's relevant!? anyway, strip it.
+		topLevelDir := "."
+		entries, err := fs.ReadDir(embeddedWebsite, ".")
+		if err == nil && len(entries) == 1 {
+			topLevelDir = entries[0].Name()
+		}
+		frontend, err = fs.Sub(embeddedWebsite, topLevelDir)
+		if err != nil {
+			return nil, fmt.Errorf("could not strip top level folder from embedded website FS: %w", err)
+		}
+	} else {
+		frontend = os.DirFS(cfg.WebsiteDir)
+	}
+
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(ctx)
+
+	newApp := &App{
+		ctx:             ctx,
+		cfg:             cfg,
+		log:             timeline.Log,
+		embeddedWebsite: embeddedWebsite,
+	}
+	newApp.server = server{
+		app:      newApp,
+		log:      newApp.log.Named("http"),
+		frontend: frontend,
+	}
+	newApp.cancel = func() {
+		// cancel the context, so anything relying on it knows to terminate
+		cancel()
+
+		// close all open timelines (TODO: Maybe they should be open on the app, not global in the timeline package?)
+		shutdownTimelines()
+
+		// stop python server (will wait for it below)
+		if err := newApp.pyServer.Process.Kill(); err != nil {
+			newApp.log.Error("could not terminate ML server", zap.Error(err))
+		}
+
+		// gracefully close the HTTP server (let existing requests finish within a timeout)
+		if newApp.server.httpServer != nil {
+			// use a different context since the one we have has been canceled
+			const shutdownTimeout = 10 * time.Second
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer shutdownCancel()
+			_ = newApp.server.httpServer.Shutdown(shutdownCtx)
+		}
+
+		// finish waiting for python server to exit
+		if state, err := newApp.pyServer.Process.Wait(); err != nil {
+			newApp.log.Error("ML server", zap.Error(err), zap.String("state", state.String()))
+		}
+	}
+	newApp.registerCommands()
+
+	appMu.Lock()
+	app = newApp
+	appMu.Unlock()
+
+	return newApp, nil
+}
 
 func (a *App) RunCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
@@ -74,7 +166,7 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 	case None:
 	}
 
-	url := "http://" + defaultAdminAddr + apiBasePath + commandName
+	url := "http://" + a.cfg.listenAddr() + apiBasePath + commandName
 
 	req, err := http.NewRequestWithContext(ctx, endpoint.Method, url, body)
 	if err != nil {
@@ -89,7 +181,7 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 	var resp *http.Response
 	if a.serverRunning() {
 		httpClient := &http.Client{Timeout: 1 * time.Minute}
-		resp, err = httpClient.Do(req) //nolint:bodyclose // bug filed: https://github.com/timakin/bodyclose/issues/61
+		resp, err = httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("running command on server: %w", err)
 		}
@@ -144,98 +236,77 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 // Serve serves the application server only if it is not already running
 // (possibly in another process). It returns true if it started the
 // application server, or false if it was already running.
-func (a *App) Serve(adminAddr string) (bool, error) {
+func (a *App) Serve() (bool, error) {
 	if a.serverRunning() {
 		return false, nil
 	}
-	return true, a.serve(adminAddr)
+	return true, a.serve()
 }
 
-func (a *App) MustServe(adminAddr string) error {
-	return a.serve(adminAddr)
+func (a *App) MustServe() error {
+	return a.serve()
 }
 
-// TODO: This is not ideal, but I'm just throwing this together temporarily to get us up and running quickly and easily.
-// We should have a less externally-dependent way of getting this running. :)
-func installPython(ctx context.Context) error {
-	if _, err := exec.LookPath("uv"); err == nil {
+func (a *App) startPythonServer() error {
+	// nothing to do if uv isn't installed
+	if _, err := exec.LookPath("uv"); err != nil {
+		a.log.Warn("uv is not installed in PATH; semantic features will be unavailable (to fix: install uv, then restart app)", zap.Error(err))
 		return nil
 	}
 
-	switch runtime.GOOS {
-	case "darwin", "linux":
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://astral.sh/uv/install.sh", nil)
-		if err != nil {
-			return err
-		}
+	// the subfolder in the embedded directory wherein the Python project lives;
+	// the contents of this folder are dumped to disk, and may replace what is
+	// already in that folder on disk (to accommodate changes/updates); the
+	// virtual env must be in a different folder (via UV_PROJECT_ENVIRONMENT)
+	const scriptSubfolder = "server"
 
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
+	// get the name of the embedded folder
+	entries, err := fs.ReadDir(embeddedPython, ".")
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 || !entries[0].IsDir() {
+		return errors.New("embedded python assets have unexpected structure; semantic features will be unavailable")
+	}
+	embedFolderName := entries[0].Name()
 
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("downloading installer script: got HTTP status %d", resp.StatusCode)
-		}
+	// embedded assets need to be written to disk so that the python environment
+	// can operate: it needs to know the uv project manifest, the dependencies,
+	// and a place to put the virtualenv (venv). By default, uv would put the
+	// .venv folder in the project directory, but that would make updating the
+	// scripts tricky, since we couldn't just delete the whole thing and re-write
+	// the files (we don't want to delete the venv, it's usually a big cache); so
+	// we need to put the files we embed into a separate subfolder from the venv;
+	// we can do this easily with an environment variable to relocate the venv,
+	// and have the scripts/project in their own subfolder, in the app data dir.
+	dataDir := AppDataDir()
+	projectPath := filepath.Join(dataDir, embedFolderName, scriptSubfolder)
+	venvPath := filepath.Join(dataDir, embedFolderName, "venv")
 
-		const maxScriptSize = 1024 * 256
-		respBody := io.LimitReader(resp.Body, maxScriptSize)
-
-		cmd := exec.Command("sh")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		inPipe, err := cmd.StdinPipe()
-		if err != nil {
-			return err
-		}
-
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		if _, err := io.Copy(inPipe, respBody); err != nil {
-			return err
-		}
-		inPipe.Close()
-		if err := cmd.Wait(); err != nil {
-			return err
-		}
-
-		// TODO: Figure out how to update the PATH or at least get the 'uv' path so we can execute it right away;
-		// currently we have to restart the shell Timelinize is running in
-
-	case osWindows:
-		cmd := exec.Command("powershell", "-c", "irm https://astral.sh/uv/install.ps1 | iex")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return err
-		}
-
-	default:
-		return fmt.Errorf("OS not supported for auto-installation of ML environment: %s", runtime.GOOS)
+	// clear out old project/script files (this ensures they stay current)
+	// then write the embedded files in their place
+	if err = os.RemoveAll(projectPath); err != nil {
+		return nil
+	}
+	if err := os.CopyFS(dataDir, embeddedPython); err != nil {
+		return err
 	}
 
-	return nil
-}
+	a.log.Info("starting python server to enable semantic features", zap.String("dir", projectPath))
 
-func startMLServer() error {
-	// TODO: This has to be distributable somehow; maybe embed it into the binary and then write it to an application dir or something
+	// run the python server such that the venv is relocated to its own
+	// folder outside the project folder (but still in the app data dir)
 	cmd := exec.Command("uv", "run", "server.py")
-	cmd.Dir = "ml"
+	cmd.Dir = projectPath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	// TODO: a way to manage the process (stop it, etc)...
-	return cmd.Start()
+	cmd.Env = append(os.Environ(), "UV_PROJECT_ENVIRONMENT="+venvPath)
+	a.pyServer = cmd
+	return cmd.Start() // TODO: need to be sure this stops when our program stops
 }
 
-func (a *App) serve(adminAddr string) error {
-	// TODO: Eventually this will be configurable, but seems like a good idea to do at first
-	if err := installPython(a.ctx); err != nil {
-		return fmt.Errorf("setting up ML environment: %w", err)
-	}
-
-	if err := startMLServer(); err != nil {
+func (a *App) serve() error {
+	if err := a.startPythonServer(); err != nil {
 		return fmt.Errorf("starting ML server: %w", err)
 	}
 
@@ -247,9 +318,7 @@ func (a *App) serve(adminAddr string) error {
 		return fmt.Errorf("server already running on %s", a.server.adminLn.Addr())
 	}
 
-	if adminAddr == "" {
-		adminAddr = defaultAdminAddr
-	}
+	adminAddr := a.cfg.listenAddr()
 	a.server.fillAllowedHosts(adminAddr)   // restrict allowed Host headers to mitigate DNS rebinding attacks
 	a.server.fillAllowedOrigins(adminAddr) // for CORS enforcement
 
@@ -268,7 +337,7 @@ func (a *App) serve(adminAddr string) error {
 	}
 
 	// static file server
-	a.server.staticFiles = http.FileServer(http.FS(a.frontend))
+	a.server.staticFiles = http.FileServer(http.FS(a.server.frontend))
 	addRoute("/", Endpoint{
 		Method:  http.MethodGet,
 		Handler: a.server.serveFrontend,
@@ -308,20 +377,19 @@ func (a *App) serve(adminAddr string) error {
 	// TODO: remote server (with TLS mutual auth)
 
 	a.log.Info("started admin server", zap.String("listener", ln.Addr().String()))
+	a.server.httpServer = &http.Server{
+		Handler:           a.server,
+		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    1024 * 512,
+	}
 
 	go func() {
-		server := &http.Server{
-			Handler:           a.server,
-			ReadHeaderTimeout: 10 * time.Second,
-			MaxHeaderBytes:    1024 * 512,
-		}
-		if err := server.Serve(ln); err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				// normal; the listener was closed
-				a.log.Info("stopped admin server", zap.String("listener", ln.Addr().String()))
-			} else {
-				a.log.Error("admin server failed", zap.String("listener", ln.Addr().String()), zap.Error(err))
-			}
+		err := a.server.httpServer.Serve(ln)
+		if errors.Is(err, net.ErrClosed) || errors.Is(err, http.ErrServerClosed) {
+			// normal; the listener or server was deliberately closed
+			a.log.Info("stopped server", zap.String("listener", ln.Addr().String()))
+		} else if err != nil {
+			a.log.Error("server failed", zap.String("listener", ln.Addr().String()), zap.Error(err))
 		}
 	}()
 
@@ -379,129 +447,26 @@ func (a *App) serverRunning() bool {
 	return resp.Header.Get("Server") == "Timelinize"
 }
 
-func Init(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) {
-	if app != nil {
-		return nil, errors.New("application already initialized")
-	}
-
-	// // TODO: FOR DEVELOPMENT ONLY!!
-	// cfg.WebsiteDir = "./frontend"
-
-	cfg.fillDefaults()
-
-	var frontend fs.FS
-	if cfg.WebsiteDir == "" {
-		// embedded file systems have a top level folder that is annoying for us
-		// because it means all requests for these static resources need to be
-		// prefixed by the dir name, as if that's relevant!? anyway, strip it.
-		var topLevelDir string
-		entries, err := fs.ReadDir(embeddedWebsite, ".")
-		if err == nil && len(entries) == 1 {
-			topLevelDir = entries[0].Name()
-		}
-		frontend, err = fs.Sub(embeddedWebsite, topLevelDir)
-		if err != nil {
-			return nil, fmt.Errorf("stripping top level folder from frontend FS: %w", err)
-		}
-	} else {
-		frontend = os.DirFS(cfg.WebsiteDir)
-	}
-
-	app = &App{
-		ctx:      ctx,
-		cfg:      cfg,
-		log:      timeline.Log,
-		frontend: frontend,
-	}
-	app.server = server{
-		app: app,
-		log: app.log.Named("http"),
-	}
-	app.registerCommands()
-
-	return app, nil
-}
-
 func (a *App) openRepos() error {
 	// open designated timelines; copy pointer so we don't have to acquire lock on cfg and create deadlock with OpenRepository()
 	// TODO: use race detector to verify ^
 	lastOpenedRepos := a.cfg.Repositories
 	for i, repoDir := range lastOpenedRepos {
-		_, err := app.openRepository(a.ctx, repoDir, false)
+		_, err := a.openRepository(a.ctx, repoDir, false)
 		if err != nil {
-			app.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(a.cfg.Repositories)),
+			a.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(a.cfg.Repositories)),
 				zap.Error(err),
 				zap.String("dir", repoDir))
 		}
 	}
 
 	// persist config so it can be used on restart
-	if err := a.cfg.save(); err != nil {
+	if err := a.cfg.autosave(); err != nil {
 		return fmt.Errorf("persisting config file: %w", err)
 	}
 
 	return nil
 }
-
-type App struct {
-	ctx context.Context
-	cfg *Config
-	log *zap.Logger
-
-	commands map[string]Endpoint
-
-	server server // TODO: not sure if this needs to be a pointer?
-
-	frontend fs.FS
-}
-
-// func (a *App) Logger() *zap.Logger { return a.log }
-
-// func newApp(cfg *Config) *App {
-// 	appLog := timeline.Log.Named("app")
-// 	a := &App{
-// 		ctx:     context.Background(), // default in case GUI isn't used; otherwise replaced by Wails context on app startup
-// 		cfg:     cfg,
-// 		log:     appLog,
-// 		httpLog: appLog.Named("http"),
-// 	}
-// 	// TODO: ensure this works & is useful
-// 	if cfg.WebsiteDir == "" {
-// 		// serve from embedded file system (compile-time load)
-// 		a.frontend = embeddedWebsite
-// 	} else {
-// 		// serve directly from disk (request-time load)
-// 		a.frontend = os.DirFS(cfg.WebsiteDir)
-// 	}
-// 	return a
-// }
-
-// func (a *App) Run() error {
-// return wails.Run(&options.App{
-// 	Title:     "Timelinize",
-// 	Width:     1200,
-// 	Height:    800,
-// 	Frameless: runtime.GOOS != "darwin",
-// 	AssetServer: &assetserver.Options{
-// 		Assets:  a.frontend,
-// 		Handler: a.StaticWebsiteHandler(),
-// 		// Middleware: a.StaticWebsiteMiddleware,
-// 	},
-// 	Mac: &mac.Options{
-// 		TitleBar: mac.TitleBarHiddenInset(),
-// 		About: &mac.AboutInfo{
-// 			Title:   "Timelinize",
-// 			Message: "All your data, organized on your own computer.\n\n© Dyanim LLC. All rights reserved.",
-// 			Icon:    build.AppIcon,
-// 		},
-// 	},
-// 	OnStartup: func(ctx context.Context) {
-// 		a.ctx = ctx
-// 		timeline.SetWailsAppContext(ctx)
-// 	},
-// 	Bind: []any{a},
-// })
-// }
 
 // virtualResponseWriter is used in virtualized HTTP requests
 // where the handler is called directly rather than using a
@@ -524,8 +489,18 @@ func (vrw *virtualResponseWriter) Write(data []byte) (int, error) {
 	return vrw.body.Write(data)
 }
 
+// The app global instance is used mainly for properly
+// shutting down after a signal is received.
+var (
+	app   *App
+	appMu sync.Mutex
+)
+
 const lowestErrorStatus = 400
 
 const osWindows = "windows"
 
 const defaultAdminAddr = "127.0.0.1:12002"
+
+//go:embed python
+var embeddedPython embed.FS

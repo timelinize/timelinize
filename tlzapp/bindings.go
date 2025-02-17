@@ -208,62 +208,62 @@ func (a App) GetEntity(repoID string, entityID int64) (timeline.Entity, error) {
 	return tl.LoadEntity(entityID)
 }
 
-func (a App) AddAccount(repoID string, dataSourceID string, auth bool, dsOpt json.RawMessage) (timeline.Account, error) {
-	tl, err := getOpenTimeline(repoID)
-	if err != nil {
-		return timeline.Account{}, err
-	}
+// func (a App) AddAccount(repoID string, dataSourceID string, auth bool, dsOpt json.RawMessage) (timeline.Account, error) {
+// 	tl, err := getOpenTimeline(repoID)
+// 	if err != nil {
+// 		return timeline.Account{}, err
+// 	}
 
-	ds, err := timeline.GetDataSource(dataSourceID)
-	if err != nil {
-		return timeline.Account{}, err
-	}
+// 	ds, err := timeline.GetDataSource(dataSourceID)
+// 	if err != nil {
+// 		return timeline.Account{}, err
+// 	}
 
-	// // for the 'files' data source, the default user ID can and probably should be user@hostname.
-	// if payload.DataSource == files.DataSourceID && payload.Owner.UserID == "" {
-	// 	var username, hostname string
+// 	// for the 'files' data source, the default user ID can and probably should be user@hostname.
+// 	if payload.DataSource == files.DataSourceID && payload.Owner.UserID == "" {
+// 		var username, hostname string
 
-	// 	u, err := user.Current()
-	// 	if err == nil {
-	// 		username = u.Username
-	// 	} else {
-	// 		s.log.Error("looking up current user", zap.Error(err))
-	// 	}
+// 		u, err := user.Current()
+// 		if err == nil {
+// 			username = u.Username
+// 		} else {
+// 			s.log.Error("looking up current user", zap.Error(err))
+// 		}
 
-	// 	hostname, err = os.Hostname()
-	// 	if err != nil {
-	// 		s.log.Error("looking up hostname", zap.Error(err))
-	// 	}
+// 		hostname, err = os.Hostname()
+// 		if err != nil {
+// 			s.log.Error("looking up hostname", zap.Error(err))
+// 		}
 
-	// 	// set some sane, slightly recognizable defaults, I guess
-	// 	if username == "" {
-	// 		if payload.Owner.Name != "" {
-	// 			username = payload.Owner.Name
-	// 		} else {
-	// 			username = "me"
-	// 		}
-	// 	}
-	// 	if hostname == "" {
-	// 		hostname = "localhost"
-	// 	}
+// 		// set some sane, slightly recognizable defaults, I guess
+// 		if username == "" {
+// 			if payload.Owner.Name != "" {
+// 				username = payload.Owner.Name
+// 			} else {
+// 				username = "me"
+// 			}
+// 		}
+// 		if hostname == "" {
+// 			hostname = "localhost"
+// 		}
 
-	// 	payload.Owner.UserID = username + "@" + hostname
-	// }
+// 		payload.Owner.UserID = username + "@" + hostname
+// 	}
 
-	acct, err := tl.AddAccount(a.ctx, dataSourceID, dsOpt)
-	if err != nil {
-		return timeline.Account{}, err
-	}
+// 	acct, err := tl.AddAccount(a.ctx, dataSourceID, dsOpt)
+// 	if err != nil {
+// 		return timeline.Account{}, err
+// 	}
 
-	if auth {
-		err = ds.NewAPIImporter().Authenticate(a.ctx, acct, dsOpt)
-		if err != nil {
-			return timeline.Account{}, err
-		}
-	}
+// 	if auth {
+// 		err = ds.NewAPIImporter().Authenticate(a.ctx, acct, dsOpt)
+// 		if err != nil {
+// 			return timeline.Account{}, err
+// 		}
+// 	}
 
-	return acct, nil
-}
+// 	return acct, nil
+// }
 
 func (a App) RepositoryIsEmpty(repo string) (bool, error) {
 	tl, err := getOpenTimeline(repo)
@@ -354,7 +354,6 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		// directory only, and counting the number of entries that
 		// each data source matched; then sort by most matches
 		var counts dataSourceCounts
-		// for _, p := range pairings[currentDirPairingsMarker:] {
 		for _, p := range currentPairings {
 			for _, match := range p.DataSources {
 				if match.DirThreshold > 0 {
@@ -398,18 +397,46 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			if archives.PathContainsArchive(filename) {
 				ftype = fileTypeArchive
 			}
-			pairings[dir] = []timeline.ProposedFileImport{
-				{
-					Filename:    filename,
-					FileType:    ftype,
-					DataSources: consolidatedMatches,
-				},
-			}
-			for d := range pairings {
-				if d != dir && strings.HasPrefix(d, dir) {
-					delete(pairings, d)
+
+			// we need to be careful not to wipe out matches from other data sources
+			// within this directory (imagine, for example, a folder of jpgs, with a
+			// single vcard file, where the jpgs are contact pictures; the media data
+			// source should not wipe out the vcard match!); these loops look scary,
+			// but all they do is remove the matches for individual files within the
+			// folder being consolidated, *only for the data sources that are collapsing
+			// the folder* - we leave the matches from data sources that don't
+			// support/qualify collapsing the folder, since they could still be useful
+			// (consider the vcard example).
+			// TODO: Since this logic allows data sources to overlap paths (e.g. media could claim a folder, and vcard could match a file inside it), maybe we should enable some UI interaction/notice to ensure this is desired, OR make an import planner option the user can set to control this
+			for d, p := range pairings {
+				if strings.HasPrefix(d, dir) {
+					for i := 0; i < len(p); i++ {
+						for j := 0; j < len(p[i].DataSources); j++ {
+							if hasDataSource(consolidatedMatches, p[i].DataSources[j].DataSource) {
+								p[i].DataSources = append(p[i].DataSources[:j], p[i].DataSources[j+1:]...)
+								j--
+							}
+						}
+						if len(p[i].DataSources) == 0 {
+							p = append(p[:i], p[i+1:]...)
+							pairings[d] = p
+							i--
+						}
+					}
+					if len(pairings[d]) == 0 {
+						delete(pairings, d)
+					}
 				}
 			}
+
+			// now that we've removed individual file matches from data sources within this
+			// folder that are being consolidated to the folder level, add the match that
+			// actually represents those data sources at the folder level
+			pairings[dir] = append(pairings[dir], timeline.ProposedFileImport{
+				Filename:    filename,
+				FileType:    ftype,
+				DataSources: consolidatedMatches,
+			})
 		}
 	}
 
@@ -559,6 +586,15 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 	return plan, nil
 }
 
+func hasDataSource(matches []timeline.DataSourceRecognition, target timeline.DataSource) bool {
+	for _, m := range matches {
+		if m.DataSource.Name == target.Name {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	fileTypeFile    = "file"
 	fileTypeDir     = "dir"
@@ -594,8 +630,8 @@ func (dsCounts *dataSourceCounts) count(match timeline.DataSourceRecognition) {
 }
 
 type ImportParameters struct {
-	Repo string             `json:"repo"`
-	Job  timeline.ImportJob `json:"job"`
+	Repo string              `json:"repo"`
+	Job  *timeline.ImportJob `json:"job"`
 
 	// For external data sources: (TODO: ... figure this out)
 	// DataSource timeline.DataSource // required: Name, Title, Icon, Description
@@ -607,9 +643,30 @@ func (a App) Import(params ImportParameters) (int64, error) {
 		return 0, err
 	}
 	// queue job for a brief period to allow UI to render job page first and to help
-	// user get their bearings
+	// user get their bearings, unless it's interactive: then just start right away
+	// since the user will be waiting for the first item
 	const queueDuration = 5 * time.Second
-	return tl.CreateJob(params.Job, time.Now().Add(queueDuration), 0, 0, 0)
+	scheduled := time.Now().Add(queueDuration)
+	if params.Job.ProcessingOptions.Interactive != nil {
+		scheduled = time.Time{}
+	}
+	return tl.CreateJob(params.Job, scheduled, 0, 0, 0)
+}
+
+func (App) NextGraph(repoID string, jobID int64) (*timeline.Graph, error) {
+	tl, err := getOpenTimeline(repoID)
+	if err != nil {
+		return nil, err
+	}
+	return tl.Timeline.NextGraphFromImport(jobID)
+}
+
+func (App) SubmitGraph(repoID string, jobID int64, g *timeline.Graph, skip bool) error {
+	tl, err := getOpenTimeline(repoID)
+	if err != nil {
+		return err
+	}
+	return tl.Timeline.SubmitGraph(jobID, g, skip)
 }
 
 func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {
@@ -646,12 +703,37 @@ func (a *App) SearchEntities(params timeline.EntitySearchParams) ([]timeline.Ent
 	return results, nil
 }
 
-func (a *App) DataSources() []timeline.DataSource {
-	return timeline.AllDataSources()
-}
+func (a *App) DataSources(ctx context.Context, targetDSName string) ([]timeline.DataSourceRow, error) {
+	openTimelinesMu.RLock()
+	defer openTimelinesMu.RUnlock()
 
-func (a *App) DataSource(name string) (timeline.DataSource, error) {
-	return timeline.GetDataSource(name)
+	// use a map for deduplication first
+	allMap := make(map[string]timeline.DataSourceRow)
+
+	for _, tl := range openTimelines {
+		tlDSes, err := tl.DataSources(ctx, targetDSName)
+		if err != nil {
+			return nil, err
+		}
+		for _, tlDS := range tlDSes {
+			allMap[tlDS.Name] = tlDS
+		}
+		if len(tlDSes) > 0 && targetDSName != "" {
+			break // found what we're looking for
+		}
+	}
+
+	// then turn the map which has no duplicates into a slice
+	all := make([]timeline.DataSourceRow, 0, len(allMap))
+	for _, ds := range allMap {
+		all = append(all, ds)
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].Title < all[j].Title
+	})
+
+	return all, nil
 }
 
 func (a *App) ItemClassifications(repo string) ([]timeline.Classification, error) {
@@ -663,20 +745,81 @@ func (a *App) ItemClassifications(repo string) ([]timeline.Classification, error
 }
 
 // TODO: Very WIP / experimental
-func (*App) LoadItemStats(statName, repoID string, params url.Values) (any, error) {
+func (*App) ChartStats(ctx context.Context, chartName, repoID string, params url.Values) (any, error) {
 	tl, err := getOpenTimeline(repoID)
 	if err != nil {
 		return nil, err
 	}
-	switch statName {
-	case "periodical":
-		return tl.RecentItemStats(params)
-	case "classifications":
-		return tl.ItemTypeStats()
-	case "datasources":
-		return tl.DataSourceUsageStats()
+	return tl.Chart(ctx, chartName, params)
+}
+
+type Settings struct {
+	Application *Config `json:"application"`
+
+	// Map of repo ID to map of property name to value.
+	Timelines map[string]map[string]any `json:"timelines,omitempty"`
+}
+
+func (a *App) GetSettings(_ context.Context) (Settings, error) {
+	return Settings{
+		Application: a.cfg,
+	}, nil
+}
+
+func (a *App) ChangeSettings(_ context.Context, newSettings *changeSettingsPayload) error {
+	a.cfg.Lock()
+	defer a.cfg.Unlock()
+
+	// some settings, when changed, may necessitate a restart of the server/app to take effect
+	var restart bool
+
+	for key, val := range newSettings.Application {
+		var err error
+		switch key {
+		case "app.mapbox_api_key":
+			err = json.Unmarshal(val, &a.cfg.MapboxAPIKey)
+		case "app.website_dir":
+			var newVal string
+			err = json.Unmarshal(val, &newVal)
+			restart = restart || newVal != a.cfg.WebsiteDir
+			a.cfg.WebsiteDir = newVal
+		case "app.obfuscation.enabled":
+			err = json.Unmarshal(val, &a.cfg.Obfuscation.Enabled)
+		case "app.obfuscation.locations":
+			err = json.Unmarshal(val, &a.cfg.Obfuscation.Locations)
+		case "app.obfuscation.data_files":
+			err = json.Unmarshal(val, &a.cfg.Obfuscation.DataFiles)
+		}
+		if err != nil {
+			return fmt.Errorf("saving setting %s: %w (value=%s)", key, err, string(val))
+		}
 	}
-	return nil, fmt.Errorf("unknown stat name: %s", statName)
+
+	if err := a.cfg.unsyncedSave(); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+
+	if restart {
+		go func(oldApp *App) {
+			oldApp.cancel()
+
+			newApp, err := New(context.Background(), oldApp.cfg, oldApp.embeddedWebsite)
+			if err != nil {
+				oldApp.log.Error("initializing new app", zap.Error(err))
+				return
+			}
+
+			started, err := newApp.Serve()
+			if err != nil {
+				oldApp.log.Fatal("could not start server", zap.Error(err))
+			}
+			if !started {
+				oldApp.log.Error("server not started; maybe the old listener is still bound (please report this as a bug)")
+			}
+		}(a)
+	}
+
+	return nil
 }
 
 // TODO: very experimental
@@ -733,13 +876,13 @@ func (a App) DeleteItems(repo string, itemRowIDs []int64, options timeline.Delet
 	return tl.DeleteItems(a.ctx, itemRowIDs, options)
 }
 
-func (a App) Jobs(repo string, jobIDs []int64) ([]timeline.Job, error) {
+func (a App) Jobs(repo string, jobIDs []int64, mostRecent int) ([]timeline.Job, error) {
 	if repo != "" {
 		tl, err := getOpenTimeline(repo)
 		if err != nil {
 			return nil, err
 		}
-		return tl.GetJobs(a.ctx, jobIDs)
+		return tl.GetJobs(a.ctx, jobIDs, mostRecent)
 	}
 	return nil, errors.New("TODO: Getting jobs other than by specific IDs not yet implemented")
 }

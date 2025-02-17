@@ -5,21 +5,27 @@ const mutationObs = new MutationObserver(function(mutations) {
 			if (!(node instanceof HTMLElement)) continue; // skip text/whitespace nodes
 			
 			if (node.matches('.map-container')) {
-				mapIntersectionObs.observe(node);
+				tlz.mapIntersectionObs.observe(node);
 			}
 			$$('.map-container', node).forEach(el => {
-				mapIntersectionObs.observe(el);
+				tlz.mapIntersectionObs.observe(el);
 			});
 		}
-		// also stop observing them when they're removed (TODO: is this necessary?)
+		// don't unobserve removedNodes, because the intersection observer
+		// removes map containers from a set when they go out of view,
+		// and if we unobserve it can't do that, causing a memory leak;
+		// but we can fire mapMoved events for special-use maps that may
+		// need to reset some state or initialization, such as the map on
+		// the Demo Mode Settings page, which adds draw controls (it needs
+		// to remove them when navigating away).
 		for (const node of mut.removedNodes) {
 			if (!(node instanceof HTMLElement)) continue; // skip text/whitespace nodes
-
+			
 			if (node.matches('.map-container')) {
-				mapIntersectionObs.unobserve(el);
+				document.dispatchEvent(new CustomEvent("mapMoved", { detail: { previousElement: node } }));
 			}
 			$$('.map-container', node).forEach(el => {
-				mapIntersectionObs.unobserve(el);
+				document.dispatchEvent(new CustomEvent("mapMoved", { detail: { previousElement: el } }));
 			});
 		}
 	}
@@ -52,7 +58,8 @@ function currentURI() {
 
 // navigateSPA changes the page. The argument should be the URI (not including scheme/host; i.e. just
 // path and optional query string) to show in the address bar (the user-friendly URI). If omitted,
-// it defaults to the path and query currently in the address bar.
+// or not a string (sometimes it is an event handler) it defaults to the path and query currently
+// in the address bar.
 async function navigateSPA(addrBarDestination) {
 	$('#page-content').classList.add('opacity0');
 
@@ -113,8 +120,10 @@ async function navigateSPA(addrBarDestination) {
 	// wait for page to finish fading out before
 	setTimeout(async function() {
 		promise.then(async (data) => {
-			tlz.map.tl_containers = new Map();
-			tlz.map.tl_clear();
+			if (tlz.map) {
+				tlz.map.tl_containers = new Map();
+				tlz.map.tl_clear();
+			}
 			for (const dateInputEl of $$('.date-input')) {
 				// it seems like a good idea to clean up our AirDatepickers, but
 				// I haven't confirmed whether this is truly necessary
@@ -135,13 +144,6 @@ async function navigateSPA(addrBarDestination) {
 			// replace page content
 			$('#page-content').innerHTML = data;
 
-			// set up the page, and store a reference to the current page's
-			// controller, since it will be used later like when unloading it
-			tlz.currentPageController = tlz.pageControllers[destPath];
-			if (tlz.currentPageController?.load) {
-				await tlz.currentPageController.load();
-			}
-
 			// adjust page title
 			const newTitleEl = $('body title');
 			if (newTitleEl) {
@@ -149,10 +151,17 @@ async function navigateSPA(addrBarDestination) {
 				newTitleEl.remove();
 			}
 
-			// Render data source filter dropdowns
-			$$('.filter .tl-data-source-dropdown').forEach(e => {
-				renderFilterDropdown(e, "Data sources", 'data_sources');
-			});
+			// set up the page, and store a reference to the current page's
+			// controller, since it will be used later like when unloading it
+			tlz.currentPageController = tlz.pageControllers[destPath];
+			if (tlz.currentPageController?.load) {
+				await tlz.currentPageController.load();
+			}
+
+			// Render data source filter inputs (we don't use forEach here because it does not await async functions!)
+			for (const e of $$('.filter select.tl-data-source')) {
+				await newDataSourceSelect(e);
+			};
 
 			// Render item classification filter dropdowns
 			$$('.filter .tl-item-class-dropdown').forEach(e => {
@@ -166,6 +175,10 @@ async function navigateSPA(addrBarDestination) {
 			if (tlz.currentPageController?.render) {
 				await tlz.currentPageController.render();
 			}
+
+			// activate custom/Bootstrap tooltips on the page
+			const tooltipList = [...$$('[data-bs-toggle="tooltip"]')].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl))
+
 
 			// hide any loading indicator (or prevent it from appearing in the first place)
 			if (slowLoadingHandle) {
@@ -262,15 +275,6 @@ async function updateRepoOwners() {
 	return true;
 }
 
-async function updateDataSources() {
-	const dsArray = await app.DataSources();
-	tlz.dataSources = {};
-	for (const ds of dsArray) {
-		tlz.dataSources[ds.name] = ds;
-	}
-	store('data_sources', tlz.dataSources);
-}
-
 async function updateItemClasses() {
 	const clArray = await app.ItemClassifications(tlz.openRepos[0].instance_id);
 	const classes = {};
@@ -282,11 +286,6 @@ async function updateItemClasses() {
 
 
 async function initialize() {
-	// make a local cache of the data sources and classifications, since we'll use them so often
-	if (!tlz.dataSources) {
-		await updateDataSources();
-	}
-
 	// classifications are stored in the database, so get open repos first and attach owner info
 	tlz.openRepos = await app.OpenRepositories();
 
@@ -296,6 +295,12 @@ async function initialize() {
 	if (tlz.openRepos.length && !load('item_classes')) {
 		await updateItemClasses();
 	}
+
+	// load app settings
+	tlz.settings = await app.GetSettings();
+
+	// now that settings are loaded, initialize the map
+	initMapSingleton();
 
 	// perform initial page load
 	if (document.readyState === 'loading') {

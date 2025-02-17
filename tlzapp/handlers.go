@@ -19,6 +19,7 @@
 package tlzapp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -85,24 +87,25 @@ func (s *server) handleMergeEntities(w http.ResponseWriter, r *http.Request) err
 	return jsonResponse(w, nil, err)
 }
 
-func (s *server) handleStats(w http.ResponseWriter, r *http.Request) error {
-	statName, repoID := r.FormValue("name"), r.FormValue("repo_id")
+func (s *server) handleCharts(w http.ResponseWriter, r *http.Request) error {
+	chartName, repoID := r.FormValue("name"), r.FormValue("repo_id")
 	q := r.URL.Query()
 	q.Del("name")
 	q.Del("repo_id")
 	r.URL.RawQuery = q.Encode()
-	stats, err := s.app.LoadItemStats(statName, repoID, r.URL.Query())
+	stats, err := s.app.ChartStats(r.Context(), chartName, repoID, r.URL.Query())
 	return jsonResponse(w, stats, err)
 }
 
 type jobsPayload struct {
-	RepoID string  `json:"repo_id"`
-	JobIDs []int64 `json:"job_ids"`
+	RepoID     string  `json:"repo_id"`
+	JobIDs     []int64 `json:"job_ids"`
+	MostRecent int     `json:"most_recent"`
 }
 
 func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) error {
 	payload := r.Context().Value(ctxKeyPayload).(*jobsPayload)
-	jobs, err := s.app.Jobs(payload.RepoID, payload.JobIDs)
+	jobs, err := s.app.Jobs(payload.RepoID, payload.JobIDs, payload.MostRecent)
 	return jsonResponse(w, jobs, err)
 }
 
@@ -145,6 +148,30 @@ func (s *server) handleStartJob(w http.ResponseWriter, r *http.Request) error {
 	payload := r.Context().Value(ctxKeyPayload).(*jobPayload)
 	err := s.app.StartJob(r.Context(), payload.RepoID, payload.JobID, payload.StartOver)
 	return jsonResponse(w, nil, err)
+}
+
+func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) error {
+	allSettings, err := s.app.GetSettings(r.Context())
+	if allSettings.Application != nil {
+		allSettings.Application.RLock()
+		defer allSettings.Application.RUnlock()
+	}
+	return jsonResponse(w, allSettings, err)
+}
+
+type changeSettingsPayload struct {
+	Application map[string]json.RawMessage            `json:"application"`
+	Timelines   map[string]map[string]json.RawMessage `json:"timelines"` // map of repo ID to map of setting keys to their new values
+}
+
+// TODO: I guess, "get settings" could just be this handler with an empty payload. *shrug*
+func (s *server) handleChangeSettings(w http.ResponseWriter, r *http.Request) error {
+	payload := r.Context().Value(ctxKeyPayload).(*changeSettingsPayload)
+	err := s.app.ChangeSettings(r.Context(), payload)
+	if err != nil {
+		return jsonResponse(w, nil, err)
+	}
+	return s.handleSettings(w, r)
 }
 
 func (s *server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
@@ -212,14 +239,9 @@ func (s *server) handleBuildInfo(w http.ResponseWriter, _ *http.Request) error {
 	return jsonResponse(w, s.app.BuildInfo(), nil)
 }
 
-func (s *server) handleGetDataSources(w http.ResponseWriter, _ *http.Request) error {
-	return jsonResponse(w, s.app.DataSources(), nil)
-}
-
-func (s *server) handleDataSource(w http.ResponseWriter, r *http.Request) error {
-	dsID := r.Context().Value(ctxKeyPayload).(*string)
-	ds, err := s.app.DataSource(*dsID)
-	return jsonResponse(w, ds, err)
+func (s *server) handleGetDataSources(w http.ResponseWriter, r *http.Request) error {
+	allDS, err := s.app.DataSources(r.Context(), "")
+	return jsonResponse(w, allDS, err)
 }
 
 type openRepoPayload struct {
@@ -259,63 +281,6 @@ func (s *server) handleCloseRepo(w http.ResponseWriter, r *http.Request) error {
 	return jsonResponse(w, nil, s.app.CloseRepository(*repoID))
 }
 
-// // TODO: we might need a way to "add identity"
-// func (s *server) handleAddAccount(w http.ResponseWriter, r *http.Request) error {
-// 	var payload struct {
-// 		Repo       string `json:"repo"`
-// 		DataSource string `json:"data_source"`
-// 		// Owner      timeline.Person `json:"owner"` // TODO: necessary?
-
-// 		// sometimes useful when interacting with the data
-// 		// source, like setting up account or processing
-// 		DataSourceOptions json.RawMessage `json:"data_source_options"`
-
-// 		// if true, also get authorization with data source's auth endpoint (like for API access)
-// 		Auth bool `json:"auth"`
-// 	}
-// 	err := json.NewDecoder(r.Body).Decode(&payload)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	acct, err := s.app.AddAccount(payload.Repo, payload.DataSource, payload.Auth, payload.DataSourceOptions)
-// 	return jsonResponse(w, acct, err)
-// }
-
-// TODO: revise this once we update accounts
-// func (s *server) handleGetAccounts(w http.ResponseWriter, r *http.Request) error {
-// 	var payload struct {
-// 		Repo             string  `json:"repo"`
-// 		IDs              []int64 `json:"ids"`         // optionally get specific accounts
-// 		DataSource       string  `json:"data_source"` // optionally filter by data source
-// 		ExpandDataSource bool    `json:"expand_data_source"`
-// 	}
-// 	err := json.NewDecoder(r.Body).Decode(&payload)
-// 	if err != nil {
-// 		return jsonDecodeErr(err)
-// 	}
-
-// 	allInfo, err := s.app.GetAccounts(payload.Repo, payload.IDs, payload.DataSource, payload.ExpandDataSource)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	return jsonResponse(w, allInfo)
-// }
-
-// func (s *server) handleAuthAccount(_ http.ResponseWriter, r *http.Request) error {
-// 	var payload struct {
-// 		Repo              string          `json:"repo"`
-// 		AccountID         int64           `json:"account_id"`
-// 		DataSourceOptions json.RawMessage `json:"data_source_options"`
-// 	}
-// 	err := json.NewDecoder(r.Body).Decode(&payload)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return s.app.AuthAccount(payload.Repo, payload.AccountID, payload.DataSourceOptions)
-// }
-
 func (s *server) handlePlanImport(w http.ResponseWriter, r *http.Request) error {
 	plannerOptions := *r.Context().Value(ctxKeyPayload).(*PlannerOptions)
 	importPlan, err := s.app.PlanImport(r.Context(), plannerOptions)
@@ -326,6 +291,29 @@ func (s *server) handleImport(w http.ResponseWriter, r *http.Request) error {
 	params := *r.Context().Value(ctxKeyPayload).(*ImportParameters)
 	jobID, err := s.app.Import(params)
 	return jsonResponse(w, map[string]any{"job_id": jobID}, err)
+}
+
+func (s *server) handleNextGraph(w http.ResponseWriter, r *http.Request) error {
+	repoID, jobIDStr := r.FormValue("repo_id"), r.FormValue("job_id")
+	jobID, err := strconv.ParseInt(jobIDStr, 10, 64)
+	if err != nil {
+		return jsonResponse(w, nil, fmt.Errorf("job ID must be an integer: %w", err))
+	}
+	graph, err := s.app.NextGraph(repoID, jobID)
+	return jsonResponse(w, graph, err)
+}
+
+type submitGraphPayload struct {
+	RepoID string          `json:"repo_id"`
+	JobID  int64           `json:"job_id"`
+	Graph  *timeline.Graph `json:"graph"`
+	Skip   bool            `json:"skip"`
+}
+
+func (s *server) handleSubmitGraph(w http.ResponseWriter, r *http.Request) error {
+	params := *r.Context().Value(ctxKeyPayload).(*submitGraphPayload)
+	err := s.app.SubmitGraph(params.RepoID, params.JobID, params.Graph, params.Skip)
+	return jsonResponse(w, nil, err)
 }
 
 func (s *server) handleSearchItems(w http.ResponseWriter, r *http.Request) error {

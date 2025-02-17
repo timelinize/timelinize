@@ -4,12 +4,13 @@ go 1.23.3
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
-	github.com/abema/go-mp4 v1.2.0
+	github.com/abema/go-mp4 v1.3.0
 	github.com/adrianmo/go-nmea v1.10.0
+	github.com/apognu/gocal v0.9.1
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/brianvoe/gofakeit/v6 v6.28.0
 	github.com/caddyserver/caddy/v2 v2.8.4
-	github.com/davidbyttow/govips/v2 v2.15.0
+	github.com/davidbyttow/govips/v2 v2.16.0
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/galdor/go-thumbhash v1.0.1-0.20240227061205-5f40e920ff45
 	github.com/gen2brain/avif v0.4.2
@@ -18,7 +19,7 @@ require (
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/maruel/natural v1.1.1
 	github.com/mattn/go-sqlite3 v1.14.24
-	github.com/mholt/archives v0.0.0-20241207175349-5e373c52f8aa
+	github.com/mholt/archives v0.1.0
 	github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e
 	github.com/mholt/goexif2 v0.0.0-20230302025153-4d89d35092b2
 	github.com/signal-golang/go-vcard v0.1.2
@@ -26,7 +27,7 @@ require (
 	github.com/zeebo/blake3 v0.2.4
 	go.uber.org/zap v1.27.0
 	golang.org/x/image v0.23.0
-	golang.org/x/oauth2 v0.24.0
+	golang.org/x/oauth2 v0.25.0
 	howett.net/plist v1.0.1
 )
 
@@ -34,6 +35,7 @@ require (
 	dario.cat/mergo v1.0.1 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
+	github.com/ChannelMeter/iso8601duration v0.0.0-20150204201828-8da3af7a2a61 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.3.0 // indirect
 	github.com/Microsoft/go-winio v0.6.0 // indirect
@@ -66,7 +68,7 @@ require (
 	github.com/go-sql-driver/mysql v1.7.1 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/gogs/chardet v0.0.0-20211120154057-b7413eaefb8f // indirect
-	github.com/golang/glog v1.2.0 // indirect
+	github.com/golang/glog v1.2.4 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/cel-go v0.20.1 // indirect
