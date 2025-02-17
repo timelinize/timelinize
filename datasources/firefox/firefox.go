@@ -148,6 +148,9 @@ func (f *Firefox) process(ctx context.Context, path string, itemChan chan<- *tim
 				Classification:       timeline.ClassPageView,
 				Timestamp:            timestamp,
 				IntermediateLocation: path,
+				Content: timeline.ItemData{
+					Data: timeline.StringData(url),
+				},
 				Metadata: timeline.Metadata{
 					"URL":         url,
 					"Title":       title.String,
