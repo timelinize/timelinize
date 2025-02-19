@@ -58,7 +58,7 @@
         "unconvert",
         "unparam",
         "unused",
-	"usetesting",
+        "usetesting",
         "usestdlibvars",
         "wastedassign",
         "whitespace",
