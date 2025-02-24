@@ -28,6 +28,7 @@ import (
 	_ "github.com/timelinize/timelinize/datasources/contactlist"
 	_ "github.com/timelinize/timelinize/datasources/email"
 	_ "github.com/timelinize/timelinize/datasources/facebook"
+	_ "github.com/timelinize/timelinize/datasources/firefox"
 	_ "github.com/timelinize/timelinize/datasources/generic"
 	_ "github.com/timelinize/timelinize/datasources/geojson"
 	_ "github.com/timelinize/timelinize/datasources/github"
