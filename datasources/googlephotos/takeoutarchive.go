@@ -43,7 +43,7 @@ const googlePhotosPath = "Takeout/Google Photos"
 func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeline.ImportParams, dirEntry timeline.DirEntry) error {
 	fimp.truncatedNames = make(map[string]int)
 
-	albumFolders, err := dirEntry.TopDirReadDir(googlePhotosPath)
+	albumFolders, err := fs.ReadDir(dirEntry.FS, dirEntry.Filename)
 	if err != nil {
 		return fmt.Errorf("getting album list from %s: %w", googlePhotosPath, err)
 	}
@@ -63,13 +63,12 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 	// its sidecar will even be in the same archive/import; so the retrieval key
 	// lets us import partial item data as we discover it, but it HAS to be the
 	// same, and we use the filename for that, so we HAVE to reliably compute it.
-
 	for _, albumFolder := range albumFolders {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		thisAlbumFolderPath := path.Join(googlePhotosPath, albumFolder.Name())
+		thisAlbumFolderPath := path.Join(dirEntry.Filename, albumFolder.Name())
 
 		albumMeta, err := fimp.readAlbumMetadata(dirEntry, thisAlbumFolderPath)
 		if err != nil {
@@ -78,7 +77,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 
 		// read album folder contents, then sort in what I think is the same way
 		// Google does before truncating long filenames
-		albumItems, err := dirEntry.TopDirReadDir(thisAlbumFolderPath)
+		albumItems, err := fs.ReadDir(dirEntry.FS, thisAlbumFolderPath)
 		if err != nil {
 			return err
 		}
@@ -104,22 +103,22 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 }
 
 func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumArchiveMetadata, folderPath string, d fs.DirEntry, opt timeline.ImportParams, dirEntry timeline.DirEntry) error {
-	fpath := path.Join(folderPath, d.Name())
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	// skip the album metadata
-	// TODO: Also skip  print-subscriptions.json, shared_album_comments.json, user-generated-memory-titles.json,... I guess? I haven't seen those though
+	// TODO: Also skip/use print-subscriptions.json, shared_album_comments.json, user-generated-memory-titles.json,... I guess? I haven't seen those though
 	if d.Name() == albumMetadataFilename {
 		return nil
 	}
 
-	// skip directories (there shouldn't be any in the first place...)
+	// skip directories (there shouldn't be any in the first place... since Google Photos doesn't support sub-albums)
 	if d.IsDir() {
 		return nil
 	}
 
-	f, err := dirEntry.TopDirOpen(fpath)
+	fpath := path.Join(folderPath, d.Name())
+	f, err := dirEntry.FS.Open(fpath)
 	if err != nil {
 		return err
 	}
@@ -145,8 +144,8 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			return nil
 		}
 
-		// we don't trust the timstamp in the metadata file, but we'll take it
-		// in case the actual media file doesn't contain any
+		// we don't totally trust the timstamp in the metadata file, but we'll
+		// take it in case the actual media file doesn't contain any
 		itemMeta.parsedPhotoTakenTime, err = itemMeta.timestamp()
 		if err != nil && !errors.Is(err, errNoTimestamp) {
 			return fmt.Errorf("parsing timestamp from item %s: %w", fpath, err)
@@ -169,8 +168,13 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	ig := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 
 	// tell the processor we prefer embedded metadata rather than sidecar info
+	// (except: the sidecar file likely contains the full/original name of the file,
+	// which may have been truncated after a certain length, so we prefer the filename
+	// from the sidecar file)
 	if path.Ext(fpath) != ".json" {
-		ig.Item.Retrieval.PreferFields = []string{"data", "original_location", "intermediate_location", "filename", "timestamp", "timespan", "timeframe", "time_offset", "time_uncertainty", "location"}
+		ig.Item.Retrieval.PreferFields = []string{"data", "original_location", "intermediate_location", "timestamp", "timespan", "timeframe", "time_offset", "time_uncertainty", "location"}
+	} else {
+		ig.Item.Retrieval.PreferFields = []string{"filename"}
 	}
 
 	// if item has an "-edited" variant, relate it
@@ -201,7 +205,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 			"Local folder": itemMeta.GooglePhotosOrigin.MobileUpload.DeviceFolder.LocalFolderName,
 			"Device type":  itemMeta.GooglePhotosOrigin.MobileUpload.DeviceType,
 			"Views":        itemMeta.ImageViews,
-			"URL:":         itemMeta.URL,
+			"URL":          itemMeta.URL,
 		},
 	}
 	if itemMeta.source.FS != nil {
@@ -216,7 +220,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 			item.Content.Filename = path.Base(mediaFilePath)
 		}
 		item.Content.Data = func(_ context.Context) (io.ReadCloser, error) {
-			return itemMeta.source.TopDirOpen(mediaFilePath)
+			return itemMeta.source.FS.Open(path.Join(itemMeta.source.Filename, mediaFilePath))
 		}
 
 		// add metadata contained in the image file itself; note that this overwrites any overlapping
@@ -227,9 +231,6 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 		_, err := media.ExtractAllMetadata(opt.Log, itemMeta.source.FS, path.Join(itemMeta.source.Filename, mediaFilePath), item, timeline.MetaMergeReplaceEmpty)
 		if err != nil {
 			opt.Log.Warn("extracting metadata", zap.Error(err))
-		}
-		if item.Timestamp.IsZero() {
-			item.Timestamp = itemMeta.parsedPhotoTakenTime
 		}
 	}
 
@@ -288,20 +289,23 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 // positional index and without the extension. It assumes a Takeout archive filename
 // that has not been renamed, for example: "takeout-20240516T230250Z-003.zip", this
 // returns "takeout-20240516T230250Z". This is useful for identifying which export
-// an archive belongs to.
+// an archive belongs to. (The filename is not strictly parsed; it quite naively
+// just uses the name up to the last dash, as long as whatever is before the last dash
+// is the same for all archives in the group.)
 func (fimp *FileImporter) archiveFilenameWithoutPositionPart() string {
-	base := filepath.Base(fimp.filename)
-	parts := strings.Split(base, "-")
-	const requiredParts = 3
-	if len(parts) < requiredParts {
+	// For "/foo/takeout-20240516T230250Z-003.zip/Takeout/Google Photos", strip the
+	// "Takeout/Google Photos" suffix to terminate the path at the root of the archive
+	base := filepath.Base(strings.TrimSuffix(fimp.filename, googlePhotosPath))
+	lastDashPos := strings.LastIndex(base, "-")
+	if lastDashPos <= 0 {
 		return base
 	}
-	return strings.Join(parts[:2], "-")
+	return base[:lastDashPos]
 }
 
 func (fimp *FileImporter) readAlbumMetadata(d timeline.DirEntry, albumFolderPath string) (albumArchiveMetadata, error) {
-	albumMetadataFilePath := path.Join(albumFolderPath, albumMetadataFilename)
-	albumMetadataFile, err := d.TopDirOpen(albumMetadataFilePath)
+	albumMetadataFilePath := path.Join(d.Filename, albumFolderPath, albumMetadataFilename)
+	albumMetadataFile, err := d.FS.Open(albumMetadataFilePath)
 	if err != nil {
 		return albumArchiveMetadata{}, fmt.Errorf("opening metadata file %s: %w", albumMetadataFilename, err)
 	}

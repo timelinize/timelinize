@@ -61,9 +61,9 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 
 // FileImport imports data from a file/folder.
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	fimp.filename = dirEntry.Name()
+	fimp.filename = dirEntry.FullPath()
 
-	if _, err := dirEntry.TopDirStat(googlePhotosPath); err == nil {
+	if strings.HasSuffix(filepath.ToSlash(dirEntry.FullPath()), googlePhotosPath) {
 		return fimp.listFromTakeoutArchive(ctx, params, dirEntry)
 	}
 

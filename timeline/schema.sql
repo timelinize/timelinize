@@ -246,7 +246,7 @@ CREATE TABLE IF NOT EXISTS "relations" (
 
 -- A story is a user-created document with rich text formatting (basically HTML;
 -- including hrefs to other items/entities). It can also embed timeline data, which
--- embeddings are stored in the curation_elements table.
+-- embeddings are stored in the story_elements table.
 CREATE TABLE IF NOT EXISTS "stories" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT,
@@ -261,14 +261,14 @@ CREATE TABLE IF NOT EXISTS "stories" (
 -- collections. Rich text content can be provided together with embedded data as an annotation.
 CREATE TABLE IF NOT EXISTS "story_elements" (
 	"id" INTEGER PRIMARY KEY,
-	"curation_id" INTEGER NOT NULL,
+	"story_id" INTEGER NOT NULL,
 	-- only one of the following 5 fields should be populated
 	"item_id" INTEGER,       -- embedded item
 	"entity_id" INTEGER,     -- embedded entity
 	"query" TEXT,            -- embedded dynamic set; omits SELECT, e.g. "FROM items|entities WHERE ... ORDER BY ... LIMIT ..."
 	"external" TEXT,         -- embedded data from other timeline/repo DB, of this format: "<repo_id>:<query>|item|entity:rowid"
 	"note" TEXT,             -- optional annotation of embedded content
-	FOREIGN KEY ("curation_id") REFERENCES "curations"("id") ON UPDATE CASCADE ON DELETE CASCADE,
+	FOREIGN KEY ("story_id") REFERENCES "stories"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE SET NULL,
 	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
@@ -280,7 +280,7 @@ CREATE TABLE IF NOT EXISTS "tags" (
 	"color" TEXT
 ) STRICT;
 
--- The tags associated with items, entities, curations, or relationships.
+-- The tags associated with items, entities, stories, or relationships.
 -- The same tag may not be applied multiple times to the same entity.
 CREATE TABLE IF NOT EXISTS "tagged" (
 	"id" INTEGER PRIMARY KEY,
@@ -289,7 +289,7 @@ CREATE TABLE IF NOT EXISTS "tagged" (
 	"item_id" INTEGER,
 	"entity_id" INTEGER,
 	"attribute_id" INTEGER,
-	"curation_id" INTEGER,
+	"story_id" INTEGER,
 	"relationship_id" INTEGER,
 	"data" TEXT, -- could be used for rich relationships, e.g. the coordinates of a entity tagged in a photo, etc.
 	-- TODO: a way to indicate if this tag came as part of an import from a data source?
@@ -297,7 +297,7 @@ CREATE TABLE IF NOT EXISTS "tagged" (
 	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("curation_id") REFERENCES "curations"("id") ON UPDATE CASCADE ON DELETE CASCADE,
+	FOREIGN KEY ("story_id") REFERENCES "stories"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("relationship_id") REFERENCES "relationships"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
