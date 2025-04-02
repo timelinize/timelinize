@@ -129,6 +129,8 @@
         "github.com/timelinize",
         "github.com/ttacon/libphonenumber",
         "github.com/zeebo/blake3",
+        "go.uber.org/zap",
+        "golang.org/x/",
         "howett.net/plist",
     ]
 
