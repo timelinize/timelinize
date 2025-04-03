@@ -35,7 +35,7 @@ func loadSettingsFromTakeoutArchive(d timeline.DirEntry) (settings, error) {
 		takeoutLocationHistoryPath2024,
 		takeoutLocationHistoryPathPre2024,
 	} {
-		file, err = flexibleOpen(d, path.Join(pathToTry, "Settings.json"))
+		file, err = d.Open(path.Join(pathToTry, "Settings.json"))
 		if err == nil || !errors.Is(err, fs.ErrNotExist) {
 			break
 		}

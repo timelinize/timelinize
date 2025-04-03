@@ -376,6 +376,44 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		return nil, fmt.Errorf("opening thumbnail database: %w", err)
 	}
 
+	// // TODO: TEMPORARY ONLY FOR DEV!!
+	// //////////////////////////////////////
+	// log.Println("WIPING DB...")
+	// _, err = db.ExecContext(ctx, `DELETE FROM items`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting items: %w", err)
+	// }
+	// _, err = db.ExecContext(ctx, `DELETE FROM item_data`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting item_data: %w", err)
+	// }
+	// // _, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id>1`)
+	// // if err != nil {
+	// // 	return nil, fmt.Errorf("resetting entities: %w", err)
+	// // }
+	// _, err = db.ExecContext(ctx, `DELETE FROM relationships`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting relationships: %w", err)
+	// }
+	// _, err = db.ExecContext(ctx, `DELETE FROM relations`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting relations: %w", err)
+	// }
+	// _, err = db.ExecContext(ctx, `DELETE FROM jobs`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting jobs: %w", err)
+	// }
+	// _, err = db.ExecContext(ctx, `DELETE FROM embeddings`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting embeddings: %w", err)
+	// }
+	// _, err = thumbsDB.ExecContext(ctx, `DELETE FROM thumbnails`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting thumbnails: %w", err)
+	// }
+	// log.Println("DONE WIPING DB.")
+	// //////////////////////////////////////
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	tl := &Timeline{

@@ -106,7 +106,7 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// skip the album metadata
+	// skip the album metadata (it is consumed separately)
 	// TODO: Also skip/use print-subscriptions.json, shared_album_comments.json, user-generated-memory-titles.json,... I guess? I haven't seen those though
 	if d.Name() == albumMetadataFilename {
 		return nil
@@ -157,7 +157,7 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			return nil
 		}
 
-		mediaFilePath = fimp.determineMediaFilenameInArchive(dirEntry, fpath, itemMeta)
+		mediaFilePath = fimp.determineMediaFilenameInArchive(fpath, itemMeta)
 		opt.Log.Debug("mapped sidecar to target media file",
 			zap.String("sidecar_file", fpath),
 			zap.String("target_file", mediaFilePath))
@@ -167,20 +167,20 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 
 	ig := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 
-	// tell the processor we prefer embedded metadata rather than sidecar info
-	// (except: the sidecar file likely contains the full/original name of the file,
-	// which may have been truncated after a certain length, so we prefer the filename
-	// from the sidecar file)
-	if path.Ext(fpath) != ".json" {
-		ig.Item.Retrieval.PreferFields = []string{"data", "original_location", "intermediate_location", "timestamp", "timespan", "timeframe", "time_offset", "time_uncertainty", "location"}
-	} else {
+	// tell the processor we prefer embedded metadata rather than sidecar info, by
+	// only preferring the filename read from the sidecar file (because it should
+	// contain the full/original name of the file which may have been truncated
+	// in the export archive)
+	if path.Ext(fpath) == ".json" {
 		ig.Item.Retrieval.PreferFields = []string{"filename"}
+	} else {
+		ig.Item.Retrieval.PreferFields = []string{"data", "original_location", "intermediate_location", "timestamp", "timespan", "timeframe", "time_offset", "time_uncertainty", "location"}
 	}
 
 	// if item has an "-edited" variant, relate it
 	ext := path.Ext(mediaFilePath)
 	editedPath := strings.TrimSuffix(mediaFilePath, ext) + "-edited" + ext
-	if timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, editedPath)) {
+	if dirEntry.FileExists(editedPath) {
 		mediaFilePath = editedPath
 		edited := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 		ig.ToItem(timeline.RelEdit, edited.Item)
@@ -214,9 +214,9 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 			// we are still likely to get the filename (mostly) right if we use the
 			// filename, AFAIK it only changes if it gets truncated for length, in
 			// which case, the DB row will be updated to the correct filename when
-			// we do eventually ready the sidecar file, even if the filename in the
-			// repo won't be updated, oh well, that's less visible, as we almost
-			// always use the filename in the DB row when showing the filename
+			// we do eventually read the sidecar file (the data file name in the repo
+			// will still have this name even after the DB row gets updated, but that
+			// name is internal-only for the most part)
 			item.Content.Filename = path.Base(mediaFilePath)
 		}
 		item.Content.Data = func(_ context.Context) (io.ReadCloser, error) {
@@ -449,7 +449,7 @@ func (m mediaArchiveMetadata) timestamp() (time.Time, error) {
 // Google Photos export truncates long filenames. This function uses a lexical approach
 // with the help of some count state to assemble the image filename that can be used to
 // read it in the archive.
-func (fimp *FileImporter) determineMediaFilenameInArchive(dirEntry timeline.DirEntry, jsonFilePath string, itemMeta mediaArchiveMetadata) string {
+func (fimp *FileImporter) determineMediaFilenameInArchive(jsonFilePath string, itemMeta mediaArchiveMetadata) string {
 	// target media file will be in the same directory
 	dir := path.Dir(jsonFilePath)
 
@@ -473,11 +473,6 @@ func (fimp *FileImporter) determineMediaFilenameInArchive(dirEntry timeline.DirE
 		truncatedTitle := titleWithoutExt[:truncateAt]
 		truncatedTitleWithDir := path.Join(dir, truncatedTitle)
 		fullTruncatedName := truncatedTitleWithDir + titleExt
-
-		// if the truncated filename already exists, then we need to count that as the first "hit"
-		if fimp.truncatedNames[fullTruncatedName] == 0 && timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, fullTruncatedName)) {
-			fimp.truncatedNames[fullTruncatedName]++
-		}
 
 		// then count this "hit" for the name
 		fimp.truncatedNames[fullTruncatedName]++

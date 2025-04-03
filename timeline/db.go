@@ -162,7 +162,7 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 				case ".webp":
 					ct = "image/webp"
 				case ".avif":
-					ct = "image/webp"
+					ct = "image/avif"
 				case ".gif":
 					ct = "image/gif"
 				}

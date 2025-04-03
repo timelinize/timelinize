@@ -61,7 +61,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 		"activities.csv",
 		"profile.csv",
 	} {
-		if _, err := dirEntry.TopDirStat(expectedFile); err == nil {
+		if _, err := dirEntry.Stat(expectedFile); err == nil {
 			continue
 		}
 		return timeline.Recognition{}, nil

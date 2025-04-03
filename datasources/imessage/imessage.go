@@ -296,8 +296,8 @@ func chatDBPath(input timeline.DirEntry) string {
 		timeline.FileExistsFS(input.FS, path.Join(path.Dir(input.Filename), "Attachments")) {
 		return input.Filename
 	} else if info.IsDir() &&
-		timeline.FileExistsFS(input.FS, path.Join(input.Filename, "Attachments")) &&
-		timeline.FileExistsFS(input.FS, path.Join(input.Filename, "chat.db")) {
+		input.FileExists("Attachments") &&
+		input.FileExists("chat.db") {
 		return path.Join(input.Filename, "chat.db")
 	}
 	return ""

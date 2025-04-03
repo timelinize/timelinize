@@ -28,7 +28,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"math"
 	"path"
 	"strconv"
@@ -267,19 +266,7 @@ func (dec *decoder) NextLocation(ctx context.Context) (*Location, error) {
 }
 
 func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
-	// we're not sure if the user gave the JSON file directly
-	// or whether it's in the Takeout archive
-	var file fs.File
-	var err error
-	for _, pathToTry := range []string{
-		takeoutLocationHistoryPath2024,
-		takeoutLocationHistoryPathPre2024,
-	} {
-		file, err = flexibleOpen(fi.d, path.Join(pathToTry, "Records.json"))
-		if err == nil || !errors.Is(err, fs.ErrNotExist) {
-			break
-		}
-	}
+	file, err := fi.d.Open(path.Join("Records.json"))
 	if err != nil {
 		return fmt.Errorf("locating data file: %w", err)
 	}
@@ -384,20 +371,6 @@ func FloatStringToIntE7(coord string) (int64, error) {
 	reconstructed := coord[:dotPos] + coord[dotPos+1:endPos]
 
 	return strconv.ParseInt(reconstructed, 10, 64)
-}
-
-// flexibleOpen tries opening the given file directly first; then if not found, it tries
-// a "top dir open" (strips the first path component - the "top dir") in case the user
-// selected the folder created by extracting the archive; then if not found it tries
-// just the last path component in case the user navigated into the subfolder.
-func flexibleOpen(d timeline.DirEntry, filename string) (file fs.File, err error) {
-	// perhaps archive was extracted and the "Takeout" folder was selected
-	file, err = d.TopDirOpen(filename)
-	if errors.Is(err, fs.ErrNotExist) {
-		// okay, maybe they just selected the Location History subfolder
-		file, err = d.FS.Open(path.Join(d.Filename, path.Base(filename)))
-	}
-	return
 }
 
 // haversineDistanceEarth computes the great-circle distance in kilometers between two points on Earth.

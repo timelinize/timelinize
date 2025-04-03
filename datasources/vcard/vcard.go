@@ -65,7 +65,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 		return rec, nil
 	}
 
-	file, err := dirEntry.Open()
+	file, err := dirEntry.Open(".")
 	if err != nil {
 		return rec, err
 	}
@@ -107,7 +107,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			return nil // traverse into subdirectories
 		}
 
-		file, err := dirEntry.Open()
+		file, err := dirEntry.Open(".")
 		if err != nil {
 			return err
 		}

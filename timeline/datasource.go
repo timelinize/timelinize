@@ -33,13 +33,13 @@ import (
 )
 
 type DataSourceRow struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Media       []byte `json:"-"`
-	MediaType   string `json:"-"`
-	Standard    bool   `json:"standard"`
+	ID          int64   `json:"id"`
+	Name        string  `json:"name"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Media       []byte  `json:"-"`
+	MediaType   *string `json:"-"`
+	Standard    bool    `json:"standard"`
 
 	// Not part of the DB row, but useful to associate with
 	// the struct so that future lookups can easily know
@@ -221,6 +221,8 @@ type Recognition struct {
 // or folder), and also carries the associated file system it came
 // from, the filename of the file (within the FS), and the root path
 // of the OS (as an OS-compatible filepath).
+//
+// TODO: This type kind of accidentally turned out to be an fs.FS, fs.StatFS, and fs.ReadDirFS, with FS being "SubFS'ed" by Filename.
 type DirEntry struct {
 	fs.DirEntry
 
@@ -247,20 +249,24 @@ type DirEntry struct {
 	Filename string
 }
 
-func (d DirEntry) Open() (fs.File, error) { return d.FS.Open(d.Filename) }
-
-// TODO: see if we can get by without the data sources needing to call these (shouldn't our new recursive importer be able to choose the right directory?)
-
-func (d DirEntry) TopDirOpen(filename string) (fs.File, error) {
-	return archives.TopDirOpen(d.FS, path.Join(d.Filename, filename))
+// Open opens the named file from the DirEntry's FS rooted at the DirEntry's Filename.
+func (d DirEntry) Open(filename string) (fs.File, error) {
+	return d.FS.Open(path.Join(d.Filename, filename))
 }
 
-func (d DirEntry) TopDirStat(filename string) (fs.FileInfo, error) {
-	return archives.TopDirStat(d.FS, path.Join(d.Filename, filename))
+// Stat stats the named file from the DirEntry's FS rooted at the DirEntry's Filename.
+func (d DirEntry) Stat(filename string) (fs.FileInfo, error) {
+	return fs.Stat(d.FS, path.Join(d.Filename, filename))
 }
 
-func (d DirEntry) TopDirReadDir(filename string) ([]fs.DirEntry, error) {
-	return archives.TopDirReadDir(d.FS, path.Join(d.Filename, filename))
+// ReadDir reads the direcftory at the named path from the DirEntry's FS rooted at the DirEntry's Filename.
+func (d DirEntry) ReadDir(dirName string) ([]fs.DirEntry, error) {
+	return fs.ReadDir(d.FS, path.Join(d.Filename, dirName))
+}
+
+// FileExists returns true if the named file exists in the DirEntry's FS starting from the DirEntry's filename.
+func (d DirEntry) FileExists(filename string) bool {
+	return FileExistsFS(d.FS, path.Join(d.Filename, filename))
 }
 
 // FullPath returns the full path of the directory entry, including the FS

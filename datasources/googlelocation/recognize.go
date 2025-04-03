@@ -2,7 +2,6 @@ package googlelocation
 
 import (
 	"encoding/json"
-	"path"
 	"strings"
 
 	"github.com/timelinize/timelinize/timeline"
@@ -17,8 +16,7 @@ const (
 func (FileImporter) recognizeLegacyTakeoutFormat(dirEntry timeline.DirEntry) timeline.Recognition {
 	if dirEntry.IsDir() {
 		// see if it's a Takeout-structured location history (a folder with Records.json in it)
-		pathToTry := path.Join(dirEntry.Filename, filenameFromLegacyTakeout)
-		if strings.Contains(dirEntry.Name(), "Location History") && timeline.FileExistsFS(dirEntry.FS, pathToTry) {
+		if strings.Contains(dirEntry.Name(), "Location History") && dirEntry.FileExists(filenameFromLegacyTakeout) {
 			return timeline.Recognition{Confidence: 1}
 		}
 	}
@@ -31,7 +29,7 @@ func (FileImporter) recognizeOnDevice2024iOSFormat(dirEntry timeline.DirEntry) (
 		return timeline.Recognition{}, nil
 	}
 
-	f, err := dirEntry.Open()
+	f, err := dirEntry.Open(".")
 	if err != nil {
 		return timeline.Recognition{}, err
 	}
@@ -58,7 +56,7 @@ func (FileImporter) recognizeOnDevice2025AndroidFormat(dirEntry timeline.DirEntr
 		return timeline.Recognition{}, nil
 	}
 
-	f, err := dirEntry.Open()
+	f, err := dirEntry.Open(".")
 	if err != nil {
 		return timeline.Recognition{}, err
 	}

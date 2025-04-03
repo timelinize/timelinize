@@ -22,7 +22,6 @@ import (
 	"context"
 	"io"
 	"io/fs"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -84,7 +83,7 @@ func (fimp *FileImporter) listFromAlbumFolder(ctx context.Context, opt timeline.
 				Content: timeline.ItemData{
 					Filename: d.Name(),
 					Data: func(_ context.Context) (io.ReadCloser, error) {
-						return dirEntry.FS.Open(path.Join(dirEntry.Filename, fpath))
+						return dirEntry.Open(fpath)
 					},
 				},
 			}

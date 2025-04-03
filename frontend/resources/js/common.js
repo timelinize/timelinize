@@ -54,6 +54,9 @@ async function getOwner(repo) {
 
 // entityAttribute returns the value of the given attribute for the given person.
 function entityAttribute(entity, attribute) {
+	if (!entity.attributes) {
+		return "";
+	}
 	for (var i = 0; i < entity.attributes.length; i++) {
 		if (entity.attributes[i].name == attribute) {
 			return entity.attributes[i].value;

@@ -622,7 +622,12 @@ func (s server) dataSourceImage(w http.ResponseWriter, r *http.Request) error {
 	}
 	ds := all[0]
 
-	w.Header().Set("Content-Type", ds.MediaType)
+	if len(ds.Media) == 0 || ds.MediaType == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+
+	w.Header().Set("Content-Type", *ds.MediaType)
 	_, err = w.Write(ds.Media)
 
 	return err

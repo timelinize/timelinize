@@ -59,12 +59,11 @@ type Archive struct {
 
 // Recognize returns whether the input file is recognized.
 func (Archive) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
-	if _, err := dirEntry.TopDirStat(pre2024ProfileInfoPath); err != nil {
-		if _, err = dirEntry.TopDirStat(year2024ProfileInfoPath); err != nil {
-			return timeline.Recognition{}, nil
-		}
+	if dirEntry.FileExists(pre2024ProfileInfoPath) ||
+		dirEntry.FileExists(year2024ProfileInfoPath) {
+		return timeline.Recognition{Confidence: 1}, nil
 	}
-	return timeline.Recognition{Confidence: 1}, nil
+	return timeline.Recognition{}, nil
 }
 
 // FileImport imports the data in the file.
@@ -262,10 +261,10 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 }
 
 func (Archive) loadProfileInfo(d timeline.DirEntry) (profileInfo, error) {
-	file, err := d.TopDirOpen(pre2024ProfileInfoPath)
+	file, err := d.Open(pre2024ProfileInfoPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		// try another archive version
-		file, err = d.TopDirOpen(year2024ProfileInfoPath)
+		file, err = d.Open(year2024ProfileInfoPath)
 	}
 	if err != nil {
 		return profileInfo{}, err

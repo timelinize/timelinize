@@ -83,7 +83,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 		"Status.plist",
 	} {
 		total++
-		if timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, filename)) {
+		if dirEntry.FileExists(filename) {
 			found++
 		} else if filename == "Manifest.db" {
 			return timeline.Recognition{}, nil // the manifest DB is absolutely required

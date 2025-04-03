@@ -50,7 +50,7 @@ type FileImporter struct{}
 
 // FileImport imports data from a file.
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	file, err := dirEntry.Open()
+	file, err := dirEntry.Open(".")
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
 	}
@@ -152,7 +152,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 			}
 		}
 
-		// I think it's pointless to process person if there aren't at
+		// I think it's pointless to process a person if there aren't at
 		// least 2 data points about them because we can get single
 		// data points from nearly any data source; the value of adding
 		// a contact list is to get more information about a person to

@@ -68,7 +68,7 @@ func (fi *FileImporter) decodeOnDevice2024iOSFormat(ctx context.Context, dirEntr
 		return false, nil
 	}
 
-	f, err := dirEntry.Open()
+	f, err := dirEntry.Open(".")
 	if err != nil {
 		return false, err
 	}
@@ -126,7 +126,7 @@ func (fi *FileImporter) decodeOnDevice2025AndroidFormat(ctx context.Context, dir
 		return false, nil
 	}
 
-	f, err := dirEntry.Open()
+	f, err := dirEntry.Open(".")
 	if err != nil {
 		return false, err
 	}

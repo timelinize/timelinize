@@ -67,7 +67,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 		return timeline.Recognition{}, nil
 	}
 
-	file, err := dirEntry.Open()
+	file, err := dirEntry.Open(".")
 	if err != nil {
 		return timeline.Recognition{}, fmt.Errorf("opening file: %w", err)
 	}

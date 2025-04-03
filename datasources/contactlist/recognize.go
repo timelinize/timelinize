@@ -50,7 +50,7 @@ func (fimp *FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEn
 }
 
 func recognizeCSV(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams, delim rune) (timeline.Recognition, error) {
-	file, err := dirEntry.Open()
+	file, err := dirEntry.Open(".")
 	if err != nil {
 		return timeline.Recognition{}, err
 	}

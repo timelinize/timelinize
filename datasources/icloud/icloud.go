@@ -30,7 +30,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mholt/archives"
 	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -122,7 +121,7 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, d tim
 			}
 			filename += ".csv"
 
-			detailsFile, err := d.TopDirOpen(path.Join(fsysName, "Photos", filename))
+			detailsFile, err := d.Open(path.Join(fsysName, "Photos", filename))
 			if errors.Is(err, fs.ErrNotExist) {
 				return true, nil
 			}
@@ -196,7 +195,7 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, d tim
 					Content: timeline.ItemData{
 						Filename: imgName,
 						Data: func(_ context.Context) (io.ReadCloser, error) {
-							return archives.TopDirOpen(d.FS, imgPath) // imgPath already prepended the DirEntry Filename
+							return d.FS.Open(imgPath) // imgPath already prepended the DirEntry Filename
 						},
 					},
 					Metadata: timeline.Metadata{
@@ -244,7 +243,7 @@ func (fi *FileImporter) importPhotos(ctx context.Context, fsysName string, d tim
 
 func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName string, d timeline.DirEntry, opt timeline.ImportParams) error {
 	// albums
-	entries, err := d.TopDirReadDir(path.Join(fsysName, "Albums"))
+	entries, err := d.ReadDir(path.Join(fsysName, "Albums"))
 	if err != nil {
 		return err
 	}
@@ -260,7 +259,7 @@ func (fi *FileImporter) importAlbumsAndMemories(ctx context.Context, fsysName st
 	}
 
 	// memories
-	entries, err = d.TopDirReadDir(path.Join(fsysName, "Memories"))
+	entries, err = d.ReadDir(path.Join(fsysName, "Memories"))
 	if err != nil {
 		return err
 	}
@@ -289,7 +288,7 @@ func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string
 		Owner: owner,
 	}
 
-	albumListing, err := d.TopDirOpen(albumPath)
+	albumListing, err := d.Open(albumPath)
 	if err != nil {
 		return err
 	}
@@ -349,7 +348,7 @@ func (fi *FileImporter) importAlbumOrMemory(ctx context.Context, fsysName string
 			Content: timeline.ItemData{
 				Filename: imgName,
 				Data: func(_ context.Context) (io.ReadCloser, error) {
-					return archives.TopDirOpen(d.FS, imgPath) // imgPath already prepended the DirEntry Filename
+					return d.FS.Open(imgPath) // imgPath already prepended the DirEntry Filename
 				},
 			},
 		}

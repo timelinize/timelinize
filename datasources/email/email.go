@@ -57,12 +57,6 @@ type FileImporter struct{}
 func (fi FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	rec := timeline.Recognition{DirThreshold: 0.9}
 
-	// special case: Google Takeout archive with mail folder
-	if timeline.FileExistsFS(dirEntry.FS, googleTakeoutMailFolder) {
-		rec.Confidence = 1
-		return rec, nil
-	}
-
 	// TODO: proper detection, not just filename
 	ext := strings.ToLower(path.Ext(dirEntry.Filename))
 	if ext == extMbox || ext == extEml {
@@ -82,13 +76,7 @@ type Options struct {
 func (fi FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	dsOpt := params.DataSourceOptions.(*Options)
 
-	// as a special case, support Google Takeout's "Mail" folder
-	walkDir := dirEntry.Filename
-	if timeline.FileExistsFS(dirEntry.FS, googleTakeoutMailFolder) {
-		walkDir = googleTakeoutMailFolder
-	}
-
-	err := fs.WalkDir(dirEntry.FS, walkDir, func(fpath string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
