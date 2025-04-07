@@ -425,5 +425,3 @@ const (
 	extMbox = ".mbox"
 	extEml  = ".eml"
 )
-
-const googleTakeoutMailFolder = "Takeout/Mail"

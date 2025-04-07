@@ -84,7 +84,7 @@ func Main(embeddedWebsite fs.FS) {
 
 	// once the server is running, open GUI in web browser
 	if err := openWebBrowser("http://127.0.0.1:12002"); err != nil {
-		timeline.Log.Fatal("could not open web browser", zap.Error(err))
+		timeline.Log.Error("could not open web browser", zap.Error(err))
 	}
 
 	if startedServer {
