@@ -1065,6 +1065,11 @@ var classifications = []Classification{
 		Labels:      []string{"Bookmark", "Web", "URL"},
 		Description: "A bookmark to a web page",
 	},
+	{
+		Name:        "page_view",
+		Labels:      []string{"Web", "URL"},
+		Description: "A visit to a web page",
+	},
 }
 
 // Item classifications!
@@ -1080,6 +1085,7 @@ var (
 	ClassDocument   = getClassification("document")
 	ClassBookmark   = getClassification("bookmark")
 	ClassEvent      = getClassification("event") // TODO: call it "schedule" instead?
+	ClassPageView   = getClassification("page_view")
 )
 
 func getClassification(name string) Classification {
