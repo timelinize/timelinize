@@ -23,6 +23,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,7 +119,10 @@ func TestFirefox_FileImport(t *testing.T) {
 	defer cancel()
 
 	// Run the import in a goroutine
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		f := new(Firefox)
 		dirEntry := timeline.DirEntry{
 			DirEntry: testDirEntry{name: dbFilename},
@@ -166,6 +170,7 @@ func TestFirefox_FileImport(t *testing.T) {
 			t.Fatal("Timeout waiting for imported item")
 		}
 	}
+	wg.Wait()
 
 	if count != 2 {
 		t.Errorf("Expected count 2, got %d", count)
