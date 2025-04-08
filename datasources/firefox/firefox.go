@@ -23,6 +23,7 @@ package firefox
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -169,7 +170,7 @@ func checkTables(src string) (bool, error) {
 
 	var exists bool
 	err = db.QueryRow("SELECT 1 FROM sqlite_master WHERE type='table' AND name='moz_places'").Scan(&exists)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("checking table existence: %w", err)
 	}
 	return exists, nil
