@@ -23,6 +23,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,11 +36,18 @@ func TestFirefox_Recognize(t *testing.T) {
 		name     string
 		filename string
 		want     float64
+		valid    bool
 	}{
 		{
 			name:     "Places database",
 			filename: "places.sqlite",
 			want:     1,
+			valid:    true,
+		},
+		{
+			name:     "Invalid places database",
+			filename: "places.sqlite",
+			want:     0,
 		},
 		{
 			name:     "Other SQLite file",
@@ -58,8 +66,15 @@ func TestFirefox_Recognize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), tt.filename)
+			_, err := createTestDatabase(dbPath, tt.valid)
+			if err != nil {
+				t.Fatalf("Failed to create test database: %v", err)
+			}
+
 			dirEntry := timeline.DirEntry{
 				DirEntry: testDirEntry{name: tt.filename},
+				FSRoot:   dbPath,
 			}
 
 			recognition, err := f.Recognize(ctx, dirEntry, timeline.RecognizeParams{})
@@ -80,7 +95,7 @@ func TestFirefox_FileImport(t *testing.T) {
 
 	dbFilename := "places.sqlite"
 	dbPath := filepath.Join(tmpDir, dbFilename)
-	db, err := createTestDatabase(dbPath)
+	db, err := createTestDatabase(dbPath, true)
 	if err != nil {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
@@ -104,7 +119,10 @@ func TestFirefox_FileImport(t *testing.T) {
 	defer cancel()
 
 	// Run the import in a goroutine
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		f := new(Firefox)
 		dirEntry := timeline.DirEntry{
 			DirEntry: testDirEntry{name: dbFilename},
@@ -152,6 +170,7 @@ func TestFirefox_FileImport(t *testing.T) {
 			t.Fatal("Timeout waiting for imported item")
 		}
 	}
+	wg.Wait()
 
 	if count != 2 {
 		t.Errorf("Expected count 2, got %d", count)
@@ -167,25 +186,30 @@ func (t testDirEntry) IsDir() bool                { return false }
 func (t testDirEntry) Type() os.FileMode          { return 0 }
 func (t testDirEntry) Info() (os.FileInfo, error) { return nil, nil }
 
-func createTestDatabase(path string) (*sql.DB, error) {
+func createTestDatabase(path string, valid bool) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = db.Exec(`
-		CREATE TABLE moz_places (
-			id INTEGER PRIMARY KEY,
-			url TEXT NOT NULL,
-			title TEXT,
-			description TEXT
-		);
-		CREATE TABLE moz_historyvisits (
-			id INTEGER PRIMARY KEY,
-			place_id INTEGER NOT NULL,
-			visit_date INTEGER NOT NULL
-		);
-	`)
+	query := "CREATE TABLE random (id INTEGER PRIMARY KEY);"
+	if valid {
+		query = `
+			CREATE TABLE moz_places (
+				id INTEGER PRIMARY KEY,
+				url TEXT NOT NULL,
+				title TEXT,
+				description TEXT
+			);
+			CREATE TABLE moz_historyvisits (
+				id INTEGER PRIMARY KEY,
+				place_id INTEGER NOT NULL,
+				visit_date INTEGER NOT NULL
+			);
+		`
+	}
+
+	_, err = db.Exec(query)
 	if err != nil {
 		db.Close()
 		return nil, err

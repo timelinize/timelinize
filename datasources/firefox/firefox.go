@@ -23,6 +23,7 @@ package firefox
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -58,7 +59,15 @@ type Firefox struct{}
 // Recognize returns whether the input file is recognized.
 func (Firefox) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	if filepath.Base(dirEntry.Name()) == "places.sqlite" {
-		return timeline.Recognition{Confidence: 1}, nil
+		var ok bool
+		var err error
+		if ok, err = checkTables(dirEntry.FullPath()); err != nil {
+			return timeline.Recognition{}, fmt.Errorf("checking table existence: %w", err)
+		}
+
+		if ok {
+			return timeline.Recognition{Confidence: 1}, nil
+		}
 	}
 
 	return timeline.Recognition{}, nil
@@ -77,35 +86,8 @@ func (f *Firefox) process(ctx context.Context, path string, itemChan chan<- *tim
 	}
 	defer os.RemoveAll(tempDir)
 
-	tmpDB := filepath.Join(tempDir, filepath.Base(path))
-	// copyFile copies the contents of the source file to the destination file.
-	copyFile := func(src, dst string) error {
-		sourceFile, err := os.Open(src)
-		if err != nil {
-			return fmt.Errorf("opening source file: %w", err)
-		}
-		defer sourceFile.Close()
-
-		destFile, err := os.Create(dst)
-		if err != nil {
-			return fmt.Errorf("creating destination file: %w", err)
-		}
-		defer destFile.Close()
-
-		_, err = io.Copy(destFile, sourceFile)
-		if err != nil {
-			return fmt.Errorf("copying file contents from %s to %s: %w", src, dst, err)
-		}
-
-		return nil
-	}
-	err = copyFile(path, tmpDB)
-	if err != nil {
-		return fmt.Errorf("copying file to temp directory: %w", err)
-	}
-
 	// Open the database in read-only mode
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", tmpDB))
+	db, err := openDB(path, tempDir)
 	if err != nil {
 		return fmt.Errorf("opening database in read-only mode: %w", err)
 	}
@@ -171,4 +153,53 @@ func (f *Firefox) process(ctx context.Context, path string, itemChan chan<- *tim
 	}
 
 	return nil
+}
+
+func checkTables(src string) (bool, error) {
+	tempDir, err := os.MkdirTemp("", "firefox_import_*")
+	if err != nil {
+		return false, fmt.Errorf("creating temp directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	db, err := openDB(src, tempDir)
+	if err != nil {
+		return false, fmt.Errorf("opening database: %w", err)
+	}
+	defer db.Close()
+
+	var exists bool
+	err = db.QueryRow("SELECT 1 FROM sqlite_master WHERE type='table' AND name='moz_places'").Scan(&exists)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("checking table existence: %w", err)
+	}
+	return exists, nil
+}
+
+func openDB(src, tempDir string) (*sql.DB, error) {
+	tmpDB := filepath.Join(tempDir, filepath.Base(src))
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return nil, fmt.Errorf("opening source file: %w", err)
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(tmpDB)
+	if err != nil {
+		return nil, fmt.Errorf("creating destination file: %w", err)
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return nil, fmt.Errorf("copying file contents from %s to %s: %w", src, tmpDB, err)
+	}
+
+	// Open the database in read-only mode
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", tmpDB))
+	if err != nil {
+		return nil, fmt.Errorf("opening database in read-only mode: %w", err)
+	}
+
+	return db, nil
 }
