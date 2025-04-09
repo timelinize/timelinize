@@ -476,7 +476,8 @@ a.disabled {
 /* The file picker styles were meticulously designed so that the table body (tbody) becomes
 the scroll element that collapses down when there's not enough height, leaving a sticky table
 header (thead) -- no need for position: sticky -- and doesn't overflow container or viewport */
-#modal-file-picker .modal-body {
+#modal-file-picker .modal-body,
+#modal-timeline-folder .modal-body {
 	min-height: 0;
 	display: flex;
 }
