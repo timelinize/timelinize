@@ -97,11 +97,6 @@ body {
 }
 
 /* overrides tabler-vendors to accommodate small avatar in multi-select */
-.ts-wrapper.multi .ts-control > div {
-	padding: 3px 5px;
-	margin: 0 5px 5px 0;
-}
-
 .has-items .ts-control > input {
 	padding: 0 0 4px !important;
 }

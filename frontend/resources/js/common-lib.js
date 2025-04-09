@@ -725,6 +725,9 @@ async function newFilePicker(name, options) {
 	filePicker.filepaths = {}; // keeps track of which files are currently selected
 	filePicker.selected = function() { return Object.keys(filePicker.filepaths); };
 
+	// restore the hidden files preference, if set
+	$('.file-picker-hidden-files', filePicker).checked = tlz.filePickers?.[name]?.show_hidden;
+
 	// we don't calculate sizes of directories, so hide size column if we only show dirs
 	if (filePicker.options?.only_dirs) {
 		$('.file-picker-col-size', filePicker).remove();
@@ -790,11 +793,16 @@ async function newFilePicker(name, options) {
 		$('.file-picker-mount-points', filePicker).append(a);
 	}
 
-
-	// TODO: should 'options' be set when the picker is made? or for every file listing like it is now...
-	filePicker.navigate = async function (dir = tlz.filePickers?.[name], options) {
+	filePicker.navigate = async function (dir = tlz.filePickers?.[name]?.dir, options) {
 		// merge navigate options with those specified for the file picker
 		options = {...filePicker.options, ...options}
+
+		// as a special case, show_hidden is an option that is preserved
+		// across instances of this file picker, so if it's not explicitly
+		// set, use the preserved value
+		if (!("show_hidden" in options) && tlz.filePickers?.[name]?.show_hidden) {
+			options.show_hidden = true;
+		}
 
 		// don't get new file listing if it's the same dir and refresh isn't forced
 		if (filePicker.dir && dir == filePicker.dir && !options?.refresh) {
@@ -809,7 +817,10 @@ async function newFilePicker(name, options) {
 		}
 
 		filePicker.dir = listing.dir;
-		tlz.filePickers[name] = listing.dir;
+		tlz.filePickers[name] = {
+			dir: listing.dir,
+			show_hidden: options?.show_hidden
+		}
 
 		// let listeners know we are navigating
 		const event = new CustomEvent("navigate", {
@@ -825,7 +836,9 @@ async function newFilePicker(name, options) {
 		// reset the filepath box, listing table, and selected path(s),
 		// then emit event (intentionally named uniquely from standard events)
 		$('.file-picker-path').value = listing.dir;
+		const upElem = $('.file-picker-up', filePicker);
 		$('.file-picker-table tbody', filePicker).innerHTML = '';
+		$('.file-picker-table tbody', filePicker).append(upElem);
 		filePicker.filepaths = {};
 		filePicker.dispatchEvent(new CustomEvent("selection", { bubbles: true }));
 
@@ -962,6 +975,17 @@ on('click', '.file-picker-table .file-picker-up', event => {
 // choosing a mount
 on('click', '.file-picker-mount-points .dropdown-item', event => {
 	event.target.closest('.file-picker').navigate(event.target.closest('.dropdown-item').dataset.filepath);
+});
+
+// toggle hidden files/folders
+on('change', '.file-picker-hidden-files', event => {
+	const fp = event.target.closest('.file-picker');
+	if (!fp.options) {
+		fp.options = {};
+	}
+	fp.options.refresh = true; // dir isn't changing, but we need to update the listing
+	fp.options.show_hidden = event.target.checked;
+	event.target.closest('.file-picker').navigate();
 });
 
 

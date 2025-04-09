@@ -84,6 +84,7 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 
 	const plan = await app.PlanImport({
 		path: $('#modal-file-picker .file-picker').selected()[0],
+		hidden: $('.file-picker-hidden-files').checked,
 		recursive: $('#recursive').checked,
 		traverse_archives: $('#traverse-archives').checked
 	});

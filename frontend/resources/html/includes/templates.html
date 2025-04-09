@@ -357,6 +357,8 @@
 						<th class="file-picker-col-size"><button class="table-sort" data-sort="sort-size">Size</button></th>
 						<th><button class="table-sort" data-sort="sort-modified">Modified</button></th>
 					</tr>
+				</thead>
+				<tbody class="table-tbody">
 					<tr class="file-picker-up">
 						<td class="sort-name" colspan="3">
 							<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-arrow-back-up" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -367,11 +369,14 @@
 							Up
 						</td>
 					</tr>
-				</thead>
-				<tbody class="table-tbody">
-					
 				</tbody>
 			</table>
+		</div>
+		<div class="pt-3">
+			<label class="form-check form-switch form-check-inline mb-0 ms-auto" title="Include hidden files and folders">
+				<input type="checkbox" class="form-check-input file-picker-hidden-files">
+				<span class="form-check-label">Hidden files and folders</span>
+			</label>
 		</div>
 	</div>
 </template>

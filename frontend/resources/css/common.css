@@ -7,7 +7,7 @@
 
 /*
 
-MY OWN TABLER (BETA 19, 20, 21, 22) FIXES
+MY OWN TABLER (BETA 19, 20, 21, 22, and v1.1.1) FIXES
 
 */
 
@@ -47,15 +47,25 @@ a parent div. this takes care of that by removing the >. */
 }
 
 
-/* override tabler-vendors */
-.ts-wrapper.multi .ts-control > div {
-	/* for some reason, the vertical margin they add to
-	these elements makes the tomselect item "chips" take
-	up too much space and throw off vertical alignment */
-	margin-top: 0;
-	margin-bottom: 0;
-}
 
+/* broke sometime between Beta 22 and v1.1.1 */
+.ts-wrapper.multi .ts-control > div {
+	margin: 0;
+	font-size: 12px;
+}
+.ts-control {
+	border: none;
+	padding: 0;
+	gap: 2px;
+}
+.ts-control input {
+	min-width: 4rem;
+	font-size: 14px;
+}
+.ts-control .item {
+	margin: 0;
+	border-radius: 4px;
+}
 
 
 
@@ -456,18 +466,56 @@ a.disabled {
 
 
 
+.file-picker .btn.dropdown-toggle {
+	border-bottom-left-radius: 0;
+}
+.file-picker-path {
+	border-bottom-right-radius: 0;
+}
+
+/* The file picker styles were meticulously designed so that the table body (tbody) becomes
+the scroll element that collapses down when there's not enough height, leaving a sticky table
+header (thead) -- no need for position: sticky -- and doesn't overflow container or viewport */
+#modal-file-picker .modal-body {
+	min-height: 0;
+	display: flex;
+}
+.file-picker {
+    display: flex;
+    flex-direction: column;
+}
+.file-picker table {
+	display: flex;
+	flex-flow: column;
+	width: 100%;
+	height: 100%;
+}
+.file-picker table thead {
+	flex: 0 0 auto;
+}
+.file-picker table tbody {
+	flex: 1 1 auto;
+    display: block;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+.file-picker table tr {
+	width: 100%;
+    display: table;
+    table-layout: fixed;
+}
+
+
+
+
+
+
 
 .file-picker-table {
-	max-height: 700px;
 	user-select: none;
 	background: var(--tblr-bg-forms);
 	border: 1px solid var(--tblr-border-color);
 	border-top: 0;
-}
-
-.file-picker-table th {
-	position: sticky;
-	top: 0;
 }
 
 .file-picker-table tr:hover {
