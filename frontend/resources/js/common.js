@@ -525,37 +525,46 @@ function moveMapInto(mapContainerElem) {
 
 	// when the map is rendered to the page, make sure it resizes properly, then render this map's data
 	// See https://stackoverflow.com/a/66172042/1048862 (several answers exist, most are kind of hacky)
-	var observer = new ResizeObserver(function(arg) {
+	// (the resizeCount is because... for some reason, it seems that the container on the map explore
+	// page resizes twice before it settles on its initial size; it's a bit hacky but the other option
+	// is to use a setTimeout but that's even worse)
+	let resizeCount = 0;
+	let observer = new ResizeObserver(function(arg) {
+		resizeCount++
 		tlz.map.resize();
 
-		// clear map data
-		tlz.map.tl_clear();
+		if (resizeCount == 1) {
+			// clear map data
+			tlz.map.tl_clear();
 
-		const renderMapData = function() {
-			if (mapContainerElem.getAttribute("tl-onload")) {
-				eval(mapContainerElem.getAttribute("tl-onload"));
-			} else if (typeof tlz.map.tl_containers.get(mapContainerElem) === 'function') {
-				tlz.map.tl_containers.get(mapContainerElem)();
-			}
-		};
+			const renderMapData = function() {
+				if (mapContainerElem.getAttribute("tl-onload")) {
+					eval(mapContainerElem.getAttribute("tl-onload"));
+				} else if (typeof tlz.map.tl_containers.get(mapContainerElem) === 'function') {
+					tlz.map.tl_containers.get(mapContainerElem)();
+				}
+			};
 
-		// render new data
-		if (tlz.map.tl_isLoaded) {
-			renderMapData();
-		} else {
-			tlz.map.on('load', async () => {
-				// // Custom atmosphere styling
-				// map.setFog({
-				// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
-				// 	'high-color': 'rgb(36, 92, 223)', // Blue sky / upper atmosphere
-				// 	'horizon-blend': 0.4 // Exaggerate atmosphere (default is .1)
-				// });
+			// render new data
+			if (tlz.map.tl_isLoaded) {
 				renderMapData();
-			});
+			} else {
+				tlz.map.on('load', async () => {
+					// // Custom atmosphere styling
+					// map.setFog({
+					// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
+					// 	'high-color': 'rgb(36, 92, 223)', // Blue sky / upper atmosphere
+					// 	'horizon-blend': 0.4 // Exaggerate atmosphere (default is .1)
+					// });
+					renderMapData();
+				});
+			}
 		}
 
-		// we're done, so no need to observe anymore
-		observer.disconnect();
+		if (resizeCount >= 2) {
+			// we're done, so no need to observe anymore
+			observer.disconnect();
+		}
 	});
 	observer.observe(mapContainerElem);
 

@@ -111,7 +111,7 @@ body {
 }
 
 .container-xl {
-	transition: max-width .35s ease-out;
+	transition: max-width .75s cubic-bezier(0, 0, 0.2, 1); /* modified "ease-out" */
 }
 
 #page-content,

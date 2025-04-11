@@ -345,7 +345,11 @@ func normalizeAttribute(attr Attribute) Attribute {
 // We chose E164 because that's what Twilio uses.
 func NormalizePhoneNumber(number, defaultRegion string) (string, error) {
 	if defaultRegion == "" {
-		defaultRegion = "US"
+		if _, localeRegion, _, err := getSystemLocale(); err == nil {
+			defaultRegion = localeRegion
+		} else {
+			defaultRegion = "US"
+		}
 	}
 	ph, err := libphonenumber.Parse(number, defaultRegion)
 	if err != nil {
@@ -948,6 +952,27 @@ func (l *latentID) identifyingAttributeID(ctx context.Context, tx *sql.Tx) (int6
 	l.attributeID = attrID
 
 	return l.attributeID, nil
+}
+
+// getSystemLocale returns the language, region, and encoding, if available.
+func getSystemLocale() (language, region, encoding string, err error) {
+	if lang := os.Getenv("LANG"); lang != "" {
+		underscorePos := strings.Index(lang, "_")
+		if underscorePos < 0 {
+			err = fmt.Errorf("no underscore divider between language and region in LANG=%s", lang)
+			return
+		}
+		dotPos := strings.Index(lang, ".")
+		if dotPos < 0 {
+			err = fmt.Errorf("no dot divider between language and region in LANG=%s", lang)
+		}
+		language = lang[:underscorePos]
+		region = lang[underscorePos+1 : dotPos]
+		encoding = lang[dotPos+1:]
+		return
+	}
+	err = errors.New("unable to determine locale because LANG var is unset")
+	return
 }
 
 var multiSpaceRegex = regexp.MustCompile(`\s{2,}`)
