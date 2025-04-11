@@ -236,10 +236,10 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 			args = append(args, params.StartTimestamp.UnixMilli())
 		}
 		if params.EndTimestamp != nil && (untilUnixMs == 0 || untilUnixMs > params.EndTimestamp.UnixMilli()) {
-			whereClause += " AND items.timestamp < ?"
+			whereClause += andItemsTimestampLessThanArg
 			args = append(args, params.EndTimestamp.UnixMilli())
 		} else if untilUnixMs > 0 {
-			whereClause += " AND items.timestamp < ?"
+			whereClause += andItemsTimestampLessThanArg
 			args = append(args, untilUnixMs)
 		}
 
@@ -508,11 +508,11 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 		where += ")"
 	}
 	if params.StartTimestamp != nil {
-		where += " AND items.timestamp > ?"
+		where += " AND items.timestamp >= ?"
 		whereArgs = append(whereArgs, params.StartTimestamp.UnixMilli())
 	}
 	if params.EndTimestamp != nil {
-		where += " AND items.timestamp < ?"
+		where += andItemsTimestampLessThanArg
 		whereArgs = append(whereArgs, params.EndTimestamp.UnixMilli())
 	}
 
@@ -606,6 +606,8 @@ func (s *int64Slice) appendIfUnique(v int64) {
 	}
 	*s = append(*s, v)
 }
+
+const andItemsTimestampLessThanArg = " AND items.timestamp < ?"
 
 // Implement sort.Interface
 func (s int64Slice) Len() int           { return len(s) }
