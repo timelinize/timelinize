@@ -340,7 +340,9 @@ func normalizeAttribute(attr Attribute) Attribute {
 // NormalizePhoneNumber attempts to parse number and returns
 // a standardized version in E164 format. If the number does
 // not have an explicit region/country code, the country code
-// for the region is used instead. The default region is US.
+// for the region is used instead. If no country code is
+// in the number, the country code from the system's locale
+// region is assumed; otherwise the US region is assumed.
 //
 // We chose E164 because that's what Twilio uses.
 func NormalizePhoneNumber(number, defaultRegion string) (string, error) {

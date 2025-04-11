@@ -407,6 +407,7 @@ a {
 .static-menu .dropdown-menu .dropdown-header {
 	background: inherit;
 	top: calc(-1 * var(--tblr-dropdown-padding-y));
+	z-index: inherit;
 }
 
 .btn-dark {

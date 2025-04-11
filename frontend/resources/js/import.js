@@ -226,7 +226,7 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 		dsOptModal = cloneTemplate('#tpl-modal-import-dsopt');
 		dsOptModal.id = `modal-import-dsopt-${ds.name}`;
 	}
-	$('.avatar', dsOptModal).style.backgroundImage = `url('/ds-image/${ds.icon}')`;
+	$('.avatar', dsOptModal).style.backgroundImage = `url('/ds-image/${ds.name}')`;
 	$('.modal-title', dsOptModal).append(document.createTextNode(ds.title));
 
 	const dsOptElem = cloneTemplate(`#tpl-dsopt-${ds.name}`);
