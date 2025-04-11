@@ -8,8 +8,9 @@ var _rendering = false;
 // if true, the next scroll event on the content column will not fire event handlers
 var _preventScrollEvent = true;
 
-// if true, the conversation view is at the very end, or very beginning, respectively
-var _bottom = true, _top = false;
+// if true, the conversation view is at the very end, or very beginning, respectively,
+// of the entire conversation (i.e. no more messages to load in that direction)
+var _veryEnd = true, _veryBeginning = false;
 
 async function conversationsPageMain() {
 	$('.tl-date-picker').append(newDatePicker({
@@ -36,23 +37,6 @@ async function conversationsPageMain() {
 	});
 	
 	$('#selected-entities-only').checked = queryParam("only_entity") == "true";
-	
-	const qsEntities = queryParam("entity");
-
-	// load the initial entities involved so they can be displayed in the selector, only if they aren't already
-	if (qsEntities) {
-		const initialEntities = qsEntities.split(',').map(Number);
-		// only query the DB if the entity select needs updating
-		if (!sameEntities(initialEntities, entitySelect)) {
-			const entities = await app.SearchEntities({
-				repo: tlz.openRepos[0].instance_id,
-				row_id: initialEntities
-			});
-			entities.map((v) => entitySelect.addOption(v));
-			entities.map((v) => entitySelect.addItem(v.id));
-			$('#selected-entities-only').disabled = false;
-		}
-	}
 
 	$('.content-column').addEventListener('scroll', async (event) => {
 		// only load more into the conversation view when a conversation is being viewed
@@ -66,8 +50,8 @@ async function conversationsPageMain() {
 			_preventScrollEvent = false;
 			return false;
 		}
-		
-		if (event.target.scrollTop == 0 && !_top) {
+
+		if (event.target.scrollTop == 0 && !_veryBeginning) {
 			// fun little hack: if scrollTop is 0 when new elements are *prepended*, the
 			// scrollTop stays 0 (which is jarring for the user who is scrolling up,
 			// since they've now skipped all the newly-loaded content which is now
@@ -83,7 +67,7 @@ async function conversationsPageMain() {
 			await renderConversationChunk("older");
 			return;
 		}
-		if (event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 1 && !_bottom) {
+		if (event.target.scrollHeight - event.target.scrollTop - event.target.clientHeight < 1 && !_veryEnd) {
 			await renderConversationChunk("newer");
 			return;
 		}
@@ -128,6 +112,23 @@ function messageSubstring() {
 }
 
 async function renderConversationsPage() {
+	// load the initial entities involved so they can be displayed in the selector, only if they aren't already
+	const qsEntities = queryParam("entity");
+	if (qsEntities) {
+		const initialEntities = qsEntities.split(',').map(Number);
+		const entitySelect = $('.entity-input').tomselect;
+		// only query the DB if the entity select needs updating
+		if (!sameEntities(initialEntities, entitySelect)) {
+			const entities = await app.SearchEntities({
+				repo: tlz.openRepos[0].instance_id,
+				row_id: initialEntities
+			});
+			entities.map((v) => entitySelect.addOption(v));
+			entities.map((v) => entitySelect.addItem(v.id));
+			$('#selected-entities-only').disabled = false;
+		}
+	}
+
 	const singleConversation = $('#selected-entities-only').checked;
 
 	if (singleConversation) {
@@ -277,10 +278,10 @@ async function renderConversationChunk(direction) {
 		};
 		commonFilterSearchParams(params);
 		// constrain conversation to be within selected date/time
-		if (new Date(since) > new Date(params.start_timestamp)) {
+		if (!params.start_timestamp || new Date(since) > new Date(params.start_timestamp)) {
 			params.start_timestamp = since;
 		}
-		if (new Date(until) < new Date(params.end_timestamp)) {
+		if (!params.end_timestamp || new Date(until) < new Date(params.end_timestamp)) {
 			params.end_timestamp = until;
 		}
 		console.log("PARAMS:", params)
@@ -288,12 +289,12 @@ async function renderConversationChunk(direction) {
 		console.log("RESULTS:", results)
 		
 		
-		// TODO: display some filler if there's no items
+		// TODO: display some filler/information if there's no items
 		if (!results.items) {
 			if (direction == "newer") {
-				_bottom = true;
+				_veryEnd = true;
 			} else if (direction == "older") {
-				_top = true;
+				_veryBeginning = true;
 			}
 			return;
 		}
@@ -346,14 +347,14 @@ async function renderConversationChunk(direction) {
 				for (let i = messageElems.length-limit; i < messageElems.length; i++) {
 					messageElems[i].remove();
 				}
-				_bottom = false;
+				_veryEnd = false;
 			} else {
 				// clear out oldest messages
 				messages.splice(0, limit);
 				for (let i = 0; i < limit; i++) {
 					messageElems[i].remove();
 				}
-				_top = false;
+				_veryBeginning = false;
 			}
 		}
 
@@ -401,6 +402,13 @@ on('click', '#convos-container .card-link', event => {
 	$('#selected-entities-only').disabled = false;
 	$('#selected-entities-only').checked = true;
 	trigger($('#selected-entities-only'), 'change');
+});
+
+// reset state when the filter changes, since we may or may not
+// still be at the end or beginning of the conversation
+on('change', '.filter', e => {
+	_veryBeginning = false;
+	_veryEnd = false;
 });
 
 // avoid resetting entire page state, all we need to do is go back to the list of

@@ -232,7 +232,7 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 			whereClause += ")"
 		}
 		if params.StartTimestamp != nil {
-			whereClause += " AND items.timestamp >= ?"
+			whereClause += " AND items.timestamp > ?"
 			args = append(args, params.StartTimestamp.UnixMilli())
 		}
 		if params.EndTimestamp != nil && (untilUnixMs == 0 || untilUnixMs > params.EndTimestamp.UnixMilli()) {
@@ -508,7 +508,7 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 		where += ")"
 	}
 	if params.StartTimestamp != nil {
-		where += " AND items.timestamp >= ?"
+		where += " AND items.timestamp > ?"
 		whereArgs = append(whereArgs, params.StartTimestamp.UnixMilli())
 	}
 	if params.EndTimestamp != nil {

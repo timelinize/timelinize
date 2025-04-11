@@ -162,6 +162,9 @@ on('change',
 	.filter select:not(.nonfilter),
 	.filter .dropdown-menu:not(.nonfilter)`, event => {
 
+	// convenient way to notify other parts of the code that the filter has been changed and the results are about to be updated/reset
+	$('.filter').dispatchEvent(new Event('change', { bubbles: true }));
+
 	// update query string in the URL bar so the filter will read the updated params
 	var qs = filterToQueryString().toString();
 	let newurl = window.location.protocol + "//" + window.location.host + window.location.pathname;
