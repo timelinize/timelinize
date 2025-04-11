@@ -12,6 +12,18 @@ var _preventScrollEvent = true;
 var _bottom = true, _top = false;
 
 async function conversationsPageMain() {
+	$('.tl-date-picker').append(newDatePicker({
+		passThru: {
+			range: true
+		},
+		rangeToggle: true,
+		time: false,
+		timeToggle: true,
+		proximity: true,
+		sort: false,
+		vertical: true
+	}));
+
 	const entitySelect = newEntitySelect('.entity-input', 20);
 	
 	entitySelect.on('change', async () => {
@@ -134,9 +146,9 @@ async function renderConversations() {
 	$('#showing-info').classList.remove('d-none');
 	$('.page-title').classList.remove('mb-4');
 
+	const datePicker = $('.date-input').datepicker;
+
 	const params = {
-		// classification: itemClasses(),
-		// entity_id: entitiesInvolved(),
 		data_text: messageSubstring(),
 		limit: 30,
 	};
@@ -156,12 +168,6 @@ async function renderConversations() {
 	// TODO: display something nice if there's no results
 
 	for (const convo of results) {
-		// prepare for link to conversation before we mess with the entities
-		let convoQS = new URLSearchParams();
-		convoQS.set("entity", convo.entities.map((e) => e.id).join(","));
-		convoQS.set("only_entity", "true");
-		const convoHref = "/conversations?"+convoQS.toString();
-
 		// put repo owner last, since I think most commonly they'll be in the conversations
 		convo.entities.sort((a, b) => a.id > 1 ? -1 : 1);
 
@@ -189,8 +195,7 @@ async function renderConversations() {
 			}
 		}
 		if (convo.entities.length > maxRenderNames) {
-			// TODO: have this link to the convo as well (I just want it to look like a link, consistently with the others; otherwise this can be a span tag)
-			renderNames.push(`<a href="${convoHref}" title="${tooltipNames.join(", ")}">+${convo.entities.length-maxRenderNames} more</a>`);
+			renderNames.push(`<span title="${tooltipNames.join(", ")}">+${convo.entities.length-maxRenderNames} more</span>`);
 		}
 		$('.card-title', elem).innerHTML = renderNames.join(", ");
 
@@ -214,7 +219,8 @@ async function renderConversations() {
 		const avatars = convo.entities.map((e)=>`<a href="/entities/${e.id}" title="${e.name || e.attributes[0].value}">${avatar(true, e, "avatar-sm avatar-rounded")}</a>`).join("");
 		$('.avatar-list', elem).innerHTML = avatars+more;
 
-		$('a.card', elem).href = convoHref;
+		// attach the conversation info to the card so we can fill out the filter when clicked
+		elem.conversation = convo;
 		
 		$('#convos-container').append(elem);
 	}
@@ -264,17 +270,19 @@ async function renderConversationChunk(direction) {
 		const limit = 50;
 
 		const params = {
-			// repo: tlz.openRepos[0].instance_id,
 			data_text: messageSubstring(),
-			// classification: itemClasses(),
-			// entity_id: entitiesInvolved(),
-			start_timestamp: since,
-			end_timestamp: until,
 			related: 1,
 			sort: sort,
 			limit: limit,
 		};
 		commonFilterSearchParams(params);
+		// constrain conversation to be within selected date/time
+		if (new Date(since) > new Date(params.start_timestamp)) {
+			params.start_timestamp = since;
+		}
+		if (new Date(until) < new Date(params.end_timestamp)) {
+			params.end_timestamp = until;
+		}
 		console.log("PARAMS:", params)
 		const results = await app.LoadConversation(params);
 		console.log("RESULTS:", results)
@@ -379,3 +387,29 @@ async function renderConversationChunk(direction) {
 		_rendering = false;
 	}
 }
+
+// update filters when convo card is clicked; the conversations page with the convo cards is basically a glorified filter control
+on('click', '#convos-container .card-link', event => {
+	const convoCard = event.target.closest('.convo-card');
+	const ts = $('.entity-input').tomselect;
+	ts.clear();
+	ts.clearOptions();
+	for (const entity of convoCard.conversation.entities) {
+		ts.addOption(entity);
+		ts.addItem(entity.id, true); // true = don't fire event (the updated filter gets submitted later)
+	}
+	$('#selected-entities-only').disabled = false;
+	$('#selected-entities-only').checked = true;
+	trigger($('#selected-entities-only'), 'change');
+});
+
+// avoid resetting entire page state, all we need to do is go back to the list of
+// convos, but keep the rest of the filter params
+on('click', '#conversations-reset', event => {
+	const ts = $('.entity-input').tomselect;
+	ts.clear();
+	ts.clearOptions();
+	$('#selected-entities-only').checked = false;
+	$('#selected-entities-only').disabled = true;
+	trigger($('#selected-entities-only'), 'change');
+});

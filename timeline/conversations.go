@@ -123,7 +123,7 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 	var lastItemID int64              // to help us know when we've reached a new message
 
 	// make paging more efficient than using OFFSET; this way we just use
-	// the index to skip results with timestamps we've already traversed
+	// the DB index to skip results with timestamps we've already traversed
 	var untilUnixMs int64
 
 	// worst case scenario is tens of thousands of items that pertain only to
@@ -231,8 +231,14 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 			}
 			whereClause += ")"
 		}
-
-		if untilUnixMs > 0 {
+		if params.StartTimestamp != nil {
+			whereClause += " AND items.timestamp >= ?"
+			args = append(args, params.StartTimestamp.UnixMilli())
+		}
+		if params.EndTimestamp != nil && (untilUnixMs == 0 || untilUnixMs > params.EndTimestamp.UnixMilli()) {
+			whereClause += " AND items.timestamp < ?"
+			args = append(args, params.EndTimestamp.UnixMilli())
+		} else if untilUnixMs > 0 {
 			whereClause += " AND items.timestamp < ?"
 			args = append(args, untilUnixMs)
 		}

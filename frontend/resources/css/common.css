@@ -52,11 +52,13 @@ a parent div. this takes care of that by removing the >. */
 .ts-wrapper.multi .ts-control > div {
 	margin: 0;
 	font-size: 12px;
+	border: none; /* no idea why tabler adds a border... */
 }
 .ts-control {
 	border: none;
 	padding: 0;
 	gap: 2px;
+	line-height: inherit; /* for some reason, their default of 18px makes the multi and single controls different heights */
 }
 .ts-control input {
 	min-width: 4rem;
@@ -65,6 +67,11 @@ a parent div. this takes care of that by removing the >. */
 .ts-control .item {
 	margin: 0;
 	border-radius: 4px;
+}
+
+/* the tabler-defined height of 1.25rem shifts alignment to be off when inputs are in a row - removing it equalizes heights and alignment of form elements */
+.dropdown-item-indicator {
+	height: inherit;
 }
 
 
