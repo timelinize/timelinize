@@ -43,8 +43,8 @@ type ItemSearchParams struct {
 
 	// ML searches -- currently, only one of these can be set at a time
 	// TODO: add a QueryImage field for image search
-	QueryText string  `json:"query_text,omitempty"` // results
-	SimilarTo []int64 `json:"similar_to,omitempty"` // similar to the centroid of the vectors of the specified items
+	QueryText string `json:"query_text,omitempty"` // similar to the centroid of the vector formed from this phrase
+	SimilarTo int64  `json:"similar_to,omitempty"` // similar to the centroid of the vector of the specified item (TODO: should it just be embedding IDs?)
 
 	RowID []int64 `json:"row_id,omitempty"`
 	// AccountID  []int    `json:"account_id,omitempty"` // TODO: restore this, if useful
@@ -287,7 +287,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		if params.WithTotal {
 			extraTargets = append(extraTargets, &totalCount)
 		}
-		if params.QueryText != "" || len(params.SimilarTo) > 0 {
+		if params.QueryText != "" || params.SimilarTo > 0 {
 			extraTargets = append(extraTargets, &embedDist)
 		}
 		itemRow, err := scanItemRow(rows, extraTargets)
@@ -347,7 +347,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		for i, sr := range results {
 			_, wasScored := scores[sr.ID]
 			// TODO: Be smarter: find the range the top/best results score, and only cull results below a significant threshold difference
-			if sr.Score <= 0.0001 && wasScored {
+			if sr.Score <= 0.002 && wasScored {
 				results = results[:i]
 				break
 			}
@@ -428,15 +428,14 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	// rows has priority over relationships.
 	rootItemsOnly := !params.Astructured && len(params.RowID) == 0
 
-	// select from the extended items table so we can get a little more information
-	const itemsTable = "extended_items"
-
-	// If searching by embeddings, we have to SELECT from the embeddings
-	// virtual table, and join in the items table.
-	vectorSearch := params.QueryText != "" || len(params.SimilarTo) > 0
-	selectFromTable, selectFromAs := itemsTable, " AS items"
+	// if searching by embeddings, we first select the items that could possibly
+	// be in the results by filtering with other search parameters, then we do
+	// distance calculations over that subset of the data, which is theoretically
+	// faster (see https://github.com/asg017/sqlite-vec/issues/196#issuecomment-2643543058)
+	var q string
+	vectorSearch := params.QueryText != "" || params.SimilarTo > 0
 	if vectorSearch {
-		selectFromTable, selectFromAs = "embeddings", ""
+		q = "WITH search_results AS (\n"
 	}
 
 	// honor inclusivity for bounding-box searches
@@ -447,29 +446,19 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 
 	// TODO: use strings.Builder (also in RecentConversations())
 
-	q := fmt.Sprintf(`SELECT %s, entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value`, itemDBColumns)
+	q += fmt.Sprintf("\t\tSELECT %s, entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value", itemDBColumns)
 	if params.OnlyTotal {
-		q = "SELECT count(DISTINCT items.id)"
+		q = "\t\tSELECT count(DISTINCT items.id)"
 	}
 	if params.GeoJSON {
 		// GeoJSON mode is intended to be more efficient; as such, only select coordinate data
-		q = "SELECT items.id, items.latitude, items.longitude"
+		q = "\t\tSELECT items.id, items.latitude, items.longitude"
 	}
 	if params.WithTotal {
 		q += ", count() over() AS total_count"
 	}
-	if vectorSearch {
-		q += ", embeddings.distance"
-	}
-	q += fmt.Sprintf(`
-		FROM %s%s`, selectFromTable, selectFromAs)
-
-	if vectorSearch {
-		q += fmt.Sprintf(`
-		JOIN %s AS items ON items.embedding_id = embeddings.id`, itemsTable)
-	}
-
 	q += `
+		FROM extended_items AS items
 		LEFT JOIN attributes ON items.attribute_id = attributes.id
 		LEFT JOIN entity_attributes ON attributes.id = entity_attributes.attribute_id
 		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`
@@ -672,38 +661,6 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		}
 	}
 
-	// TODO: seems reasonable, but let's tune this
-	const k = 50
-
-	if vectorSearch {
-		if params.QueryText != "" {
-			// search relative to an arbitrary input (TODO: support image inputs too)
-			embedding, err := GenerateSerializedEmbedding(tl.ctx, "text/plain", []byte(params.QueryText), nil)
-			if err != nil {
-				return "", nil, err
-			}
-			and(func() {
-				or("embeddings.embedding MATCH ?", embedding)
-				and(func() {
-					// TODO: pull up limit calculation so we can use it early here... sigh.
-					or("k=?", k)
-				})
-			})
-		} else if len(params.SimilarTo) > 0 {
-			// search items similar to existing embeddings
-			// TODO: for multiple values in this slice, compute centroid instead of using 'or'/'and' in the sql statement...?
-			for _, similarItemID := range params.SimilarTo {
-				and(func() {
-					or("embeddings.embedding MATCH (SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)", similarItemID)
-					and(func() {
-						// TODO: pull up limit calculation so we can use it early here... sigh.
-						or("k=?", k)
-					})
-				})
-			}
-		}
-	}
-
 	// skip deleted items unless we are explicitly supposed to include them
 	// (NOTE: we include them if the specific row IDs are requested)
 	if !params.Deleted && len(params.RowID) == 0 {
@@ -738,76 +695,114 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		q += "\n\t\tGROUP BY items.id"
 	}
 
-	if vectorSearch && !params.OnlyTotal {
-		q += "\n\t\tORDER BY embeddings.distance"
-	} else if params.Sort != SortNone {
-		q += "\n\t\tORDER BY "
+	// don't put order in the temporary table, since we'll be ordering by vector distance
+	if !vectorSearch {
+		if params.Sort != SortNone {
+			q += "\n\t\tORDER BY "
 
-		// TODO: not sure if this is how autocomplete will work or be useful, but basically
-		// this sorts by data text so that if it's a prefix, it's weighed higher in the
-		// sort, and if it's a suffix then put it at the end; i.e. favor term at beginning
-		// of words instead of end... I think that's what this does, at least
-		if params.PreferPrefix && len(params.DataText) == 1 {
-			q += `CASE
-				WHEN items.data_text LIKE ? || '%' THEN 1
-				WHEN items.data_text LIKE '%' || ? THEN 3
-				ELSE 2
-			END, `
-			args = append(args, params.DataText[0], params.DataText[0])
-		}
+			// TODO: not sure if this is how autocomplete will work or be useful, but basically
+			// this sorts by data text so that if it's a prefix, it's weighed higher in the
+			// sort, and if it's a suffix then put it at the end; i.e. favor term at beginning
+			// of words instead of end... I think that's what this does, at least
+			if params.PreferPrefix && len(params.DataText) == 1 {
+				q += `CASE
+					WHEN items.data_text LIKE ? || '%' THEN 1
+					WHEN items.data_text LIKE '%' || ? THEN 3
+					ELSE 2
+				END, `
+				args = append(args, params.DataText[0], params.DataText[0])
+			}
 
-		// sort
-		sortDir := strings.ToUpper(string(params.Sort))
-		if sortDir == "" {
-			// smart sort: sort ASC by default if only "minimum" side of bounding boxes are specified
-			if (params.StartTimestamp != nil || params.MinLatitude != nil || params.MinLongitude != nil) &&
-				params.EndTimestamp == nil && params.MaxLatitude == nil && params.MaxLongitude == nil {
-				sortDir = string(SortAsc)
-			} else {
-				sortDir = string(SortDesc)
+			// sort
+			sortDir := strings.ToUpper(string(params.Sort))
+			if sortDir == "" {
+				// smart sort: sort ASC by default if only "minimum" side of bounding boxes are specified
+				if (params.StartTimestamp != nil || params.MinLatitude != nil || params.MinLongitude != nil) &&
+					params.EndTimestamp == nil && params.MaxLatitude == nil && params.MaxLongitude == nil {
+					sortDir = string(SortAsc)
+				} else {
+					sortDir = string(SortDesc)
+				}
+			}
+			if sortDir != string(SortAsc) && sortDir != string(SortDesc) {
+				return "", nil, fmt.Errorf("invalid sort direction: %s", sortDir)
+			}
+			// location proximity search is only an approximation for simplicity
+			// see https://stackoverflow.com/a/39298241/1048862
+			switch {
+			case params.Latitude != nil && params.Longitude != nil:
+				// nearest to location; account for shortened distances at poles
+				// math.Cos() takes radians, hence the conversion to radians inside the cosine
+				cosLat2 := math.Pow(math.Cos(*params.Latitude*math.Pi/180.0), 2) //nolint:mnd
+				sortDir = string(SortAsc)                                        // always sort ascending for nearest
+				q += "((?-items.latitude) * (?-items.latitude)) + ((?-items.longitude) * (?-items.longitude) * ?), items.id " + sortDir
+				args = append(args, params.Latitude, params.Latitude, params.Longitude, params.Longitude, cosLat2)
+
+			case params.Timestamp != nil:
+				// nearest to timestamp
+				sortDir = string(SortAsc) // always sort ascending for nearest
+				q += "abs(?-items.timestamp), items.id " + sortDir
+				args = append(args, params.Timestamp.UnixMilli())
+
+			case params.OrderBy == "stored":
+				q += "items.stored " + sortDir
+
+			default:
+				// generic sort, which is timestamp and row ID
+				// q += fmt.Sprintf(" ORDER BY items.timestamp %s, items.id %s", sortDir, sortDir)
+				q += fmt.Sprintf("items.timestamp %s, items.id %s", sortDir, sortDir)
 			}
 		}
-		if sortDir != string(SortAsc) && sortDir != string(SortDesc) {
-			return "", nil, fmt.Errorf("invalid sort direction: %s", sortDir)
-		}
-		// location proximity search is only an approximation for simplicity
-		// see https://stackoverflow.com/a/39298241/1048862
-		switch {
-		case params.Latitude != nil && params.Longitude != nil:
-			// nearest to location; account for shortened distances at poles
-			// math.Cos() takes radians, hence the conversion to radians inside the cosine
-			cosLat2 := math.Pow(math.Cos(*params.Latitude*math.Pi/180.0), 2) //nolint:mnd
-			sortDir = string(SortAsc)                                        // always sort ascending for nearest
-			q += "((?-items.latitude) * (?-items.latitude)) + ((?-items.longitude) * (?-items.longitude) * ?), items.id " + sortDir
-			args = append(args, params.Latitude, params.Latitude, params.Longitude, params.Longitude, cosLat2)
 
-		case params.Timestamp != nil:
-			// nearest to timestamp
-			sortDir = string(SortAsc) // always sort ascending for nearest
-			q += "abs(?-items.timestamp), items.id " + sortDir
-			args = append(args, params.Timestamp.UnixMilli())
-
-		case params.OrderBy == "stored":
-			q += "items.stored " + sortDir
-
-		default:
-			// generic sort, which is timestamp and row ID
-			// q += fmt.Sprintf(" ORDER BY items.timestamp %s, items.id %s", sortDir, sortDir)
-			q += fmt.Sprintf("items.timestamp %s, items.id %s", sortDir, sortDir)
+		// limit
+		if !params.OnlyTotal {
+			if params.Limit == 0 {
+				params.Limit = 1000
+			}
+			if params.Limit > 0 {
+				q += "\n\t\tLIMIT ?"
+				args = append(args, params.Limit)
+			}
+			if params.Offset > 0 {
+				q += "\n\t\tOFFSET ?"
+				args = append(args, params.Offset)
+			}
 		}
 	}
 
-	// limit
-	if !params.OnlyTotal {
+	if vectorSearch {
+		var targetVectorClause string
+
+		if params.SimilarTo > 0 {
+			targetVectorClause = "(SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)"
+			args = append(args, params.SimilarTo)
+		} else if params.QueryText != "" {
+			// search relative to an arbitrary input (TODO: support image inputs too)
+			embedding, err := generateEmbedding(tl.ctx, "text/plain", []byte(params.QueryText), nil)
+			if err != nil {
+				return "", nil, err
+			}
+			targetVectorClause = "?"
+			args = append(args, string(embedding))
+		}
+
+		q += fmt.Sprintf(`
+)
+SELECT
+	search_results.*,
+	vec_distance_l2(%s, embeddings.embedding) AS distance
+FROM search_results
+JOIN embeddings ON embeddings.id = search_results.embedding_id
+ORDER BY distance`, targetVectorClause)
 		if params.Limit == 0 {
-			params.Limit = 1000
+			params.Limit = 100
 		}
 		if params.Limit > 0 {
-			q += "\n\t\tLIMIT ?"
+			q += "\nLIMIT ?"
 			args = append(args, params.Limit)
 		}
 		if params.Offset > 0 {
-			q += "\n\t\tOFFSET ?"
+			q += "\nOFFSET ?"
 			args = append(args, params.Offset)
 		}
 	}

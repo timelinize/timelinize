@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from flask import Flask, request
 from PIL import Image
-from transformers import AutoProcessor, SiglipVisionModel, SiglipTextModel, pipeline
+from transformers import AutoProcessor, Siglip2VisionModel, Siglip2TextModel, pipeline
 import io
 import json
 import numpy as np
@@ -29,11 +29,11 @@ import sqlite3
 import torch
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else "cpu")
-MODEL = "google/siglip-base-patch16-224" # huggingface model name
+MODEL = "google/siglip2-so400m-patch16-naflex" # (~4.5 GB)   # huggingface model name
 
 processor = AutoProcessor.from_pretrained(MODEL)
-text_model = SiglipTextModel.from_pretrained(MODEL).to(DEVICE)
-vision_model = SiglipVisionModel.from_pretrained(MODEL).to(DEVICE)
+text_model = Siglip2TextModel.from_pretrained(MODEL).to(DEVICE)
+vision_model = Siglip2VisionModel.from_pretrained(MODEL).to(DEVICE)
 image_classifier = pipeline(task="zero-shot-image-classification", model=MODEL, device=DEVICE)
 
 app = Flask(__name__)
@@ -58,11 +58,14 @@ def embedding():
 
 	if ct.startswith("image/"):
 		image = Image.open(io.BytesIO(data)).convert("RGB") # TODO: Is convert necessary?
-		image_inputs = processor(images=image, return_tensors="pt", padding="max_length").to(DEVICE)
+		image_inputs = processor(images=image, return_tensors="pt", padding="max_length", max_num_patches=1024).to(DEVICE)
 		with torch.no_grad():
 			output = vision_model(**image_inputs).pooler_output
 	elif ct.startswith("text/"):
-		text_input = processor(text=str(data), return_tensors="pt", padding="max_length").to(DEVICE)
+		# TODO: this truncates inputs at 64 tokens, which is about 1-2 sentences, or ~15 words.
+		# Consider using a different model for longer text (and then shift output into same space)
+		# or potentially a sliding window over tokens.
+		text_input = processor(text=data.decode('utf-8'), return_tensors="pt", padding="max_length", truncation=True).to(DEVICE)
 		with torch.no_grad():
 			output = text_model(**text_input).pooler_output
 	else:
@@ -96,6 +99,7 @@ def classify():
 			itemID = itemIDs[i]
 			results[itemID] = labelScore['score']
 
+	# TODO: for development only
 	print("RESULTS FOR:", labels, results)
 
 	return results

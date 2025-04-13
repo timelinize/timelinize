@@ -21,7 +21,7 @@ function itemsPageFilterParams() {
 
 	const similarTo = queryParam("similar_to");
 	if (similarTo) {
-		params.similar_to = [Number(similarTo)];
+		params.similar_to = Number(similarTo);
 	}
 
 	

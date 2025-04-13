@@ -58,13 +58,15 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	FOREIGN KEY ("parent_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
 
+-- TODO: Update comment; should the embedding just be stored in the items table now??
+--
 -- Embeddings enable "intelligent" search using ML models to derive semantics and meaning.
 -- By finding other embeddings that are close (dot product or euclidean distance),
 -- similarity searches are possible. This requires the sqlite-vec module.
-CREATE VIRTUAL TABLE IF NOT EXISTS embeddings USING vec0(
-	id INTEGER PRIMARY KEY,
-	embedding float[768]
-);
+CREATE TABLE IF NOT EXISTS "embeddings" (
+	"id" INTEGER PRIMARY KEY,
+	"embedding" BLOB -- TODO: could define as float[768] (unless STRICT) and then use `check(typeof(contents_embedding) == 'blob' AND vec_length(contents_embedding) == 768)`
+) STRICT;
 
 -- Entity type names are hard-coded (but their IDs are not).
 CREATE TABLE IF NOT EXISTS "entity_types" (
@@ -166,6 +168,7 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"attribute_id" INTEGER, -- owner, creator, or originator attributed to this item
 	"classification_id" INTEGER,
 	"original_id" TEXT, -- ID provided by the data source
+	-- "embedding" BLOB, -- TODO: experimental, inline embedding
 	"original_location" TEXT,     -- path or location of the file/data on the original data source; should include filename if applicable
 	"intermediate_location" TEXT, -- path or location of the file/data from the import dataset (e.g. after exporting from the data source); should include filename if application
 	"filename" TEXT, -- name of the original file as named by the owner, if known

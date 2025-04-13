@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -103,6 +104,10 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 	var data []byte
 	var dataFile, dataText, dataType, filename *string
 
+	// we query all the ways the content of the item could be stored: as a file (get its filename),
+	// text (read the text directly from the DB), and a separate data table (read the blob directly
+	// from the DB); only 1 of those should be non-nil, so we set the "data" variable to whichever
+	// one it is, to be sure we send it in for an embedding
 	job.tl.dbMu.RLock()
 	err := job.tl.db.QueryRowContext(ctx,
 		`SELECT items.data_file, items.data_text, items.data_type, item_data.content
@@ -123,8 +128,12 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 		fn := job.tl.FullPath(*dataFile)
 		filename = &fn
 	}
+	// if the item is text content in the DB, set the data as it so it gets passed in for an embedding
+	if data == nil && dataText != nil {
+		data = []byte(*dataText)
+	}
 
-	v, err := GenerateSerializedEmbedding(ctx, *dataType, data, filename)
+	v, err := generateSerializedEmbedding(ctx, *dataType, data, filename)
 	if err != nil {
 		return err
 	}
@@ -162,19 +171,26 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 	return nil
 }
 
-func GenerateSerializedEmbedding(ctx context.Context, dataType string, data []byte, filename *string) ([]byte, error) {
-	embedding, err := generateEmbedding(ctx, dataType, data, filename)
+func generateSerializedEmbedding(ctx context.Context, dataType string, data []byte, filename *string) ([]byte, error) {
+	embeddingJSON, err := generateEmbedding(ctx, dataType, data, filename)
 	if err != nil {
 		return nil, err
+	}
+	var embedding []float32
+	err = json.Unmarshal(embeddingJSON, &embedding)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshaling JSON embedding: %w", err)
 	}
 	v, err := sqlite_vec.SerializeFloat32(embedding)
 	if err != nil {
 		return nil, fmt.Errorf("serializing embedding: %w", err)
 	}
+	if strings.HasPrefix(dataType, "text/") {
+	}
 	return v, nil
 }
 
-func generateEmbedding(ctx context.Context, dataType string, data []byte, filename *string) ([]float32, error) {
+func generateEmbedding(ctx context.Context, dataType string, data []byte, filename *string) ([]byte, error) {
 	if dataType == "" {
 		return nil, errors.New("content type is required")
 	}
@@ -213,7 +229,7 @@ func generateEmbedding(ctx context.Context, dataType string, data []byte, filena
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		const maxSize = 1024 * 10
+		const maxSize = 1024 * 100
 		msg, err := io.ReadAll(io.LimitReader(resp.Body, maxSize))
 		if err != nil {
 			return nil, fmt.Errorf("error reading error response from ML server, HTTP %d: %w", resp.StatusCode, err)
@@ -221,13 +237,13 @@ func generateEmbedding(ctx context.Context, dataType string, data []byte, filena
 		return nil, fmt.Errorf("got error status from ML server: HTTP %d (message='%s')", resp.StatusCode, msg)
 	}
 
-	var embedding []float32
-	err = json.NewDecoder(resp.Body).Decode(&embedding)
+	const maxSize = 1024 * 100
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxSize))
 	if err != nil {
-		return nil, fmt.Errorf("decoding JSON response: %w", err)
+		return nil, err
 	}
 
-	return embedding, nil
+	return respBody, nil
 }
 
 // TODO: endpoint currently works for images only
