@@ -107,7 +107,7 @@ body {
 }
 
 .translucent:not([data-bs-theme=dark]) {
-	--tblr-navbar-bg: rgba(255, 255, 255, .65);
+	--tblr-navbar-bg: rgba(255, 255, 255, .75);
 }
 
 .container-xl {
@@ -145,6 +145,7 @@ body {
 	position: absolute;
 	top: 0;
 	left: 0;
+	background: white; /* TODO: Obviously, this is not always correct; it should be 'inherit', but this doesn't work for some reason */
 }
 
 .fade-in {

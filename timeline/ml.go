@@ -27,7 +27,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -184,8 +183,6 @@ func generateSerializedEmbedding(ctx context.Context, dataType string, data []by
 	v, err := sqlite_vec.SerializeFloat32(embedding)
 	if err != nil {
 		return nil, fmt.Errorf("serializing embedding: %w", err)
-	}
-	if strings.HasPrefix(dataType, "text/") {
 	}
 	return v, nil
 }

@@ -43,8 +43,8 @@ type ItemSearchParams struct {
 
 	// ML searches -- currently, only one of these can be set at a time
 	// TODO: add a QueryImage field for image search
-	QueryText string `json:"query_text,omitempty"` // similar to the centroid of the vector formed from this phrase
-	SimilarTo int64  `json:"similar_to,omitempty"` // similar to the centroid of the vector of the specified item (TODO: should it just be embedding IDs?)
+	SemanticText string `json:"semantic_text,omitempty"` // similar to the centroid of the vector formed from this phrase
+	SimilarTo    int64  `json:"similar_to,omitempty"`    // similar to the centroid of the vector of the specified item (TODO: should it just be embedding ID?)
 
 	RowID []int64 `json:"row_id,omitempty"`
 	// AccountID  []int    `json:"account_id,omitempty"` // TODO: restore this, if useful
@@ -186,7 +186,7 @@ type SearchResults struct {
 
 func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (SearchResults, error) {
 	// setting a natural language input has big implications, so make sure it's not just whitespace by accident
-	params.QueryText = strings.TrimSpace(params.QueryText)
+	params.SemanticText = strings.TrimSpace(params.SemanticText)
 
 	// get the DB query string and associated arguments
 	q, args, err := tl.prepareSearchQuery(params)
@@ -287,7 +287,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		if params.WithTotal {
 			extraTargets = append(extraTargets, &totalCount)
 		}
-		if params.QueryText != "" || params.SimilarTo > 0 {
+		if params.SemanticText != "" || params.SimilarTo > 0 {
 			extraTargets = append(extraTargets, &embedDist)
 		}
 		itemRow, err := scanItemRow(rows, extraTargets)
@@ -313,7 +313,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	}
 
 	// TODO: this needs tuning
-	if params.QueryText != "" {
+	if params.SemanticText != "" {
 		// filter results for relevance by passing them through the classifier...
 		// this is kind of a hack, but it's a well-known difficult problem apparently,
 		// for any KNN search, to only show relevant results
@@ -328,7 +328,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 			itemFiles[result.ID] = tl.FullPath(*result.DataFile)
 		}
 
-		scores, err := classify(ctx, itemFiles, []string{params.QueryText})
+		scores, err := classify(ctx, itemFiles, []string{params.SemanticText})
 		if err != nil {
 			return SearchResults{}, fmt.Errorf("classifying results: %w", err)
 		}
@@ -433,7 +433,7 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 	// distance calculations over that subset of the data, which is theoretically
 	// faster (see https://github.com/asg017/sqlite-vec/issues/196#issuecomment-2643543058)
 	var q string
-	vectorSearch := params.QueryText != "" || params.SimilarTo > 0
+	vectorSearch := params.SemanticText != "" || params.SimilarTo > 0
 	if vectorSearch {
 		q = "WITH search_results AS (\n"
 	}
@@ -776,9 +776,9 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		if params.SimilarTo > 0 {
 			targetVectorClause = "(SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)"
 			args = append(args, params.SimilarTo)
-		} else if params.QueryText != "" {
+		} else if params.SemanticText != "" {
 			// search relative to an arbitrary input (TODO: support image inputs too)
-			embedding, err := generateEmbedding(tl.ctx, "text/plain", []byte(params.QueryText), nil)
+			embedding, err := generateEmbedding(tl.ctx, "text/plain", []byte(params.SemanticText), nil)
 			if err != nil {
 				return "", nil, err
 			}

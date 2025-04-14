@@ -1359,9 +1359,9 @@ function itemContentElement(item, opts) {
 
 				const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
 				thumbhashImgTag.classList.add('thumbhash');
+				thumbhashImgTag.style.aspectRatio = aspectRatio;
 
 				container.classList.add('thumbhash-container');
-				container.style.aspectRatio = aspectRatio;
 
 				container.append(thumbhashImgTag);
 
@@ -2458,6 +2458,14 @@ function filterToQueryString() {
 			qs.delete('attachments');
 	}
 
+	// semantic search
+	if ($('.semantic-text-search')) {
+		if ($('.semantic-text-search').value)
+			qs.set('semantic_text', $('.semantic-text-search').value);
+		else
+			qs.delete('semantic_text');
+	}
+
 	return qs;
 }
 
@@ -2537,6 +2545,11 @@ async function queryStringToFilter() {
 		$('#format-videos').checked = qs.get('videos') != "0";
 	if ($('#include-attachments'))
 		$('#include-attachments').checked = qs.get('attachments') != "0";
+
+	// semantic search
+	if ($('.semantic-text-search')) {
+		$('.semantic-text-search').value = qs.get('semantic_text');
+	}
 }
 
 
@@ -2639,6 +2652,11 @@ function commonFilterSearchParams(params) {
 		for (const elem of checkedItemClasses) {
 			params.classification.push(elem.value);
 		}
+	}
+
+	// semantic text search
+	if (!params.semantic_text && $('.semantic-text-search')) {
+		params.semantic_text = $('.semantic-text-search').value;
 	}
 }
 

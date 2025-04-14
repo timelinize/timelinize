@@ -88,9 +88,7 @@
 }
 #modal-preview-nav .btn.btn-prev svg {
 	margin-left: calc(var(--tblr-btn-padding-x) * -.25);
-	margin-right: .4rem;
 }
 #modal-preview-nav .btn.btn-next svg {
-	margin-left: .4rem;
 	margin-right: calc(var(--tblr-btn-padding-x) * -.25);
 }

@@ -29,8 +29,7 @@
 
 					<label class="form-label">Search</label>
 					<div class="mb-4">
-						<input type="text" class="form-control" placeholder="Keywords or description"
-							id="text-search">
+						<input type="text" class="semantic-text-search form-control" placeholder="Keywords or description">
 					</div>
 					
 					<label class="form-label">Person</label>
@@ -102,16 +101,16 @@
 <div id="modal-preview" class="modal modal-blur fade" tabindex="-1" role="dialog" aria-hidden="true">
 	<div class="modal-dialog modal-xl" role="document">
 		<div class="modal-content">
-			<div class="modal-header d-flex justify-content-between">
+			<div class="modal-header d-flex justify-content-between gap-2">
 				<div class="d-flex align-items-center">
 					<div class="media-owner-avatar"></div>
 					<div>
 						<div class="media-owner-name"></div>
-						<div class="media-timestamp text-secondary"></div>
+						<div class="media-timestamp text-secondary text-nowrap"></div>
 					</div>
 				</div>
-				<div class="text-center">
-					<h5 class="modal-title"></h5>
+				<div class="text-center text-nowrap overflow-hidden">
+					<h5 class="modal-title text-truncate overflow-hidden"></h5>
 					<div class="subheader"></div>
 				</div>
 				<div id="modal-preview-nav" class="d-flex me-2">
@@ -122,10 +121,10 @@
 							<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
 							<polyline points="15 6 9 12 15 18"></polyline>
 						</svg>
-						Prev
+						<span class="d-none d-xl-block">Prev</span>
 					</a>
 					<a class="btn btn-next">
-						Next
+						<span class="d-none d-xl-block">Next</span>
 						<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-chevron-right"
 							width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
 							fill="none" stroke-linecap="round" stroke-linejoin="round">

@@ -379,7 +379,7 @@ async function recentDataSourceStats() {
 		}
 	}
 
-	$('#days-documented-count').innerText = `${Object.keys(daysSeen).length.toLocaleString()} / ${days}`;
+	$('#days-documented-count').innerText = `${Object.keys(daysSeen).length.toLocaleString()} / ${days.toLocaleString()}`;
 
 	const daysSeenPct = Object.keys(daysSeen).length / days * 100;
 	const daysNotSeenPct = (days - Object.keys(daysSeen).length) / days * 100;
