@@ -335,6 +335,8 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 				}
 
 				if err := p.process(job.Context(), dirEntry, dsCheckpoint); err != nil {
+					ij.generateThumbnailsForImportedItems()
+					ij.generateEmbeddingsForImportedItems()
 					return fmt.Errorf("processing %s: %w", filename, err)
 				}
 
@@ -515,7 +517,7 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 	// get the items in reverse timestamp order since the
 	// most recent items are most likely to be displayed by
 	// various frontend pages, i.e. the user will likely
-	// see thoes first
+	// see those first
 	ij.job.tl.dbMu.RLock()
 	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx,
 		`SELECT id, data_id, data_type, data_file
@@ -572,18 +574,6 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 		ij.job.Logger().Debug("no thumbnails to generate from this job")
 		return
 	}
-
-	// // convert maps to a slice; ordering is important for checkpoints
-	// job.Tasks = make([]thumbnailTask, len(dataIDs)+len(dataFiles))
-	// var i int
-	// for _, task := range dataIDs {
-	// 	job.Tasks[i] = task
-	// 	i++
-	// }
-	// for _, task := range dataFiles {
-	// 	job.Tasks[i] = task
-	// 	i++
-	// }
 
 	ij.job.Logger().Info("generating thumbnails for imported items", zap.Int("count", len(job.Tasks)))
 

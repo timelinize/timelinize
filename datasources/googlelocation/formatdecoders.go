@@ -64,7 +64,7 @@ func (fi *FileImporter) decodeLegacyTakeoutFormat(ctx context.Context, dirEntry 
 }
 
 func (fi *FileImporter) decodeOnDevice2024iOSFormat(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) (bool, error) {
-	if dirEntry.Name() != filenameFromiOSDevice {
+	if !filenameLooksLikeiOSOnDeviceFile(dirEntry.Name()) {
 		return false, nil
 	}
 

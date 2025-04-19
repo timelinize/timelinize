@@ -683,10 +683,11 @@ func (j *ActiveJob) Message(message string) {
 // When creating a checkpoint, the total, progress, and message data should
 // be current such that resuming the job from this checkpoint would have the
 // correct total, progress, and message displayed. Usually, a checkpoint is
-// where to begin/resume the job. For example, if a job started at unit of
-// work ("task"?) index 0 and finished up through 3, the progress value would
-// have been updated to be 4 and the checkpoint would contain index 4 (so,
-// progress THEN checkpoint, usually).
+// where to begin/resume the job, since it's often the starting index in a
+// loop. For example, if a job started at unit of work ("task"?) index 0 and
+// finished up through 3, the progress value would have been updated to be 4
+// and the checkpoint would contain index 4. The job would then resume with
+// starting at index 4, which had not been completed yet.
 //
 // Checkpoint values are opaque and MUST be JSON-marshallable. They will be
 // returned to the job action in the form of JSON bytes.

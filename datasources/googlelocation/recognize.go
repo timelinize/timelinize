@@ -2,15 +2,16 @@ package googlelocation
 
 import (
 	"encoding/json"
+	"path"
 	"strings"
 
 	"github.com/timelinize/timelinize/timeline"
 )
 
 const (
-	filenameFromLegacyTakeout = "Records.json"
-	filenameFromiOSDevice     = "location-history.json"
-	filenameFromAndroidDevice = "Timeline.json"
+	filenameFromLegacyTakeout     = "Records.json"
+	filenameFromiOSDeviceContains = "location-history"
+	filenameFromAndroidDevice     = "Timeline.json"
 )
 
 func (FileImporter) recognizeLegacyTakeoutFormat(dirEntry timeline.DirEntry) timeline.Recognition {
@@ -25,7 +26,7 @@ func (FileImporter) recognizeLegacyTakeoutFormat(dirEntry timeline.DirEntry) tim
 
 func (FileImporter) recognizeOnDevice2024iOSFormat(dirEntry timeline.DirEntry) (timeline.Recognition, error) {
 	// avoid opening all JSON files  (can be slow esp. in archives)... just possibly known ones
-	if dirEntry.Name() != filenameFromiOSDevice {
+	if !filenameLooksLikeiOSOnDeviceFile(dirEntry.Name()) {
 		return timeline.Recognition{}, nil
 	}
 
@@ -36,7 +37,7 @@ func (FileImporter) recognizeOnDevice2024iOSFormat(dirEntry timeline.DirEntry) (
 	defer f.Close()
 
 	dec := json.NewDecoder(f)
-	if token, err := dec.Token(); err == nil {
+	if token, err := dec.Token(); err == nil { // read what should be the opening delimiter
 		if _, ok := token.(json.Delim); ok {
 			var loc onDeviceLocationiOS2024
 			if err := dec.Decode(&loc); err == nil {
@@ -98,4 +99,12 @@ func (FileImporter) recognizeOnDevice2025AndroidFormat(dirEntry timeline.DirEntr
 	}
 
 	return timeline.Recognition{}, nil
+}
+
+// I could see people renaming this file to be more descriptive (like I did, heh),
+// but I don't want to try to open every JSON file we encounter, if possible...
+// so we presume that the filename still has "location-history" in it, but it
+// doesn't have to be exactly "location-history.json".
+func filenameLooksLikeiOSOnDeviceFile(filename string) bool {
+	return strings.Contains(filename, filenameFromiOSDeviceContains) && path.Ext(filename) == ".json"
 }

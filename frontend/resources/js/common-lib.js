@@ -24,6 +24,11 @@ const Interval = luxon.Interval;
 const Duration = luxon.Duration;
 
 
+// // Tabler 1.2.0 moved/hid the bootstrap variable and the prior tabler variable into a new global... see https://github.com/tabler/tabler/issues/2273#issuecomment-2816833153
+// // It broke quite a few things, so I'm holding out on Tabler 1.2 until some things are sorted out.
+// var bootstrap = tabler.bootstrap;
+// var tabler = tabler.tabler;
+
 
 
 // TODO: application vars can go in here instead of the global scope
