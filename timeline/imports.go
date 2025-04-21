@@ -25,7 +25,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,9 +34,10 @@ import (
 )
 
 type importJobCheckpoint struct {
-	EstimatedSize *int64 `json:"estimated_size"` // only set if currently in the estimating phase
-	OuterIndex    int    `json:"outer_index"`
-	InnerIndex    int    `json:"inner_index"`
+	EstimatedSize  *int64 `json:"estimated_size"` // only set if currently in the estimating phase
+	OuterIndex     int    `json:"outer_index"`
+	InnerIndex     int    `json:"inner_index"`
+	ThumbnailCount int64  `json:"thumbnail_count"`
 
 	// This is passed through to the data source; and we would be using
 	// json.RawMessage here so that, when loading a checkpoint, the
@@ -62,6 +62,7 @@ type ImportJob struct {
 	// (reset each time the job is started)
 	itemCount, newItemCount, updatedItemCount, skippedItemCount *int64
 	newEntityCount                                              *int64
+	thumbnailCount                                              *int64
 
 	job *ActiveJob
 
@@ -79,6 +80,7 @@ func (ij ImportJob) checkpoint(estimatedSize *int64, outer, inner int, ds any) e
 		EstimatedSize:        estimatedSize,
 		OuterIndex:           outer,
 		InnerIndex:           inner,
+		ThumbnailCount:       atomic.LoadInt64(ij.thumbnailCount),
 		DataSourceCheckpoint: ds,
 	})
 }
@@ -123,6 +125,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 	ij.updatedItemCount = new(int64)
 	ij.skippedItemCount = new(int64)
 	ij.newEntityCount = new(int64)
+	ij.thumbnailCount = new(int64)
 	ij.pMu = new(sync.Mutex)
 
 	estimating := ij.EstimateTotal
@@ -137,6 +140,8 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 		if err != nil {
 			return fmt.Errorf("decoding checkpoint: %w", err)
 		}
+		// restore thumbnail-eligible item count
+		atomic.StoreInt64(ij.thumbnailCount, chkpt.ThumbnailCount)
 		// in theory, resuming a job should have the same configuration as
 		// before, so this may take us out of "estimating" mode if that had
 		// already been completed, but I don't think it should ever put us
@@ -503,81 +508,21 @@ func (ij ImportJob) deleteEmptyItems() error {
 
 // generateThumbnailsForImportedItems generates thumbnails for qualifying items
 // that were a part of the import associated with this processor. It should be
-// run after the import completes.
-// TODO: What about generating thumbnails for... just anything that needs one -- this is actually going to be important for jobs that have errors and stuff (an empty list should imply all that qualify)
+// run after the import completes. It only creates a thumbnail job if there
+// are any imported items that qualify for a thumbnail.
 func (ij ImportJob) generateThumbnailsForImportedItems() {
-	var job thumbnailJob
-
-	// prevent duplicates
-	var (
-		dataIDs   = make(map[int64]struct{})
-		dataFiles = make(map[string]struct{})
-	)
-
-	// get the items in reverse timestamp order since the
-	// most recent items are most likely to be displayed by
-	// various frontend pages, i.e. the user will likely
-	// see those first
-	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx,
-		`SELECT id, data_id, data_type, data_file
-		FROM items
-		WHERE job_id=? AND (data_file IS NOT NULL OR data_id IS NOT NULL)
-		ORDER BY timestamp DESC`, ij.job.id)
-	if err != nil {
-		ij.job.tl.dbMu.RUnlock()
-		ij.job.Logger().Error("unable to generate thumbnails from this import", zap.Error(err))
+	thumbnailCount := atomic.LoadInt64(ij.thumbnailCount)
+	if thumbnailCount == 0 {
 		return
 	}
 
-	for rows.Next() {
-		var rowID int64
-		var dataID *int64
-		var dataType, dataFile *string
+	ij.job.Logger().Info("creating thumbnail generation job from import")
 
-		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
-		if err != nil {
-			defer rows.Close()
-			ij.job.Logger().Error("unable to scan row to generate thumbnails from this import", zap.Error(err))
-			ij.job.tl.dbMu.RUnlock()
-			return
-		}
-		if qualifiesForThumbnail(dataType) {
-			if dataID != nil {
-				if _, seen := dataIDs[*dataID]; !seen {
-					job.Tasks = append(job.Tasks, thumbnailTask{
-						DataID:    *dataID,
-						DataType:  *dataType,
-						ThumbType: thumbnailType(*dataType, false),
-					})
-				}
-			} else if dataFile != nil {
-				if _, seen := dataFiles[*dataFile]; !seen {
-					job.Tasks = append(job.Tasks, thumbnailTask{
-						DataFile:  *dataFile,
-						DataType:  *dataType,
-						ThumbType: thumbnailType(*dataType, false),
-					})
-				}
-			}
-		}
-	}
-	rows.Close()
-	ij.job.tl.dbMu.RUnlock()
-
-	if err = rows.Err(); err != nil {
-		ij.job.Logger().Error("iterating rows for generating thumbnails failed", zap.Error(err))
-		return
+	job := thumbnailJob{
+		TasksFromImportJob: ij.job.ID(),
 	}
 
-	if len(job.Tasks) == 0 {
-		ij.job.Logger().Debug("no thumbnails to generate from this job")
-		return
-	}
-
-	ij.job.Logger().Info("generating thumbnails for imported items", zap.Int("count", len(job.Tasks)))
-
-	if _, err = ij.job.tl.CreateJob(job, time.Time{}, len(job.Tasks), 0, ij.job.id); err != nil {
+	if _, err := ij.job.tl.CreateJob(job, time.Time{}, 0, int(thumbnailCount), ij.job.id); err != nil {
 		ij.job.Logger().Error("creating thumbnail job", zap.Error(err))
 		return
 	}
@@ -606,6 +551,7 @@ func (ij ImportJob) generateEmbeddingsForImportedItems() {
 		var dataID *int64
 		var dataType, dataFile *string
 
+		// TODO: dataID and dataFile are not used...?
 		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
 		if err != nil {
 			defer rows.Close()
@@ -614,7 +560,7 @@ func (ij ImportJob) generateEmbeddingsForImportedItems() {
 			return
 		}
 
-		if !strings.HasPrefix(*dataType, "image/") && !strings.HasPrefix(*dataType, "text/") {
+		if !qualifiesForEmbedding(dataType) {
 			continue
 		}
 
@@ -647,7 +593,7 @@ func (ij ImportJob) generateEmbeddingsForImportedItems() {
 		i++
 	}
 
-	if _, err = ij.job.tl.CreateJob(job, time.Time{}, total, 0, ij.job.id); err != nil {
+	if _, err = ij.job.tl.CreateJob(job, time.Time{}, 0, total, ij.job.id); err != nil {
 		ij.job.Logger().Error("creating embedding job", zap.Error(err))
 		return
 	}

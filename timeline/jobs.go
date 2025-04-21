@@ -44,7 +44,7 @@ var (
 // of work, to be repeated after a certain interval (if > 0). If an identical job is
 // already running, the job will be queued. If an identical job is already queued, this
 // will be a no-op. The created job ID is returned.
-func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, total int, repeat time.Duration, parentJobID int64) (int64, error) {
+func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time.Duration, total int, parentJobID int64) (int64, error) {
 	config, err := json.Marshal(action)
 	if err != nil {
 		return 0, fmt.Errorf("JSON-encoding job action: %w", err)

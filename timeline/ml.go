@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -287,4 +288,10 @@ func classify(ctx context.Context, itemFiles map[int64]string, labels []string) 
 	}
 
 	return scores, nil
+}
+
+func qualifiesForEmbedding(mimeType *string) bool {
+	return mimeType != nil &&
+		(strings.HasPrefix(*mimeType, "image/") ||
+			strings.HasPrefix(*mimeType, "text/"))
 }

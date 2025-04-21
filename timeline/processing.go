@@ -1547,6 +1547,11 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 		atomic.AddInt64(p.ij.newItemCount, 1)
 
+		// keep count of this so we can know how big the thumbnail job will be after the import
+		if qualifiesForThumbnail(ir.DataType) {
+			atomic.AddInt64(p.ij.thumbnailCount, 1)
+		}
+
 		return rowID, itemInserted, err
 	}
 

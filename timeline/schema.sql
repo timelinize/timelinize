@@ -198,6 +198,7 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"retrieval_key" BLOB UNIQUE, -- an optional opaque value that indicates this item may not be fully populated in a single import; not an ID but still a unique identifier
 	"hidden" INTEGER,  -- if owner would like to forget about this item, don't show it in search results, etc. TODO: keep?
 	"deleted" INTEGER, -- 1 = if the columns will be erased, they have been erased; >1 = a unix epoch timestamp after which the columns can be erased
+	FOREIGN KEY ("embedding_id") REFERENCES "embeddings"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE, --TODO: maybe add ON DELETE CASCADE someday, which would rely on a regular sweeping of the files (garbage collection)! or we could do SET NULL
 	FOREIGN KEY ("modified_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL, -- deleting that import won't undo the changes, however
@@ -383,12 +384,3 @@ CREATE TRIGGER IF NOT EXISTS prevent_stray_attributes
 	BEGIN
 		DELETE FROM attributes WHERE id=OLD.attribute_id;
 	END;
-
--- Foreign keys cannot reference virtual tables because, by definition, virtual
--- tables are not under the control of sqlite, so FKs cannot be enforced:
--- https://sqlite.org/forum/info/cefd5a904423239bc395039db18b7695769b72f5a15366f9ef286c638bdd8075
--- The recommended workaround is a trigger: https://github.com/asg017/sqlite-vec/issues/86
-CREATE TRIGGER IF NOT EXISTS clean_up_embeddings
-	AFTER DELETE ON items BEGIN
-	DELETE FROM embeddings WHERE id = old.embedding_id;
-END;
