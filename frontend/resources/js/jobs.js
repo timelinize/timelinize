@@ -24,24 +24,38 @@ function updateActiveJobStats() {
 
 		const chartData = stats.chartSeries[0].data;
 
-		chartData.push([
-			stats.secondsSinceStart, // x
-			Math.floor(stats.window.reduce((sum, val) => sum+val, 0) / stats.window.length) // y
-		]);
-		if (chartData.length > jobThroughputXRange+jobThroughputOffScreen) {
+		// I'm not sure why we have to push this object structure (it's the same one
+		// used by the example here: https://echarts.apache.org/examples/en/editor.html?c=dynamic-data2)
+		// since we can also just pass in [x, y], the {name: "...", value: [x, y]}
+		// structure isn't strictly necessary, BUT: when we start calling shift()
+		// to lob off old data points that have moved off the screen, it causes the
+		// lines to become jiggly/wavy during the transition, which looks ridiculous
+		// and is illegible... for SOME reason, we have to set a "name" in this object,
+		// and not only that, it has to be a unique name for this specific value, but
+		// I haven't seen this name used in a tooltip, so maybe it is only so the
+		// chart library can keep track of which data point is which; I dunno, but
+		// the important thing to avoid the jiggly line is to set a unique name per
+		// data point!
+		chartData.push({
+			name: stats.secondsSinceStart.toString(),
+			value: [
+				stats.secondsSinceStart, // x
+				Math.floor(stats.window.reduce((sum, val) => sum+val, 0) / stats.window.length) // y
+			]
+		});
+		while (chartData.length > jobThroughputXRange+jobThroughputOffScreen) {
 			chartData.shift();
 		}
 		stats.secondsSinceStart++;
-		
 		const chartContainer = $(`#throughput-chart-container.job-id-${jobID}`);
 		if (chartContainer) {
 			// this element shows the mean throughput over the entire chart data
-			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, val) => sum+val[1], 0) / chartData.length).toFixed(1).replace(".0", "");
+			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, elem) => sum+elem.value[1], 0) / chartData.length).toFixed(1).replace(".0", "");
 			$('#chart-active-job-throughput', chartContainer).chart?.setOption({
 				series: stats.chartSeries,
 				xAxis: {
 					min: chartData.length >= jobThroughputXRange
-						? chartData[chartData.length-jobThroughputXRange][0]
+						? chartData[chartData.length-jobThroughputXRange].value[0]
 						: 'dataMin',
 					max: 'dataMax'
 				}

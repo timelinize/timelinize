@@ -127,12 +127,7 @@ body {
 
 .thumbhash-container {
 	position: relative;
-}
-
-.thumbhash-container .thumbhash {
-	width: 100%;
-	height: 100%;
-	object-fit: cover;
+	overflow: hidden;
 }
 
 .thumbhash-container .content {

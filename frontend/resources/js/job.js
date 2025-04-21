@@ -1,7 +1,7 @@
 let jobThroughputInterval; // declared out here so the controller can clear it when leaving the page
 
 const jobThroughputXRange = 60;   // range of the X-axis of the job throughput chart
-const jobThroughputOffScreen = 1; // how many points to show off the left side of the chart, so it can be pruned without janking the display
+const jobThroughputOffScreen = 2; // how many points to show off the left side of the chart, so it can be pruned without janking the display
 
 async function jobPageMain() {
 	const {repoID, rowID} = parseURIPath()
@@ -79,7 +79,6 @@ async function jobPageMain() {
 				}
 			},
 			yAxis: {
-				type: 'value',
 				splitLine: {
 					show: true,
 					lineStyle: {

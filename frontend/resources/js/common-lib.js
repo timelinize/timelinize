@@ -1309,7 +1309,7 @@ function itemContentElement(item, opts) {
 				} else {
 					const imgTag = new Image;
 					imgTag.dataset.contentType = "image";
-					imgTag.classList.add("content", "rounded");
+					imgTag.classList.add("content");
 					if (src) {
 						// there won't be a src if app is in obfuscation mode
 						imgTag.src = src;
@@ -1366,7 +1366,7 @@ function itemContentElement(item, opts) {
 				thumbhashImgTag.classList.add('thumbhash');
 				thumbhashImgTag.style.aspectRatio = aspectRatio;
 
-				container.classList.add('thumbhash-container');
+				container.classList.add('thumbhash-container', 'rounded');
 
 				container.append(thumbhashImgTag);
 
