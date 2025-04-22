@@ -196,4 +196,4 @@ checks = ["argument", "condition", "operation", "return"]
 # plain numbers are fine for file permissions
 ignored-functions = ["^os\\.MkdirAll$", "^os\\.Mkdir$", "^os\\.OpenFile$", "^os\\.WriteFile$"]
 
-ignored-files = ["/faked.go$"]
+ignored-files = ["/obfuscation.go$"]

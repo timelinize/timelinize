@@ -82,38 +82,30 @@ func (tl *Timeline) PopulateWithFakeData(ctx context.Context) error {
 		// add data to entity based on randomness
 		rnd := weakrand.Int() //nolint:gosec
 
-		const (
-			emailProbability       = 2
-			phoneProbability       = 5
-			pictureProbability     = 7
-			secondPhoneProbability = 3
-			secondEmailProbability = 10
-		)
-
-		if rnd%10 > emailProbability {
+		if rnd%10 > 2 {
 			ent.Attributes = append(ent.Attributes, Attribute{
 				Name:  AttributeEmail,
 				Value: gofakeit.Email(),
 			})
 		}
-		if rnd%10 > phoneProbability {
+		if rnd%10 > 5 {
 			ent.Attributes = append(ent.Attributes, Attribute{
 				Name:  AttributePhoneNumber,
 				Value: gofakeit.Phone(),
 			})
 		}
-		if rnd&10 > pictureProbability {
+		if rnd&10 > 7 {
 			ent.NewPicture = ByteData(gofakeit.ImageJpeg(512, 512))
 		}
 
 		// less often, add a second email or phone number (TODO: useful?)
-		if rnd%100 > secondEmailProbability {
+		if rnd%100 > 3 {
 			ent.Attributes = append(ent.Attributes, Attribute{
 				Name:  AttributeEmail,
 				Value: gofakeit.Email(),
 			})
 		}
-		if rnd%100 > secondPhoneProbability {
+		if rnd%100 > 10 {
 			ent.Attributes = append(ent.Attributes, Attribute{
 				Name:  AttributePhoneNumber,
 				Value: gofakeit.Phone(),
