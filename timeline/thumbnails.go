@@ -745,7 +745,7 @@ func qualifiesForThumbnail(mimeType *string) bool {
 // AssetImage returns the bytes of the image at the given asset path (relative
 // to the repo root). If obfuscate is true, then the image will be downsized and
 // blurred.
-func (tl *Timeline) AssetImage(ctx context.Context, assetPath string, obfuscate bool) ([]byte, error) {
+func (tl *Timeline) AssetImage(_ context.Context, assetPath string, obfuscate bool) ([]byte, error) {
 	size := 480
 	if obfuscate {
 		size = 120
