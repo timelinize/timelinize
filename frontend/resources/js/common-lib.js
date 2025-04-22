@@ -1851,6 +1851,7 @@ function renderMessageItem(item, options) {
 	$('.message-avatar', elem).innerHTML = avatar(true, item.entity);
 	$('.data-source-icon', elem).style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
 	$('.data-source-icon', elem).title = item.data_source_title;
+	$('.data-source-icon', elem).dataset.bsToggle = "tooltip";
 	$('.view-item-link', elem).href = `/items/${item.repo_id}/${item.id}`;
 
 	if (options?.withToRelations && item.related) {
