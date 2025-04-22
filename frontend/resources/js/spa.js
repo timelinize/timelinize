@@ -239,10 +239,12 @@ on('click', `.filter [href^="?"], .pagination [href^="?"]`, async event => {
 });
 
 
-async function updateRepoOwners() {
+// updateRepoOwners updates the repo owners as stored locally, only if
+// the information is missing (or if forced === true).
+async function updateRepoOwners(forced) {
 	let anyUpdated = false;
 	for (const repo of tlz.openRepos) {
-		if (repo.owner) {
+		if (!forced && repo.owner) {
 			continue; // avoid re-checking on _every single page load_
 		}
 		if (await app.RepositoryIsEmpty(repo.instance_id)) {

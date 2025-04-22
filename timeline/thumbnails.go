@@ -489,7 +489,7 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 		defer inputImage.Close()
 
 		// scale down to a thumbnail size
-		if err := resizeImage(inputImage, maxThumbnailDimension); err != nil {
+		if err := scaleDownImage(inputImage, maxThumbnailDimension); err != nil {
 			return nil, "", fmt.Errorf("resizing image: %w", err)
 		}
 
@@ -742,11 +742,26 @@ func qualifiesForThumbnail(mimeType *string) bool {
 		*mimeType != imageGif
 }
 
+// AssetImage returns the bytes of the image at the given asset path (relative
+// to the repo root). If obfuscate is true, then the image will be downsized and
+// blurred.
+func (tl *Timeline) AssetImage(ctx context.Context, assetPath string, obfuscate bool) ([]byte, error) {
+	size := 480
+	if obfuscate {
+		size = 120
+	}
+	imageBytes, err := loadAndEncodeImage(tl.FullPath(assetPath), nil, ".jpg", size, obfuscate)
+	if err != nil {
+		return nil, fmt.Errorf("opening source file %s: %w", assetPath, err)
+	}
+	return imageBytes, nil
+}
+
 // GeneratePreviewImage generates a higher quality preview image for the given item. The
 // extension should be for a supported image format such as JPEG, PNG, WEBP, or AVIF.
 // (JPEG or WEBP recommended.) As preview images are not cached, the image bytes are
 // returned instead.
-func (tl *Timeline) GeneratePreviewImage(ctx context.Context, itemRow ItemRow, ext string) ([]byte, error) {
+func (tl *Timeline) GeneratePreviewImage(ctx context.Context, itemRow ItemRow, ext string, obfuscate bool) ([]byte, error) {
 	ext = strings.ToLower(ext)
 	if ext != extJpeg && ext != extJpg && ext != extPng && ext != extWebp && ext != extAvif {
 		return nil, fmt.Errorf("unsupported file extension/type: %s", ext)
@@ -766,18 +781,34 @@ func (tl *Timeline) GeneratePreviewImage(ctx context.Context, itemRow ItemRow, e
 		}
 	}
 
-	inputImage, err := loadImageVips(inputFilePath, inputBuf)
+	imageBytes, err := loadAndEncodeImage(inputFilePath, inputBuf, ext, maxPreviewImageDimension, obfuscate)
 	if err != nil {
 		return nil, fmt.Errorf("opening source file from item %d: %s: %w", itemRow.ID, inputFilePath, err)
 	}
+
+	return imageBytes, nil
+}
+
+func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension string, maxDimension int, obfuscate bool) ([]byte, error) {
+	inputImage, err := loadImageVips(inputFilePath, inputBuf)
+	if err != nil {
+		return nil, fmt.Errorf("loading image: %w", err)
+	}
 	defer inputImage.Close()
 
-	if err := resizeImage(inputImage, maxPreviewImageDimension); err != nil {
-		return nil, fmt.Errorf("item %d: image %s: %w", itemRow.ID, inputFilePath, err)
+	if err := scaleDownImage(inputImage, maxDimension); err != nil {
+		return nil, fmt.Errorf("resizing image to within %d: %w", maxDimension, err)
+	}
+
+	if obfuscate {
+		const sigma = 8 // I've found that anywhere from ~6-10 works pretty well for our purposes.
+		if err := inputImage.GaussianBlur(sigma); err != nil {
+			return nil, fmt.Errorf("applying guassian blur to image for obfuscation: %w", err)
+		}
 	}
 
 	var imageBytes []byte
-	switch ext {
+	switch desiredExtension {
 	case extJpg, extJpeg:
 		ep := vips.NewJpegExportParams()
 		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
@@ -807,19 +838,20 @@ func (tl *Timeline) GeneratePreviewImage(ctx context.Context, itemRow ItemRow, e
 		imageBytes, _, err = inputImage.ExportAvif(ep)
 	}
 	if err != nil {
+		// don't attempt a fallback if obfuscation is enabled, so we don't leak the unobfuscated image
+		if obfuscate {
+			return nil, fmt.Errorf("unable to encode obfuscated preview image: %w -- use thumbhash instead", err)
+		}
+
 		// I have seen "VipsJpeg: Corrupt JPEG data: N extraneous bytes before marker 0xdb" for some N,
 		// even though my computer can show the image just fine. Not sure how to fix this, other than
 		// configuring vips to continue on error (I think -- I know it fixed some errors)
 		Log.Error("could not encode preview image, falling back to original image",
-			zap.Int64("item_id", itemRow.ID),
 			zap.String("filename", inputFilePath),
-			zap.String("ext", ext),
+			zap.String("ext", desiredExtension),
 			zap.Error(err))
 
-		// I guess just try returning the full image as-is and hope the browser
-		// can handle it
-		// TODO: maybe try a std lib solution, even if slower
-
+		// I guess just try returning the full image as-is and hope the browser can handle it - TODO: maybe try a std lib solution, even if slower
 		if inputBuf != nil {
 			return inputBuf, nil
 		}
@@ -873,8 +905,16 @@ func loadImageVips(inputFilePath string, inputBytes []byte) (*vips.ImageRef, err
 	return vips.LoadImageFromBuffer(inputBytes, importParams)
 }
 
-func resizeImage(inputImage *vips.ImageRef, maxDimension int) error {
+// scaleDownImage resizes the image to fit within the maxDimension
+// if either side is larger than maxDimension; otherwise it does
+// nothing to the image.
+func scaleDownImage(inputImage *vips.ImageRef, maxDimension int) error {
 	meta := inputImage.Metadata()
+
+	// if image is already within constraints, no-op
+	if meta.Width < maxDimension && meta.Height < maxDimension {
+		return nil
+	}
 
 	var scale float64
 	if meta.Width > meta.Height {

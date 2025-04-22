@@ -241,4 +241,9 @@ on('click', '#submit-settings', async event => {
 		title: "Settings saved",
 		duration: 2000
 	});
+
+	// if demo mode setting changed, reload relevant page elements
+	if ($('#demo-mode-enabled').checked != $('#demo-mode-enabled').dataset.originalValue) {
+		updateRepoOwners(true);
+	}
 });

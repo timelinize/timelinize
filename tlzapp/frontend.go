@@ -138,7 +138,26 @@ func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error
 		return s.serveDataFile(w, r, tl, strings.Join(parts[3:], "/"))
 
 	case timeline.AssetsFolderName:
-		// asset file (such as profile picture); serve statically from timeline
+		// asset file (such as entity profile picture); serve statically from timeline,
+		// unless obfuscation mode is enabled, then we need to blur the image
+		_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
+		if obfuscate {
+			mimeType := mime.TypeByExtension(path.Ext(parts[len(parts)-1]))
+			if strings.HasPrefix(mimeType, "image/") {
+				assetImagePath := strings.Join(parts[3:], "/")
+				img, err := tl.AssetImage(r.Context(), assetImagePath, true)
+				if err != nil {
+					return Error{
+						Err:        err,
+						HTTPStatus: http.StatusInternalServerError,
+						Log:        "loading obfuscated asset image",
+						Message:    "Unable to load obfuscated asset image.",
+					}
+				}
+				w.Header().Set("Content-Type", "image/jpeg")
+				_, _ = w.Write(img)
+			}
+		}
 		tl.fileServer.ServeHTTP(w, r)
 		return nil
 
@@ -258,7 +277,9 @@ func (s server) servePreviewImage(w http.ResponseWriter, r *http.Request, tl ope
 		return nil
 	}
 
-	imageBytes, err := tl.GeneratePreviewImage(r.Context(), itemRow, ext)
+	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
+
+	imageBytes, err := tl.GeneratePreviewImage(r.Context(), itemRow, ext, obfuscate)
 	if err != nil {
 		return err
 	}

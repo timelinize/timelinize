@@ -123,6 +123,7 @@ tlz.pageControllers = {
 			// demo mode (obfuscation)
 			const obfs = tlz.settings?.application?.obfuscation;
 			$('#demo-mode-enabled').checked = obfs?.enabled == true;
+			$('#demo-mode-enabled').dataset.originalValue = $('#demo-mode-enabled').checked; // if it changes, page elements will be reloaded
 			$('#data-file-names').checked = obfs?.data_files == true;
 
 			// advanced

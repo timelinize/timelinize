@@ -205,7 +205,14 @@ func (a App) GetEntity(repoID string, entityID int64) (timeline.Entity, error) {
 	if err != nil {
 		return timeline.Entity{}, err
 	}
-	return tl.LoadEntity(entityID)
+	ent, err := tl.LoadEntity(entityID)
+	if err != nil {
+		return timeline.Entity{}, err
+	}
+	if _, obfuscate := a.ObfuscationMode(tl.Timeline); obfuscate {
+		ent.Anonymize()
+	}
+	return ent, nil
 }
 
 // func (a App) AddAccount(repoID string, dataSourceID string, auth bool, dsOpt json.RawMessage) (timeline.Account, error) {
