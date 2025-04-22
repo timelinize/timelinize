@@ -40,7 +40,9 @@ jobs:
 
       - name: Install libraries (macOS)
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-13' }}
-        run: brew install glib vips
+        run: |
+          brew install glib
+          brew install vips
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
