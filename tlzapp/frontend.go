@@ -564,7 +564,7 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 		}
 		type properties struct {
 			RepoID                string          `json:"repo_id,omitempty"`
-			ItemID                int64           `json:"item_id,omitempty"`
+			ItemID                uint64          `json:"item_id,omitempty"`
 			DataSourceName        *string         `json:"data_source_name,omitempty"`
 			DataSourceTitle       *string         `json:"data_source_title,omitempty"`
 			Stored                time.Time       `json:"stored,omitempty"`

@@ -55,7 +55,7 @@ func init() {
 // Options configures the data source.
 type Options struct {
 	// The ID of the owner entity. REQUIRED for linking entity in DB.
-	OwnerEntityID int64 `json:"owner_entity_id"`
+	OwnerEntityID uint64 `json:"owner_entity_id"`
 
 	// Set to a value 1-10 to enable path simplification.
 	// 10 means very aggressive simplification (skip many

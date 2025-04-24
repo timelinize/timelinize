@@ -27,7 +27,7 @@ import (
 	"hash"
 	"io"
 	"io/fs"
-	mathrand "math/rand"
+	weakrand "math/rand/v2"
 	"mime"
 	"os"
 	"path"
@@ -96,8 +96,8 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		// and we need to: clean up the duplicated file, update any references to this item ID
 		// in the DB, and then delete this item row from the DB
 		p.log.Info("after downloading data file, used file hash to determine that item is a duplicate; removing",
-			zap.Int64("matched_item_row_id", existingItemRow.ID),
-			zap.Int64("incoming_duplicate_item_row_id", it.row.ID),
+			zap.Uint64("matched_item_row_id", existingItemRow.ID),
+			zap.Uint64("incoming_duplicate_item_row_id", it.row.ID),
 			zap.Stringp("original_id", existingItemRow.OriginalID),
 			zap.String("data_file_name", it.dataFileName),
 			zap.Binary("data_file_hash", it.dataFileHash),
@@ -148,7 +148,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	// don't keep empty files
 	if it.dataFileSize == 0 {
 		p.log.Warn("downloaded data file was empty; removing item",
-			zap.Int64("item_row_id", it.row.ID),
+			zap.Uint64("item_row_id", it.row.ID),
 			zap.String("item_original_id", it.ID),
 			zap.String("data_file_name", it.dataFileName),
 			zap.Int64("bytes_written", it.dataFileSize))
@@ -189,7 +189,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		p.log.Error("updating item's data file hash in DB failed; hash info will be incorrect or missing",
 			zap.Error(err),
 			zap.String("filename", it.dataFileOut.Name()),
-			zap.Int64("row_id", it.row.ID),
+			zap.Uint64("row_id", it.row.ID),
 		)
 	}
 
@@ -199,7 +199,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		p.log.Error("updating item's initial content hash failed; duplicate detection for this item will not function",
 			zap.Error(err),
 			zap.Binary("initial_content_hash", it.contentHash),
-			zap.Int64("row_id", it.row.ID),
+			zap.Uint64("row_id", it.row.ID),
 		)
 	}
 
@@ -433,7 +433,7 @@ func (tl *Timeline) ensureDataFileNameShortEnough(filename string) string {
 }
 
 // TODO:/NOTE: If changing a file name, all items with same data_hash must also be updated to use same file name
-func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum []byte, itemRowID int64) error {
+func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum []byte, itemRowID uint64) error {
 	if canonical == nil || *canonical == "" || len(checksum) == 0 {
 		return errors.New("missing data filename and/or hash of contents")
 	}
@@ -453,7 +453,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 	// *existingDatafile instead.
 
 	p.log.Info("data file is a duplicate",
-		zap.Int64("row_id", itemRowID),
+		zap.Uint64("row_id", itemRowID),
 		zap.Stringp("duplicate_data_file", canonical),
 		zap.Stringp("existing_data_file", existingDatafile),
 		zap.Binary("checksum", checksum))
@@ -465,7 +465,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 
 	// TODO: maybe this all should be limited to only when integrity checks are enabled? how do we know that this download has the right version/contents?
 	p.log.Debug("verifying existing file is still the same",
-		zap.Int64("row_id", itemRowID),
+		zap.Uint64("row_id", itemRowID),
 		zap.Stringp("existing_data_file", existingDatafile),
 		zap.Binary("checksum", checksum))
 
@@ -491,7 +491,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 		// (by simply renaming the file on disk, we don't have
 		// to update any entries in the DB)
 		p.log.Warn("existing data file failed integrity check (checksum on disk changed; file corrupted or modified?) - replacing existing file with this one",
-			zap.Int64("row_id", itemRowID),
+			zap.Uint64("row_id", itemRowID),
 			zap.Stringp("data_file", existingDatafile),
 			zap.Binary("expected_checksum", checksum),
 			zap.Binary("actual_checksum", existingFileHash))
@@ -503,7 +503,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 		// everything checks out; delete the newly-downloaded file
 		// and use the existing file instead of duplicating it
 		p.log.Debug("existing file passed integrity check; using it instead of newly-downloaded duplicate",
-			zap.Int64("row_id", itemRowID),
+			zap.Uint64("row_id", itemRowID),
 			zap.Stringp("existing_data_file", existingDatafile),
 			zap.Binary("checksum", checksum))
 		err = os.Remove(p.tl.FullPath(*canonical))
@@ -513,7 +513,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 	}
 
 	p.log.Info("merged duplicate data files based on integrity check",
-		zap.Int64("row_id", itemRowID),
+		zap.Uint64("row_id", itemRowID),
 		zap.Stringp("duplicate_data_file", canonical),
 		zap.Stringp("existing_data_file", existingDatafile),
 		zap.Binary("checksum", checksum))
@@ -528,7 +528,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 // But it's good enough for some things. It elides certain
 // confusing characters like I, l, 1, 0, O, etc. If sameCase
 // is true, then uppercase letters are excluded.
-func randomString(n int, sameCase bool, r mathrand.Source) string {
+func randomString(n int, sameCase bool, r weakrand.Source) string {
 	if n <= 0 {
 		return ""
 	}
@@ -539,13 +539,13 @@ func randomString(n int, sameCase bool, r mathrand.Source) string {
 	}
 	b := make([]rune, n)
 	for i := range b {
-		var rnd int64
+		var rnd uint64
 		if r == nil {
-			rnd = mathrand.Int63() //nolint:gosec
+			rnd = weakrand.Uint64() //nolint:gosec
 		} else {
-			rnd = r.Int63()
+			rnd = r.Uint64()
 		}
-		b[i] = dict[rnd%int64(len(dict))]
+		b[i] = dict[rnd%uint64(len(dict))]
 	}
 	return string(b)
 }
@@ -565,7 +565,7 @@ func (*Timeline) safePathComponent(s string) string {
 	return s
 }
 
-func safeRandomString(n int, sameCase bool, r mathrand.Source) string {
+func safeRandomString(n int, sameCase bool, r weakrand.Source) string {
 	var s string
 	for range 10 {
 		s = randomString(n, sameCase, r)

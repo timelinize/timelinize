@@ -55,15 +55,15 @@ type Timeline struct {
 
 	// caches of name -> ID
 	cachesMu        sync.RWMutex // protects these maps
-	classifications map[string]int64
-	entityTypes     map[string]int64
-	relations       map[string]int64
-	dataSources     map[string]int64
+	classifications map[string]uint64
+	entityTypes     map[string]uint64
+	relations       map[string]uint64
+	dataSources     map[string]uint64
 
 	obfuscationMode func() (ObfuscationOptions, bool)
 
 	// currently-running jobs for this timeline
-	activeJobs   map[int64]*ActiveJob
+	activeJobs   map[uint64]*ActiveJob
 	activeJobsMu sync.RWMutex
 
 	// The database handle and its mutex. Why a mutex for a DB handle? Because
@@ -387,10 +387,10 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	// if err != nil {
 	// 	return nil, fmt.Errorf("resetting item_data: %w", err)
 	// }
-	// // _, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id>1`)
-	// // if err != nil {
-	// // 	return nil, fmt.Errorf("resetting entities: %w", err)
-	// // }
+	// _, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id>1`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting entities: %w", err)
+	// }
 	// _, err = db.ExecContext(ctx, `DELETE FROM relationships`)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("resetting relationships: %w", err)
@@ -430,7 +430,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		classifications: classes,
 		entityTypes:     entityTypes,
 		relations:       relations,
-		activeJobs:      make(map[int64]*ActiveJob),
+		activeJobs:      make(map[uint64]*ActiveJob),
 	}
 
 	// start maintenance goroutine; this erases items that have been
@@ -463,7 +463,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var jobID int64
+		var jobID uint64
 		err := rows.Scan(&jobID)
 		if err != nil {
 			return nil, fmt.Errorf("scanning row for resuming job: %w", err)
@@ -479,7 +479,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	return tl, nil
 }
 
-func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]int64, error) {
+func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]uint64, error) {
 	nameCol := "name"
 	if table == "relations" {
 		nameCol = "label" // TODO: this is annoying... right?
@@ -490,12 +490,12 @@ func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]in
 	}
 	defer rows.Close()
 
-	namesToIDs := make(map[string]int64)
+	namesToIDs := make(map[string]uint64)
 	for rows.Next() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		var rowID int64
+		var rowID uint64
 		var name string
 		err := rows.Scan(&rowID, &name)
 		if err != nil {
@@ -597,7 +597,7 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 	return nil
 }
 
-func (tl *Timeline) entityTypeNameToID(name string) (int64, error) {
+func (tl *Timeline) entityTypeNameToID(name string) (uint64, error) {
 	tl.cachesMu.RLock()
 	id, ok := tl.entityTypes[name]
 	tl.cachesMu.RUnlock()
@@ -620,7 +620,7 @@ func (tl *Timeline) entityTypeNameToID(name string) (int64, error) {
 	return id, nil
 }
 
-func (tl *Timeline) classificationNameToID(name string) (int64, error) {
+func (tl *Timeline) classificationNameToID(name string) (uint64, error) {
 	tl.cachesMu.RLock()
 	id, ok := tl.classifications[name]
 	tl.cachesMu.RUnlock()
@@ -710,7 +710,7 @@ func (tl *Timeline) StoreEntity(ctx context.Context, entity Entity) error {
 // is not an identity attribute. It just ensures that the attribute is linked with the
 // existing entity. If the attribute does not yet exist it will be created. The ID of
 // the attribute is returned.
-func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, entityID int64, attr Attribute) (int64, error) {
+func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, entityID uint64, attr Attribute) (uint64, error) {
 	attrID, err := storeAttribute(ctx, tx, attr)
 	if err != nil {
 		return 0, err
@@ -738,7 +738,7 @@ func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, en
 	return attrID, nil
 }
 
-func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
+func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	p := Entity{ID: id}
 
 	tl.dbMu.RLock()
@@ -805,7 +805,7 @@ func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
 	return p, tx.Commit()
 }
 
-func (tl *Timeline) NextGraphFromImport(jobID int64) (*Graph, error) {
+func (tl *Timeline) NextGraphFromImport(jobID uint64) (*Graph, error) {
 	ij, err := tl.loadInteractiveImportJob(jobID)
 	if err != nil {
 		return nil, err
@@ -831,7 +831,7 @@ func (tl *Timeline) NextGraphFromImport(jobID int64) (*Graph, error) {
 	return g.Graph, nil
 }
 
-func (tl *Timeline) SubmitGraph(jobID int64, g *Graph, skip bool) error {
+func (tl *Timeline) SubmitGraph(jobID uint64, g *Graph, skip bool) error {
 	ij, err := tl.loadInteractiveImportJob(jobID)
 	if err != nil {
 		return err
@@ -851,7 +851,7 @@ func (tl *Timeline) SubmitGraph(jobID int64, g *Graph, skip bool) error {
 	return nil
 }
 
-func (tl *Timeline) loadInteractiveImportJob(jobID int64) (*ImportJob, error) {
+func (tl *Timeline) loadInteractiveImportJob(jobID uint64) (*ImportJob, error) {
 	tl.activeJobsMu.RLock()
 	job, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.RUnlock()
@@ -884,7 +884,7 @@ type DeleteOptions struct {
 
 // DeleteItems deletes data from the items table with the given row IDs, according to the given deletion options.
 // If a retention period is configured, it marks items for erasure; otherwise it erases them right away.
-func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options DeleteOptions) error {
+func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, options DeleteOptions) error {
 	if len(itemRowIDs) == 0 {
 		return nil
 	}
@@ -1003,7 +1003,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 	}
 
 	Log.Info("marked item(s) for deletion",
-		zap.Int64s("ids", itemRowIDs),
+		zap.Uint64s("ids", itemRowIDs),
 		zap.String("retention_period", retention.String()),
 		zap.Time("deletion_scheduled", deleteAt))
 
@@ -1076,7 +1076,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 	return nil
 }
 
-func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs []int64) ([]int64, error) {
+func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs []uint64) ([]uint64, error) {
 	startingLen := len(rowIDs)
 
 	rowIDArray, rowIDArgs := sqlArray(rowIDs)
@@ -1095,7 +1095,7 @@ func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs [
 	}
 
 	for rows.Next() {
-		var id int64
+		var id uint64
 		err := rows.Scan(&id)
 		if err != nil {
 			defer rows.Close()
@@ -1123,7 +1123,7 @@ func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs [
 // sqlArray builds a placeholder array for SQL queries that will have
 // all the row IDs in it, e.g. "(?, ?, ?)" for use with 'IN' clauses,
 // returning the array as a string and also the values to pass in.
-func sqlArray(rowIDs []int64) (string, []any) {
+func sqlArray(rowIDs []uint64) (string, []any) {
 	var sb strings.Builder
 	rowIDArgs := make([]any, 0, len(rowIDs))
 	sb.WriteRune('(')

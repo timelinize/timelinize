@@ -124,6 +124,9 @@ function currentPageNum() {
 	return Number(new URLSearchParams(window.location.search).get('page') || 1);
 }
 
+function activateTooltips() {
+	const tooltipList = [...$$('[data-bs-toggle="tooltip"]')].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl))
+}
 
 // updateFilterResults runs the page's render function again to replace .filter-results
 // with the latest parameters in the query string.
@@ -147,6 +150,9 @@ function updateFilterResults() {
 		// (need brief timeout to allow time for paint, I guess; otherwise browser just flashes in the content)
 		setTimeout(function() {
 			$$('.filter-results:not(.d-none)').forEach(elem => elem.classList.remove('opacity0'));
+			
+			// activate custom/Bootstrap tooltips on the page
+			activateTooltips();
 		}, 25);
 		
 		// hide any loading indicator

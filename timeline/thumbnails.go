@@ -79,7 +79,7 @@ type thumbnailJob struct {
 	Tasks []thumbnailTask `json:"tasks,omitempty"`
 
 	// infer tasks from the given import job
-	TasksFromImportJob int64 `json:"tasks_from_import_job,omitempty"`
+	TasksFromImportJob uint64 `json:"tasks_from_import_job,omitempty"`
 
 	// if true, regenerate thumbnails even if they already exist
 	// (thumbnails will always be regenerated if the item has
@@ -108,7 +108,7 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 		return errors.New("no tasks; expecting either individual tasks listed, or an import job")
 	}
 
-	job.Logger().Info("generating thumbnails for items from import job", zap.Int64("import_job_id", tj.TasksFromImportJob))
+	job.Logger().Info("generating thumbnails for items from import job", zap.Uint64("import_job_id", tj.TasksFromImportJob))
 
 	var (
 		lastTimestamp int64 = math.MaxInt64 // start at highest possible timestamp since we're sorting by timestamp descending (next page of results will have lower timestamps, not greater)
@@ -207,7 +207,7 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 		// if we are not supposed to regenerate all thumbnails, look up the existing thumbnail
 		// for each item on this page and see if the item has been updated more recently than
-		// the thumbnail; if so,
+		// the thumbnail; if so, we need to regenerate it anyway
 		if !tj.RegenerateAll {
 			// read-only tx, but should be faster than individual queries as we iterate items
 			job.tl.thumbsMu.RLock()

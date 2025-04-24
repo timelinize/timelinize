@@ -57,7 +57,7 @@ func init() {
 type Options struct {
 	// The ID of the owner entity. REQUIRED for linking entity in DB.
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
-	OwnerEntityID int64 `json:"owner_entity_id"`
+	OwnerEntityID uint64 `json:"owner_entity_id"`
 
 	Simplification float64 `json:"simplification,omitempty"`
 

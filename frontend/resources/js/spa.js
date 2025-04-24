@@ -176,9 +176,7 @@ async function navigateSPA(addrBarDestination) {
 				await tlz.currentPageController.render();
 			}
 
-			// activate custom/Bootstrap tooltips on the page
-			const tooltipList = [...$$('[data-bs-toggle="tooltip"]')].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl))
-
+			activateTooltips();
 
 			// hide any loading indicator (or prevent it from appearing in the first place)
 			if (slowLoadingHandle) {

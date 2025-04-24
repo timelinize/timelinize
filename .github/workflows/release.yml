@@ -38,6 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libvips-dev
 
+      # TODO: On April 22, 2025, we had to separately install glib -- doesn't work in the same install command. Fails to compile otherwise. Not sure why. Yes, annotations say it is already installed. Shrug.
       - name: Install libraries (macOS)
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-13' }}
         run: |

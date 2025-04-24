@@ -50,9 +50,9 @@ import (
 // TODO: update godoc
 type Entity struct {
 	// database row IDs
-	ID     int64  `json:"id,omitempty"`
-	id     *int64 // temporary holding place for DB value
-	typeID int64
+	ID     uint64  `json:"id,omitempty"`
+	id     *uint64 // temporary holding place for DB value
+	typeID uint64
 
 	Type string  `json:"type,omitempty"`
 	name *string // temporary holding place for DB value
@@ -513,13 +513,13 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 		pictureFile, err := p.processEntityPicture(ctx, in)
 		if err != nil {
 			p.log.Error("saving new entity's profile picture",
-				zap.Int64("entity_id", in.ID),
+				zap.Uint64("entity_id", in.ID),
 				zap.Error(err))
 		} else if pictureFile != "" {
 			_, err = tx.Exec(`UPDATE entities SET picture_file=? WHERE id=?`, pictureFile, in.ID) // TODO: LIMIT 1, if ever implemented
 			if err != nil {
 				p.log.Error("updating new entity's profile picture in DB",
-					zap.Int64("entity_id", in.ID),
+					zap.Uint64("entity_id", in.ID),
 					zap.String("picture_file", pictureFile),
 					zap.Error(err))
 			}
@@ -556,7 +556,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 			pictureFile, err := p.processEntityPicture(ctx, in)
 			if err != nil {
 				p.log.Error("saving existing entity's new profile picture",
-					zap.Int64("entity_id", entity.ID),
+					zap.Uint64("entity_id", entity.ID),
 					zap.Error(err))
 			} else if pictureFile != "" {
 				if setClause != "" {
@@ -579,7 +579,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 
 	// now store each attribute+value combo if we don't have it yet,
 	// and link it to the entity
-	var identityAttributeID int64
+	var identityAttributeID uint64
 	for _, attr := range in.Attributes {
 		attrID, err := storeAttribute(ctx, tx, attr)
 		if err != nil {
@@ -588,15 +588,15 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 
 		// if this is the identity attribute, then its row ID is what we need to return so item can be associated with it;
 		// and the data source (DS) ID will be added to its entity_attributes row to indicate their identity on this DS
-		var linkedDataSourceID *int64
+		var linkedDataSourceID *uint64
 		if attr.Identity {
 			identityAttributeID = attrID
 			linkedDataSourceID = &p.dsRowID
 		}
 
 		for _, entity := range entities {
-			var eaID int64
-			var existingDataSourceID *int64
+			var eaID uint64
+			var existingDataSourceID *uint64
 
 			q := `SELECT id, data_source_id FROM entity_attributes WHERE entity_id=? AND attribute_id=?`
 			args := []any{entity.ID, attrID}
@@ -623,7 +623,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 			}
 
 			// autolink fields tell us about how an attribute was linked to an entity automatically
-			var autolinkImportID, autolinkAttrIDPtr *int64
+			var autolinkImportID, autolinkAttrIDPtr *uint64
 			if autolinkAttrID, ok := entityAutolinkAttrs[entity.ID]; ok {
 				autolinkAttrIDPtr = &autolinkAttrID
 				autolinkImportID = &p.ij.job.id
@@ -660,7 +660,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 	}, nil
 }
 
-func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([]Entity, map[int64]int64, error) {
+func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([]Entity, map[uint64]uint64, error) {
 	// iterate all the attributes to find all the entities we can identify who
 	// we already have in the database if they're not already
 	// (notice that we left join attributes; this is because an entity may only have
@@ -695,7 +695,7 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 	// all rows which is obviously wrong; if there's no ID or identifying attributes,
 	// there's no way for us to know who this entity is anyway
 	var entities []Entity
-	entityAutolinkAttrs := make(map[int64]int64) // map of entity ID to attribute ID that linked it
+	entityAutolinkAttrs := make(map[uint64]uint64) // map of entity ID to attribute ID that linked it
 	if len(whereGroups) > 0 {
 		q += strings.Join(whereGroups, " OR ")
 		q += " GROUP BY entities.id"
@@ -711,7 +711,7 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 		for rows.Next() {
 			var ent Entity
 			var name *string
-			var attrID *int64
+			var attrID *uint64
 			err := rows.Scan(&ent.ID, &name, &ent.Picture, &attrID)
 			if err != nil {
 				return nil, nil, fmt.Errorf("scanning entity ID: %w", err)
@@ -732,7 +732,7 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 	return entities, entityAutolinkAttrs, nil
 }
 
-func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (int64, error) {
+func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (uint64, error) {
 	// prepare some values for DB insertion
 	var metadata *string
 	if len(attr.Metadata) > 0 {
@@ -749,7 +749,7 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (int64, err
 	}
 
 	// store the attribute+value if we don't have this combo yet (if we do, no ID is returned, sigh)
-	var attrID int64
+	var attrID uint64
 	err := tx.QueryRowContext(ctx,
 		`INSERT OR IGNORE INTO attributes (name, value, alt_value, metadata) VALUES (?, ?, ?, ?) RETURNING id`,
 		attr.Name, attr.valueForDB(), altValue, metadata).Scan(&attrID)
@@ -773,13 +773,13 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (int64, err
 }
 
 // MergeEntities combines the entities to merge into the entity to keep.
-func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep int64, entityIDsToMerge []int64) error {
+func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, entityIDsToMerge []uint64) error {
 	// input verification / sanity checks, as well as loading entity information
 	if entityIDToKeep <= 0 {
 		return errors.New("entity to keep must have an ID greater than 0")
 	}
 	entitiesToMerge := make([]Entity, 0, len(entityIDsToMerge))
-	seen := make(map[int64]struct{}) // deduplication
+	seen := make(map[uint64]struct{}) // deduplication
 	for i, id := range entityIDsToMerge {
 		if id <= 0 {
 			return fmt.Errorf("entities to merge must have IDs greater than 0 (%d)", id)
@@ -918,11 +918,11 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep int64, ent
 // entity and get a usable attribute ID linked to the
 // entity. For items, the itemID field can be accessed directly.
 type latentID struct {
-	itemID, entityID, attributeID int64
+	itemID, entityID, attributeID uint64
 }
 
 // id returns either the item ID or the attribute ID, whichever is set.
-func (l latentID) id() int64 {
+func (l latentID) id() uint64 {
 	if l.itemID > 0 {
 		return l.itemID
 	}
@@ -935,7 +935,7 @@ func (l latentID) id() int64 {
 // identifyingAttributeID returns either the known row ID of the
 // attribute identifying the entity, or it will create a pass-thru
 // attribute for the entity and return the new row ID.
-func (l *latentID) identifyingAttributeID(ctx context.Context, tx *sql.Tx) (int64, error) {
+func (l *latentID) identifyingAttributeID(ctx context.Context, tx *sql.Tx) (uint64, error) {
 	if l.attributeID > 0 {
 		return l.attributeID, nil
 	}
@@ -945,7 +945,7 @@ func (l *latentID) identifyingAttributeID(ctx context.Context, tx *sql.Tx) (int6
 
 	attrID, err := storeLinkBetweenEntityAndNonIDAttribute(ctx, tx, l.entityID, Attribute{
 		Name:     passThruAttribute,
-		Value:    strconv.FormatInt(l.entityID, 10),
+		Value:    strconv.FormatUint(l.entityID, 10),
 		Identity: true,
 	})
 	if err != nil {

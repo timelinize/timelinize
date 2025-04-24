@@ -443,7 +443,7 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 		l := p.log.With(
 			zap.String("graph", fmt.Sprintf("%p", g)),
 			zap.String("type", graphType),
-			zap.Int64("row_id", g.rowID.id()),
+			zap.Uint64("row_id", g.rowID.id()),
 			zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
 			zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
 			zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
@@ -550,7 +550,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, ig *Graph) err
 		err := p.processRelationship(ctx, tx, r, ig)
 		if err != nil {
 			p.log.Error("processing relationship",
-				zap.Int64("item_or_attribute_row_id", ig.rowID.id()),
+				zap.Uint64("item_or_attribute_row_id", ig.rowID.id()),
 				zap.Error(err))
 		}
 	}
@@ -590,7 +590,7 @@ func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item) (late
 }
 
 // TODO: godoc about return value of 0, nil
-func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64, error) {
+func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64, error) {
 	// keep count of number of items processed, mainly for logging
 	defer atomic.AddInt64(p.ij.itemCount, 1)
 
@@ -723,7 +723,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (int64,
 
 			atomic.AddInt64(p.ij.skippedItemCount, 1)
 			p.log.Debug("skipping processing of existing item",
-				zap.Int64("row_id", ir.ID),
+				zap.Uint64("row_id", ir.ID),
 				zap.String("filename", it.Content.Filename),
 				zap.String("item_original_id", it.ID))
 			ir.howStored = itemSkipped
@@ -999,7 +999,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		dbItem.DataHash == nil &&
 		dbItem.DataFile != nil && FileExists(p.tl.FullPath(*dbItem.DataFile)) {
 		p.log.Debug("processing existing item, but skipping data file because it is already being processed by this import",
-			zap.Int64("item_row_id", dbItem.ID),
+			zap.Uint64("item_row_id", dbItem.ID),
 			zap.String("filename", it.Content.Filename),
 			zap.String("item_original_id", it.ID),
 			zap.String("data_file_path", p.tl.FullPath(*dbItem.DataFile)))
@@ -1092,7 +1092,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 
 		if !item {
 			p.log.Debug("skipping processing of existing item because it was already processed in this import and there are no update overrides",
-				zap.Int64("item_row_id", dbItem.ID),
+				zap.Uint64("item_row_id", dbItem.ID),
 				zap.String("filename", it.Content.Filename),
 				zap.String("item_original_id", it.ID))
 		}
@@ -1123,7 +1123,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		// this case, the integrity check does truthfully fail, it simply means it
 		// might be processed twice (oh well)
 		p.log.Warn("integrity check failed",
-			zap.Int64("item_row_id", dbItem.ID),
+			zap.Uint64("item_row_id", dbItem.ID),
 			zap.Stringp("data_file", dbItem.DataFile),
 			zap.Error(integrityCheckErr))
 	}
@@ -1131,7 +1131,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// if modified manually, do not overwrite changes unless specifically enabled
 	if dbItem.Modified != nil && !p.ij.ProcessingOptions.OverwriteModifications {
 		p.log.Debug("skipping processing of existing item because it has been manually modified within the repo (enable modification overwrites to override)",
-			zap.Int64("item_row_id", dbItem.ID),
+			zap.Uint64("item_row_id", dbItem.ID),
 			zap.String("filename", it.Content.Filename),
 			zap.String("item_original_id", it.ID))
 		return false, false, nil
@@ -1223,7 +1223,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	}
 
 	// convert classification name to ID
-	var clID int64
+	var clID uint64
 	if it.Classification.Name != "" {
 		clID, err = p.tl.classificationNameToID(it.Classification.Name)
 		if err != nil {
@@ -1232,7 +1232,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	}
 
 	// if this item has an owner entity, get the associated attribute ID
-	var attrID int64
+	var attrID uint64
 	if rowID.entityID > 0 {
 		attrID, err = rowID.identifyingAttributeID(ctx, tx)
 		if err != nil {
@@ -1331,7 +1331,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 // original ID. If the original ID is specified, the sole criteria used to look up a unique item
 // is the data source and the original ID.
 // TODO: checkDeleted is more like "use hashes to retrieve rows for deduplication purposes"
-func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it *Item, dataSourceName *string, uniqueConstraints map[string]bool, checkDeleted bool) (ItemRow, error) {
+func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, it *Item, dataSourceName *string, uniqueConstraints map[string]bool, checkDeleted bool) (ItemRow, error) {
 	var sb strings.Builder
 
 	sb.WriteString("SELECT ")
@@ -1521,10 +1521,10 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID int64, it
 }
 
 // insertOrUpdateItem inserts the fully-populated ir into the database (TODO: finish godoc)
-func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool, updateOverrides map[string]fieldUpdatePolicy) (int64, itemStoreResult, error) {
+func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool, updateOverrides map[string]fieldUpdatePolicy) (uint64, itemStoreResult, error) {
 	// new item? insert it
 	if ir.ID == 0 {
-		var rowID int64
+		var rowID uint64
 
 		err := tx.QueryRowContext(ctx,
 			`INSERT INTO items
@@ -1547,9 +1547,12 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 		atomic.AddInt64(p.ij.newItemCount, 1)
 
-		// keep count of this so we can know how big the thumbnail job will be after the import
+		// keep count of this so we can know how big the thumbnail and embedding jobs will be after the import
 		if qualifiesForThumbnail(ir.DataType) {
 			atomic.AddInt64(p.ij.thumbnailCount, 1)
+		}
+		if qualifiesForEmbedding(ir.DataType) {
+			atomic.AddInt64(p.ij.embeddingCount, 1)
 		}
 
 		return rowID, itemInserted, err
@@ -1708,7 +1711,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	if startingDataFile != nil && ir.DataFile == nil {
 		if err := p.tl.cleanDataFile(tx, *startingDataFile); err != nil {
 			p.log.Error("cleaning up data file",
-				zap.Int64("item_row_id", ir.ID),
+				zap.Uint64("item_row_id", ir.ID),
 				zap.Stringp("data_file_name", startingDataFile),
 				zap.Error(err))
 		}

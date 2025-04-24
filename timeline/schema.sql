@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 -- similarity searches are possible. This requires the sqlite-vec module.
 CREATE TABLE IF NOT EXISTS "embeddings" (
 	"id" INTEGER PRIMARY KEY,
+	"generated" INTEGER NOT NULL DEFAULT (unixepoch()), -- when the embedding was generated (timestamp in unix seconds UTC)
 	"embedding" BLOB -- TODO: could define as float[768] (unless STRICT) and then use `check(typeof(contents_embedding) == 'blob' AND vec_length(contents_embedding) == 768)`
 ) STRICT;
 

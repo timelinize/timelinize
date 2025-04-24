@@ -51,7 +51,7 @@ type ItemSearchParams struct {
 	DataSourceName []string `json:"data_source,omitempty"`
 	JobID          []int64  `json:"job_id,omitempty"`
 	AttributeID    []int64  `json:"attribute_id,omitempty"`
-	EntityID       []int64  `json:"entity_id,omitempty"`
+	EntityID       []uint64 `json:"entity_id,omitempty"`
 	Classification []string `json:"classification,omitempty"`
 	OriginalID     []string `jsson:"original_id,omitempty"`
 	DataType       []string `json:"data_type,omitempty"`
@@ -168,7 +168,7 @@ type ItemSearchParams struct {
 	Deleted bool `json:"deleted,omitempty"`
 
 	// stores the converted names to row IDs
-	classificationIDs []int64
+	classificationIDs []uint64
 }
 
 type SearchResults struct {
@@ -240,7 +240,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		// on the coordinates which is much more efficient
 		if params.GeoJSON {
 			// read the coordinate data
-			var rowID int64
+			var rowID uint64
 			var lat, lon *float64
 			targets := []any{&rowID, &lat, &lon}
 			if params.WithTotal {
@@ -317,7 +317,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		// filter results for relevance by passing them through the classifier...
 		// this is kind of a hack, but it's a well-known difficult problem apparently,
 		// for any KNN search, to only show relevant results
-		itemFiles := make(map[int64]string)
+		itemFiles := make(map[uint64]string)
 		for _, result := range results {
 			if result.DataFile == nil || result.DataType == nil {
 				continue
@@ -886,7 +886,8 @@ func (tl *Timeline) expandRelationshipSingle(ctx context.Context, tx *sql.Tx, sr
 
 	for rows.Next() {
 		var rel Related
-		var fromItemID, toItemID, relStart, relEnd *int64
+		var fromItemID, toItemID *uint64
+		var relStart, relEnd *int64
 		var fromEntity, toEntity relatedEntity
 		var relMeta *string
 		err := rows.Scan(&rel.RelationshipID, &rel.Directed, &rel.Label, &rel.Value, &relStart, &relEnd, &relMeta, &fromItemID, &toItemID,
@@ -941,7 +942,7 @@ func (tl *Timeline) expandRelationshipSingle(ctx context.Context, tx *sql.Tx, sr
 	return nil
 }
 
-func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID int64) (*SearchResult, error) {
+func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID uint64) (*SearchResult, error) {
 	ir, err := tl.loadItemRow(ctx, tx, itemRowID, nil, nil, nil, false)
 	if err != nil {
 		return nil, fmt.Errorf("loading related item row: %w", err)
@@ -993,7 +994,7 @@ type SearchResult struct {
 // types because it is left-joined in queries which means they
 // can be null.
 type relatedEntity struct {
-	ID        *int64            `json:"id"`
+	ID        *uint64           `json:"id"`
 	Name      *string           `json:"name,omitempty"`
 	Picture   *string           `json:"picture,omitempty"`
 	Attribute nullableAttribute `json:"attribute,omitempty"` // TODO: experimental

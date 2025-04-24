@@ -34,10 +34,13 @@ import (
 )
 
 type importJobCheckpoint struct {
-	EstimatedSize  *int64 `json:"estimated_size"` // only set if currently in the estimating phase
-	OuterIndex     int    `json:"outer_index"`
-	InnerIndex     int    `json:"inner_index"`
-	ThumbnailCount int64  `json:"thumbnail_count"`
+	EstimatedSize *int64 `json:"estimated_size"` // only set if currently in the estimating phase
+	OuterIndex    int    `json:"outer_index"`
+	InnerIndex    int    `json:"inner_index"`
+
+	// these fields remember the count of new items that will need thumbnails or embeddings
+	ThumbnailCount int64 `json:"thumbnail_count"`
+	EmbeddingCount int64 `json:"embedding_count"`
 
 	// This is passed through to the data source; and we would be using
 	// json.RawMessage here so that, when loading a checkpoint, the
@@ -62,7 +65,7 @@ type ImportJob struct {
 	// (reset each time the job is started)
 	itemCount, newItemCount, updatedItemCount, skippedItemCount *int64
 	newEntityCount                                              *int64
-	thumbnailCount                                              *int64
+	thumbnailCount, embeddingCount                              *int64
 
 	job *ActiveJob
 
@@ -81,6 +84,7 @@ func (ij ImportJob) checkpoint(estimatedSize *int64, outer, inner int, ds any) e
 		OuterIndex:           outer,
 		InnerIndex:           inner,
 		ThumbnailCount:       atomic.LoadInt64(ij.thumbnailCount),
+		EmbeddingCount:       atomic.LoadInt64(ij.embeddingCount),
 		DataSourceCheckpoint: ds,
 	})
 }
@@ -126,6 +130,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 	ij.skippedItemCount = new(int64)
 	ij.newEntityCount = new(int64)
 	ij.thumbnailCount = new(int64)
+	ij.embeddingCount = new(int64)
 	ij.pMu = new(sync.Mutex)
 
 	estimating := ij.EstimateTotal
@@ -140,8 +145,9 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 		if err != nil {
 			return fmt.Errorf("decoding checkpoint: %w", err)
 		}
-		// restore thumbnail-eligible item count
+		// restore thumbnail-eligible or embedding-eligible item count
 		atomic.StoreInt64(ij.thumbnailCount, chkpt.ThumbnailCount)
+		atomic.StoreInt64(ij.embeddingCount, chkpt.EmbeddingCount)
 		// in theory, resuming a job should have the same configuration as
 		// before, so this may take us out of "estimating" mode if that had
 		// already been completed, but I don't think it should ever put us
@@ -497,6 +503,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 
 	// nothing to do if no items were empty
 	if len(emptyItems) == 0 {
+		ij.job.Logger().Info("no empty items to delete")
 		return nil
 	}
 
@@ -529,72 +536,20 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 }
 
 func (ij ImportJob) generateEmbeddingsForImportedItems() {
-	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx, `
-		SELECT id, data_id, data_type, data_file
-		FROM items
-		WHERE job_id=?
-			AND data_type IS NOT NULL
-			AND (data_id IS NOT NULL OR data_text IS NOT NULL OR data_file IS NOT NULL)
-		`, ij.job.id)
-	if err != nil {
-		ij.job.tl.dbMu.RUnlock()
-		ij.job.Logger().Error("unable to generate embeddings from this import", zap.Error(err))
+	// TODO: This is not really accurate/useful, since we just calculate it in the job.
+	embeddingCount := atomic.LoadInt64(ij.embeddingCount)
+	if embeddingCount == 0 {
 		return
 	}
 
-	var job embeddingJob
-	var idMap = make(map[int64]struct{}) // prevent duplicates
+	ij.job.Logger().Info("creating embeddings job from import")
 
-	for rows.Next() {
-		var rowID int64
-		var dataID *int64
-		var dataType, dataFile *string
-
-		// TODO: dataID and dataFile are not used...?
-		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
-		if err != nil {
-			defer rows.Close()
-			ij.job.Logger().Error("unable to scan row to generate embeddings from this import", zap.Error(err))
-			ij.job.tl.dbMu.RUnlock()
-			return
-		}
-
-		if !qualifiesForEmbedding(dataType) {
-			continue
-		}
-
-		idMap[rowID] = struct{}{}
-	}
-	rows.Close()
-	ij.job.tl.dbMu.RUnlock()
-
-	if err = rows.Err(); err != nil {
-		ij.job.Logger().Error("iterating rows for generating embeddings failed", zap.Error(err))
-		return
+	job := embeddingJob{
+		ItemsFromImportJob: ij.job.ID(),
 	}
 
-	if len(idMap) == 0 {
-		ij.job.Logger().Debug("no embeddings to generate from this job")
-		return
-	}
-
-	total := len(idMap)
-
-	// now that our read lock on the DB is released, we can take our time generating embeddings in the background
-
-	ij.job.Logger().Info("generating embeddings for imported items", zap.Int("count", total))
-
-	// convert map to slice; it's more concise in the DB and ordering is important with checkpoints
-	job.ItemIDs = make([]int64, len(idMap))
-	var i int
-	for id := range idMap {
-		job.ItemIDs[i] = id
-		i++
-	}
-
-	if _, err = ij.job.tl.CreateJob(job, time.Time{}, 0, total, ij.job.id); err != nil {
-		ij.job.Logger().Error("creating embedding job", zap.Error(err))
+	if _, err := ij.job.tl.CreateJob(job, time.Time{}, 0, 0, ij.job.id); err != nil {
+		ij.job.Logger().Error("creating embeddings job", zap.Error(err))
 		return
 	}
 }

@@ -44,7 +44,7 @@ var (
 // of work, to be repeated after a certain interval (if > 0). If an identical job is
 // already running, the job will be queued. If an identical job is already queued, this
 // will be a no-op. The created job ID is returned.
-func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time.Duration, total int, parentJobID int64) (int64, error) {
+func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time.Duration, total int, parentJobID uint64) (uint64, error) {
 	config, err := json.Marshal(action)
 	if err != nil {
 		return 0, fmt.Errorf("JSON-encoding job action: %w", err)
@@ -65,7 +65,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 	var repeatPtr *time.Duration
 	var startPtr *time.Time
 	var totalPtr *int
-	var parentJobIDPtr *int64
+	var parentJobIDPtr *uint64
 	if repeat > 0 {
 		repeatPtr = &repeat
 	}
@@ -109,11 +109,12 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 	// to make a logger with the same name and many of the same fields...
 	Log.Named("job.status").Info("created",
 		zap.String("repo_id", tl.ID().String()),
-		zap.Int64("id", jobID),
+		zap.Uint64("id", jobID),
 		zap.String("type", string(job.Type)),
 		zap.Time("created", time.Now()),
 		zap.Timep("start", job.Start),
-		zap.Int64p("parent_job_id", parentJobIDPtr))
+		zap.Uint64p("parent_job_id", parentJobIDPtr),
+		zap.Intp("size", totalPtr))
 
 	err = tl.startJob(tl.ctx, tx, jobID)
 	if err != nil {
@@ -129,7 +130,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 
 // storeJob adds the job to the database. It does not start it.
 // TODO: Job configs could be compressed to save space in the DB...
-func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
+func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, error) {
 	job.Hash = job.hash()
 
 	hostname, err := os.Hostname()
@@ -157,7 +158,7 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
 		start = &startVal
 	}
 
-	var id int64
+	var id uint64
 	err = tx.QueryRowContext(tl.ctx, `
 		INSERT INTO jobs (type, configuration, hash, hostname, start, total, repeat, parent_job_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -172,7 +173,7 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (int64, error) {
 
 // loadJob loads a job from the database, using tx if set. A lock MUST be obtained on the
 // timeline database when calling this function!
-func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, parentAndChildJobs bool) (Job, error) {
+func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID uint64, parentAndChildJobs bool) (Job, error) {
 	q := `SELECT
 	id, type, name, configuration, hash, state, hostname,
 	created, updated, start, ended,
@@ -246,7 +247,7 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID int64, parent
 // startJob makes sure an identical job is not already running, then
 // sets the job's state to started and syncs it with the DB, then
 // calls the action function in a goroutine.
-func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID int64) error {
+func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID uint64) error {
 	// if an identical job is already running, we shouldn't start yet
 	var count int
 	err := tx.QueryRowContext(tl.ctx,
@@ -377,7 +378,7 @@ func (tl *Timeline) runJob(row Job) error {
 
 	baseLogger := Log.Named("job").With(
 		zap.String("repo_id", tl.ID().String()),
-		zap.Int64("id", row.ID),
+		zap.Uint64("id", row.ID),
 		zap.String("type", string(row.Type)),
 		zap.Time("created", row.Created),
 		zap.Timep("start", row.Start))
@@ -503,7 +504,7 @@ func (tl *Timeline) runJob(row Job) error {
 
 		// see if there's another job queued up we should run
 		// (only run import jobs on the same machine they were configured from, since it uses external file paths)
-		var nextJobID int64
+		var nextJobID uint64
 		err = tx.QueryRowContext(tl.ctx,
 			`SELECT id
 			FROM jobs
@@ -545,11 +546,11 @@ type ActiveJob struct {
 	cancel      context.CancelFunc
 	pause       chan chan struct{} // send to the outer channel to pause, receive on the inner channel to unpause
 	done        chan struct{}      // signaling channel that is closed when the job action returns
-	id          int64
+	id          uint64
 	tl          *Timeline
 	logger      *zap.Logger
 	statusLog   *zap.Logger
-	parentJobID *int64
+	parentJobID *uint64
 	action      JobAction
 
 	mu sync.Mutex
@@ -571,7 +572,7 @@ type ActiveJob struct {
 func (j *ActiveJob) Context() context.Context { return j.ctx }
 
 // ID returns the database row ID of the job.
-func (j *ActiveJob) ID() int64 { return j.id }
+func (j *ActiveJob) ID() uint64 { return j.id }
 
 // Timeline returns the timeline associated with the job.
 func (j *ActiveJob) Timeline() *Timeline { return j.tl }
@@ -661,7 +662,7 @@ func (j *ActiveJob) flushProgress(logger *zap.Logger) {
 			zap.Intp("total", j.currentTotal),
 			zap.Stringp("message", j.currentMessage),
 			zap.Timep("checkpointed", j.lastCheckpoint),
-			zap.Int64p("parent_job_id", j.parentJobID))
+			zap.Uint64p("parent_job_id", j.parentJobID))
 		j.lastFlush = time.Now()
 		_ = logger.Sync() // ensure it gets written promptly
 	}
@@ -753,7 +754,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 
 // GetJobs loads the jobs with the specified IDs, or by the most recent jobs, whichever is set.
 // Both technically can be set, but why?
-func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64, mostRecent int) ([]Job, error) {
+func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []uint64, mostRecent int) ([]Job, error) {
 	var jobs []Job //nolint:prealloc // false positive! can't always know how many we'll have in this case
 
 	// load most recent jobs
@@ -824,7 +825,7 @@ func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []int64, mostRecent int)
 	return jobs, nil
 }
 
-func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
+func (tl *Timeline) CancelJob(ctx context.Context, jobID uint64) error {
 	tl.activeJobsMu.Lock()
 	activeJob, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.Unlock()
@@ -886,7 +887,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
 	// update any UI elements that may be showing info about this inactive job
 	statusLog := Log.Named("job.status").With(
 		zap.String("repo_id", tl.ID().String()),
-		zap.Int64("id", job.ID),
+		zap.Uint64("id", job.ID),
 		zap.String("type", string(job.Type)),
 		zap.Time("created", job.Created),
 		zap.Timep("start", job.Start))
@@ -905,7 +906,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID int64) error {
 	return nil
 }
 
-func (tl *Timeline) PauseJob(ctx context.Context, jobID int64) error {
+func (tl *Timeline) PauseJob(ctx context.Context, jobID uint64) error {
 	tl.activeJobsMu.Lock()
 	job, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.Unlock()
@@ -945,7 +946,7 @@ func (tl *Timeline) PauseJob(ctx context.Context, jobID int64) error {
 	return nil
 }
 
-func (tl *Timeline) UnpauseJob(ctx context.Context, jobID int64) error {
+func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 	tl.activeJobsMu.Lock()
 	job, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.Unlock()
@@ -991,7 +992,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID int64) error {
 	return nil
 }
 
-func (tl *Timeline) StartJob(ctx context.Context, jobID int64, startOver bool) error {
+func (tl *Timeline) StartJob(ctx context.Context, jobID uint64, startOver bool) error {
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
@@ -1056,7 +1057,7 @@ type Job struct {
 	// not a field in the DB, but useful for bookkeeping where multiple timelines are open
 	RepoID string `json:"repo_id"`
 
-	ID          int64          `json:"id"`
+	ID          uint64         `json:"id"`
 	Type        JobType        `json:"type"`
 	Name        *string        `json:"name,omitempty"`
 	Config      string         `json:"config,omitempty"` // JSON encoding of, for instance, ImportParameters, etc.
@@ -1072,7 +1073,7 @@ type Job struct {
 	Progress    *int           `json:"progress,omitempty"`
 	Checkpoint  []byte         `json:"checkpoint,omitempty"`
 	Repeat      *time.Duration `json:"repeat,omitempty"`
-	ParentJobID *int64         `json:"parent_job_id,omitempty"`
+	ParentJobID *uint64        `json:"parent_job_id,omitempty"`
 
 	// only used when loading jobs from the DB for the frontend
 	Parent   *Job  `json:"parent,omitempty"`

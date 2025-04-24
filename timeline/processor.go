@@ -36,7 +36,7 @@ type processor struct {
 	ij *ImportJob
 
 	ds      DataSource
-	dsRowID int64
+	dsRowID uint64
 	dsOpt   any
 
 	tl *Timeline

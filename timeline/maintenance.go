@@ -156,7 +156,7 @@ func (tl *Timeline) deleteExpiredItems(logger *zap.Logger) error {
 	return nil
 }
 
-func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []int64, dataFiles []string) error {
+func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []uint64, dataFiles []string) error {
 	tl.thumbsMu.Lock()
 	defer tl.thumbsMu.Unlock()
 
@@ -182,7 +182,7 @@ func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []int64, da
 	return thumbsTx.Commit()
 }
 
-func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (rowIDs []int64, dataFilesToDelete []string, err error) {
+func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (rowIDs []uint64, dataFilesToDelete []string, err error) {
 	now := time.Now().Unix()
 
 	// this query selects the rows that are pending deletion ("in the trash") and returns their
@@ -211,7 +211,7 @@ func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (ro
 	dataFilesMap := make(map[string]struct{})
 
 	for rows.Next() {
-		var id int64
+		var id uint64
 		var dataFile *string
 		var otherItemsUsingFile int
 		if err := rows.Scan(&id, &dataFile, &otherItemsUsingFile); err != nil {
@@ -235,7 +235,7 @@ func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (ro
 	return
 }
 
-func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs []int64, preserveUserNotes bool) error {
+func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs []uint64, preserveUserNotes bool) error {
 	if len(rowIDs) == 0 {
 		return nil
 	}

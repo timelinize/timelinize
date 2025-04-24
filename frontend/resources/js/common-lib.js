@@ -1917,6 +1917,7 @@ function renderMessageItem(item, options) {
 			for (const [reaction, rels] of Object.entries(reactions)) {
 				var reactElem = document.createElement('div');
 				reactElem.classList.add('message-reaction');
+				reactElem.dataset.bsToggle = "tooltip";
 				var emojiElem = document.createElement('span');
 				emojiElem.classList.add('emoji');
 				emojiElem.textContent = reaction;

@@ -35,11 +35,11 @@ type Conversation struct {
 	RecentMessages []ItemRow `json:"messages"`
 
 	// the set of entities defines a unique conversation
-	entities int64Slice
+	entities uint64Slice
 }
 
 // hasAllEntities returns true if the conversation has all the entities in entityIDs.
-func (c Conversation) hasAllEntities(entityIDs []int64) bool {
+func (c Conversation) hasAllEntities(entityIDs []uint64) bool {
 outer:
 	for _, findID := range entityIDs {
 		for _, ent := range c.Entities {
@@ -120,7 +120,7 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 
 	// make sure our state is preserved across different query pages
 	currentConvo := new(Conversation) // aggregate, as convos with 3+ attributes involved span multiple rows
-	var lastItemID int64              // to help us know when we've reached a new message
+	var lastItemID uint64             // to help us know when we've reached a new message
 
 	// make paging more efficient than using OFFSET; this way we just use
 	// the DB index to skip results with timestamps we've already traversed
@@ -536,7 +536,7 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 	selects := make([]string, 0, len(params.EntityID))
 	idsForExcept := make([]string, 0, len(params.EntityID))
 	for _, entityID := range params.EntityID {
-		idsForExcept = append(idsForExcept, strconv.FormatInt(entityID, 10))
+		idsForExcept = append(idsForExcept, strconv.FormatUint(entityID, 10))
 		selects = append(selects, fmt.Sprintf(
 			`SELECT %s, entities.id, entities.name, entities.picture_file
 			FROM extended_items AS items
@@ -586,19 +586,19 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 	return q, args, nil
 }
 
-type int64Slice []int64
+type uint64Slice []uint64
 
-func (s int64Slice) hash() string {
+func (s uint64Slice) hash() string {
 	sort.Sort(s) // TODO: this doesn't seem to be working
 	var sb strings.Builder
 	for _, v := range s {
-		sb.WriteString(strconv.FormatInt(v, 10))
+		sb.WriteString(strconv.FormatUint(v, 10))
 		sb.WriteRune(',')
 	}
 	return sb.String()
 }
 
-func (s *int64Slice) appendIfUnique(v int64) {
+func (s *uint64Slice) appendIfUnique(v uint64) {
 	for _, elem := range *s {
 		if elem == v {
 			return
@@ -610,6 +610,6 @@ func (s *int64Slice) appendIfUnique(v int64) {
 const andItemsTimestampLessThanArg = " AND items.timestamp < ?"
 
 // Implement sort.Interface
-func (s int64Slice) Len() int           { return len(s) }
-func (s int64Slice) Less(i, j int) bool { return s[i] < s[j] }
-func (s int64Slice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s uint64Slice) Len() int           { return len(s) }
+func (s uint64Slice) Less(i, j int) bool { return s[i] < s[j] }
+func (s uint64Slice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
