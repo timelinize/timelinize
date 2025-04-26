@@ -341,8 +341,35 @@ func (e *Entity) Anonymize() {
 	src := weakrand.NewPCG(e.ID, 0)
 	faker := gofakeit.NewFaker(src, false)
 
+	// but to fake the name, we actually use a faker with a seed based on each
+	// space-separated part of the name; this means that names like Betty will
+	// always be replaced with the same fake name, so if you have entities "Betty
+	// Jane" and "Betty Jane Smith" who are actually the same person, then you
+	// will see more consistent fake names like "Kristen May" and "Kristen May
+	// Pike" -- keeping the name pattern, which is more helpful in demos.
+	// This isn't perfect though, like "Matt" is obviously short for "Matthew"
+	// in the unobfuscated space, but the faker just uses hashing so it doesn't
+	// care about that, and they will have totally different fake names in the
+	// obfuscated space. Oh well.
 	if e.Name != "" {
-		e.Name = faker.Name()
+		var fakeName string
+		names := strings.Split(e.Name, " ")
+		for i, name := range names {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			nameSrc := weakrand.NewPCG(dumbHash(name), 0)
+			nameFaker := gofakeit.NewFaker(nameSrc, false)
+			if fakeName == "" {
+				fakeName = nameFaker.FirstName()
+			} else if i < len(names)-1 {
+				fakeName += " " + nameFaker.MiddleName()
+			} else {
+				fakeName += " " + nameFaker.LastName()
+			}
+		}
+		e.Name = fakeName
 	}
 
 	for i := range e.Attributes {
@@ -375,6 +402,14 @@ func (e *Entity) Anonymize() {
 			return resp.Body, err
 		}
 	}
+}
+
+func dumbHash(input string) uint64 {
+	var checksum uint64
+	for i, ch := range input {
+		checksum += uint64(int(ch)*i + 1)
+	}
+	return checksum
 }
 
 // Anonymize obfuscates the item.
