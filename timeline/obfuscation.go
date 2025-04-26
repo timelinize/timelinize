@@ -361,7 +361,7 @@ func (e *Entity) Anonymize() {
 			}
 			nameSrc := weakrand.NewPCG(dumbHash(name), 0)
 			nameFaker := gofakeit.NewFaker(nameSrc, false)
-			if fakeName == "" {
+			if fakeName == "" { //nolint:gocritic
 				fakeName = nameFaker.FirstName()
 			} else if i < len(names)-1 {
 				fakeName += " " + nameFaker.MiddleName()
@@ -407,7 +407,7 @@ func (e *Entity) Anonymize() {
 func dumbHash(input string) uint64 {
 	var checksum uint64
 	for i, ch := range input {
-		checksum += uint64(int(ch)*i + 1)
+		checksum += uint64(int(ch) * (i + 1)) //nolint:gosec
 	}
 	return checksum
 }
