@@ -841,9 +841,7 @@ async function newFilePicker(name, options) {
 		// reset the filepath box, listing table, and selected path(s),
 		// then emit event (intentionally named uniquely from standard events)
 		$('.file-picker-path').value = listing.dir;
-		const upElem = $('.file-picker-up', filePicker);
 		$('.file-picker-table tbody', filePicker).innerHTML = '';
-		$('.file-picker-table tbody', filePicker).append(upElem);
 		filePicker.filepaths = {};
 		filePicker.dispatchEvent(new CustomEvent("selection", { bubbles: true }));
 

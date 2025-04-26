@@ -477,37 +477,60 @@ a.disabled {
 	border-bottom-right-radius: 0;
 }
 
-/* The file picker styles were meticulously designed so that the table body (tbody) becomes
-the scroll element that collapses down when there's not enough height, leaving a sticky table
-header (thead) -- no need for position: sticky -- and doesn't overflow container or viewport */
+/*
+File picker styles are designed so that the contents of the table have the vertical
+scrollbar when there is an overflow-y. The table header is stickied. The downside
+is that the scrollbar goes onto the table header, which is not strictly necessary,
+but seeing as scrollbars take up horizontal space on most platforms, this actually
+is a good thing since it keeps cells aligned.
+
+To make the table body have the scrollbar, but not the table header, and not need
+sticky for the header, enable these styles:
+
+	.file-picker table {
+		display: flex;
+		flex-flow: column;
+		width: 100%;
+		height: 100%;
+	}
+	.file-picker table thead {
+		flex: 0 0 auto;
+	}
+	.file-picker table tbody {
+		flex: 1 1 auto;
+		display: block;
+		overflow-y: auto;
+		overflow-x: hidden;
+	}
+	.file-picker table tr {
+		width: 100%;
+		display: table;
+		table-layout: fixed;
+	}
+
+However! Doing things this way will cause cells to be slightly disjoint from
+their header cells, since the scrollbar has width which squishes the cells'
+widths slightly (but not on touch platforms, presumably). It also causes cells
+to stop auto-sizing based on the width of their contents; i.e. all cells are
+the same width, which looks dumb and is less useful when one column, such as
+filename, almost always need the maximum width possible.
+
+So, for simplicity and the benefits described, I've decided to not use these
+styles. But it took hours to figure them out!
+*/
 #modal-file-picker .modal-body,
 #modal-timeline-folder .modal-body {
 	min-height: 0;
 	display: flex;
 }
 .file-picker {
-    display: flex;
-    flex-direction: column;
-}
-.file-picker table {
 	display: flex;
-	flex-flow: column;
+	flex-direction: column;
 	width: 100%;
-	height: 100%;
 }
-.file-picker table thead {
-	flex: 0 0 auto;
-}
-.file-picker table tbody {
-	flex: 1 1 auto;
-    display: block;
-    overflow-y: auto;
-    overflow-x: hidden;
-}
-.file-picker table tr {
-	width: 100%;
-    display: table;
-    table-layout: fixed;
+.file-picker thead th {
+	position: sticky;
+	top: 0;
 }
 
 
@@ -530,6 +553,10 @@ header (thead) -- no need for position: sticky -- and doesn't overflow container
 .file-picker-table tr.selected {
 	background: var(--tblr-indigo);
 	color: var(--tblr-light);
+}
+
+.file-picker-table thead th {
+	position: sticky;
 }
 
 .file-picker-table td {
