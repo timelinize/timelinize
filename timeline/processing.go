@@ -436,72 +436,114 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 	// this whole big thing is one huge log so the UI can stream
 	// a sample of live import data
 	defer func() {
-		graphType := "item"
-		if g.Entity != nil {
-			graphType = "entity"
-		}
-		l := p.log.With(
-			zap.String("graph", fmt.Sprintf("%p", g)),
-			zap.String("type", graphType),
-			zap.Uint64("row_id", g.rowID.id()),
-			zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
-			zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
-			zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
-			zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
-			zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
-		)
-		if g.Item != nil && !g.Item.Timestamp.IsZero() {
-			l = l.With(zap.Time("item_timestamp", g.Item.Timestamp))
-		}
-		entityAttr := func(e Entity) zapcore.Field {
-			if e.Name != "" {
-				return zap.String("entity", e.Name)
+		// logging the progress every item/entity that gets processed is actually
+		// not super efficient, so we use this trick to only prepare the log entry
+		// if it will, in fact, be logged (we sample logs to increase efficiency,
+		// but those gains are most realized when we avoid our own processing if
+		// a particular log entry will be dropped too, hence the call to Check())
+		if checkedLog := p.log.Check(zapcore.InfoLevel, "finished graph"); checkedLog != nil {
+			graphType := "item"
+			if g.Entity != nil {
+				graphType = "entity"
 			}
-			for _, attr := range e.Attributes {
-				if attr.Identifying || attr.Identity {
-					return zap.Any("entity", attr.Value)
+
+			fields := []zapcore.Field{
+				zap.String("graph", fmt.Sprintf("%p", g)),
+				zap.String("type", graphType),
+				zap.Uint64("row_id", g.rowID.id()),
+				zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
+				zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
+				zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
+				zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
+				zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
+			}
+
+			if g.Item != nil && !g.Item.Timestamp.IsZero() {
+				fields = append(fields, zap.Time("item_timestamp", g.Item.Timestamp))
+			}
+
+			entityAttr := func(e Entity) zapcore.Field {
+				if e.Name != "" {
+					return zap.String("entity", e.Name)
+				}
+				for _, attr := range e.Attributes {
+					if attr.Identifying || attr.Identity {
+						return zap.Any("entity", attr.Value)
+					}
+				}
+				return zap.Stringp("entity", nil)
+			}
+			item, entity := g.Item, g.Entity
+			if options, obfuscate := p.tl.obfuscationMode(); obfuscate {
+				// We tediously (shallow-ish) copy the values that are anonymized,
+				// since we have to log them with obfuscation mode enabled. Why
+				// do we need to copy them first? Because the tx isn't finished
+				// yet. This whole method is one iteration's call as part of a
+				// batch, so if we change the values right now, they'll go into
+				// the DB like that -- I have verified this by inspecting the DB,
+				// and found obfuscated values -- yikes! so we do have to copy
+				// the values that get anonymized, even if we don't log them.
+				if item != nil {
+					anonItem := *item
+					anonItem.row.Anonymize(options)
+					anonItem.row.Metadata = make(json.RawMessage, len(item.row.Metadata))
+					copy(anonItem.row.Metadata, item.row.Metadata)
+					anonItem.Owner.Attributes = make([]Attribute, len(item.Owner.Attributes))
+					copy(anonItem.Owner.Attributes, item.Owner.Attributes)
+					for i := range anonItem.Owner.Attributes {
+						anonItem.Owner.Attributes[i].Metadata = make(Metadata)
+						for k, v := range entity.Attributes[i].Metadata {
+							anonItem.Owner.Attributes[i].Metadata[k] = v
+						}
+					}
+					anonItem.Owner.Anonymize()
+					item = &anonItem
+				}
+				if entity != nil {
+					anonEntity := *entity
+					anonEntity.Metadata = make(Metadata, len(entity.Metadata))
+					for k, v := range entity.Metadata {
+						anonEntity.Metadata[k] = v
+					}
+					anonEntity.Attributes = make([]Attribute, len(entity.Attributes))
+					copy(anonEntity.Attributes, entity.Attributes)
+					for i := range anonEntity.Attributes {
+						anonEntity.Attributes[i].Metadata = make(Metadata)
+						for k, v := range entity.Attributes[i].Metadata {
+							anonEntity.Attributes[i].Metadata[k] = v
+						}
+					}
+					anonEntity.ID = g.rowID.id()
+					anonEntity.Anonymize()
+					entity = &anonEntity
 				}
 			}
-			return zap.Stringp("entity", nil)
-		}
-		if options, obfuscate := p.tl.obfuscationMode(); obfuscate {
-			// this kind of nukes the actual values from this point forward,
-			// but we're done with them now, so it should be okay
-			if g.Item != nil {
-				g.Item.row.Anonymize(options)
-				g.Item.Owner.Anonymize()
+			if item != nil {
+				size := item.dataFileSize
+				if item.row.DataText != nil {
+					size = int64(len(*item.row.DataText))
+				}
+				preview := item.row.DataText
+				const maxPreviewLen = 30
+				if preview != nil && len(*preview) > maxPreviewLen {
+					shortPreview := (*preview)[:maxPreviewLen]
+					preview = &shortPreview
+				}
+				fields = append(fields,
+					zap.String("status", string(item.row.howStored)),
+					zap.String("classification", item.Classification.Name),
+					zap.Stringp("preview", preview),
+					zap.Stringp("filename", item.row.Filename),
+					zap.Int64("size", size),
+					zap.Float64p("lat", item.row.Latitude),
+					zap.Float64p("lon", item.row.Longitude),
+					zap.String("media_type", item.Content.MediaType),
+					entityAttr(item.Owner))
+			} else if entity != nil {
+				fields = append(fields, entityAttr(*entity))
 			}
-			if g.Entity != nil {
-				g.Entity.ID = g.rowID.id()
-				g.Entity.Anonymize()
-			}
+			checkedLog.Write(fields...)
 		}
-		if g.Item != nil {
-			size := g.Item.dataFileSize
-			if g.Item.row.DataText != nil {
-				size = int64(len(*g.Item.row.DataText))
-			}
-			preview := g.Item.row.DataText
-			const maxPreviewLen = 30
-			if preview != nil && len(*preview) > maxPreviewLen {
-				shortPreview := (*preview)[:maxPreviewLen]
-				preview = &shortPreview
-			}
-			l = l.With(
-				zap.String("status", string(g.Item.row.howStored)),
-				zap.String("classification", g.Item.Classification.Name),
-				zap.Stringp("preview", preview),
-				zap.Stringp("filename", g.Item.row.Filename),
-				zap.Int64("size", size),
-				zap.Float64p("lat", g.Item.row.Latitude),
-				zap.Float64p("lon", g.Item.row.Longitude),
-				zap.String("media_type", g.Item.Content.MediaType),
-				entityAttr(g.Item.Owner))
-		}
-		if g.Entity != nil {
-			l = l.With(entityAttr(*g.Entity))
-		}
-		l.Info("finished graph")
 	}()
 
 	if err := p.finishDataFileProcessing(ctx, tx, g.Item); err != nil {
