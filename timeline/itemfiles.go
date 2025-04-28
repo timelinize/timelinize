@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -174,8 +175,15 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	// which is kind of pointless IMO
 	// (this is where it's important that it.row.DataFile is not a pointer to it.dataFileName,
 	// because we end up changing the value of it.dataFileName in this method)
-	if err := p.replaceWithExisting(tx, &it.dataFileName, it.dataFileHash, it.row.ID); err != nil {
+	fileWasDuplicate, err := p.replaceWithExisting(tx, &it.dataFileName, it.dataFileHash, it.row.ID)
+	if err != nil {
 		return fmt.Errorf("replacing data file with identical existing file: %w", err)
+	}
+
+	// if this file is new/unique, and should get a thumbnail, count it so we can know how big
+	// the thumbnail job will be after the import concludes
+	if !fileWasDuplicate && qualifiesForThumbnail(it.row.DataType) {
+		atomic.AddInt64(p.ij.thumbnailCount, 1)
 	}
 
 	// save the file's name and hash to all items which use it, to confirm it was downloaded successfully
@@ -183,7 +191,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	// we updated it.dataFileName's value to the existing file, but that would also change it.row.DataFile
 	// to be the same because they point to the same value in memory!! yet we expect it.row.DataFile to
 	// keep the duplicate filename so we can select the row(s) to update...)
-	_, err := tx.Exec(`UPDATE items SET data_file=?, data_hash=? WHERE data_file=?`,
+	_, err = tx.Exec(`UPDATE items SET data_file=?, data_hash=? WHERE data_file=?`,
 		it.dataFileName, it.dataFileHash, it.row.DataFile)
 	if err != nil {
 		p.log.Error("updating item's data file hash in DB failed; hash info will be incorrect or missing",
@@ -432,20 +440,23 @@ func (tl *Timeline) ensureDataFileNameShortEnough(filename string) string {
 	return filename
 }
 
+// replaceWIthExisting checks to see if the checksum of a file already exists in the database for a
+// file that is not the file with the given canonical path or row ID. It returns true if the file
+// already exists and a replacement occurred; false otherwise (i.e. the file was unique).
 // TODO:/NOTE: If changing a file name, all items with same data_hash must also be updated to use same file name
-func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum []byte, itemRowID uint64) error {
+func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum []byte, itemRowID uint64) (bool, error) {
 	if canonical == nil || *canonical == "" || len(checksum) == 0 {
-		return errors.New("missing data filename and/or hash of contents")
+		return false, errors.New("missing data filename and/or hash of contents")
 	}
 
 	var existingDatafile *string
 	err := tx.QueryRow(`SELECT data_file FROM items WHERE data_hash = ? AND id != ? AND data_file != ? LIMIT 1`,
 		checksum, itemRowID, *canonical).Scan(&existingDatafile)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil // file is unique; carry on
+		return false, nil // file is unique; carry on
 	}
 	if err != nil {
-		return fmt.Errorf("querying DB: %w", err)
+		return false, fmt.Errorf("querying DB: %w", err)
 	}
 
 	// file is a duplicate! by the time this function returns (if successful),
@@ -460,7 +471,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 
 	if existingDatafile == nil {
 		// ... that's weird, how's this possible? it has a hash but no file name recorded
-		return fmt.Errorf("item with matching hash is missing data file name; hash: %x", checksum)
+		return false, fmt.Errorf("item with matching hash is missing data file name; hash: %x", checksum)
 	}
 
 	// TODO: maybe this all should be limited to only when integrity checks are enabled? how do we know that this download has the right version/contents?
@@ -474,13 +485,13 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 	f, err := os.Open(p.tl.FullPath(*existingDatafile))
 	if err != nil {
 		// TODO: This error is happening often when (re-?)importing SMS backup & restore MMS data files ("no such file or directory")
-		return fmt.Errorf("opening existing file: %w", err)
+		return false, fmt.Errorf("opening existing file: %w", err)
 	}
 	defer f.Close()
 
 	_, err = io.Copy(h, f)
 	if err != nil {
-		return fmt.Errorf("checking file integrity: %w", err)
+		return false, fmt.Errorf("checking file integrity: %w", err)
 	}
 
 	existingFileHash := h.Sum(nil)
@@ -497,7 +508,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 			zap.Binary("actual_checksum", existingFileHash))
 		err := os.Rename(p.tl.FullPath(*canonical), p.tl.FullPath(*existingDatafile))
 		if err != nil {
-			return fmt.Errorf("replacing modified data file: %w", err)
+			return false, fmt.Errorf("replacing modified data file: %w", err)
 		}
 	} else {
 		// everything checks out; delete the newly-downloaded file
@@ -508,7 +519,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 			zap.Binary("checksum", checksum))
 		err = os.Remove(p.tl.FullPath(*canonical))
 		if err != nil {
-			return fmt.Errorf("removing duplicate data file: %w", err)
+			return false, fmt.Errorf("removing duplicate data file: %w", err)
 		}
 	}
 
@@ -520,7 +531,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 
 	*canonical = *existingDatafile
 
-	return nil
+	return true, nil
 }
 
 // randomString returns a string of n random characters.

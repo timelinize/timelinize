@@ -118,6 +118,18 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 	for {
 		var pageResults []thumbnailTask
 
+		// prevent duplicates within a page; when we load a page, we do check
+		// each row to see if a thumbnail has already been generated (recently
+		// enough), but since we don't actually generate thumbnails until after
+		// doing all the checks for a page (for efficiency), it's possible that
+		// multiple rows on the page which share a data file would both add the
+		// same file to the task queue; so we have to deduplicate those per-page,
+		// otherwise we not only duplicate work, but our final count is wrong
+		// from the estimated total -- by the time we get to the next page, the
+		// thumbnails for this page have all been generated and stored in the DB,
+		// so we don't need to de-duplicate in memory across all pages
+		pageDataFiles, pageDataIDs := make(map[string]struct{}), make(map[int64]struct{})
+
 		// get the items in reverse timestamp order since the
 		// most recent items are most likely to be displayed by
 		// various frontend pages, i.e. the user will likely
@@ -179,19 +191,27 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 			lastItemID = rowID
 			lastTimestamp = *timestamp
 
+			// if the item qualifies for a thumbnail, make sure it's not a duplicate
+			// on this page before adding it to the queue
 			if qualifiesForThumbnail(dataType) {
 				if dataID != nil {
-					pageResults = append(pageResults, thumbnailTask{
-						DataID:    *dataID,
-						DataType:  *dataType,
-						ThumbType: thumbnailType(*dataType, false),
-					})
+					if _, ok := pageDataIDs[*dataID]; !ok {
+						pageDataIDs[*dataID] = struct{}{}
+						pageResults = append(pageResults, thumbnailTask{
+							DataID:    *dataID,
+							DataType:  *dataType,
+							ThumbType: thumbnailType(*dataType, false),
+						})
+					}
 				} else if dataFile != nil {
-					pageResults = append(pageResults, thumbnailTask{
-						DataFile:  *dataFile,
-						DataType:  *dataType,
-						ThumbType: thumbnailType(*dataType, false),
-					})
+					if _, ok := pageDataFiles[*dataFile]; !ok {
+						pageDataFiles[*dataFile] = struct{}{}
+						pageResults = append(pageResults, thumbnailTask{
+							DataFile:  *dataFile,
+							DataType:  *dataType,
+							ThumbType: thumbnailType(*dataType, false),
+						})
+					}
 				}
 			}
 		}

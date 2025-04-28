@@ -353,7 +353,7 @@ func (e *Entity) Anonymize() {
 	// obfuscated space. Oh well.
 	if e.Name != "" {
 		var fakeName string
-		names := strings.Split(e.Name, " ")
+		names := strings.Split(strings.ToLower(e.Name), " ")
 		for i, name := range names {
 			name = strings.TrimSpace(name)
 			if name == "" {

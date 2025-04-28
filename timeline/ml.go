@@ -90,6 +90,11 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 	}
 	job.SetTotal(jobSize)
 
+	if jobSize == 0 {
+		logger.Info("nothing to do", zap.Int("count", jobSize))
+		return nil
+	}
+
 	logger.Info("generating embeddings for items from import job", zap.Int("count", jobSize))
 
 	var thisPageStart int64

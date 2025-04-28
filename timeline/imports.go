@@ -65,7 +65,7 @@ type ImportJob struct {
 	// (reset each time the job is started)
 	itemCount, newItemCount, updatedItemCount, skippedItemCount *int64
 	newEntityCount                                              *int64
-	thumbnailCount, embeddingCount                              *int64
+	thumbnailCount                                              *int64
 
 	job *ActiveJob
 
@@ -84,7 +84,6 @@ func (ij ImportJob) checkpoint(estimatedSize *int64, outer, inner int, ds any) e
 		OuterIndex:           outer,
 		InnerIndex:           inner,
 		ThumbnailCount:       atomic.LoadInt64(ij.thumbnailCount),
-		EmbeddingCount:       atomic.LoadInt64(ij.embeddingCount),
 		DataSourceCheckpoint: ds,
 	})
 }
@@ -130,7 +129,6 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 	ij.skippedItemCount = new(int64)
 	ij.newEntityCount = new(int64)
 	ij.thumbnailCount = new(int64)
-	ij.embeddingCount = new(int64)
 	ij.pMu = new(sync.Mutex)
 
 	estimating := ij.EstimateTotal
@@ -145,9 +143,8 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 		if err != nil {
 			return fmt.Errorf("decoding checkpoint: %w", err)
 		}
-		// restore thumbnail-eligible or embedding-eligible item count
+		// restore thumbnail-eligible item count
 		atomic.StoreInt64(ij.thumbnailCount, chkpt.ThumbnailCount)
-		atomic.StoreInt64(ij.embeddingCount, chkpt.EmbeddingCount)
 		// in theory, resuming a job should have the same configuration as
 		// before, so this may take us out of "estimating" mode if that had
 		// already been completed, but I don't think it should ever put us
@@ -536,12 +533,6 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 }
 
 func (ij ImportJob) generateEmbeddingsForImportedItems() {
-	// TODO: This is not really accurate/useful, since we just calculate it in the job.
-	embeddingCount := atomic.LoadInt64(ij.embeddingCount)
-	if embeddingCount == 0 {
-		return
-	}
-
 	ij.job.Logger().Info("creating embeddings job from import")
 
 	job := embeddingJob{
