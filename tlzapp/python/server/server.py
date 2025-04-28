@@ -27,6 +27,14 @@ import requests
 import sqlite_vec
 import sqlite3
 import torch
+from argparse import ArgumentParser
+
+parser = ArgumentParser()
+parser.add_argument("--host", help="Host/interface to bind to")
+parser.add_argument("--port", help="Port to serve on", type=int)
+parser.add_argument("--pingback", help="Pingback URL to notify parent process when the server is ready")
+args = parser.parse_args()
+
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else "cpu")
 MODEL = "google/siglip2-so400m-patch16-naflex" # (~4.5 GB)   # huggingface model name
@@ -37,6 +45,10 @@ vision_model = Siglip2VisionModel.from_pretrained(MODEL).to(DEVICE)
 image_classifier = pipeline(task="zero-shot-image-classification", model=MODEL, device=DEVICE)
 
 app = Flask(__name__)
+
+@app.route("/health-check")
+def healthCheck():
+	return ""
 
 @app.route("/embedding", methods=["QUERY"])
 def embedding():
@@ -105,5 +117,10 @@ def classify():
 	return results
 
 if __name__ == "__main__":
-	app.run(host='127.0.0.1', port=12003)
+	# notify parent process the model has loaded and the server is becoming available
+	if args.pingback:
+		requests.get(args.pingback)
+
+	# start the web service
+	app.run(host=args.host or "127.0.0.1", port=args.port or 12003)
 

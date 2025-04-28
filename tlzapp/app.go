@@ -37,6 +37,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,7 +55,8 @@ type App struct {
 
 	commands map[string]Endpoint
 
-	server   server
+	server server
+
 	pyServer *exec.Cmd
 
 	// references to embedded assets... due to limitations
@@ -247,10 +249,10 @@ func (a *App) MustServe() error {
 	return a.serve()
 }
 
-func (a *App) startPythonServer() error {
+func (a *App) startPythonServer(host string, port int) error {
 	// nothing to do if uv isn't installed
 	if _, err := exec.LookPath("uv"); err != nil {
-		a.log.Warn("uv is not installed in PATH; semantic features will be unavailable (to fix: install uv, then restart app)", zap.Error(err))
+		a.log.Warn("uv is not installed in PATH; semantic features will be unavailable (to fix: install uv into PATH, then restart app)", zap.Error(err))
 		return nil
 	}
 
@@ -296,7 +298,11 @@ func (a *App) startPythonServer() error {
 
 	// run the python server such that the venv is relocated to its own
 	// folder outside the project folder (but still in the app data dir)
-	cmd := exec.Command("uv", "run", "server.py")
+	//nolint:gosec
+	cmd := exec.Command(
+		"uv", "run", "server.py",
+		"--host", host,
+		"--port", strconv.Itoa(port))
 	cmd.Dir = projectPath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -306,7 +312,7 @@ func (a *App) startPythonServer() error {
 }
 
 func (a *App) serve() error {
-	if err := a.startPythonServer(); err != nil {
+	if err := a.startPythonServer(timeline.PyHost, timeline.PyPort); err != nil {
 		return fmt.Errorf("starting ML server: %w", err)
 	}
 

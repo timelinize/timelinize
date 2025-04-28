@@ -25,16 +25,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"go.uber.org/zap"
 )
 
-const mlServer = "http://127.0.0.1:12003/"
+const (
+	PyHost = "127.0.0.1"
+	PyPort = 12003
+)
 
 type embeddingJob struct {
 	// be sure not to include duplicates in this list
@@ -93,6 +99,12 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 	if jobSize == 0 {
 		logger.Info("nothing to do", zap.Int("count", jobSize))
 		return nil
+	}
+
+	logger.Info("verifying that python server is available")
+
+	if !pythonServerReady(job.ctx, true) {
+		return errors.New("python server not ready")
 	}
 
 	logger.Info("generating embeddings for items from import job", zap.Int("count", jobSize))
@@ -313,7 +325,11 @@ func generateEmbedding(ctx context.Context, dataType string, data []byte, filena
 		return nil, errors.New("content type is required")
 	}
 
-	endpoint := mlServer + "/embedding"
+	if !pythonServerReady(ctx, false) {
+		return nil, errors.New("python server not ready")
+	}
+
+	endpoint := pyServerURL("/embedding")
 
 	var body io.Reader
 	if data != nil {
@@ -366,7 +382,7 @@ func generateEmbedding(ctx context.Context, dataType string, data []byte, filena
 
 // TODO: endpoint currently works for images only
 func classify(ctx context.Context, itemFiles map[uint64]string, labels []string) (map[uint64]float64, error) {
-	endpoint := mlServer + "/classify"
+	endpoint := pyServerURL("/classify")
 
 	jsonBytes, err := json.Marshal(itemFiles)
 	if err != nil {
@@ -419,4 +435,41 @@ func qualifiesForEmbedding(mimeType *string) bool {
 type embeddingJobCheckpoint struct {
 	PageStart   int64 `json:"page_start"`
 	IndexOnPage int   `json:"index_on_page"`
+}
+
+func pythonServerReady(ctx context.Context, wait bool) bool {
+	healthCheckURL := pyServerURL("/health-check")
+
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthCheckURL, nil)
+		if err != nil {
+			panic("could not construct health check request: " + err.Error())
+		}
+
+		resp, err := pythonServerHTTPClient.Do(req)
+		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			resp.Body.Close()
+			return true
+		}
+
+		if !wait {
+			return false
+		}
+
+		const pause = 500 * time.Millisecond
+		select {
+		case <-time.After(pause):
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
+func pyServerURL(path string) string {
+	hostPort := net.JoinHostPort(PyHost, strconv.Itoa(PyPort))
+	return fmt.Sprintf("http://%s%s", hostPort, path)
+}
+
+var pythonServerHTTPClient = &http.Client{
+	Timeout: 2 * time.Second,
 }

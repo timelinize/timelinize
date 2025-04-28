@@ -387,9 +387,17 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	// if err != nil {
 	// 	return nil, fmt.Errorf("resetting item_data: %w", err)
 	// }
-	// _, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id>1`)
+	// _, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id > 1`)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("resetting entities: %w", err)
+	// }
+	// _, err = db.ExecContext(ctx, `DELETE FROM attributes WHERE id NOT IN (SELECT attribute_id FROM entity_attributes WHERE entity_id = 1)`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting attributes: %w", err)
+	// }
+	// _, err = db.ExecContext(ctx, `DELETE FROM entity_attributes WHERE entity_id > 1`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting entity_attributes: %w", err)
 	// }
 	// _, err = db.ExecContext(ctx, `DELETE FROM relationships`)
 	// if err != nil {
@@ -1260,7 +1268,7 @@ const (
 	// (i.e. prefer incoming even if incoming is NULL)
 	updatePolicyOverwriteExisting
 
-	// TODO: choose one based on properties of the item? like larger or smaller one, etc... (e.g. if we want to prefer the higher-quality photo...)
+	// TODO: choose one based on properties of the item? like larger or smaller one, etc... (e.g. if we want to prefer the higher-quality photo... or a certain data source)
 )
 
 // Files belonging at the root within the timeline repository.
