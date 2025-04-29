@@ -65,6 +65,10 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 	// if the embeddings to generate were explicitly enumerated, simply do those
 	if len(ej.ItemIDs) > 0 {
+		job.Logger().Info("waiting until Python server is ready")
+		if !pythonServerReady(job.ctx, true) {
+			return errors.New("python server not ready")
+		}
 		job.Logger().Info("generating embeddings using predefined list", zap.Int("count", len(ej.ItemIDs)))
 		return ej.processInBatches(job, ej.ItemIDs, 0, chkpt.IndexOnPage)
 	}
@@ -101,7 +105,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 		return nil
 	}
 
-	logger.Info("verifying that python server is available")
+	logger.Info("waiting until Python server is ready")
 
 	if !pythonServerReady(job.ctx, true) {
 		return errors.New("python server not ready")
@@ -323,10 +327,6 @@ func generateSerializedEmbedding(ctx context.Context, dataType string, data []by
 func generateEmbedding(ctx context.Context, dataType string, data []byte, filename *string) ([]byte, error) {
 	if dataType == "" {
 		return nil, errors.New("content type is required")
-	}
-
-	if !pythonServerReady(ctx, false) {
-		return nil, errors.New("python server not ready")
 	}
 
 	endpoint := pyServerURL("/embedding")

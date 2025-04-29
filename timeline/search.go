@@ -189,7 +189,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	params.SemanticText = strings.TrimSpace(params.SemanticText)
 
 	// get the DB query string and associated arguments
-	q, args, err := tl.prepareSearchQuery(params)
+	q, args, err := tl.prepareSearchQuery(ctx, params)
 	if err != nil {
 		return SearchResults{}, err
 	}
@@ -394,7 +394,7 @@ func (tl *Timeline) convertNamesToIDs(params *ItemSearchParams) {
 	tl.cachesMu.RUnlock()
 }
 
-func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, error) {
+func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchParams) (string, []any, error) {
 	if (params.Latitude == nil && params.Longitude != nil) || (params.Latitude != nil && params.Longitude == nil) {
 		return "", nil, errors.New("location proximity search must include both lat and lon coordinates")
 	}
@@ -777,8 +777,11 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 			targetVectorClause = "(SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)"
 			args = append(args, params.SimilarTo)
 		} else if params.SemanticText != "" {
-			// search relative to an arbitrary input (TODO: support image inputs too)
-			embedding, err := generateEmbedding(tl.ctx, "text/plain", []byte(params.SemanticText), nil)
+			// search relative to an arbitrary input (TODO: support image inputs too) - python server must be online
+			if !pythonServerReady(ctx, false) {
+				return "", nil, errors.New("python server not ready")
+			}
+			embedding, err := generateEmbedding(ctx, "text/plain", []byte(params.SemanticText), nil)
 			if err != nil {
 				return "", nil, err
 			}
