@@ -325,14 +325,14 @@ function notify(params) {
 	}
 
 	if (params.title) {
-		$('.alert-title', notifElem).innerText = params.title;
+		$('.alert-heading', notifElem).innerText = params.title;
 	} else {
-		$('.alert-title', notifElem).remove();
+		$('.alert-heading', notifElem).remove();
 	}
 	if (params.message) {
-		$('.text-secondary', notifElem).innerText = params.message;
+		$('.alert-description', notifElem).innerText = params.message;
 	} else {
-		$('.text-secondary', notifElem).remove();
+		$('.alert-description', notifElem).remove();
 	}
 	$('.alert-icon', notifElem).innerHTML = icons[params.type];
 

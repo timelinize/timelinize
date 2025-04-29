@@ -997,10 +997,6 @@ iframe {
 	max-width: 400px;
 }
 
-.alert-timed {
-	position: relative;
-}
-
 .alert-timer-progress-bar-container {
 	position: absolute;
 	right: 0;
@@ -1008,7 +1004,7 @@ iframe {
 	left: 0;
 	grid-column: auto !important;
 	overflow: hidden;
-	border-bottom-right-radius: 5px;
+	border-bottom-right-radius: 8px;
 }
 
 .alert-timer-progress-bar {
@@ -1037,4 +1033,14 @@ iframe {
 		transform: scale(.4);
 		opacity: 0;
 	}
+}
+
+/* TODO: Tabler 1.2 introduced these styles to fix the dismiss button positioning, but I
+haven't upgraded yet for other reasons. After upgrading we can probably remove this shim. */
+.alert-dismissible .btn-close {
+	position: absolute;
+	top: calc(var(--tblr-alert-padding-x) / 2 - 1px);
+	right: calc(var(--tblr-alert-padding-y) / 2 - 1px);
+	z-index: 1;
+	padding: calc(var(--tblr-alert-padding-y) * 1.25) var(--tblr-alert-padding-x);
 }

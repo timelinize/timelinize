@@ -1,12 +1,11 @@
 <template id="tpl-alert">
-	<div class="alert bg-white alert-show" role="alert">
-		<div class="d-flex">
-			<div class="alert-icon"></div>
-			<div>
-				<h4 class="alert-title"></h4>
-				<div class="text-secondary"></div>
-			</div>
+	<div class="alert alert-minor alert-dismissible bg-white alert-show" role="alert">
+		<div class="alert-icon"></div>
+		<div>
+			<h4 class="alert-heading"></h4>
+			<div class="alert-description"></div>
 		</div>
+		<a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
 		<div class="alert-timer-progress-bar-container"> 
 			<div class="alert-timer-progress-bar"></div>
 		</div>
