@@ -567,7 +567,7 @@ function moveMapInto(mapContainerElem) {
 			}
 		}
 
-		if (resizeCount >= 2) {
+		if (resizeCount >= 3) {
 			// we're done, so no need to observe anymore
 			observer.disconnect();
 		}
