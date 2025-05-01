@@ -492,7 +492,7 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 					copy(anonItem.Owner.Attributes, item.Owner.Attributes)
 					for i := range anonItem.Owner.Attributes {
 						anonItem.Owner.Attributes[i].Metadata = make(Metadata)
-						for k, v := range entity.Attributes[i].Metadata {
+						for k, v := range anonItem.Owner.Attributes[i].Metadata {
 							anonItem.Owner.Attributes[i].Metadata[k] = v
 						}
 					}
@@ -910,6 +910,15 @@ func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r R
 	}
 
 	if otherGraph != nil {
+		// sidecar live photos don't get thumbnails; this is the only/best spot
+		// in the pipeline where we will know that an item is a sidecar live photo,
+		// so we set this here to avoid counting this toward the expected thumbnail
+		// job size later
+		// (TODO: We could move the definition of RelMotion into this package, but, eh. this works for now.)
+		if r.Relation.Label == "motion" && otherGraph.Item != nil {
+			otherGraph.Item.skipThumb = true
+		}
+
 		err := p.processGraph(ctx, tx, otherGraph)
 		if err != nil {
 			return fmt.Errorf("%s node: %w", fromOrTo, err)

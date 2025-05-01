@@ -180,9 +180,10 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		return fmt.Errorf("replacing data file with identical existing file: %w", err)
 	}
 
-	// if this file is new/unique, and should get a thumbnail, count it so we can know how big
-	// the thumbnail job will be after the import concludes
-	if !fileWasDuplicate && qualifiesForThumbnail(it.row.DataType) {
+	// if this file is new/unique, and cam get a thumbnail, and SHOULD get a thumbnail (i.e.
+	// is not a motion/live photo sidecar), count it so we can know how big the thumbnail
+	// job will be after the import concludes
+	if !fileWasDuplicate && qualifiesForThumbnail(it.row.DataType) && !it.skipThumb {
 		atomic.AddInt64(p.ij.thumbnailCount, 1)
 	}
 

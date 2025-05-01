@@ -381,6 +381,8 @@ async function renderConversationChunk(direction) {
 			}
 		}
 
+		activateTooltips();
+
 		// TODO: error handling
 	} /*catch(err) {
 		console.error("caught:", err);

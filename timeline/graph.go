@@ -283,6 +283,7 @@ type Item struct {
 	dataFileHash []byte // should only be set if dataFileSize > 0
 	idHash       []byte
 	contentHash  []byte
+	skipThumb    bool // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
