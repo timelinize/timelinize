@@ -36,7 +36,7 @@ import (
 const maxThrottleCPUPct = 0.25
 
 var (
-	throttleSize         = int(float64(runtime.NumCPU()) * maxThrottleCPUPct)
+	throttleSize         = max(int(float64(runtime.NumCPU())*maxThrottleCPUPct), 1)
 	cpuIntensiveThrottle = make(chan struct{}, throttleSize)
 )
 

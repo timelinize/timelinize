@@ -175,15 +175,19 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	// which is kind of pointless IMO
 	// (this is where it's important that it.row.DataFile is not a pointer to it.dataFileName,
 	// because we end up changing the value of it.dataFileName in this method)
-	fileWasDuplicate, err := p.replaceWithExisting(tx, &it.dataFileName, it.dataFileHash, it.row.ID)
+	_, err := p.replaceWithExisting(tx, &it.dataFileName, it.dataFileHash, it.row.ID)
 	if err != nil {
 		return fmt.Errorf("replacing data file with identical existing file: %w", err)
 	}
 
-	// if this file is new/unique, and cam get a thumbnail, and SHOULD get a thumbnail (i.e.
-	// is not a motion/live photo sidecar), count it so we can know how big the thumbnail
-	// job will be after the import concludes
-	if !fileWasDuplicate && qualifiesForThumbnail(it.row.DataType) && !it.skipThumb {
+	// Count data files which are eligible for a thumbnail and which are not excluded from
+	// receiving a thumbnail (like live photos/motion picture sidecar files, which are
+	// generally an exception from normal related items). This count is not used to configure
+	// the thumbnail job's total size, but it was in a previous version of the code. Now the
+	// job calculates it when it starts. This count is mainly used to determine whether to
+	// even start a thumbnail job. TODO: That said, maybe we should always start a thumbnail
+	// job even if it does nothing? Then we don't have to count here.
+	if qualifiesForThumbnail(it.row.DataType) && !it.skipThumb {
 		atomic.AddInt64(p.ij.thumbnailCount, 1)
 	}
 
