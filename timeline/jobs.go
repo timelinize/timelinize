@@ -918,7 +918,32 @@ func (tl *Timeline) PauseJob(ctx context.Context, jobID uint64) error {
 	// (closing this channel will unpause the job)
 	paused := make(chan struct{})
 
-	// store reference to the new channel so it can be closed (to unpause) later
+	// What happens next is done deliberately in this order:
+	// 1. Update the job's state in the DB. This is authoritative, so if the program
+	//    terminates before the job pauses, at least the user's intent will be preserved.
+	// 2. Signal the job to pause. The UI is currently showing temporary "Pausing..."
+	//    text, and it can take time for the job to receive our signal and pause,
+	//    for example if it's in the middle of a batch of thumbnails being generated;
+	//    while it's finishing those, it's emitting job status updates and the UI will
+	//    update accordingly, so if we set the state to "paused" before the job has
+	//    actually paused, it looks dumb because it'll be streaming progress while paused.
+	// 3. Update the UI's state to "paused" so that controls appear to allow resumption.
+
+	// step 1. update the DB with the authoritative job state
+	tl.dbMu.Lock()
+	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobPaused, JobStarted, job.id) // TODO: LIMIT 1
+	tl.dbMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("job paused, but error updating job state in DB: %w", err)
+	}
+
+	// step 2. the job should soon select on the pause channel to receive this, then
+	// immediately try to receive from the paused channel, which is effectively the
+	// pause behavior, as it blocks the job's goroutine until we unpause
+	job.pause <- paused
+
+	// step 3. store reference to the new channel so it can be closed (to unpause) later,
+	// and update the UI with the job's paused state
 	job.mu.Lock()
 	if job.paused != nil {
 		// already paused (not an error, just a no-op)
@@ -927,21 +952,8 @@ func (tl *Timeline) PauseJob(ctx context.Context, jobID uint64) error {
 	}
 	job.paused = paused
 	job.currentState = JobPaused
-	job.flushProgress(job.statusLog) // note that the UI might get the state update before this function, and thus its HTTP request, returns
+	job.flushProgress(job.statusLog) // note that the UI might get the state update before this function, and thus its HTTP request, returns -- TODO: not true if this change works
 	job.mu.Unlock()
-
-	// the job should soon select on the pause channel to receive this,
-	// then immediately try to receive from the paused channel, which is
-	// effectively the pause as it will block for now
-	job.pause <- paused
-
-	// by now, the job is paused, so we can update the DB
-	tl.dbMu.Lock()
-	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobPaused, JobStarted, job.id) // TODO: LIMIT 1
-	tl.dbMu.Unlock()
-	if err != nil {
-		return fmt.Errorf("job paused, but error updating job state in DB: %w", err)
-	}
 
 	return nil
 }
@@ -968,7 +980,16 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 		return tl.StartJob(ctx, jobID, false)
 	}
 
-	// unpause by closing the paused channel
+	// update the DB first because it's authoritative for the job's state
+	tl.dbMu.Lock()
+	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
+	tl.dbMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("job unpaused, but error updating job state in DB: %w", err)
+	}
+
+	// unpause by closing the pause channel, delete the pause channel,
+	// and then update the UI as to the job's new state
 	job.mu.Lock()
 	defer job.mu.Unlock()
 
@@ -981,13 +1002,6 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 	job.currentState = JobStarted
 
 	job.flushProgress(job.statusLog)
-
-	tl.dbMu.Lock()
-	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
-	tl.dbMu.Unlock()
-	if err != nil {
-		return fmt.Errorf("job unpaused, but error updating job state in DB: %w", err)
-	}
 
 	return nil
 }

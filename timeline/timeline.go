@@ -476,6 +476,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		if err != nil {
 			return nil, fmt.Errorf("scanning row for resuming job: %w", err)
 		}
+		Log.Info("resuming job that was queued or interrupted", zap.Uint64("job_id", jobID))
 		if err = tl.StartJob(ctx, jobID, false); err != nil {
 			return nil, fmt.Errorf("starting job %d from last open: %w", jobID, err)
 		}

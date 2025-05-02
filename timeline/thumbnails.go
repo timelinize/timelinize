@@ -351,18 +351,19 @@ func (thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, star
 	// - Batching in this way acts as a goroutine throttle, so we don't flood the CPU.
 	//
 	// Downside: Videos thumbnails often take much longer to generate than stills, so
-	// it can appear that the whole job has paused after the still thumbnails are
+	// it can appear that the whole job has stalled after the still thumbnails are
 	// done. It would be interesting to see if we can find a way to at least keep the
 	// status message current with which video is being processed, since many of the
 	// stills will be done so quickly the user won't even see them. Also, smaller
-	// batches mean better checkpoint precision, but less concurrency (speed). Since
-	// we don't use checkpoints with large import jobs (since the tasks are calculated
+	// batches mean better checkpoint and pause precision, but less concurrency (speed).
+	// Since we don't use checkpoints with large import jobs (as the tasks are calculated
 	// on-the-fly based on import ID), and we can resume a job by paging through the
 	// database without a checkpoint, we prefer a larger batch size when checkpointing
 	// isn't enabled. This should help keep the CPU busy longer while working on videos,
-	// assuming mostly stills in the batch.
+	// assuming mostly stills in the batch. But not too large, so that pausing doesn't
+	// take forever.
 	var wg sync.WaitGroup
-	batchSize := 50
+	batchSize := 25
 	if checkpoints {
 		batchSize = 5
 	}
