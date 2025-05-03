@@ -72,8 +72,8 @@ func TestFileImport(t *testing.T) {
 		if message.Item.Timestamp.Hour() != 12 {
 			t.Fatalf("message %d should have been near midday, but was %d", i, message.Item.Timestamp.Hour())
 		}
-		if int(message.Item.Timestamp.Second()) != expected[i].index {
-			t.Fatalf("incorrect month for message %d, wanted %d but was %d", i, expected[i].index, int(message.Item.Timestamp.Second()))
+		if message.Item.Timestamp.Second() != expected[i].index {
+			t.Fatalf("incorrect month for message %d, wanted %d but was %d", i, expected[i].index, message.Item.Timestamp.Second())
 		}
 
 		validateItemData(t, "", expected[i].text, message.Item.Content, "incorrect text for message %d", i)
@@ -118,7 +118,6 @@ func validateItemData(t *testing.T, expectedFilename string, expectedData any, i
 			t.Fatalf("%s; should not have had a DataFunc", errMsg)
 		}
 		return
-
 	} else if exp, ok := expectedData.(io.Reader); ok {
 		var err error
 		expectedBytes, err = io.ReadAll(exp)
@@ -126,13 +125,10 @@ func validateItemData(t *testing.T, expectedFilename string, expectedData any, i
 			t.Errorf("%s; couldn't read expected data: %v", errMsg, err)
 			return
 		}
-
 	} else if isStr {
 		expectedBytes = []byte(expectedStr)
-
 	} else if exp, ok := expectedData.([]byte); ok {
 		expectedBytes = exp
-
 	} else {
 		t.Errorf("%s; unable to check content with expected data type: %T", errMsg, expectedData)
 		return
