@@ -36,6 +36,7 @@ func TestFileImport(t *testing.T) {
 		index       int
 		text        string
 		attachments []string
+		metadata    map[string]any
 	}{
 		// Messages and calls are end-to-end encrypted
 		// Person 2 changed their phone number
@@ -47,9 +48,31 @@ func TestFileImport(t *testing.T) {
 		// You deleted this message
 		{owner: "Person 3", index: 9, text: "How rude"},
 		{owner: "Person 1", index: 10, text: "", attachments: []string{"some-doc.pdf"}},
-		// Poll is ignored, for now
-		{owner: "Person 2", index: 12, text: "British Library (96 Euston Rd, London, Greater London NW1 2DB): https://foursquare.com/v/4ac518cef964a52019a620e3"},
-		{owner: "Person 3", index: 13, text: "Location: https://maps.google.com/?q=51.513767,-0.098266"},
+		{owner: "Person 1", index: 11, text: "A question\r\n- Option A (1 vote)\r\n- Option B (2 votes)",
+			metadata: map[string]any{
+				"Poll Question": "A question",
+				"Poll Option 1": "Option A",
+				"Poll Votes 1":  "1",
+				"Poll Option 2": "Option B",
+				"Poll Votes 2":  "2",
+			}},
+		{owner: "Person 2", index: 12, text: "British Library (96 Euston Rd, London, Greater London NW1 2DB): https://foursquare.com/v/4ac518cef964a52019a620e3",
+			metadata: map[string]any{
+				"Location Foursquare ID": "4ac518cef964a52019a620e3",
+			}},
+		{owner: "Person 3", index: 13, text: "Location: https://maps.google.com/?q=51.513767,-0.098266",
+			metadata: map[string]any{
+				"Location Latitude":  51.513767,
+				"Location Longitude": -0.098266,
+			}},
+		// Missing image means message is ignored
+		// Missed voice call omitted
+		// Taken video call omitted
+		// Deleted message omitted
+		{owner: "Person 2", index: 18, text: "An edited message",
+			metadata: map[string]any{
+				"Edited": true,
+			}},
 	}
 
 	i := 0
@@ -73,7 +96,7 @@ func TestFileImport(t *testing.T) {
 			t.Fatalf("message %d should have been near midday, but was %d", i, message.Item.Timestamp.Hour())
 		}
 		if message.Item.Timestamp.Second() != expected[i].index {
-			t.Fatalf("incorrect month for message %d, wanted %d but was %d", i, expected[i].index, message.Item.Timestamp.Second())
+			t.Fatalf("incorrect second for message %d, wanted %d but was %d", i, expected[i].index, message.Item.Timestamp.Second())
 		}
 
 		validateItemData(t, "", expected[i].text, message.Item.Content, "incorrect text for message %d", i)
@@ -155,6 +178,6 @@ func validateItemData(t *testing.T, expectedFilename string, expectedData any, i
 		t.Fatalf("%s; filename incorrect, wanted %s but was %s", errMsg, expectedFilename, itemData.Filename)
 	}
 	if !bytes.Equal(actualBytes, expectedBytes) {
-		t.Fatalf("%s; item data incorrect", errMsg)
+		t.Fatalf("%s; item data incorrect, wanted:\n %v\n %s\nbut got:\n %v\n %s", errMsg, expectedBytes, string(expectedBytes), actualBytes, string(actualBytes))
 	}
 }

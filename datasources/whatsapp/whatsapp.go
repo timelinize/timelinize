@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -77,6 +76,13 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 			},
 		}
 
+		var attachment *timeline.Item
+		// If a line has an attachment the final \x200E separated column is always about that attachment
+		if sub[1] == "\u200E" {
+			attachment = attachmentToItem(content[len(content)-1], timestamp, owner, dirEntry)
+			content = content[:len(content)-1]
+		}
+
 		var rootKey timeline.ItemRetrieval
 		// Note: This isn't perfect; if someone renames a contact in their address book then the same message in a new export won't match.
 		// We can't use a hash of the content of the message, as the key use-case here is to be able to add in "caption" text, if Meta fixes
@@ -92,46 +98,30 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 			},
 		}
 
-		hasAttachments := false
-		// First item is always the message, subsequent are context notes & attachment declarations
-		for _, part := range content[1:] {
-			// We're dropping non-attachment context notes, which are announcements about changes in phone number, or the number of pages of a PDF
-
-			if filename, isAttachment := strings.CutPrefix(part, attachPrefix); isAttachment {
-				filename = strings.TrimSuffix(strings.TrimSpace(filename), attachSuffix)
-
-				var fileKey timeline.ItemRetrieval
-				fileKey.SetKey(fmt.Sprintf("whatsapp-%s-%s", timestamp.Format(time.DateTime), filename))
-
-				message.ToItem(timeline.RelAttachment, &timeline.Item{
-					Classification: timeline.ClassMessage,
-					Timestamp:      timestamp,
-					Owner:          owner,
-					Retrieval:      fileKey,
-					Content: timeline.ItemData{
-						Filename: filename,
-						Data: func(_ context.Context) (io.ReadCloser, error) {
-							return dirEntry.FS.Open(filename)
-						},
-					},
-				})
-				hasAttachments = true
-			}
-		}
-
 		// Note: WhatsApp chat exports currently (2025-06-03) totally omit text sent as a caption to an attachment, so these are never included in the data
 		// However, for non-image files, this part of the line often includes the original filename instead, which we don't want to keep
-		if !hasAttachments {
-			messageText := strings.TrimSpace(content[0])
-			// Skip messages context-only messages
+		var messageText string
+		if attachment == nil {
+			messageText = strings.TrimSpace(content[0])
+
+			if pollMessage, pollMeta, isPoll := extractPoll(content); isPoll {
+				messageText = pollMessage
+				message.Item.Metadata = pollMeta
+			} else if locationMessage, locationMeta, isLocation := extractLocation(content); isLocation {
+				messageText = locationMessage
+				message.Item.Metadata = locationMeta
+			}
+
+			// Skip messages that have no content & no attachment
 			if messageText == "" {
-				// TODO: This includes context like "you deleted this message"; do we want to keep those?
 				continue
 			}
 
 			message.Item.Content = timeline.ItemData{
 				Data: timeline.StringData(messageText),
 			}
+		} else {
+			message.ToItem(timeline.RelAttachment, attachment)
 		}
 
 		// Record all recipients for messages we're keeping

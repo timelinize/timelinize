@@ -12,7 +12,12 @@ over multiple lines!
 ‎[2020-10-01, 12:00:10] Person 1: A PDF.pdf • ‎1 page ‎<attached: some-doc.pdf>
 [2020-11-01, 12:00:11] Person 1: ‎POLL:
 A question
-OPTION: Option 1 (1 vote)
-OPTION: Option 2 (1 vote)
-[2020-12-01, 12:00:12] Person 2: British Library (96 Euston Rd, London, Greater London NW1 2DB): https://foursquare.com/v/4ac518cef964a52019a620e3
-[2020-01-01, 12:00:13] Person 3: Location: https://maps.google.com/?q=51.513767,-0.098266
+OPTION: Option A (1 vote)
+OPTION: Option B (2 votes)
+[2020-12-01, 12:00:12] Person 2: ‎British Library (96 Euston Rd, London, Greater London NW1 2DB): https://foursquare.com/v/4ac518cef964a52019a620e3
+[2020-01-01, 12:00:13] Person 3: ‎Location: https://maps.google.com/?q=51.513767,-0.098266
+‎[2020-02-01, 12:00:14] Person 2: ‎image omitted
+[2020-03-01, 12:00:15] Person 3: ‎Missed voice call
+[2020-04-01, 12:00:16] Person 3: ‎Video call, ‎5 min
+[2020-05-01, 12:00:17] Person 1: ‎This message was deleted.
+[2020-06-01, 12:00:18] Person 2: An edited message ‎<This message was edited>
