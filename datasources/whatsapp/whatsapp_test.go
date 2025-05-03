@@ -47,6 +47,9 @@ func TestFileImport(t *testing.T) {
 		// You deleted this message
 		{owner: "Person 3", index: 9, text: "How rude"},
 		{owner: "Person 1", index: 10, text: "", attachments: []string{"some-doc.pdf"}},
+		// Poll is ignored, for now
+		{owner: "Person 2", index: 12, text: "British Library (96 Euston Rd, London, Greater London NW1 2DB): https://foursquare.com/v/4ac518cef964a52019a620e3"},
+		{owner: "Person 3", index: 13, text: "Location: https://maps.google.com/?q=51.513767,-0.098266"},
 	}
 
 	i := 0
@@ -60,7 +63,8 @@ func TestFileImport(t *testing.T) {
 			t.Fatalf("incorrect owner for message %d, wanted %s but was %s", i, expected[i].owner, message.Item.Owner.Name)
 		}
 
-		if int(message.Item.Timestamp.Month()) != expected[i].index {
+		expectedMonth := ((expected[i].index - 1) % 12) + 1
+		if int(message.Item.Timestamp.Month()) != expectedMonth {
 			t.Fatalf("incorrect month for message %d, wanted %d but was %d", i, expected[i].index, int(message.Item.Timestamp.Month()))
 		}
 		// TODO: Timestamp timezones need to all be interpreted as "local time, at the time"

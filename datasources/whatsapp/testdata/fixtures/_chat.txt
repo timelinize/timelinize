@@ -10,3 +10,9 @@ over multiple lines!
 [2020-08-01, 12:00:08] Person 1: ‎You deleted this message.
 [2020-09-01, 12:00:09] Person 3: How rude
 ‎[2020-10-01, 12:00:10] Person 1: A PDF.pdf • ‎1 page ‎<attached: some-doc.pdf>
+[2020-11-01, 12:00:11] Person 1: ‎POLL:
+A question
+OPTION: Option 1 (1 vote)
+OPTION: Option 2 (1 vote)
+[2020-12-01, 12:00:12] Person 2: British Library (96 Euston Rd, London, Greater London NW1 2DB): https://foursquare.com/v/4ac518cef964a52019a620e3
+[2020-01-01, 12:00:13] Person 3: Location: https://maps.google.com/?q=51.513767,-0.098266
