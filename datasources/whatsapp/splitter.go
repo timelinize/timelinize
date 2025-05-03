@@ -5,7 +5,7 @@ import (
 	"regexp"
 )
 
-var messageStartRegex = regexp.MustCompile(`(?s)(` + "\u200E" + `)?\[(\d{4}-\d{2}-\d{2}), (\d{2}:\d{2}:\d{2})\] ([^:]+): `)
+var messageStartRegex = regexp.MustCompile(`(?s)(` + "\u200E" + `)?\[(\d{4}[-./]\d{2}[-./]\d{2}|\d{2}[-./]\d{2}[-./]\d{4}), (\d{2}:\d{2}:\d{2})\] ([^:]+): `)
 
 func chatSplit(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	// +1: Make sure not to match a message start if it's right at the start of the provided data

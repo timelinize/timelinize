@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,9 +58,9 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 
 		sub := messageStartRegex.FindStringSubmatch(messageLine)
 
-		timestamp, err := time.Parse(time.DateTime, sub[2]+" "+sub[3])
+		timestamp, err := parseTime(sub[2], sub[3])
 		if err != nil {
-			return fmt.Errorf("unable to convert '%s %s' into a time", sub[2], sub[3])
+			return err
 		}
 
 		content := strings.Split(messageLine[len(sub[0])-1:], "\u200E")
@@ -148,6 +149,31 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 	}
 
 	return nil
+}
+
+func parseTime(dateStr, timeStr string) (time.Time, error) {
+	yearAtEnd := true
+	sep := dateStr[2:3]
+	if _, err := strconv.Atoi(sep); err == nil {
+		yearAtEnd = false
+		sep = dateStr[4:5]
+		if _, err := strconv.Atoi(sep); err == nil {
+			return time.Time{}, fmt.Errorf("unable to convert '%s %s' into a time", dateStr, timeStr)
+		}
+	}
+
+	var format string
+	if yearAtEnd {
+		format = fmt.Sprintf("02%s01%s2006 15:04:05", sep, sep)
+	} else {
+		format = fmt.Sprintf("2006%s01%s02 15:04:05", sep, sep)
+	}
+
+	timestamp, err := time.Parse(format, dateStr+" "+timeStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("unable to convert '%s %s' into a time", dateStr, timeStr)
+	}
+	return timestamp, nil
 }
 
 const (

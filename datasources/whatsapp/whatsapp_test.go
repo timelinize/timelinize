@@ -48,7 +48,7 @@ func TestFileImport(t *testing.T) {
 		// You deleted this message
 		{owner: "Person 3", index: 9, text: "How rude"},
 		{owner: "Person 1", index: 10, text: "", attachments: []string{"some-doc.pdf"}},
-		{owner: "Person 1", index: 11, text: "A question\r\n- Option A (1 vote)\r\n- Option B (2 votes)",
+		{owner: "Person 1", index: 11, text: "A question\r\n- Option A (☑︎ 1)\r\n- Option B (☑︎ 2)",
 			metadata: map[string]any{
 				"Poll Question": "A question",
 				"Poll Option 1": "Option A",
@@ -72,6 +72,16 @@ func TestFileImport(t *testing.T) {
 		{owner: "Person 2", index: 18, text: "An edited message",
 			metadata: map[string]any{
 				"Edited": true,
+			}},
+		{owner: "Persona español", index: 19, text: "Una pregunta\r\n- Opción A (☑︎ 0)\r\n- Opción B (☑︎ 1)\r\n- Opción C (☑︎ 2)",
+			metadata: map[string]any{
+				"Poll Question": "Una pregunta",
+				"Poll Option 1": "Opción A",
+				"Poll Votes 1":  "0",
+				"Poll Option 2": "Opción B",
+				"Poll Votes 2":  "1",
+				"Poll Option 3": "Opción C",
+				"Poll Votes 3":  "2",
 			}},
 	}
 

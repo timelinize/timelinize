@@ -7,10 +7,11 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-const optionRegexStr = `OPTION: (.+) \((\d) votes?\)`
+// We use `\p{Lu}+` to match the "POLL" and "OPTION" words in any locale (eg. OPCIÓN)
+const optionRegexStr = `\p{Lu}+: (.+) \((\d) .+\)`
 
 var optionRegex = regexp.MustCompile(optionRegexStr)
-var pollRegex = regexp.MustCompile(`POLL:\r\n(.+)((\r\n` + optionRegexStr + `)+)`)
+var pollRegex = regexp.MustCompile(`\p{Lu}+:\r\n(.+)((\r\n` + optionRegexStr + `)+)`)
 
 func extractPoll(content []string) (string, timeline.Metadata, bool) {
 	if len(content) < 2 {
@@ -29,11 +30,7 @@ func extractPoll(content []string) (string, timeline.Metadata, bool) {
 		meta[fmt.Sprintf("Poll Option %d", i+1)] = opt[1]
 		meta[fmt.Sprintf("Poll Votes %d", i+1)] = opt[2]
 
-		customMessage += "\r\n- " + opt[1] + " (" + opt[2] + " vote"
-		if opt[2] != "1" {
-			customMessage += "s"
-		}
-		customMessage += ")"
+		customMessage += "\r\n- " + opt[1] + " (☑︎ " + opt[2] + ")"
 	}
 
 	return customMessage, meta, true
