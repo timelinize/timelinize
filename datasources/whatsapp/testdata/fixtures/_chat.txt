@@ -1,7 +1,7 @@
 [2020-01-01, 12:00:01] Person 1: ‎Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them.
 [2020-02-01, 12:00:02] Person 1: ‎Person 2 changed their phone number to a new number
 [2020-03-01, 12:00:03] Person 2: A message
-[2020-04-01, 12:00:04] Person 1: A reply ☺️
+[2020-04-01, 12:00:04] Person 1: A reply with _italic_ and *bold* and ~strikethrough~ and `monospace` and emoji ☺️
 [2020-05-01, 12:00:05] Person 3: Someone else
 with a lot to say
 over multiple lines!

@@ -40,7 +40,7 @@ func TestFileImport(t *testing.T) {
 		// Messages and calls are end-to-end encrypted
 		// Person 2 changed their phone number
 		{owner: "Person 2", index: 3, text: "A message"},
-		{owner: "Person 1", index: 4, text: "A reply ☺️"},
+		{owner: "Person 1", index: 4, text: "A reply with _italic_ and *bold* and ~strikethrough~ and `monospace` and emoji ☺️"},
 		{owner: "Person 3", index: 5, text: "Someone else\r\nwith a lot to say\r\nover multiple lines!"},
 		{owner: "Person 1", index: 6, text: "", attachments: []string{"some-image.jpg"}},
 		{owner: "Person 2", index: 7, text: "A retort"},
