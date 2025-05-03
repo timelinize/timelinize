@@ -1,0 +1,12 @@
+[2020-01-01, 12:00:01] Person 1: ‎Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them.
+[2020-02-01, 12:00:02] Person 1: ‎Person 2 changed their phone number to a new number
+[2020-03-01, 12:00:03] Person 2: A message
+[2020-04-01, 12:00:04] Person 1: A reply ☺️
+[2020-05-01, 12:00:05] Person 3: Someone else
+with a lot to say
+over multiple lines!
+‎[2020-06-01, 12:00:06] Person 1: ‎<attached: some-image.jpg>
+[2020-07-01, 12:00:07] Person 2: A retort
+[2020-08-01, 12:00:08] Person 1: ‎You deleted this message.
+[2020-09-01, 12:00:09] Person 3: How rude
+‎[2020-10-01, 12:00:10] Person 1: A PDF.pdf • ‎1 page ‎<attached: some-doc.pdf>
