@@ -275,15 +275,17 @@ type Item struct {
 	dataText *string
 
 	// state for processing pipeline phases
-	row          ItemRow
-	dataFileIn   io.ReadCloser
-	dataFileOut  *os.File
-	dataFileSize int64
-	dataFileName string
-	dataFileHash []byte // should only be set if dataFileSize > 0
-	idHash       []byte
-	contentHash  []byte
-	skipThumb    bool // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
+	row                 ItemRow
+	dataFileIn          io.ReadCloser
+	dataFileOut         *os.File
+	dataFileSize        int64
+	dataFileName        string // path to the data file relative to the repo root
+	dataFileHash        []byte // should only be set if dataFileSize > 0
+	desiredDataFileName string // base filename (sans path) the processor tried to get for the file, but may have been taken
+	idHash              []byte
+	contentHash         []byte
+	skipThumb           bool   // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
+	oldDataFile         string // when replacing a data file, used to clean things up at the end of processing the item
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.

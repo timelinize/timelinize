@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"io/fs"
 	"mime"
 	"net/http"
 	"os"
@@ -773,41 +772,6 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 			return ir.ID, nil
 		}
 		processDataFile = reprocessDataFile
-
-		// if we are in fact processing this data file, move any old one out of the way temporarily
-		// as a safe measure, and also because our filename-generator will not allow a file to be
-		// overwritten, but we want to replace the existing file in this case...
-		if processDataFile && ir.DataFile != nil {
-			origFile := p.tl.FullPath(*ir.DataFile)
-			bakFile := p.tl.FullPath(*ir.DataFile + ".bak")
-			err = os.Rename(origFile, bakFile)
-			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return 0, fmt.Errorf("temporarily moving data file: %w", err)
-			}
-
-			// if this function returns with an error,
-			// restore the original file in case it was
-			// partially written or something; otherwise
-			// delete the old file altogether
-			defer func() {
-				if err == nil {
-					err := os.Remove(bakFile)
-					if err != nil && !errors.Is(err, fs.ErrNotExist) {
-						p.log.Error("deleting data file backup",
-							zap.Error(err),
-							zap.String("backup_file", bakFile))
-					}
-				} else {
-					err := os.Rename(bakFile, origFile)
-					if err != nil && !errors.Is(err, fs.ErrNotExist) {
-						p.log.Error("restoring original data file from backup",
-							zap.Error(err),
-							zap.String("backup_file", bakFile),
-							zap.String("original_file", origFile))
-					}
-				}
-			}()
-		}
 	}
 
 	// get the filename for the data file if we are processing it
@@ -816,10 +780,24 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 		if err != nil {
 			return 0, fmt.Errorf("opening output data file: %w", err)
 		}
+
+		// if we end up returning with an error, it means that the item row was not saved
+		// in the DB; avoid leaving a dangling file reservation and clean up fd resources
+		defer func() {
+			if err != nil && it.dataFileOut != nil {
+				it.dataFileIn.Close()
+				it.dataFileOut.Close()
+				_ = p.tl.deleteRepoFile(it.dataFileOut.Name())
+			}
+		}()
 	}
 
-	// make a copy of this 'cause we might use it later to clean up a data file if we ended up setting it to NULL
+	// make a copy of this 'cause we might use it later to clean up a data file if we ended up setting it to NULL or replacing it
+	// TODO: both, really? ... probably just need this copied to one var
 	startingDataFile := ir.DataFile
+	if ir.DataFile != nil {
+		it.oldDataFile = *ir.DataFile
+	}
 
 	err = p.fillItemRow(ctx, tx, &ir, it)
 	if err != nil {
@@ -971,17 +949,24 @@ const (
 	relationTo   = "to"
 )
 
-func (tl *Timeline) cleanDataFile(tx *sql.Tx, dataFilePath string) error {
+// deleteDataFileAndThumbnailIfUnreferenced deletes the data file and its thumbnail if there are no item rows referring to it.
+func (tl *Timeline) deleteDataFileAndThumbnailIfUnreferenced(ctx context.Context, tx *sql.Tx, dataFilePath string) error {
 	var count int
-	err := tx.QueryRow(`SELECT count() FROM items WHERE data_file=? LIMIT 1`, dataFilePath).Scan(&count)
+	err := tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? LIMIT 1`, dataFilePath).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("querying to check if data file is unused: %w", err)
 	}
 	if count > 0 {
 		return nil
 	}
-	if err := os.Remove(tl.FullPath(dataFilePath)); err != nil {
+	if err := tl.deleteRepoFile(dataFilePath); err != nil {
 		return fmt.Errorf("deleting unused data file: %w", err)
+	}
+	tl.thumbsMu.Lock()
+	_, err = tl.thumbs.ExecContext(ctx, "DELETE FROM thumbnails WHERE data_file=?", dataFilePath)
+	tl.thumbsMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("deleting unused data file's thumbnail: %w", err)
 	}
 	return nil
 }
@@ -1752,7 +1737,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	// if there's a chance that we just set the data_file to NULL, check to see if the
 	// file is no longer referenced in the DB; if not, clean it up
 	if startingDataFile != nil && ir.DataFile == nil {
-		if err := p.tl.cleanDataFile(tx, *startingDataFile); err != nil {
+		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, *startingDataFile); err != nil {
 			p.log.Error("cleaning up data file",
 				zap.Uint64("item_row_id", ir.ID),
 				zap.Stringp("data_file_name", startingDataFile),

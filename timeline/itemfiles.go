@@ -105,7 +105,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 			zap.Int64("bytes_written", it.dataFileSize))
 
 		// delete duplicate data file
-		if err := os.Remove(it.dataFileOut.Name()); err != nil {
+		if err := p.tl.deleteRepoFile(it.dataFileOut.Name()); err != nil {
 			return fmt.Errorf("deleting duplicate data file %s: %w", it.dataFileOut.Name(), err)
 		}
 
@@ -162,7 +162,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		}
 
 		// delete the empty data file
-		if err := os.Remove(it.dataFileOut.Name()); err != nil {
+		if err := p.tl.deleteRepoFile(it.dataFileOut.Name()); err != nil {
 			return fmt.Errorf("deleting empty data file: %w", err)
 		}
 
@@ -189,6 +189,47 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	// job even if it does nothing? Then we don't have to count here.
 	if qualifiesForThumbnail(it.row.DataType) && !it.skipThumb {
 		atomic.AddInt64(p.ij.thumbnailCount, 1)
+	}
+
+	// if this replaced an item's previous data file, clean up the old one if it is no longer
+	// referenced by any other items
+	if it.oldDataFile != "" && it.dataFileName != it.oldDataFile {
+		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, it.oldDataFile); err != nil {
+			p.log.Error("could not clean up old, unreferenced data file and any associated thumbnail",
+				zap.Error(err),
+				zap.String("old_data_file", it.oldDataFile),
+				zap.String("replaced_by", it.dataFileName),
+				zap.Uint64("row_id", it.row.ID))
+		}
+
+		// additionally, if the incoming file has the same filename as the one we just deleted, let's see
+		// if now that filename is available, to try to preserve the item's original filename best we can
+		// (for example, if an item with a file named "A.JPG" is being replaced by a new "A.JPG", the
+		// processor will initially create "A__asdf.jpg" because "A.JPG" already exists; but once we get
+		// here, that old file has been deleted, so we can now restore the original name to the new file)
+		if it.desiredDataFileName != "" && path.Base(it.dataFileName) != it.desiredDataFileName {
+			desiredFilename := path.Join(path.Dir(it.dataFileName), it.desiredDataFileName)
+			desiredFilenameFullPath := p.tl.FullPath(desiredFilename)
+			f, err := os.OpenFile(desiredFilenameFullPath, os.O_CREATE|os.O_RDWR|os.O_EXCL, 0600)
+			if err == nil {
+				f.Close()
+				if err := os.Rename(p.tl.FullPath(it.dataFileName), desiredFilenameFullPath); err != nil {
+					p.log.Error("could not restore data file name from temporary name",
+						zap.Error(err),
+						zap.String("temporary_name", it.dataFileName),
+						zap.String("name_to_restore", desiredFilename),
+						zap.Uint64("row_id", it.row.ID))
+				} else {
+					it.dataFileName = desiredFilename
+				}
+			} else if !errors.Is(err, fs.ErrExist) {
+				p.log.Error("could not create placeholder file for data file of the which original filename is being restored",
+					zap.Error(err),
+					zap.String("temporary_name", it.dataFileName),
+					zap.String("name_to_restore", desiredFilename),
+					zap.Uint64("row_id", it.row.ID))
+			}
+		}
 	}
 
 	// save the file's name and hash to all items which use it, to confirm it was downloaded successfully
@@ -241,8 +282,8 @@ func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error
 		}
 	}()
 
-	// if there's no file to process, nbd; no-op; but if only one file
-	// is open, then that's an error!
+	// if there's no file to process, nbd, just no-op; but if only
+	// one file is open, then that's an error!
 	if it.dataFileIn == nil && it.dataFileOut == nil {
 		return 0, nil
 	}
@@ -258,7 +299,8 @@ func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error
 
 	n, err := io.Copy(it.dataFileOut, tr)
 	if err != nil {
-		os.Remove(it.dataFileOut.Name())
+		// TODO: The error should be highlighted as a notification of some sort. Ideally, keep what we have, but somehow indicate in the DB that it's corrupt/incomplete (like not filling out a data_hash)
+		_ = p.tl.deleteRepoFile(it.dataFileOut.Name())
 		return n, fmt.Errorf("copying contents: %w", err)
 	}
 
@@ -267,7 +309,6 @@ func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error
 	// we can probably increase performance if we don't sync all the time, but that would be less reliable...
 	if n > 0 {
 		if err := it.dataFileOut.Sync(); err != nil {
-			os.Remove(it.dataFileOut.Name())
 			return n, fmt.Errorf("syncing file after downloading: %w", err)
 		}
 	}
@@ -305,11 +346,13 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logg
 
 	// find a unique filename for this item
 	canonicalFilename := tl.canonicalItemDataFileName(it)
+	it.desiredDataFileName = canonicalFilename // hold onto this name through processing, as it may be used later if we have to add random suffix to the end
 	canonicalFilenameExt := path.Ext(canonicalFilename)
 	canonicalFilenameWithoutExt := strings.TrimSuffix(canonicalFilename, canonicalFilenameExt)
 
 	const randSuffixLen = 4
 
+	// TODO: If this isn't enough iterations (for some reason!?) we can either increase the iteration count, or try an outer loop that extends the randSuffixLen to 5, even 6 chars.
 	for i := range 10 {
 		// build the filepath to try; only add randomness to the filename if the original name isn't available
 		tryPath := path.Join(dir, canonicalFilenameWithoutExt)
@@ -318,7 +361,7 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logg
 		}
 		tryPath += canonicalFilenameExt
 
-		// see if the filename is available; create it with EXCLUSIVE so that we don't truncate any existing
+		// see if the filename is available; create it with EXCLUSIVE so that we don't trample any existing
 		// file, and instead we should get a special error that the file already exists if it's taken...
 		// if it is taken we can try another filename, but if it doesn't, this syscall will immediately
 		// claim it for us
@@ -341,7 +384,7 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logg
 			return nil, "", fmt.Errorf("checking DB for file uniqueness: %w", err)
 		}
 		if count > 0 {
-			// an existing item has claim to it, so let
+			// an existing item has claim to it, so let it keep that, it might still be processing
 			logger.Warn("file did not exist on disk but is already claimed in database - will try to make filename unique", zap.String("filepath", tryPath))
 			continue
 		}
@@ -522,7 +565,7 @@ func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum 
 			zap.Uint64("row_id", itemRowID),
 			zap.Stringp("existing_data_file", existingDatafile),
 			zap.Binary("checksum", checksum))
-		err = os.Remove(p.tl.FullPath(*canonical))
+		err = p.tl.deleteRepoFile(*canonical)
 		if err != nil {
 			return false, fmt.Errorf("removing duplicate data file: %w", err)
 		}

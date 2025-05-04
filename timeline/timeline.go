@@ -31,6 +31,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -148,12 +149,13 @@ func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
 	return openAndProvisionTimeline(ctx, repoPath, cacheDir)
 }
 
-// directoryEmpty returns true if dirPath is an empty directory. If false,
-// the name of the first discovered file is returned. If deletePointlessFiles
-// is true, then unintentional files (like .DS_Store) will be deleted while
-// considering whether a dir is empty. (It is not required to delete the file
-// to still consider it empty, but if preparing an empty dir for deletion,
-// emptying the dir of pointless files will come in handy.)
+// directoryEmpty returns true if dirPath is an empty directory except for some
+// common, but non-critical, OS files. If false, the name of the first discovered
+// file is returned. If deletePointlessFiles is true, then those implicit OS files
+// (like .DS_Store) will be deleted while considering whether a dir is empty.
+// (It is not required to delete the file to still consider it empty, but if
+// preparing an empty dir for deletion, emptying the dir of pointless files will
+// come in handy.)
 func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, error) {
 	dir, err := os.Open(dirPath)
 	if err != nil {
@@ -168,9 +170,14 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 		return false, "", fmt.Errorf("reading folder contents: %w", err)
 	}
 
+	pointlessFiles := map[string]struct{}{
+		".DS_Store": {},
+		"Thumbs.db": {},
+	}
+
 	for _, f := range fileList {
 		// ignore, and possibly delete, pointless files
-		if f == ".DS_Store" || f == "Thumbs.db" {
+		if _, ok := pointlessFiles[f]; ok {
 			if deletePointlessFiles {
 				err := os.Remove(filepath.Join(dirPath, f))
 				if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -978,7 +985,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, option
 		}
 
 		// delete data files only if they are no longer referenced by any items
-		numFilesDeleted, err := tl.deleteDataFiles(tl.ctx, Log, dataFilesToDelete)
+		numFilesDeleted, err := tl.deleteRepoFiles(tl.ctx, Log, dataFilesToDelete)
 		if err != nil {
 			Log.Error("error when deleting data files of erased items (items have already been marked as deleted in DB)", zap.Error(err))
 		}
@@ -1077,7 +1084,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 		return fmt.Errorf("committing deletion transaction: %w", err)
 	}
 
-	_, err = tl.deleteDataFiles(ctx, Log, dataFilesToDelete)
+	_, err = tl.deleteRepoFiles(ctx, Log, dataFilesToDelete)
 	if err != nil {
 		return fmt.Errorf("deleting data files (after deleting associated item rows from DB): %w", err)
 	}
@@ -1127,6 +1134,47 @@ func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs [
 	}
 
 	return rowIDs, nil
+}
+
+// deleteRepoFile deletes the file at pathInRepo, which is a path relative
+// to the repo root, or a path within the repo root (if the given path is
+// prefixed by the repo root, then it is treated as an absolute OS path).
+// Empty parent directories are then deleted until the first non-empty
+// directory within the repo dir, to keep the repo tidy.
+func (tl *Timeline) deleteRepoFile(pathInRepo string) error {
+	// normalize the input path: if the path is an absolute OS filepath,
+	// trim the repo path prefix off, and convert it into a path within
+	// the repo, which we always use the slash as separator
+	// (i.e. "C:\repo\a\b\c" => "a/b/c" where repo dir is "C:\repo", note
+	// how we also trim the slash between "repo" and "a")
+	if strings.HasPrefix(pathInRepo, tl.repoDir) {
+		pathInRepo = strings.TrimPrefix(filepath.ToSlash(strings.TrimPrefix(pathInRepo, tl.repoDir)), "/")
+	}
+
+	err := os.Remove(tl.FullPath(pathInRepo))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+
+	for p := path.Dir(pathInRepo); p != "."; p = path.Dir(p) {
+		fullPath := tl.FullPath(p)
+		isEmpty, _, err := directoryEmpty(fullPath, true)
+		if err != nil {
+			return fmt.Errorf("deleted %q, but could not check parent folder %q: %w",
+				pathInRepo, fullPath, err)
+		}
+		if isEmpty {
+			if err := os.Remove(fullPath); err != nil {
+				return fmt.Errorf("deleted %q, but could not clean up empty parent folder %q: %w",
+					pathInRepo, fullPath, err)
+			}
+		} else {
+			// we have to stop at the first non-empty parent folder
+			return nil
+		}
+	}
+
+	return nil
 }
 
 // sqlArray builds a placeholder array for SQL queries that will have

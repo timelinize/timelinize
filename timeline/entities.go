@@ -900,7 +900,7 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 			return fmt.Errorf("deleting from entities table: %w", err)
 		}
 		if oldPictureFile != nil {
-			if err := os.Remove(filepath.Join(tl.repoDir, *oldPictureFile)); err != nil {
+			if err := tl.deleteRepoFile(*oldPictureFile); err != nil {
 				return err
 			}
 		}
