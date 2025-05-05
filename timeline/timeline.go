@@ -604,7 +604,7 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, relID, rel.value,
 		rel.fromItemID, rel.fromAttributeID,
 		rel.toItemID, rel.toAttributeID,
-		rel.start, rel.end, rel.metadata,
+		rel.start, rel.end, string(rel.metadata),
 	)
 	if err != nil {
 		return fmt.Errorf("inserting relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)

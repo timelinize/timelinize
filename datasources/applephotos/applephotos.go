@@ -87,11 +87,23 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	defer db.Close()
 
 	var owner timeline.Entity
-	if dsOpt.OwnerEntityID == 0 {
-		// TODO: ZPERSON.ZISMECONFIDENCE seems to be a value of 1.0 for the owner of the library! Use it to make an owner entity.
-	}
 	if dsOpt.OwnerEntityID > 0 {
+		// use preset owner entity configured by user
 		owner = timeline.Entity{ID: dsOpt.OwnerEntityID}
+	} else {
+		// ZPERSON.ZISMECONFIDENCE seems to be a value of 1.0 for the owner of the library! Maybe we can use it to infer the owner entity if not preset.
+		var personDetectionType, personGenderType *int
+		var personDisplayName, personFullName, personUUID, personURI *string
+		err := db.QueryRowContext(ctx, `
+			SELECT ZDETECTIONTYPE, ZGENDERTYPE, ZDISPLAYNAME, ZFULLNAME, ZPERSONUUID, ZPERSONURI
+			FROM ZPERSON
+			WHERE ZISMECONFIDENCE=1.0 AND (ZDISPLAYNAME IS NOT NULL OR ZFULLNAME IS NOT NULL)
+			LIMIT 1`).Scan(&personDetectionType, &personGenderType, &personDisplayName, &personFullName, &personUUID, &personURI)
+		if err != nil {
+			params.Log.Error("could not infer owner entity from DB", zap.Error(err))
+		} else {
+			owner = makeEntity(personDetectionType, personGenderType, personFullName, personDisplayName, personUUID, personURI)
+		}
 	}
 
 	var trashedState int
@@ -99,30 +111,35 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 		trashedState = 1
 	}
 
-	// TODO: Additional Photos DB speculation:
-	// ZDETECTEDFACE table: I think ZPERSONBEINGKEYFACE might be which photo is their like cover picture for that face.
-	// ZPERSON table: the ZAGETYPE column seems to be something like... child is 2, infant is 1, 5 is middle-aged adult? I dunno
-
 	// sort by the same column that we use to keep track of duplicate asset rows while iterating
 	// (it's unclear whether it's better to use ZASSET.Z_PK or ZASSET.ZUUID for this; Z_PK is the
 	// row ID, ZUUID is a UUID assigned to the image; both are nullable, but have no null rows)
+	// (there are a lot more columns we can get interesting data from, I just chose a few of my favorites)
 	rows, err := db.QueryContext(ctx, `
 		SELECT
 			ZASSET.Z_PK, ZASSET.ZDATECREATED, ZASSET.ZLATITUDE, ZASSET.ZLONGITUDE, ZASSET.ZMODIFICATIONDATE, ZASSET.ZOVERALLAESTHETICSCORE,
 			ZASSET.ZDIRECTORY, ZASSET.ZFILENAME, ZASSET.ZORIGINALCOLORSPACE, ZASSET.ZUNIFORMTYPEIDENTIFIER, ZASSET.ZUUID,
 			AAA.ZORIGINALFILENAME,
-			ZPERSON.ZDETECTIONTYPE, ZPERSON.ZGENDERTYPE, ZPERSON.ZDISPLAYNAME, ZPERSON.ZFULLNAME, ZPERSON.ZPERSONUUID, ZPERSON.ZPERSONURI
+			ZPERSON.ZDETECTIONTYPE, ZPERSON.ZGENDERTYPE, ZPERSON.ZDISPLAYNAME, ZPERSON.ZFULLNAME, ZPERSON.ZPERSONUUID, ZPERSON.ZPERSONURI,
+			FACE.ZEYESSTATE, FACE.ZFACEEXPRESSIONTYPE, FACE.ZFACIALHAIRTYPE,
+			FACE.ZGLASSESTYPE, FACE.ZHASFACEMASK, FACE.ZHASSMILE, FACE.ZISLEFTEYECLOSED, FACE.ZISRIGHTEYECLOSED,
+			FACE.ZPOSETYPE, FACE.ZSMILETYPE, FACE.ZBODYCENTERX, FACE.ZBODYCENTERY, FACE.ZBODYHEIGHT, FACE.ZBODYWIDTH,
+			FACE.ZCENTERX, FACE.ZCENTERY, FACE.ZGAZECENTERX, FACE.ZGAZECENTERY, FACE.ZSIZE
 		FROM ZASSET
 		JOIN ZADDITIONALASSETATTRIBUTES AS AAA ON AAA.Z_PK = ZASSET.ZADDITIONALATTRIBUTES
 		LEFT JOIN ZDETECTEDFACE AS FACE ON FACE.ZASSETFORFACE = ZASSET.Z_PK
 		LEFT JOIN ZPERSON ON ZPERSON.Z_PK = FACE.ZPERSONFORFACE
-		WHERE ZASSET.ZTRASHEDSTATE=?
+		WHERE ZASSET.ZTRASHEDSTATE=0 OR ZASSET.ZTRASHEDSTATE=?
 		ORDER BY ZASSET.Z_PK
 	`, trashedState)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
+
+	// Additional Photos DB speculation:
+	// ZDETECTEDFACE table: I think ZPERSONBEINGKEYFACE might be which photo is their like cover picture for that face. Maybe related to ZPERSON.ZKEYFACE
+	// ZPERSON table: the ZAGETYPE column seems to be something like... child is 2, infant is 1, 5 is middle-aged adult? I dunno
 
 	// since we're left-joining detected faces for each asset row (image), we will likely have
 	// multiple asset rows if there are multiple faces in the picture, so we have to keep track
@@ -131,15 +148,19 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	var currentGraph *timeline.Graph
 	for rows.Next() {
 		var assetRowID string
-		var lat, lon, aestheticScore *float64
+		var lat, lon, aestheticScore, fBodyCenterX, fBodyCenterY, fBodyHeight, fBodyWidth, fCenterX, fCenterY, fGazeCenterX, fGazeCenterY, fSize *float64
 		var dateCreated, modDate, dir, filename, colorspace, uniformTypeIdentifier, uuid, originalFilename *string
-		var personDetectionType, personGenderType *int
-		var personDisplayName, personFullName, personUUID, personURI *string
+		var pDetectionType, fEyesState, fExprType, fFacialHairType, pGenderType, fGlassesType, fHasFacemask, fHasSmile, fLeftEyeClosed, fRightEyeClosed, fPoseType, fSmileType *int
+		var pDisplayName, pFullName, pUUID, pURI *string
 
 		err := rows.Scan(&assetRowID, &dateCreated, &lat, &lon, &modDate, &aestheticScore,
 			&dir, &filename, &colorspace, &uniformTypeIdentifier, &uuid,
 			&originalFilename,
-			&personDetectionType, &personGenderType, &personDisplayName, &personFullName, &personUUID, &personURI)
+			&pDetectionType, &pGenderType, &pDisplayName, &pFullName, &pUUID, &pURI,
+			&fEyesState, &fExprType, &fFacialHairType,
+			&fGlassesType, &fHasFacemask, &fHasSmile, &fLeftEyeClosed, &fRightEyeClosed,
+			&fPoseType, &fSmileType, &fBodyCenterX, &fBodyCenterY, &fBodyHeight, &fBodyWidth,
+			&fCenterX, &fCenterY, &fGazeCenterX, &fGazeCenterY, &fSize)
 		if err != nil {
 			return fmt.Errorf("scanning row: %w", err)
 		}
@@ -169,7 +190,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 			}
 			mediaRelPath := path.Join("originals", *dir, *filename)
 			if !timeline.FileExistsFS(dirEntry.FS, mediaRelPath) {
-				params.Log.Info("media file not found in library; ensure 'Download Originals to Mac' option is selected in Photos settings",
+				params.Log.Warn("media file not found in library; ensure 'Download Originals to Mac' option is selected in Photos settings",
 					zap.Stringp("asset_uuid", uuid),
 					zap.String("asset_path", mediaRelPath))
 				continue
@@ -209,6 +230,11 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 			}
 			if aestheticScore != nil {
 				item.Metadata["Aesthetic score"] = *aestheticScore
+			}
+			if modDate != nil {
+				if ts, err := imessage.ParseAppleDate(*modDate); err == nil {
+					item.Metadata["Modified"] = ts
+				}
 			}
 
 			// get all the metadata out of the file; and prefer timestamp in EXIF data, since I'm not 100% sure that
@@ -270,57 +296,42 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 		}
 
 		// for every occurrence of the row, if there is a person (or animal!) detected, relate them to the image
-		if personUUID != nil && currentGraph != nil && currentGraph.Item != nil {
-			var entityType string
-			if personDetectionType != nil {
-				switch *personDetectionType {
-				case 1:
-					entityType = "person"
-				case 4:
-					// TODO: I don't actually know for sure what 4 is, they show up for cats for me, but they could also be "pet" or "animal"
-					// (should we be more specific with our entity types?)
-					entityType = "creature"
-				}
-			}
+		if pUUID != nil && currentGraph != nil && currentGraph.Item != nil {
+			entity := makeEntity(pDetectionType, pGenderType, pFullName, pDisplayName, pUUID, pURI)
 
-			var entityName string
-			if personFullName != nil {
-				entityName = *personFullName
-			} else if personDisplayName != nil {
-				entityName = *personDisplayName
-			}
-
-			var gender string
-			if personGenderType != nil {
-				switch *personGenderType {
-				case 1:
-					gender = "male"
-				case 2:
-					gender = "female"
-				}
-			}
-
-			// TODO: Let's also grab the centers/heights/widths from the ZDETECTEDFACE table and include them as the value (JSON-encoded?)
-			// so we can know where in the photo the face/person is at
-			currentGraph.ToEntity(timeline.RelIncludes, &timeline.Entity{
-				Type: entityType,
-				Name: entityName,
+			rel := timeline.Relationship{
+				Relation: timeline.RelIncludes,
+				To:       &timeline.Graph{Entity: &entity},
 				Metadata: timeline.Metadata{
-					// this seems to be their way of connecting it to a contact in the Address Book DB
-					"Apple Photos Person URI": personURI,
+					// TODO: Maybe some slight interpretation on these values / make them more meaningful? will have to reverse-engineer some of them
+					"Body center X":    fBodyCenterX,
+					"Body center Y":    fBodyCenterY,
+					"Body height":      fBodyHeight,
+					"Body width":       fBodyWidth,
+					"Center X":         fCenterX,
+					"Center Y":         fCenterY,
+					"Size":             fSize,
+					"Eyes state":       fEyesState,
+					"Expression":       fExprType,
+					"Facial hair":      fFacialHairType,
+					"Glasses":          fGlassesType,
+					"Facemask":         fHasFacemask != nil && *fHasFacemask == 1,
+					"Smile":            fHasSmile != nil && *fHasSmile == 1,
+					"Left eye closed":  fLeftEyeClosed != nil && *fLeftEyeClosed == 1,
+					"Right eye closed": fRightEyeClosed != nil && *fRightEyeClosed == 1,
+					"Pose":             fPoseType,
+					"Smile type":       fSmileType,
 				},
-				Attributes: []timeline.Attribute{
-					{
-						Name:     "applephotos_uuid", // TODO: Or "applephotos_zperson"?
-						Value:    personUUID,
-						Identity: true,
-					},
-					{
-						Name:  timeline.AttributeGender,
-						Value: gender,
-					},
-				},
-			})
+				// TODO: should the value be some JSON-encoded object that the UI can use to highlight the person in the image?
+			}
+			if fGazeCenterX != nil && *fGazeCenterX > -1.0 {
+				rel.Metadata["Gaze center X"] = fGazeCenterX
+			}
+			if fGazeCenterY != nil && *fGazeCenterY > -1.0 {
+				rel.Metadata["Gaze center Y"] = fGazeCenterY
+			}
+
+			currentGraph.Edges = append(currentGraph.Edges, rel)
 		}
 	}
 	if err = rows.Err(); err != nil {
@@ -333,6 +344,57 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	}
 
 	return nil
+}
+
+func makeEntity(personDetectionType, personGenderType *int, personFullName, personDisplayName, personUUID, personURI *string) timeline.Entity {
+	var entityType string
+	if personDetectionType != nil {
+		switch *personDetectionType {
+		case 1:
+			entityType = "person"
+		case 4:
+			// TODO: I don't actually know for sure what 4 is, they show up for cats for me, but they could also be "pet" or "animal"
+			// (should we be more specific with our entity types?)
+			entityType = "creature"
+		}
+	}
+
+	var entityName string
+	if personFullName != nil {
+		entityName = *personFullName
+	} else if personDisplayName != nil {
+		entityName = *personDisplayName
+	}
+
+	var gender string
+	if personGenderType != nil {
+		switch *personGenderType {
+		case 1:
+			gender = "male"
+		case 2:
+			gender = "female"
+		}
+	}
+
+	return timeline.Entity{
+		Type: entityType,
+		Name: entityName,
+		Metadata: timeline.Metadata{
+			// this seems to be their way of connecting it to a contact in the Address Book DB
+			"Apple Photos Person URI": personURI,
+		},
+		Attributes: []timeline.Attribute{
+			{
+				Name:     "applephotos_zperson",
+				Value:    personUUID,
+				Identity: true,
+			},
+			{
+				Name:  timeline.AttributeGender,
+				Value: gender,
+			},
+		},
+	}
 }
 
 var uniformTypeIdentifierToMIME = map[string]string{

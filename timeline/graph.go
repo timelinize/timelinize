@@ -579,13 +579,19 @@ func (Metadata) isEmpty(v any) bool {
 		return true
 	} else if str, ok := v.(string); ok && strings.TrimSpace(str) == "" {
 		return true
+	} else if str, ok := v.(*string); ok && (str == nil || strings.TrimSpace(*str) == "") {
+		return true
 	} else if buf, ok := v.([]byte); ok && len(bytes.TrimSpace(buf)) == 0 {
 		return true
 	} else if t, ok := v.(time.Time); ok && t.IsZero() {
 		return true
+	} else if t, ok := v.(*time.Time); ok && (t == nil || t.IsZero()) {
+		return true
 	} else if d, ok := v.(time.Duration); ok && d == 0 {
 		return true
 	} else if n, ok := v.(int); ok && n == 0 {
+		return true
+	} else if n, ok := v.(*int); ok && (n == nil || *n == 0) {
 		return true
 	} else if n, ok := v.(int8); ok && n == 0 {
 		return true
@@ -594,6 +600,8 @@ func (Metadata) isEmpty(v any) bool {
 	} else if n, ok := v.(int32); ok && n == 0 {
 		return true
 	} else if n, ok := v.(int64); ok && n == 0 {
+		return true
+	} else if n, ok := v.(*int64); ok && (n == nil || *n == 0) {
 		return true
 	} else if n, ok := v.(uint); ok && n == 0 {
 		return true
@@ -610,6 +618,8 @@ func (Metadata) isEmpty(v any) bool {
 		return true
 	} else if n, ok := v.(float64); ok &&
 		(n < 0.00000000000001 && n > -0.00000000000001) {
+		return true
+	} else if n, ok := v.(*float64); ok && (n == nil || *n == 0) {
 		return true
 	}
 	return false

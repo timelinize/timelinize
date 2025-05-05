@@ -310,10 +310,8 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 		entitySelect.addItem(owner.id);
 	}
 	if (ds.name == "applephotos") {
-		const entitySelect = newEntitySelect($('.applephotos-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
-		entitySelect.addOption(owner);
-		entitySelect.addItem(owner.id);
+		// This data source can sometimes detect its owner, so it's not required for us to assume!
+		newEntitySelect($('.applephotos-owner', dsOptElem), 1);
 	}
 }
 
