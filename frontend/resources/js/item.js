@@ -202,6 +202,22 @@ async function itemPageMain() {
 				entTpl.href = `/entities/${repoID}/${rel.to_entity.id}`;
 
 				$('#related-entities').append(entTpl);
+
+			} else if (rel.label == 'includes' && rel.to_entity) {
+				// TODO: TEMPORARY PoC: This is very temporary, we need to improve the UI here
+				if (rel.metadata["Center X"] && rel.metadata["Center Y"] && rel.metadata["Size"]) {
+					const boxEl = document.createElement('div');
+					boxEl.classList.add('face-circle');
+					const imgRect = $('#item-content').getBoundingClientRect();
+					const width = imgRect.width * rel.metadata["Size"];
+					const height = imgRect.height * rel.metadata["Size"];
+					boxEl.style.width = width+"px";
+					boxEl.style.height = height+"px";
+					boxEl.style.bottom = `${(rel.metadata["Center Y"]-rel.metadata["Size"]/2)*imgRect.height}px`; // NOTE: Apple's y-coord is from the bottom!!
+					boxEl.style.left = `${(rel.metadata["Center X"]-rel.metadata["Size"]/2)*imgRect.width}px`;
+					boxEl.innerText = rel.to_entity.name;
+					$('#item-content').append(boxEl);
+				}
 			}
 		}
 	}

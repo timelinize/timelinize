@@ -84,3 +84,15 @@
 #item-content video {
 	width: 100%;
 }
+
+/* TODO: temporary! */
+.face-circle {
+	position: absolute;
+	border-radius: 50%;
+	border: 5px solid white;
+	color: white;
+	font-weight: bold;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
