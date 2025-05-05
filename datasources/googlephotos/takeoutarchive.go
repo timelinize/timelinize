@@ -270,7 +270,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 	}
 
 	for _, person := range itemMeta.People {
-		ig.ToEntity(timeline.RelDepicts, &timeline.Entity{
+		ig.ToEntity(timeline.RelIncludes, &timeline.Entity{
 			Name: person.Name,
 			Attributes: []timeline.Attribute{
 				{

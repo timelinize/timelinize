@@ -50,7 +50,7 @@ type FileImporter struct{}
 func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	// first see if the file is an AddressBook DB directly
 	// fun fact, "abcddb" apparently means "Address Book CoreData Database"
-	if path.Ext(dirEntry.Name()) == addressBookFilename {
+	if dirEntry.Name() == addressBookFilename {
 		return timeline.Recognition{Confidence: 1}, nil
 	}
 	if path.Ext(dirEntry.Name()) == ".abcddb" {

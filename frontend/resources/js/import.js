@@ -309,6 +309,12 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 	}
+	if (ds.name == "applephotos") {
+		const entitySelect = newEntitySelect($('.applephotos-owner', dsOptElem), 1);
+		const owner = await getOwner(tlz.openRepos[0]);
+		entitySelect.addOption(owner);
+		entitySelect.addItem(owner.id);
+	}
 }
 
 function updateFileCountDisplays(dsgroupElem) {
@@ -517,6 +523,15 @@ function dataSourceOptions(ds) {
 			recently_deleted: $('.icloud-recently-deleted', dsoptContainer).checked
 		};
 		const owner = $('.icloud-owner', dsoptContainer).tomselect.getValue();
+		if (owner.length) {
+			dsOpt.owner_entity_id = Number(owner[0]);
+		}
+	}
+	if (ds.name == "applephotos") {
+		dsOpt = {
+			include_trashed: $('.applephotos-trashed', dsoptContainer).checked
+		};
+		const owner = $('.applephotos-owner', dsoptContainer).tomselect.getValue();
 		if (owner.length) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
