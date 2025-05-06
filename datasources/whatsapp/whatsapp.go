@@ -32,7 +32,7 @@ type Importer struct{}
 // Recognize returns whether the input is supported.
 func (Importer) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	if dirEntry.FileExists(chatPath) {
-		return timeline.Recognition{Confidence: 1}, nil
+		return timeline.Recognition{Confidence: 0.8}, nil
 	}
 	return timeline.Recognition{}, nil
 }
