@@ -2185,6 +2185,8 @@ const PreviewModal = (function() {
 				$$('#modal-preview .btn-next').forEach(elem => elem.classList.add('disabled'));
 			}
 
+			$('#modal-preview .btn-primary').href = `/items/${item.repo_id}/${item.id}`;
+
 			// TODO: is this used/needed?
 			private.currentItem = item;
 		}

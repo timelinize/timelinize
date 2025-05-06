@@ -133,8 +133,12 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	if err = fimp.messages(ctx); err != nil {
 		return fmt.Errorf("importing iPhone messages: %w", err)
 	}
-	if err = fimp.cameraRoll(ctx); err != nil {
-		return fmt.Errorf("importing iPhone camera roll: %w", err)
+	// TODO: I think, but am not sure, that importing the camera roll by iterating the files in the Media/DCIM directory is basically the same thing as using the photos DB, but with less information
+	// if err = fimp.cameraRoll(ctx); err != nil {
+	// 	return fmt.Errorf("importing iPhone camera roll: %w", err)
+	// }
+	if err = fimp.photosLibrary(ctx, dirEntry); err != nil {
+		return fmt.Errorf("importing iPhone Photos app library: %w", err)
 	}
 
 	return nil

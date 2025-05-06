@@ -72,7 +72,7 @@ on('click', '#continue', async () => {
 			}
 
 			// otherwise, if there is at least one person, return to app
-			await navigateSPA('/');
+			await navigateSPA('/', true);
 
 			notify({
 				type: "success",
@@ -129,7 +129,7 @@ on('click', '#continue', async () => {
 		await updateRepoOwners();
 
 		// continue to app
-		await navigateSPA('/');
+		await navigateSPA('/', true);
 
 		notify({
 			type: "success",

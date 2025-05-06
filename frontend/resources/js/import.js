@@ -425,10 +425,10 @@ on('click', '#start-import', async event => {
 
 	if (importParams.job.processing_options.interactive) {
 		// take user to page where they can begin their interactive import
-		navigateSPA(`/input?repo_id=${repoID}&job_id=${result.job_id}`);
+		navigateSPA(`/input?repo_id=${repoID}&job_id=${result.job_id}`, true);
 	} else {
 		// otherwise, redirect to job status, I guess
-		navigateSPA(`/jobs/${repoID}/${result.job_id}`);
+		navigateSPA(`/jobs/${repoID}/${result.job_id}`, true);
 	}
 
 });

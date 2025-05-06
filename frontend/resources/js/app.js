@@ -404,7 +404,7 @@ async function closeRepository() {
 	tlz.openRepos = await app.OpenRepositories();
 	store('open_repos', tlz.openRepos);
 	if (!tlz.openRepos.length) {
-		await navigateSPA('/setup');
+		await navigateSPA('/setup', true);
 		notify({
 			type: 'success',
 			title: "Logged out",

@@ -60,7 +60,7 @@ function currentURI() {
 // path and optional query string) to show in the address bar (the user-friendly URI). If omitted,
 // or not a string (sometimes it is an event handler) it defaults to the path and query currently
 // in the address bar.
-async function navigateSPA(addrBarDestination) {
+async function navigateSPA(addrBarDestination, scrollToTop) {
 	$('#page-content').classList.add('opacity0');
 
 	// when used as an event handler, the first argument may be an event object,
@@ -178,6 +178,18 @@ async function navigateSPA(addrBarDestination) {
 
 			activateTooltips();
 
+			// this isn't desirable every time, like when going Back, or refreshing the page,
+			// as we may want to keep the current position; but usually when navigating to a new
+			// page from a page where we've been scrolled down, it's weird to have it load to
+			// the bottom of the page... so generally we want to scroll up on link clicks
+			if (scrollToTop) {
+				window.scrollTo({
+					top: 0,
+					left: 0,
+					behavior: 'instant'
+				});
+			}
+
 			// hide any loading indicator (or prevent it from appearing in the first place)
 			if (slowLoadingHandle) {
 				clearTimeout(slowLoadingHandle);
@@ -219,7 +231,7 @@ async function navigateSPA(addrBarDestination) {
 on('click', '[href^="/"]:not([download])', async e => {
 	e.preventDefault();
 	const destination = e.target.closest(':not(use)[href]').getAttribute('href'); // can't use .href because that returns a fully-qualified URL, which actually breaks in Wails dev; and we only accept path+query
-	await navigateSPA(destination);
+	await navigateSPA(destination, true);
 	return false;
 });
 
