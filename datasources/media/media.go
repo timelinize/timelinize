@@ -405,7 +405,7 @@ var (
 		".m4v":  {},
 		".mkv":  {},
 		".mov":  {},
-		".mp":   {}, // Google Photos / Pixel phones motion pictures... sigh
+		".mp":   {}, // One generation of Google Photos / Pixel phones motion pictures... sigh
 		".mp4":  {},
 		".mpeg": {},
 		".mpg":  {},
@@ -429,6 +429,7 @@ var (
 		".mp3":  {},
 		".oga":  {},
 		".ogg":  {},
+		".opus": {},
 		".wav":  {},
 		".wma":  {},
 	}

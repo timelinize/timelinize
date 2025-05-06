@@ -240,6 +240,35 @@
 	</fieldset>
 </template>
 
+<template id="tpl-dsopt-applephotos">
+	<fieldset class="form-fieldset mb-0">
+		<div class="mb-4 row">
+			<label class="col-4 col-form-label">Owner</label>
+			<div class="col">
+				<select class="applephotos-owner form-select" placeholder="Name or contact info">
+				</select>
+				<div class="small form-hint">
+					Select the person whose Apple Photos library this belongs to.
+				</div>
+			</div>
+		</div>
+		<div class="mb-4 row">
+			<label class="col-4 fw-medium">Import trashed items</label>
+			<div class="col">
+				<label class="form-check mb-1">
+					<input class="applephotos-trashed form-check-input" type="checkbox">
+					<span class="form-check-label">Include photos and videos that are in the trash</span>
+				</label>
+				<div class="small form-hint">
+					By default, deleted content is not imported. If checked, recently deleted photos and videos will
+					also be included in the import.
+				</div>
+			</div>
+		</div>
+
+	</fieldset>
+</template>
+
 <template id="tpl-dsopt-email">
 	<fieldset class="form-fieldset mb-0">
 		<div class="mb-3 row">

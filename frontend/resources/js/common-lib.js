@@ -1494,7 +1494,7 @@ function itemContentElement(item, opts) {
 				return noContentElem();
 			}
 		}
-		else if (item.data_type.startsWith("audio/"))
+		else if (item.data_type.startsWith("audio/") || item.data_type == "application/ogg")
 		{
 			const audioTag = document.createElement('audio');
 			audioTag.classList.add('content');

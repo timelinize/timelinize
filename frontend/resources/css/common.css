@@ -1014,7 +1014,6 @@ iframe {
 	background: rgba(0, 0, 0, .2);
 }
 
-
 .alert-show {
 	animation: alert-toast-show 500ms;
 }
@@ -1035,12 +1034,17 @@ iframe {
 	}
 }
 
-/* TODO: Tabler 1.2 introduced these styles to fix the dismiss button positioning, but I
-haven't upgraded yet for other reasons. After upgrading we can probably remove this shim. */
-.alert-dismissible .btn-close {
-	position: absolute;
-	top: calc(var(--tblr-alert-padding-x) / 2 - 1px);
-	right: calc(var(--tblr-alert-padding-y) / 2 - 1px);
-	z-index: 1;
-	padding: calc(var(--tblr-alert-padding-y) * 1.25) var(--tblr-alert-padding-x);
+/* Tabler 1.1/1.2 changed alert styles, and I don't like it exactly. If
+there's no description/message, it expects you to not use .alert-heading
+either; i.e. you either use both .alert-heading and .alert-description
+or neither, but that makes building dynamic alerts like we do a little
+more tedious. Our alerts always have a "heading", but not always a
+description. To simplify my code, I'm swapping which tag has the margin.
+This way, we only add space below a heading if a description is present.
+*/
+.alert-heading {
+	margin-bottom: 0;
+}
+.alert-description {
+	margin-top: .25rem;
 }

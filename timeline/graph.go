@@ -275,14 +275,17 @@ type Item struct {
 	dataText *string
 
 	// state for processing pipeline phases
-	row          ItemRow
-	dataFileIn   io.ReadCloser
-	dataFileOut  *os.File
-	dataFileSize int64
-	dataFileName string
-	dataFileHash []byte // should only be set if dataFileSize > 0
-	idHash       []byte
-	contentHash  []byte
+	row                 ItemRow
+	dataFileIn          io.ReadCloser
+	dataFileOut         *os.File
+	dataFileSize        int64
+	dataFileName        string // path to the data file relative to the repo root
+	dataFileHash        []byte // should only be set if dataFileSize > 0
+	desiredDataFileName string // base filename (sans path) the processor tried to get for the file, but may have been taken
+	idHash              []byte
+	contentHash         []byte
+	skipThumb           bool   // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
+	oldDataFile         string // when replacing a data file, used to clean things up at the end of processing the item
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
@@ -537,11 +540,13 @@ func (m Metadata) Clean() {
 }
 
 // StringsToSpecificType applies StringToSpecificType() to all
-// string values in the metadata map.
+// string and *string values in the metadata map.
 func (m Metadata) StringsToSpecificType() {
 	for key, anyVal := range m {
 		if strVal, ok := anyVal.(string); ok {
 			m[key] = StringToSpecificType(strVal)
+		} else if strPVal, ok := anyVal.(*string); ok && strPVal != nil {
+			m[key] = StringToSpecificType(*strPVal)
 		}
 	}
 }
@@ -574,13 +579,19 @@ func (Metadata) isEmpty(v any) bool {
 		return true
 	} else if str, ok := v.(string); ok && strings.TrimSpace(str) == "" {
 		return true
+	} else if str, ok := v.(*string); ok && (str == nil || strings.TrimSpace(*str) == "") {
+		return true
 	} else if buf, ok := v.([]byte); ok && len(bytes.TrimSpace(buf)) == 0 {
 		return true
 	} else if t, ok := v.(time.Time); ok && t.IsZero() {
 		return true
+	} else if t, ok := v.(*time.Time); ok && (t == nil || t.IsZero()) {
+		return true
 	} else if d, ok := v.(time.Duration); ok && d == 0 {
 		return true
 	} else if n, ok := v.(int); ok && n == 0 {
+		return true
+	} else if n, ok := v.(*int); ok && (n == nil || *n == 0) {
 		return true
 	} else if n, ok := v.(int8); ok && n == 0 {
 		return true
@@ -589,6 +600,8 @@ func (Metadata) isEmpty(v any) bool {
 	} else if n, ok := v.(int32); ok && n == 0 {
 		return true
 	} else if n, ok := v.(int64); ok && n == 0 {
+		return true
+	} else if n, ok := v.(*int64); ok && (n == nil || *n == 0) {
 		return true
 	} else if n, ok := v.(uint); ok && n == 0 {
 		return true
@@ -605,6 +618,8 @@ func (Metadata) isEmpty(v any) bool {
 		return true
 	} else if n, ok := v.(float64); ok &&
 		(n < 0.00000000000001 && n > -0.00000000000001) {
+		return true
+	} else if n, ok := v.(*float64); ok && (n == nil || *n == 0) {
 		return true
 	}
 	return false
@@ -698,10 +713,10 @@ var (
 	RelReply        = Relation{Label: "reply", Directed: true}                           // "<from_item> is reply to <to_item>"
 	RelQuotes       = Relation{Label: "quotes", Directed: true}                          // "<from_item> quotes <to>", or "<to> is quoted by <from>"
 	RelReacted      = Relation{Label: "reacted", Directed: true}                         // "<from_entity>" reacted to <to_item> with <value>"
-	RelDepicts      = Relation{Label: "depicts", Directed: true}                         // flexible, but most common is: "<from_item> depicts <to_entity>"
-	RelEdit         = Relation{Label: "edit", Directed: true}                            // "<to_item> is edit of <from_item>"
 	RelInCollection = Relation{Label: "in_collection", Directed: true}                   // "<from_item> is in collection <to_item> at position <value>"
-	RelAt           = Relation{Label: "at", Directed: true}                              // "<from_item> is at <to_entity>"
+	RelEdit         = Relation{Label: "edit", Directed: true}                            // "<to_item> is edit of <from_item>"
+	RelIncludes     = Relation{Label: "includes", Directed: true}                        // "<from_item> includes <to_entity>" (has, depicts, portrays, contains... doesn't have to be item->entity either)
+	// RelAt           = Relation{Label: "at", Directed: true}                              // "<from_item> is at <to_entity>" (to indicate something at a particular place, for instance)
 	// RelTranscript = Relation{Label: "transcript", Directed: true, Subordinating: true} // "<from_item> is transcribed by <to_item>"
 )
 

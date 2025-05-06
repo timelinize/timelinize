@@ -85,6 +85,16 @@ async function itemPageMain() {
 	$('#item-class-icon').innerHTML = itemClass.icon;
 	$('#item-class-label').innerText = itemClass.label;
 
+	if (item.data_type.startsWith("image/")) {
+		$('#item-type-label').innerText = "picture";
+	} else if (item.data_type.startsWith("video/")) {
+		$('#item-type-label').innerText = "video";
+	} else if (item.data_type.startsWith("audio/")) {
+		$('#item-type-label').innerText = "recording";
+	} else if (item.data_type.startsWith("text/")) {
+		$('#item-type-label').innerText = "document";
+	}
+
 	if (item.original_path) {
 		$('#item-original-path').innerText = item.original_path;
 	} else {
@@ -200,6 +210,48 @@ async function itemPageMain() {
 				$('.entity-name', entTpl).innerText = entityDisplay.name;
 				$('.entity-attr', entTpl).innerText = entityDisplay.attribute;
 				entTpl.href = `/entities/${repoID}/${rel.to_entity.id}`;
+
+				$('#related-entities-included').before(entTpl);
+
+			} else if (rel.label == 'includes' && rel.to_entity) {
+				// show the entity in the list on the sidebar
+				$('#related-entities').classList.remove('d-none');
+				$('#related-entities-included').classList.remove('d-none');
+				const entTpl = cloneTemplate('#tpl-included-entity');
+				$('.entity-picture', entTpl).innerHTML = avatar(true, rel.to_entity, 'avatar-xs');
+				const entityDisplay = entityDisplayNameAndAttr(rel.to_entity);
+				$('.entity-name', entTpl).innerText = entityDisplay.name;
+				$('.entity-attr', entTpl).innerText = entityDisplay.attribute;
+				// TODO: instead of going to the entity page, open a modal with more relationship details
+				entTpl.href = `/entities/${repoID}/${rel.to_entity.id}`;
+
+				// then, if we have face detection info, show it on hover of their name
+				if (rel.metadata["Center X"] && rel.metadata["Center Y"] && rel.metadata["Size"]) {
+					// small faces/outlines are harder to see, so we want those to appear a little larger,
+					// whereas larger ones don't need to be scaled up as much
+					const sizeScaled = rel.metadata["Size"] * (rel.metadata["Size"] > 0.05 ? 2 : 4);
+
+					const boxEl = document.createElement('div');
+					boxEl.id = `face-circle-rel-${rel.relationship_id}`;
+					boxEl.classList.add('face-circle', 'd-none');
+					const imgRect = $('#item-content').getBoundingClientRect();
+					const width = imgRect.width * sizeScaled;
+					const height = imgRect.height * sizeScaled;
+					boxEl.style.width = width+"px";
+					boxEl.style.height = height+"px";
+					boxEl.style.left = `${(rel.metadata["Center X"]-sizeScaled/2)*imgRect.width}px`;
+					boxEl.style.bottom = `${(rel.metadata["Center Y"]-sizeScaled/2)*imgRect.height}px`; // NOTE: Apple's y-coord is from the bottom!!
+					boxEl.innerText = rel.to_entity.name || "unknown";
+					$('#item-content').append(boxEl);
+
+					// show the face circle when the name is hovered in the sidebar
+					entTpl.onmouseover = function() {
+						boxEl.classList.remove('d-none');
+					};
+					entTpl.onmouseout = function() {
+						boxEl.classList.add('d-none');
+					};					
+				}
 
 				$('#related-entities').append(entTpl);
 			}

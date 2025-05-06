@@ -108,60 +108,94 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 		return errors.New("no tasks; expecting either individual tasks listed, or an import job")
 	}
 
-	job.Logger().Info("generating thumbnails for items from import job", zap.Uint64("import_job_id", tj.TasksFromImportJob))
+	logger := job.Logger().With(zap.Uint64("import_job_id", tj.TasksFromImportJob))
+
+	logger.Info("counting job size")
+
+	job.Message("Estimating total job size")
+
+	jobSize, err := tj.iteratePagesOfTasksFromImportJob(job, true)
+	if err != nil {
+		return fmt.Errorf("counting job size: %w", err)
+	}
+
+	job.SetTotal(jobSize)
+
+	logger.Info("generating thumbnails for items from import job", zap.Int("count", jobSize))
+
+	_, err = tj.iteratePagesOfTasksFromImportJob(job, false)
+	return err
+}
+
+// iteratePagesOfTasksFromImportJob goes through pages of database results for the import job specified
+// in the job config and, after figuring out which rows of items point to data files that need thumbnails,
+// counts the number of tasks and, if precountMode is false, also generates and stores the thumbnails
+// (and thumbhashes). If precountMode is true, only the counting will occur, and the total number of
+// tasks to be expected will be returned. Note that this return value may be invalid if the import job
+// is still running or if any items associated with the import job are changing while this job is running.
+// If that happens, the final completion percentage may not be exactly 100%.
+func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precountMode bool) (int, error) {
+	// the query that is used to page through rows.
+	// get the items in reverse timestamp order since the
+	// most recent items are most likely to be displayed by
+	// various frontend pages, i.e. the user will likely
+	// see those first (TODO: maybe this should be customizable)
+	// (this query pages through results by timestamp, i.e.
+	// the column we order by, which is efficient but if we
+	// aren't careful we can skip rows: if we did timestamp < ?,
+	// then if the LIMIT happened to end between rows with the
+	// same timestamp, the next query would skip those; so we also
+	// use row ID as the second sort column to avoid repeating or
+	// skipping items within the same timestamp)
+	const thumbnailJobQuery = `SELECT
+			items.id, items.stored, items.modified, items.timestamp, items.data_id, items.data_type, items.data_file
+		FROM items
+		LEFT JOIN relationships ON relationships.to_item_id = items.id
+		LEFT JOIN relations ON relations.id = relationships.relation_id
+		WHERE job_id=?
+			AND (items.data_file IS NOT NULL OR items.data_id IS NOT NULL)
+			AND (items.data_type LIKE 'image/%' OR items.data_type LIKE 'video/%' OR items.data_type = 'application/pdf')
+			AND relations.label IS NOT 'motion'
+			AND (timestamp < ? OR ((timestamp = ? OR timestamp IS NULL) AND items.id > ?))
+		ORDER BY items.timestamp DESC, items.id ASC
+		LIMIT ?`
+	const thumbnailJobPageSize = 1000
 
 	var (
-		lastTimestamp int64 = math.MaxInt64 // start at highest possible timestamp since we're sorting by timestamp descending (next page of results will have lower timestamps, not greater)
-		lastItemID    int64
+		maxInt64      int64 = math.MaxInt64
+		lastTimestamp       = &maxInt64 // start at highest possible timestamp since we're sorting by timestamp descending (next page of results will have lower timestamps, not greater)
+		lastItemID    int64             // start at 0, since we're sorting by ID ascending (useful for keeping our place in rows with the same timestamp)
+
+		taskCount int // if precountMode enabled, we keep count of the number of tasks, and don't do actual work
 	)
 
 	for {
 		var pageResults []thumbnailTask
 
 		// prevent duplicates within a page; when we load a page, we do check
-		// each row to see if a thumbnail has already been generated (recently
-		// enough), but since we don't actually generate thumbnails until after
-		// doing all the checks for a page (for efficiency), it's possible that
-		// multiple rows on the page which share a data file would both add the
-		// same file to the task queue; so we have to deduplicate those per-page,
-		// otherwise we not only duplicate work, but our final count is wrong
-		// from the estimated total -- by the time we get to the next page, the
-		// thumbnails for this page have all been generated and stored in the DB,
-		// so we don't need to de-duplicate in memory across all pages
+		// each row to see if a current thumbnail has already been generated, but
+		// since we don't actually generate thumbnails until after doing all the
+		// checks for a page (for efficiency), it's possible that multiple rows
+		// on the page share a data file and they both add the same file to the
+		// task queue; so we have to deduplicate those per-page, otherwise we not
+		// only duplicate work, but our final count is wrong from the estimated
+		// total -- by the time we get to the next page, the thumbnails for this
+		// page have all been generated and stored in the DB, so we don't need
+		// to de-duplicate in memory across all pages
 		pageDataFiles, pageDataIDs := make(map[string]struct{}), make(map[int64]struct{})
 
-		// get the items in reverse timestamp order since the
-		// most recent items are most likely to be displayed by
-		// various frontend pages, i.e. the user will likely
-		// see those first (TODO: maybe this should be customizable)
-		// (this query pages through results by timestamp, i.e.
-		// the column we order by, which is efficient but if we
-		// aren't careful we can skip rows: if we did timestamp < ?,
-		// then if the LIMIT happened to end between rows with the
-		// same timestamp, the next query would skip those; so we
-		// have to do <=, but this will almost always repeat items,
-		// so we also keep track of the last item ID and skip until
-		// we get to it)
-		const pageSize = 1000
-
 		job.tl.dbMu.RLock()
-		rows, err := job.tl.db.QueryContext(job.ctx,
-			`SELECT
-				id, stored, modified, timestamp, data_id, data_type, data_file
-			FROM items
-			WHERE job_id=?
-				AND (data_file IS NOT NULL OR data_id IS NOT NULL)
-				AND (data_type LIKE 'image/%' OR data_type LIKE 'video/%' OR data_type = 'application/pdf')
-				AND (timestamp <= ? OR timestamp IS NULL)
-			ORDER BY timestamp DESC
-			LIMIT ?`, tj.TasksFromImportJob, lastTimestamp, pageSize)
+		rows, err := job.tl.db.QueryContext(job.ctx, thumbnailJobQuery,
+			tj.TasksFromImportJob, lastTimestamp, lastTimestamp, lastItemID, thumbnailJobPageSize)
 		if err != nil {
 			job.tl.dbMu.RUnlock()
-			return fmt.Errorf("failed querying page of database table: %w", err)
+			return 0, fmt.Errorf("failed querying page of database table: %w", err)
 		}
-		fastForwardedToLastItem := lastItemID == 0
-		var moreRows bool
+
+		var hadRows bool
 		for rows.Next() {
+			hadRows = true
+
 			var rowID, stored int64
 			var modified, timestamp, dataID *int64
 			var dataType, dataFile *string
@@ -170,46 +204,37 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 			if err != nil {
 				defer rows.Close()
 				job.tl.dbMu.RUnlock()
-				return fmt.Errorf("failed to scan row from database page: %w", err)
-			}
-
-			moreRows = lastItemID == 0 || rowID != lastItemID
-
-			// If we're still fast-forwarding through the end of the last page's results
-			// because possibly the LIMIT (page size) was in the middle of multiple rows
-			// with the same timestamp, just iterate until we find the last item of the
-			// previous page; if this row IS that last item, then remember that we've
-			// finished fast-forwarding.
-			if lastItemID > 0 && !fastForwardedToLastItem {
-				if rowID == lastItemID {
-					fastForwardedToLastItem = true
-				}
-				continue
+				return 0, fmt.Errorf("failed to scan row from database page: %w", err)
 			}
 
 			// Keep the last item ID and timestamp for use by the next page.
 			lastItemID = rowID
-			lastTimestamp = *timestamp
+			lastTimestamp = timestamp
 
 			// if the item qualifies for a thumbnail, make sure it's not a duplicate
-			// on this page before adding it to the queue
+			// on this page before adding it to the queue; but if it is a duplicate,
+			// we should still count it, since
 			if qualifiesForThumbnail(dataType) {
-				if dataID != nil {
-					if _, ok := pageDataIDs[*dataID]; !ok {
-						pageDataIDs[*dataID] = struct{}{}
-						pageResults = append(pageResults, thumbnailTask{
-							DataID:    *dataID,
-							DataType:  *dataType,
-							ThumbType: thumbnailType(*dataType, false),
-						})
-					}
-				} else if dataFile != nil {
+				if dataFile != nil {
 					if _, ok := pageDataFiles[*dataFile]; !ok {
 						pageDataFiles[*dataFile] = struct{}{}
 						pageResults = append(pageResults, thumbnailTask{
-							DataFile:  *dataFile,
-							DataType:  *dataType,
-							ThumbType: thumbnailType(*dataType, false),
+							DataFile:     *dataFile,
+							DataType:     *dataType,
+							ThumbType:    thumbnailType(*dataType, false),
+							itemStored:   stored,
+							itemModified: modified,
+						})
+					}
+				} else if dataID != nil {
+					if _, ok := pageDataIDs[*dataID]; !ok {
+						pageDataIDs[*dataID] = struct{}{}
+						pageResults = append(pageResults, thumbnailTask{
+							DataID:       *dataID,
+							DataType:     *dataType,
+							ThumbType:    thumbnailType(*dataType, false),
+							itemStored:   stored,
+							itemModified: modified,
 						})
 					}
 				}
@@ -218,12 +243,19 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 		rows.Close()
 		job.tl.dbMu.RUnlock()
 		if err = rows.Err(); err != nil {
-			return fmt.Errorf("iterating rows for researching thumbnails failed: %w", err)
+			return 0, fmt.Errorf("iterating rows for researching thumbnails failed: %w", err)
 		}
 
-		if !moreRows {
+		if !hadRows {
 			break // all done!
 		}
+
+		// based on lots of trial+error, this is the correct place to increment the count of tasks
+		// (before pruning; since we consider the check to see if a thumbnail is actually needed
+		// to be a unit of work itself; i.e. resuming an incomplete job will treat all the skipped
+		// data files as progress, and that's OK since it was work to determine that the thumbnail
+		// isn't needed)
+		taskCount += len(pageResults)
 
 		// if we are not supposed to regenerate all thumbnails, look up the existing thumbnail
 		// for each item on this page and see if the item has been updated more recently than
@@ -233,12 +265,13 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 			job.tl.thumbsMu.RLock()
 			thumbsTx, err := job.tl.thumbs.Begin()
 			if err != nil {
-				return fmt.Errorf("starting tx for checking for existing thumbnails: %w", err)
+				return 0, fmt.Errorf("starting tx for checking for existing thumbnails: %w", err)
 			}
 
 			// use classic loop style since we'll be deleting entries as we go
 			for i := 0; i < len(pageResults); i++ {
 				task := pageResults[i]
+
 				// if we're not supposed to regenerate every thumbnail, see if thumbnail already exists; we might
 				// still regenerate it if it's from before when the item was last stored or manually updated
 				var thumbGenerated int64
@@ -246,41 +279,65 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 					`SELECT generated FROM thumbnails WHERE (data_file=? OR item_data_id=?) LIMIT 1`,
 					task.DataFile, task.DataID).Scan(&thumbGenerated)
 				if errors.Is(err, sql.ErrNoRows) {
-					continue // no existing thumbnail; carry on
+					// no existing thumbnail; carry on
+					continue
 				} else if err != nil {
+					// DB error; probably shouldn't continue
 					thumbsTx.Rollback()
 					job.tl.thumbsMu.RUnlock()
-					return fmt.Errorf("checking for existing thumbnail: %w", err)
+					return 0, fmt.Errorf("checking for existing thumbnail: %w", err)
 				}
-				// if this existing thumbnail was generated after item was both stored and manually updated (if applicable)
-				// then we don't need to regenerate it, since always-regenerate is not enabled
-				if thumbGenerated > task.itemStored &&
-					(task.itemModified == nil || thumbGenerated > *task.itemModified) {
-					// thumbnail is newer than last item changes, so we can remove this one from the task list
+
+				// if the thumbnail was generated when or after the item was stored, and also after
+				// it was modified (if modified at all), then we do not need to generate it, so we
+				// can remove it from the task queue -- this is considered progress anyway
+				if thumbGenerated >= task.itemStored &&
+					(task.itemModified == nil || thumbGenerated >= *task.itemModified) {
 					pageResults = slices.Delete(pageResults, i, i+1)
-					// count this as progress since we don't use checkpoints in this mode; otherwise a finished
-					// thumbnail job would only look partially complete
-					job.Progress(1)
+
+					// two possibilities: this could either be a thumbnail we already generated as part of this job,
+					// or it was a duplicate data file that already had a thumbnail generated for it (as part of this
+					// job, or otherwise) -- either way, we can't distinguish between them, so we need to count it
+					// as progress to reach 100% completion; besides, this check/pruning is considered a unit of work
+					if !precountMode {
+						job.Progress(1)
+					}
+
+					// since we're deleting this element AFTER the work on this element has
+					// been done, we need to decrement our index before the next iteration,
+					// otherwise we skip an element, which in the past has led to us not
+					// pruning that element when we should have, which led to >100% progress
+					// at job completion; play demo: https://go.dev/play/p/rH5szSDC2SD
+					// (see how only the last demo visits/prints every element)
+					i--
 				}
 			}
 
+			// rollback should be OK since we didn't mutate anything, should even be slightly more efficient than a commit?
 			thumbsTx.Rollback()
 			job.tl.thumbsMu.RUnlock()
 		}
 
+		// if all we needed to do was count, we did that for this page, so move on to the next page
+		if precountMode {
+			continue
+		}
+
+		// nothing to do if there are no actionable results on this page
 		if len(pageResults) == 0 {
 			continue
 		}
 
+		// since we're not in precount mode, go ahead and actually generate the thumbnails+thumbhashes
 		if err := tj.processInBatches(job, pageResults, 0, false); err != nil {
-			return fmt.Errorf("processing page of thumbnail tasks: %w", err)
+			return 0, fmt.Errorf("processing page of thumbnail tasks: %w", err)
 		}
 	}
 
-	return nil
+	return taskCount, nil
 }
 
-func (tj thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, startIdx int, checkpoints bool) error {
+func (thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, startIdx int, checkpoints bool) error {
 	if len(tasks) == 0 {
 		job.Logger().Debug("no thumbnails to generate")
 		return nil
@@ -292,8 +349,24 @@ func (tj thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, s
 	//   have finished, so we can checkpoint and thus resume correctly from that index,
 	//   without having to worry about some goroutines that haven't finished yet.
 	// - Batching in this way acts as a goroutine throttle, so we don't flood the CPU.
+	//
+	// Downside: Videos thumbnails often take much longer to generate than stills, so
+	// it can appear that the whole job has stalled after the still thumbnails are
+	// done. It would be interesting to see if we can find a way to at least keep the
+	// status message current with which video is being processed, since many of the
+	// stills will be done so quickly the user won't even see them. Also, smaller
+	// batches mean better checkpoint and pause precision, but less concurrency (speed).
+	// Since we don't use checkpoints with large import jobs (as the tasks are calculated
+	// on-the-fly based on import ID), and we can resume a job by paging through the
+	// database without a checkpoint, we prefer a larger batch size when checkpointing
+	// isn't enabled. This should help keep the CPU busy longer while working on videos,
+	// assuming mostly stills in the batch. But not too large, so that pausing doesn't
+	// take forever.
 	var wg sync.WaitGroup
-	const batchSize = 5
+	batchSize := 25
+	if checkpoints {
+		batchSize = 5
+	}
 
 	// all goroutines must be done before we return
 	defer wg.Wait()
@@ -332,17 +405,18 @@ func (tj thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, s
 				zap.String("thumbnail_type", task.ThumbType),
 			)
 
+			// TODO: we're in a tight loop as part of a batch; how do we get it to
+			// show for the user during longer tasks such that it isn't overwritten?
 			job.Message(task.DataFile)
 
 			_, thash, err := task.thumbnailAndThumbhash(job.Context(), task.DataID, task.DataFile)
 			if err != nil {
 				// don't terminate the job if there's an error
-				// TODO: but we should probably note somewhere in the job's
-				// row in the DB that this error happened... maybe?
+				// TODO: but we should probably note somewhere in the job's row in the DB that this error happened... maybe?
 				logger.Error("thumbnail/thumbhash generation failed", zap.Error(err))
+			} else {
+				logger.Info("finished thumbnail", zap.Binary("thumb_hash", thash))
 			}
-
-			logger.Info("finished thumbnail", zap.Binary("thumb_hash", thash))
 
 			job.Progress(1)
 		}(job, task)
@@ -455,11 +529,10 @@ func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID 
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT DO UPDATE
 		SET generated=?, mime_type=?, content=?
-		WHERE (data_file=? OR (data_file IS NULL AND ? IS NULL))
-			AND (item_data_id=? OR (item_data_id IS NULL AND ? IS NULL))`,
+		WHERE data_file IS ? AND item_data_id IS ?`,
 		dataFileToInsert, dataIDToInsert, mimeType, thumbnail,
 		now.Unix(), mimeType, thumbnail,
-		dataFileToInsert, dataFileToInsert, dataIDToInsert, dataIDToInsert)
+		dataFileToInsert, dataIDToInsert)
 	if err != nil {
 		return Thumbnail{}, fmt.Errorf("saving thumbnail to database: %w (item_data_id=%d data_file='%s')", err, dataID, dataFile)
 	}

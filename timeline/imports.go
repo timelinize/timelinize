@@ -526,7 +526,8 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 		TasksFromImportJob: ij.job.ID(),
 	}
 
-	if _, err := ij.job.tl.CreateJob(job, time.Time{}, 0, int(thumbnailCount), ij.job.id); err != nil {
+	// thumbnail job will calculate its total size
+	if _, err := ij.job.tl.CreateJob(job, time.Time{}, 0, 0, ij.job.id); err != nil {
 		ij.job.Logger().Error("creating thumbnail job", zap.Error(err))
 		return
 	}
@@ -539,6 +540,7 @@ func (ij ImportJob) generateEmbeddingsForImportedItems() {
 		ItemsFromImportJob: ij.job.ID(),
 	}
 
+	// embedding job will calculate its total size
 	if _, err := ij.job.tl.CreateJob(job, time.Time{}, 0, 0, ij.job.id); err != nil {
 		ij.job.Logger().Error("creating embeddings job", zap.Error(err))
 		return
