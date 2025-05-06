@@ -66,6 +66,18 @@ bin-cross:
 	# windows arm64
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC="zig cc -target x86_64-windows" CXX="zig c++ -target x86_64-windows" go build -o $(BIN_ROOT)/$(BIN_NAME)_windows_arm64.exe
 
+# Build the Beeper importer tool
+beeper-import:
+	go build -o .bin/beeper-import cmd/beeper-import/main.go
+
+# Run the Beeper importer
+run-beeper-import: beeper-import
+	./.bin/beeper-import -verbose
+
+# Run unit tests for the Beeper datasource
+test-beeper:
+	go test -v ./datasources/beeper/...
+
 ### run
 
 run-h:
