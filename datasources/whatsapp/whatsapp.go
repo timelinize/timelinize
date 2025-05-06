@@ -70,7 +70,7 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 			Name: name,
 			Attributes: []timeline.Attribute{
 				{
-					Name:     "WhatsApp Name",
+					Name:     "whatsapp_name",
 					Value:    name,
 					Identity: true, // the data export only gives us this info for the owner, so it is the identity, but only for this user
 				},
