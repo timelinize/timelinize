@@ -85,14 +85,16 @@
 	width: 100%;
 }
 
-/* TODO: temporary! */
 .face-circle {
 	position: absolute;
 	border-radius: 50%;
 	border: 5px solid white;
+	outline: 5px solid rgb(0 0 0 / .5);
 	color: white;
+	text-shadow: 0px 0px 3px black;
 	font-weight: bold;
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	text-align: center;
 }

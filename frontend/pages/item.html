@@ -15,10 +15,10 @@
 			</div>
 			<div class="col-auto ms-auto">
 				<div class="btn-list">
-					<a class="btn btn-ghost-red">
+					<a class="btn btn-ghost-red disabled" title="Not yet implemented">
 						Delete
 					</a>
-					<a class="btn btn-outline">
+					<a class="btn btn-outline disabled" title="Not yet implemented">
 						<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-edit"
 							width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
 							fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -92,8 +92,9 @@
 						</div>
 					</a>
 					<div id="related-entities" class="list-group list-group-flush list-group-hoverable d-none">
-						<div class="subheader px-3 py-2 mb-0">Sent to:</div>
+						<div class="subheader px-3 py-2 mb-0 d-none" id="related-entities-sent-to">Sent to:</div>
 						<!-- TODO: if wanting a sticky header in a scrollable container, for lots of recipients: <div class="list-group-header sticky-top">Sent to</div> -->
+						<div class="subheader px-3 py-2 mb-0 d-none" id="related-entities-included">In this <span id="item-type-label">item</span>:</div>
 					</div>
 				</div>
 
@@ -276,6 +277,23 @@
 </template>
 
 <template id="tpl-related-entity">
+	<a class="list-group-item list-group-item-action">
+		<div class="d-flex align-items-center gap-2 text-truncate">
+			<div class="entity-picture col-auto">
+
+			</div>
+			<div class="entity-name fw-medium">
+
+			</div>
+			<div class="entity-attr text-secondary small">
+
+			</div>
+		</div>
+	</a>
+</template>
+
+<!-- TODO: this is currently the same as related-entity; but I think I had plans to make it slightly different somehow, a little more useful/interesting -->
+<template id="tpl-included-entity">
 	<a class="list-group-item list-group-item-action">
 		<div class="d-flex align-items-center gap-2 text-truncate">
 			<div class="entity-picture col-auto">
