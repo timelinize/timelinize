@@ -23,7 +23,7 @@ func extractPoll(content []string) (string, timeline.Metadata, bool) {
 	}
 
 	meta := make(timeline.Metadata)
-	meta["Poll Question"] = parts[1]
+	meta["Poll question"] = parts[1]
 	customMessage := parts[1]
 
 	for i, optLine := range content[2:] {
@@ -37,8 +37,8 @@ func extractPoll(content []string) (string, timeline.Metadata, bool) {
 		// No need to track error, it's extracted with `\d+`
 		voteCount, _ := strconv.Atoi(parts[2])
 
-		meta[fmt.Sprintf("Poll Option %d", i+1)] = parts[1]
-		meta[fmt.Sprintf("Poll Votes %d", i+1)] = voteCount
+		meta[fmt.Sprintf("Poll option %d", i+1)] = parts[1]
+		meta[fmt.Sprintf("Poll votes %d", i+1)] = voteCount
 	}
 
 	return customMessage, meta, true

@@ -52,9 +52,9 @@ func TestFileImport(t *testing.T) {
 			metadata: map[string]any{
 				"Poll question": "A question",
 				"Poll option 1": "Option A",
-				"Poll votes 1":  "1",
+				"Poll votes 1":  1,
 				"Poll option 2": "Option B",
-				"Poll votes 2":  "2",
+				"Poll votes 2":  2,
 			}},
 		{owner: "Person 2", index: 12, text: "British Library (96 Euston Rd, London, Greater London NW1 2DB): https://foursquare.com/v/4ac518cef964a52019a620e3",
 			metadata: map[string]any{
@@ -69,19 +69,16 @@ func TestFileImport(t *testing.T) {
 		// Missed voice call omitted
 		// Taken video call omitted
 		// Deleted message omitted
-		{owner: "Person 2", index: 18, text: "An edited message",
-			metadata: map[string]any{
-				"Edited": true,
-			}},
+		{owner: "Person 2", index: 18, text: "An edited message"},
 		{owner: "Persona español", index: 19, text: "Una pregunta\r\n- Opción A (☑︎ 0)\r\n- Opción B (☑︎ 1)\r\n- Opción C (☑︎ 2)",
 			metadata: map[string]any{
 				"Poll question": "Una pregunta",
 				"Poll option 1": "Opción A",
-				"Poll votes 1":  "0",
+				"Poll votes 1":  0,
 				"Poll option 2": "Opción B",
-				"Poll votes 2":  "1",
+				"Poll votes 2":  1,
 				"Poll option 3": "Opción C",
-				"Poll votes 3":  "2",
+				"Poll votes 3":  2,
 			}},
 	}
 
@@ -129,6 +126,16 @@ func TestFileImport(t *testing.T) {
 				}
 
 				validateItemData(t, filename, expFile, attachedItems[j].Content, "incorrect %dth attachment for message %d", j, i)
+			}
+		}
+
+		for key, expectedValue := range expected[i].metadata {
+			if actualValue, ok := message.Item.Metadata[key]; ok {
+				if actualValue != expectedValue {
+					t.Fatalf("metadata value for %s is incorrect, wanted %v (%T), but was %v (%T)", key, expectedValue, expectedValue, actualValue, actualValue)
+				}
+			} else {
+				t.Fatalf("metadata value for %s was missing", key)
 			}
 		}
 
