@@ -13,11 +13,11 @@ var pollRegex = regexp.MustCompile(`^\p{Lu}+:\r\n(.+)\r\n$`)
 var optionRegex = regexp.MustCompile(`^\p{Lu}+: (.+) \((\d+) .+\)\r\n$`)
 
 func extractPoll(content []string) (string, timeline.Metadata, bool) {
-	if len(content) < 2 {
+	if len(content) <= metadataFieldNumber {
 		return "", nil, false
 	}
 
-	parts := pollRegex.FindStringSubmatch(content[1])
+	parts := pollRegex.FindStringSubmatch(content[metadataFieldNumber])
 	if parts == nil {
 		return "", nil, false
 	}

@@ -180,4 +180,6 @@ const (
 	chatPath     = "_chat.txt"
 	attachPrefix = "<attached: "
 	attachSuffix = ">"
+
+	metadataFieldNumber = 1
 )

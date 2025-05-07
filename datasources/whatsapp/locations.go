@@ -8,11 +8,11 @@ import (
 )
 
 func extractLocation(content []string) (string, timeline.Metadata, bool) {
-	if len(content) < 2 {
+	if len(content) <= metadataFieldNumber {
 		return "", nil, false
 	}
 
-	trimmedContent := strings.TrimSpace(content[1])
+	trimmedContent := strings.TrimSpace(content[metadataFieldNumber])
 	meta := make(timeline.Metadata)
 	if idx := strings.Index(trimmedContent, foursquarePrefix); idx != -1 {
 		meta["Location Foursquare ID"] = trimmedContent[idx+len(foursquarePrefix):]
