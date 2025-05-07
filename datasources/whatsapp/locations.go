@@ -15,7 +15,7 @@ func extractLocation(content []string) (string, timeline.Metadata, bool) {
 	trimmedContent := strings.TrimSpace(content[metadataFieldNumber])
 	meta := make(timeline.Metadata)
 	if idx := strings.Index(trimmedContent, foursquarePrefix); idx != -1 {
-		meta["Location Foursquare ID"] = trimmedContent[idx+len(foursquarePrefix):]
+		meta["Pin foursquare id"] = trimmedContent[idx+len(foursquarePrefix):]
 	} else if idx := strings.Index(trimmedContent, googleMapsPrefix); idx != -1 {
 		var lat float64
 		var lng float64
@@ -23,8 +23,8 @@ func extractLocation(content []string) (string, timeline.Metadata, bool) {
 			return "", nil, false
 		}
 
-		meta["Location Latitude"] = lat
-		meta["Location Longitude"] = lng
+		meta["Pin latitude"] = lat
+		meta["Pin longitude"] = lng
 	} else {
 		return "", nil, false
 	}
