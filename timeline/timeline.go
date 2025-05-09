@@ -1268,7 +1268,7 @@ type ProcessingOptions struct {
 	Timeframe Timeframe `json:"timeframe,omitempty"`
 
 	// If true, items with manual modifications may be updated, overwriting local changes.
-	OverwriteModifications bool `json:"overwrite_modifications,omitempty"`
+	OverwriteLocalChanges bool `json:"overwrite_local_changes,omitempty"`
 
 	// Names of columns in the items table to check for sameness when loading an item
 	// that doesn't have data_source+original_id. The field/column is the same if the
@@ -1276,9 +1276,9 @@ type ProcessingOptions struct {
 	// however, strict NULL comparison is applied, where NULL=NULL only.
 	ItemUniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
 
-	// The policies to apply when updating an item in the DB, specified per-field.
-	// Note: Some fields are described in aggregate, such as data and location.
-	ItemFieldUpdates map[string]fieldUpdatePolicy `json:"item_field_updates,omitempty"`
+	// How to update existing items, specified per-field.
+	// If not set, items that already exist will simply be skipped.
+	ItemUpdatePreferences []FieldUpdatePreference `json:"item_update_preferences,omitempty"`
 
 	// TODO: WIP (Should this be in importjob or processingoptions?)
 	Interactive *InteractiveImport `json:"interactive,omitempty"`
@@ -1304,11 +1304,14 @@ type InteractiveGraph struct {
 }
 
 // fieldUpdatePolicy values specify how to update a field/column of an item in the DB.
+// It's a lower level of abstraction than field update preferences, which are user-facing.
 type fieldUpdatePolicy int
 
 const (
+	updatePolicyKeepExisting fieldUpdatePolicy = iota
+
 	// COALESCE(existing, incoming)
-	updatePolicyPreferExisting fieldUpdatePolicy = iota + 1
+	updatePolicyPreferExisting
 
 	// COALESCE(incoming, existing)
 	updatePolicyPreferIncoming
@@ -1316,9 +1319,191 @@ const (
 	// SET existing=incoming
 	// (i.e. prefer incoming even if incoming is NULL)
 	updatePolicyOverwriteExisting
-
-	// TODO: choose one based on properties of the item? like larger or smaller one, etc... (e.g. if we want to prefer the higher-quality photo... or a certain data source)
 )
+
+// FieldUpdatePreference describes a user's preference for updating part of an item.
+type FieldUpdatePreference struct {
+	Field      string           `json:"field"`
+	Priorities []map[string]any `json:"priorities"`
+	Nulls      bool             `json:"nulls,omitempty"` // if true, nulls can overwrite data
+}
+
+// distillUpdatePolicies converts the user's update preferences for the import
+// into update policies for this item for the DB.
+func (p *processor) distillUpdatePolicies(incoming *Item, existing ItemRow) error {
+	// reset target map if already populated
+	if len(incoming.fieldUpdatePolicies) > 0 {
+		incoming.fieldUpdatePolicies = make(map[string]fieldUpdatePolicy)
+	}
+	for _, pref := range p.ij.ProcessingOptions.ItemUpdatePreferences {
+		policy, err := p.distillUpdatePolicy(pref, incoming, existing)
+		if err != nil {
+			return fmt.Errorf("distilling update policy from preference %+v: %w", pref, err)
+		}
+		// Only create a policy if it's not the default (to keep existing; i.e. no-op),
+		// since we use the size of the policies map as an indicator that we need to
+		// process the item.
+		if policy != updatePolicyKeepExisting {
+			if incoming.fieldUpdatePolicies == nil {
+				incoming.fieldUpdatePolicies = make(map[string]fieldUpdatePolicy)
+			}
+			incoming.fieldUpdatePolicies[pref.Field] = policy
+		}
+	}
+	return nil
+}
+
+func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *Item, existing ItemRow) (fieldUpdatePolicy, error) {
+	for i, priority := range pref.Priorities {
+		// can only have 1 priority specified per map; the map just allows arbitrary keys
+		if len(priority) != 1 {
+			return 0, fmt.Errorf("only one priority may be specified per array element, got %d at %d: %v", len(priority), i, priority)
+		}
+		for property, v := range priority {
+			switch property {
+			case "data_source":
+				if existing.DataSourceName != nil && *existing.DataSourceName == p.ds.Name {
+					// both incoming and existing have the same data source,
+					// so this isn't a good distinguisher
+					continue
+				}
+				if existing.DataSourceName != nil && *existing.DataSourceName == v {
+					if pref.Nulls {
+						return updatePolicyKeepExisting, nil
+					}
+					return updatePolicyPreferExisting, nil
+				}
+				if p.ds.Name == v {
+					if pref.Nulls {
+						return updatePolicyOverwriteExisting, nil
+					}
+					return updatePolicyPreferIncoming, nil
+				}
+			case "media_type":
+				if existing.DataType != nil && *existing.DataType == incoming.Content.MediaType {
+					// both incoming and existing have the same media type,
+					// so this isn't a good distinguisher
+					continue
+				}
+				if existing.DataType != nil && *existing.DataType == v {
+					if pref.Nulls {
+						return updatePolicyKeepExisting, nil
+					}
+					return updatePolicyPreferExisting, nil
+				}
+				if incoming.Content.MediaType == v {
+					if pref.Nulls {
+						return updatePolicyOverwriteExisting, nil
+					}
+					return updatePolicyPreferIncoming, nil
+				}
+			case "size":
+				const bigger, smaller = "bigger", "smaller"
+				if v != bigger && v != smaller {
+					return 0, fmt.Errorf("unknown policy for 'size' property: %v (expected bigger or smaller)", v)
+				}
+				if incoming.dataFileIn != nil && incoming.dataFileSize == 0 && incoming.dataFileHash == nil {
+					// there's a data file incoming, and we don't know its size yet;
+					// we can't determine size until after processing the incoming data...
+					// signal to the processor that the data file should be processed,
+					// but before finalizing things at the end of the pipeline, do all
+					// this again to know how to handle the item
+					return -1, nil
+				}
+				// existing item content could be either in the DB or on disk, so
+				// whichever it is, get the length of it
+				existingDataLen := -1 // default to -1 to suggest nil existing data
+				if existing.DataText != nil {
+					existingDataLen = len(*existing.DataText)
+				} else if existing.DataFile != nil {
+					info, err := os.Stat(p.tl.FullPath(*existing.DataFile))
+					if err != nil {
+						return 0, err
+					}
+					existingDataLen = int(info.Size())
+				} // TODO: else if existing.DataID != nil ... get len from other DB table
+				incomingDataLen := -1 // default to -1 to suggest nil incoming data
+				if incoming.dataText != nil {
+					incomingDataLen = len(*incoming.dataText)
+				} else if incoming.dataFileSize > 0 {
+					incomingDataLen = int(incoming.dataFileSize)
+				}
+				if incomingDataLen == existingDataLen {
+					// both incoming and existing have the same content length,
+					// so size isn't a good distinguisher
+					continue
+				}
+				if v == bigger {
+					if existingDataLen > incomingDataLen {
+						if pref.Nulls {
+							return updatePolicyKeepExisting, nil
+						}
+						return updatePolicyPreferExisting, nil
+					}
+					if incomingDataLen > existingDataLen {
+						if pref.Nulls {
+							return updatePolicyOverwriteExisting, nil
+						}
+						return updatePolicyPreferIncoming, nil
+					}
+				} else if v == smaller {
+					if existingDataLen < incomingDataLen {
+						if pref.Nulls {
+							return updatePolicyKeepExisting, nil
+						}
+						return updatePolicyPreferExisting, nil
+					}
+					if incomingDataLen < existingDataLen {
+						if pref.Nulls {
+							return updatePolicyOverwriteExisting, nil
+						}
+						return updatePolicyPreferIncoming, nil
+					}
+				}
+			case "timestamp":
+				const earlier, later = "earlier", "later"
+				if v != earlier && v != later {
+					return 0, fmt.Errorf("unknown policy for 'timestamp' property: %v (expected earlier or later)", v)
+				}
+				if existing.Timestamp != nil && !incoming.Timestamp.IsZero() &&
+					existing.Timestamp.Equal(incoming.Timestamp) {
+					// both incoming and existing have the same timestamp, so this isn't a good distinguisher
+					continue
+				}
+				if v == earlier {
+					if existing.Timestamp != nil && (incoming.Timestamp.IsZero() || existing.Timestamp.Before(incoming.Timestamp)) {
+						if pref.Nulls {
+							return updatePolicyKeepExisting, nil
+						}
+						return updatePolicyPreferExisting, nil
+					}
+					if !incoming.Timestamp.IsZero() && (existing.Timestamp == nil || incoming.Timestamp.Before(*existing.Timestamp)) {
+						if pref.Nulls {
+							return updatePolicyOverwriteExisting, nil
+						}
+						return updatePolicyPreferIncoming, nil
+					}
+				} else if v == later {
+					if existing.Timestamp != nil && (incoming.Timestamp.IsZero() || existing.Timestamp.After(incoming.Timestamp)) {
+						if pref.Nulls {
+							return updatePolicyKeepExisting, nil
+						}
+						return updatePolicyPreferExisting, nil
+					}
+					if !incoming.Timestamp.IsZero() && (existing.Timestamp == nil || incoming.Timestamp.After(*existing.Timestamp)) {
+						if pref.Nulls {
+							return updatePolicyOverwriteExisting, nil
+						}
+						return updatePolicyPreferIncoming, nil
+					}
+				}
+			default:
+				return 0, fmt.Errorf("unknown property '%s'", property)
+			}
+		}
+	}
+	return updatePolicyKeepExisting, nil
+}
 
 // Files belonging at the root within the timeline repository.
 const (

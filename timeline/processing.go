@@ -741,12 +741,6 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	it.makeIDHash(dsName)
 	it.makeContentHash()
 
-	// the user's update policies may be overridden on a per-item basis depending on
-	// what makes the most sense, like if an item was found in the DB with an original
-	// ID but has no content, from the same import especially, always update the row,
-	// because it just means the data source gave us the item in two (or more) parts
-	var updateOverrides map[string]fieldUpdatePolicy
-
 	// if the item is already in our DB, load it
 	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true)
 	if err != nil {
@@ -754,8 +748,18 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	}
 	if ir.ID > 0 {
 		// found it in our DB; skip it?
+
+		// first we need to distill user's update preferences down to update policies for the DB
+		if err := p.distillUpdatePolicies(it, ir); err != nil {
+			return 0, fmt.Errorf("distilling initial update policies: %w", err)
+		}
+		if len(it.fieldUpdatePolicies) > 0 {
+			it.existingRow = ir // we might need this in phase 3
+		}
+
+		// now determine if we should process this duplicate/existing item at all
 		var reprocessItem, reprocessDataFile bool
-		reprocessItem, reprocessDataFile, updateOverrides = p.shouldProcessExistingItem(it, ir, processDataFile)
+		reprocessItem, reprocessDataFile = p.shouldProcessExistingItem(it, ir, processDataFile)
 		if !reprocessItem {
 			// don't confuse phase 2 which downloads data files, by setting
 			// a reader (above) but not a writer (below), so make sure the
@@ -809,7 +813,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	// with its original ID, we can still link a relationship, but if the incoming item has no content we
 	// should not zero out any existing version of the item in the database; the intent by the data source is
 	// to merely link the item by ID (or create a placeholder item), not zero it out!
-	ir.ID, ir.howStored, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), updateOverrides)
+	ir.ID, ir.howStored, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), it.fieldUpdatePolicies)
 	if err != nil {
 		return 0, fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
 	}
@@ -1007,7 +1011,7 @@ func (p *processor) integrityCheck(dbItem ItemRow) error {
 // item in the database. It returns true for item if the whole item should be reprocessed, and
 // it returns true for dataFile if at least the dataFile should be processed.
 // Valid return values: false false, true false, true true.
-func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFileIncoming bool) (item bool, dataFile bool, updateOverrides map[string]fieldUpdatePolicy) {
+func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFileIncoming bool) (item bool, dataFile bool) {
 	// An item may be referenced by the data source more than once, and thus the same item may be processed concurrently;
 	// when this happens, multiple data files are created in the repo: the first will presumably have the original filename,
 	// while the later ones will have random strings appended. The problem is if a later one end up finishing first, the
@@ -1039,7 +1043,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 			zap.String("filename", it.Content.Filename),
 			zap.String("item_original_id", it.ID),
 			zap.String("data_file_path", p.tl.FullPath(*dbItem.DataFile)))
-		return true, false, nil
+		return true, false
 	}
 
 	// within the same import, reprocess an item if the data source gives us the item in pieces;
@@ -1048,12 +1052,14 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// of the item's information -- so if our current item row is missing information, we can at
 	// least safely add new info I think
 	if dbItem.JobID != nil && *dbItem.JobID == p.ij.job.id {
-		updateOverrides = make(map[string]fieldUpdatePolicy)
+		if it.fieldUpdatePolicies == nil {
+			it.fieldUpdatePolicies = make(map[string]fieldUpdatePolicy)
+		}
 
 		// if there's an incoming data file and we don't have one, then update
 		if dbItem.DataText == nil && dbItem.DataFile == nil && (it.dataText != nil || it.Content.Data != nil) {
 			dataFile = true
-			updateOverrides["data"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["data"] = updatePolicyPreferIncoming
 		}
 
 		// if incoming item is linked to an owner attribute, but the one in the DB is null,
@@ -1067,7 +1073,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 				}
 			}
 			if hasIDAttr {
-				updateOverrides["attribute_id"] = updatePolicyPreferIncoming
+				it.fieldUpdatePolicies["attribute_id"] = updatePolicyPreferIncoming
 			}
 		}
 
@@ -1075,34 +1081,34 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		if (dbItem.Latitude == nil && it.Location.Latitude != nil) ||
 			(dbItem.Longitude == nil && it.Location.Longitude != nil) ||
 			(dbItem.Altitude == nil && it.Location.Altitude != nil) {
-			updateOverrides["location"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["location"] = updatePolicyPreferIncoming
 		}
 		if (dbItem.Timestamp == nil || dbItem.TimeOffset == nil) && !it.Timestamp.IsZero() {
-			updateOverrides["timestamp"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["timestamp"] = updatePolicyPreferIncoming
 		}
 		if dbItem.Timespan == nil && !it.Timespan.IsZero() {
-			updateOverrides["timespan"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["timespan"] = updatePolicyPreferIncoming
 		}
 		if dbItem.Timeframe == nil && !it.Timeframe.IsZero() {
-			updateOverrides["timeframe"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["timeframe"] = updatePolicyPreferIncoming
 		}
 		if dbItem.Filename == nil && it.Content.Filename != "" {
-			updateOverrides["filename"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["filename"] = updatePolicyPreferIncoming
 		}
 		if dbItem.Classification == nil && it.Classification.Name != "" {
-			updateOverrides["classification_id"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["classification_id"] = updatePolicyPreferIncoming
 		}
 		if dbItem.OriginalLocation == nil && it.OriginalLocation != "" {
-			updateOverrides["original_location"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["original_location"] = updatePolicyPreferIncoming
 		}
 		if dbItem.OriginalID == nil && it.ID != "" {
-			updateOverrides["original_id"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["original_id"] = updatePolicyPreferIncoming
 		}
 
 		// metadata is a little tricky, especially to decide efficiently, unless
 		// the incoming item obiously has some and the existing one does not...
 		if len(it.Metadata) > 0 && len(dbItem.Metadata) == 0 {
-			updateOverrides["metadata"] = updatePolicyOverwriteExisting
+			it.fieldUpdatePolicies["metadata"] = updatePolicyOverwriteExisting
 		} else if len(it.Metadata) > 0 {
 			var decoded Metadata
 			err := json.Unmarshal(dbItem.Metadata, &decoded)
@@ -1117,14 +1123,14 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 						// so I guess we take this as a hint to replace the existing... but obviously, there
 						// could be fields that DB has that the incoming item does not...
 						// TODO: we may need a way to apply metadata merge policy ?
-						updateOverrides["metadata"] = updatePolicyOverwriteExisting
+						it.fieldUpdatePolicies["metadata"] = updatePolicyOverwriteExisting
 						break
 					}
 				}
 			}
 		}
 
-		item = len(updateOverrides) > 0
+		item = len(it.fieldUpdatePolicies) > 0
 
 		if !item {
 			p.log.Debug("skipping processing of existing item because it was already processed in this import and there are no update overrides",
@@ -1140,9 +1146,11 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// provide the whole item in one import, so in that case, always reprocess, but make sure
 	// to account for the update overrides specified by the data source
 	if len(it.Retrieval.key) > 0 {
-		updateOverrides = make(map[string]fieldUpdatePolicy)
+		if it.fieldUpdatePolicies == nil {
+			it.fieldUpdatePolicies = make(map[string]fieldUpdatePolicy)
+		}
 		for _, field := range it.Retrieval.PreferFields {
-			updateOverrides[field] = updatePolicyOverwriteExisting
+			it.fieldUpdatePolicies[field] = updatePolicyOverwriteExisting
 		}
 		item, dataFile = true, true
 		return
@@ -1165,26 +1173,34 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	}
 
 	// if modified manually, do not overwrite changes unless specifically enabled
-	if dbItem.Modified != nil && !p.ij.ProcessingOptions.OverwriteModifications {
+	if dbItem.Modified != nil && !p.ij.ProcessingOptions.OverwriteLocalChanges {
 		p.log.Debug("skipping processing of existing item because it has been manually modified within the repo (enable modification overwrites to override)",
 			zap.Uint64("item_row_id", dbItem.ID),
 			zap.String("filename", it.Content.Filename),
 			zap.String("item_original_id", it.ID))
-		return false, false, nil
+		return false, false
+	}
+
+	// if a field update policy is deferred, it's because it requires knowing something about the incoming data
+	// file that we won't know until we download it in a later phase; so re-process the item and the file
+	for _, pol := range it.fieldUpdatePolicies {
+		if pol < 0 {
+			return true, true
+		}
 	}
 
 	// if the item data is explicitly configured to overwrite existing, then it
 	// should always be reprocessed, even if NULL
-	dataUpdatePolicy, dataUpdateEnabled := p.ij.ProcessingOptions.ItemFieldUpdates["data"]
+	dataUpdatePolicy, dataUpdateEnabled := it.fieldUpdatePolicies["data"]
 	if dataUpdatePolicy == updatePolicyOverwriteExisting {
-		return true, true, nil
+		return true, true
 	}
 
 	if dataFileIncoming {
 		// if a data file is incoming and integrity check failed, always reprocess regardless of
 		// specific update policy for this field (because integrity check is explicitly opt-in too)
 		if integrityCheckErr != nil {
-			return true, true, nil
+			return true, true
 		}
 
 		// If the data_hash is missing (data file did not finish processing), and a data file is incoming,
@@ -1196,7 +1212,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		// even though the file is obviously missing and needs to be replaced.
 		dataFileMissing := dbItem.DataFile != nil && dbItem.DataHash == nil
 		if dataUpdateEnabled && dataFileMissing {
-			return true, true, nil
+			return true, true
 		}
 
 		// by this point, we know that if it has a data file, it has good integrity
@@ -1232,9 +1248,9 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	}
 
 	// finally, if the user has configured/enabled updates, reprocess the item
-	item = len(p.ij.ProcessingOptions.ItemFieldUpdates) > 0
+	item = len(it.fieldUpdatePolicies) > 0
 
-	return item || dataFile, dataFile, nil
+	return item || dataFile, dataFile
 }
 
 func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it *Item) error {
@@ -1279,7 +1295,11 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	ir.DataSourceID = &p.dsRowID
 	ir.DataSourceName = &p.ds.Name
 	ir.DataSourceTitle = &p.ds.Title
-	ir.JobID = &p.ij.job.id
+	if ir.JobID == nil {
+		// if the row was loaded from the DB, we don't want to wipe out if it
+		// already had its original job ID associated with it
+		ir.JobID = &p.ij.job.id
+	}
 	if attrID != 0 {
 		ir.AttributeID = &attrID
 	}
@@ -1505,7 +1525,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 					filename = &it.Content.Filename
 				}
 				args = append(args, filename, filename)
-			case "timestamp":
+			case "timestamp": //nolint:goconst
 				timestamp := it.timestampUnix()
 				args = append(args, timestamp, timestamp)
 			case "timespan":
@@ -1557,7 +1577,8 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 }
 
 // insertOrUpdateItem inserts the fully-populated ir into the database (TODO: finish godoc)
-func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool, updateOverrides map[string]fieldUpdatePolicy) (uint64, itemStoreResult, error) {
+func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool,
+	fieldUpdatePolicies map[string]fieldUpdatePolicy) (uint64, itemStoreResult, error) {
 	// new item? insert it
 	if ir.ID == 0 {
 		var rowID uint64
@@ -1589,7 +1610,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	// existing item; update it
 
 	// ...only if any fields are configured to be updated
-	if len(p.ij.ProcessingOptions.ItemFieldUpdates) == 0 && len(updateOverrides) == 0 {
+	if len(fieldUpdatePolicies) == 0 {
 		return ir.ID, itemSkipped, nil
 	}
 
@@ -1597,12 +1618,12 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	var args []any
 	var needsComma bool
 
-	sb.WriteString(`UPDATE items SET `)
+	sb.WriteString("UPDATE items SET ")
 
 	// set the modified_job_id (the ID of the import that most recently modified the item) only if
 	// it's not the original import, I think it makes sense to count the original import only once
 	if ir.JobID != nil && *ir.JobID != p.ij.job.id {
-		sb.WriteString(`modified_job_id=?`)
+		sb.WriteString("modified_job_id=?")
 		args = append(args, p.ij.job.id)
 		needsComma = true
 	}
@@ -1640,6 +1661,12 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	}
 
 	applyUpdatePolicy := func(field string, policy fieldUpdatePolicy) error {
+		if policy < 0 {
+			// this happens if we're still waiting for information before we can
+			// apply the policy; the processor should do this again later
+			return nil
+		}
+
 		switch field {
 		case "data":
 			appendToQuery("data_type", policy)
@@ -1708,19 +1735,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 
 	// build the SET clause field by field
 
-	// apply update overrides first
-	for field, policy := range updateOverrides {
-		if err := applyUpdatePolicy(field, policy); err != nil {
-			return 0, "", err
-		}
-	}
-
-	// then for every remaining field, apply the default policy
-	for field, policy := range p.ij.ProcessingOptions.ItemFieldUpdates {
-		// skip overrides; already applied
-		if _, ok := updateOverrides[field]; ok {
-			continue
-		}
+	for field, policy := range fieldUpdatePolicies {
 		if err := applyUpdatePolicy(field, policy); err != nil {
 			return 0, "", err
 		}

@@ -82,18 +82,22 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 	logger.Info("counting total size of job")
 
 	const mostOfQuery = `FROM items
-			LEFT JOIN embeddings ON items.embedding_id = embeddings.id
-			WHERE items.job_id=?
+			LEFT JOIN embeddings ON embeddings.id = items.embedding_id
+			LEFT JOIN jobs ON jobs.id = items.modified_job_id
+			WHERE (items.job_id=? OR items.modified_job_id=?)
 				AND (items.data_type LIKE 'image/%' OR items.data_type LIKE 'text/%')
 				AND (items.data_id IS NOT NULL OR items.data_text IS NOT NULL OR items.data_file IS NOT NULL)
-				AND (items.embedding_id IS NULL OR embeddings.generated < items.stored OR embeddings.generated < items.modified)`
+				AND (items.embedding_id IS NULL
+					OR embeddings.generated < items.stored
+					OR (embeddings.generated < items.modified
+						AND embeddings.generated < jobs.ended))`
 
 	job.tl.dbMu.RLock()
 	var jobSize int
 	err := job.tl.db.QueryRowContext(job.ctx, `
 		SELECT count()
 			`+mostOfQuery,
-		ej.ItemsFromImportJob).Scan(&jobSize)
+		ej.ItemsFromImportJob, ej.ItemsFromImportJob).Scan(&jobSize)
 	job.tl.dbMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed counting size of job: %w", err)

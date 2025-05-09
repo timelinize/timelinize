@@ -52,7 +52,11 @@ func (p *processor) downloadDataFile(_ context.Context, it *Item) error {
 		return err
 	}
 	it.dataFileSize = dataFileSize
-	if dataFileSize > 0 {
+	if dataFileSize == 0 {
+		// non-nil indicates we downloaded the file, but empty still makes it
+		// clear that the file was empty (as opposed to the IV of the hash)
+		it.dataFileHash = []byte{}
+	} else {
 		it.dataFileHash = h.Sum(nil)
 	}
 	it.makeContentHash() // update content hash now that we know the data file hash
@@ -66,6 +70,31 @@ func (p *processor) downloadDataFile(_ context.Context, it *Item) error {
 func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it *Item) error {
 	if it == nil || it.dataFileOut == nil {
 		return nil
+	}
+
+	// if we were waiting on the data file to be downloaded before we can determine if/how
+	// to update some field(s) of the item (a "deferred" update policy), then now is the
+	// time to revisit that
+	var hasDeferredUpdatePolicy bool
+	for _, pol := range it.fieldUpdatePolicies {
+		if pol < 0 {
+			hasDeferredUpdatePolicy = true
+			break
+		}
+	}
+	if hasDeferredUpdatePolicy {
+		// now that we have the data file, we shouldn't get any policies < 0, i.e. we can do a full update
+		// TODO: technically, we just need to update the fields where the policies that were previously < 0, right? currently we re-update everything. I haven't noticed any harm in this yet; it's simple...
+		if err := p.distillUpdatePolicies(it, it.existingRow); err != nil {
+			return fmt.Errorf("distilling final update policies: %w", err)
+		}
+		if len(it.fieldUpdatePolicies) > 0 {
+			var err error
+			_, _, err = p.insertOrUpdateItem(ctx, tx, it.row, &it.dataFileName, it.HasContent(), it.fieldUpdatePolicies)
+			if err != nil {
+				return fmt.Errorf("could not update item with deferred update policies: %w", err)
+			}
+		}
 	}
 
 	// Now that we have a hash of the file, perform one last check WITHOUT row/original IDs to ensure the checksum
@@ -180,6 +209,19 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		return fmt.Errorf("replacing data file with identical existing file: %w", err)
 	}
 
+	// If this item had a deferred field update policy, such as one that required knowing
+	// the size of the data file, and if the field was the data itself, and if the data
+	// file we just downloaded was not actually used, then we need to clean it up to avoid
+	// a dangling data file.
+	if hasDeferredUpdatePolicy {
+		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, it.dataFileName); err != nil {
+			p.log.Error("could not clean up unused downloaded data file",
+				zap.Error(err),
+				zap.String("unused_data_file", it.dataFileName),
+				zap.Uint64("row_id", it.row.ID))
+		}
+	}
+
 	// Count data files which are eligible for a thumbnail and which are not excluded from
 	// receiving a thumbnail (like live photos/motion picture sidecar files, which are
 	// generally an exception from normal related items). This count is not used to configure
@@ -279,6 +321,7 @@ func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error
 		}
 		if it.dataFileOut != nil {
 			it.dataFileOut.Close()
+			// don't set dataFileOut to nil, since the processor needs to access this later
 		}
 	}()
 

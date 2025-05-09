@@ -228,6 +228,7 @@ type Item struct {
 	TimeUncertainty time.Duration `json:"time_uncertainty,omitempty"`
 
 	// The coordinates where the item originated.
+	// TODO: Rename to Geolocation or Coordinates?
 	Location Location `json:"location,omitempty"`
 
 	// The person who owns, created, or originated the item. At
@@ -280,12 +281,14 @@ type Item struct {
 	dataFileOut         *os.File
 	dataFileSize        int64
 	dataFileName        string // path to the data file relative to the repo root
-	dataFileHash        []byte // should only be set if dataFileSize > 0
+	dataFileHash        []byte // a non-nil hash indicates the file has been downloaded (if 0 size, it will be an empty slice, as opposed to hash's IV)
 	desiredDataFileName string // base filename (sans path) the processor tried to get for the file, but may have been taken
 	idHash              []byte
 	contentHash         []byte
-	skipThumb           bool   // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
-	oldDataFile         string // when replacing a data file, used to clean things up at the end of processing the item
+	skipThumb           bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
+	oldDataFile         string                       // when replacing a data file, used to clean things up at the end of processing the item
+	existingRow         ItemRow                      // only used if a field update policy requires info about the incoming data file
+	fieldUpdatePolicies map[string]fieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
@@ -529,7 +532,7 @@ type Metadata map[string]any
 // (TODO: Should false be considered empty?)
 func (m Metadata) Clean() {
 	for k, v := range m {
-		if k == "" {
+		if strings.TrimSpace(k) == "" {
 			delete(m, k)
 			continue
 		}
@@ -561,16 +564,13 @@ func StringToSpecificType(s string) any {
 	if v, err := strconv.ParseFloat(s, 64); err == nil {
 		return v
 	}
-
 	// we could use ParseBool, but we'd risk converting other strings
 	// like "t" or "no" to true/false which might not be desired
-	if v := strings.ToLower(strings.TrimSpace(s)); v == "true" {
-		return v
+	if lowerTrimmed := strings.ToLower(strings.TrimSpace(s)); lowerTrimmed == "true" {
+		return true
+	} else if lowerTrimmed == "false" {
+		return false
 	}
-	if v := strings.ToLower(strings.TrimSpace(s)); v == "false" {
-		return v
-	}
-
 	return s
 }
 

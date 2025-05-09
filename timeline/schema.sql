@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	"created" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp job was stored/enqueued in unix milliseconds UTC
 	"updated" INTEGER, -- timestamp of last DB sync (in unix milliseconds UTC)
 	"start" INTEGER, -- timestamp job was actually started in unix milliseconds UTC *could be future, so not called "started")
-	"ended" INTEGER, -- timestamp in unix milliseconds UTC (TODO: only when finalized, or paused too?)
+	"ended" INTEGER, -- timestamp in unix milliseconds UTC when job ended (not paused)
 	"message" TEXT, -- brief message describing current status to be shown to the user, changes less frequently than log emissions
 	"total" INTEGER, -- total number of units to complete
 	"progress" INTEGER, -- number of units completed towards the total count

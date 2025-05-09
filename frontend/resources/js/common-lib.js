@@ -1169,7 +1169,7 @@ function itemTimestampDisplay(item, endItem) {
 				dateTime: `${dt.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)} ${dt.toLocaleString(DateTime.TIME_WITH_SECONDS)}`,
 				weekdayDate: `${dt.weekdayLong}, ${dt.toLocaleString(DateTime.DATE_MED)}`,
 				dateWithWeekday: `${dt.toLocaleString(DateTime.DATE_MED)} (${dt.weekdayLong})`,
-				time: `${dt.hour() % 12} o'clock` // TODO: have it be like "1pm" instead of "13 o'clock"
+				time: `${dt.hour % 12} o'clock` // TODO: have it be like "1pm" instead of "13 o'clock"
 			};
 		} else {
 			if (itvl.hasSame('day')) {

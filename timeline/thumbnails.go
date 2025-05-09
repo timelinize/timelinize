@@ -147,12 +147,15 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 	// same timestamp, the next query would skip those; so we also
 	// use row ID as the second sort column to avoid repeating or
 	// skipping items within the same timestamp)
-	const thumbnailJobQuery = `SELECT
-			items.id, items.stored, items.modified, items.timestamp, items.data_id, items.data_type, items.data_file
+	const thumbnailJobQuery = `
+		SELECT
+			items.id, items.stored, items.modified, items.timestamp,
+			items.data_id, items.data_type, items.data_file, jobs.ended
 		FROM items
+		LEFT JOIN jobs ON jobs.id = items.modified_job_id
 		LEFT JOIN relationships ON relationships.to_item_id = items.id
 		LEFT JOIN relations ON relations.id = relationships.relation_id
-		WHERE job_id=?
+		WHERE (job_id=? OR modified_job_id=?)
 			AND (items.data_file IS NOT NULL OR items.data_id IS NOT NULL)
 			AND (items.data_type LIKE 'image/%' OR items.data_type LIKE 'video/%' OR items.data_type = 'application/pdf')
 			AND relations.label IS NOT 'motion'
@@ -186,7 +189,8 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 
 		job.tl.dbMu.RLock()
 		rows, err := job.tl.db.QueryContext(job.ctx, thumbnailJobQuery,
-			tj.TasksFromImportJob, lastTimestamp, lastTimestamp, lastItemID, thumbnailJobPageSize)
+			tj.TasksFromImportJob, tj.TasksFromImportJob,
+			lastTimestamp, lastTimestamp, lastItemID, thumbnailJobPageSize)
 		if err != nil {
 			job.tl.dbMu.RUnlock()
 			return 0, fmt.Errorf("failed querying page of database table: %w", err)
@@ -197,10 +201,10 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 			hadRows = true
 
 			var rowID, stored int64
-			var modified, timestamp, dataID *int64
+			var modified, timestamp, dataID, modJobEnded *int64
 			var dataType, dataFile *string
 
-			err := rows.Scan(&rowID, &stored, &modified, &timestamp, &dataID, &dataType, &dataFile)
+			err := rows.Scan(&rowID, &stored, &modified, &timestamp, &dataID, &dataType, &dataFile, &modJobEnded)
 			if err != nil {
 				defer rows.Close()
 				job.tl.dbMu.RUnlock()
@@ -224,6 +228,7 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 							ThumbType:    thumbnailType(*dataType, false),
 							itemStored:   stored,
 							itemModified: modified,
+							modJobEnded:  modJobEnded,
 						})
 					}
 				} else if dataID != nil {
@@ -235,6 +240,7 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 							ThumbType:    thumbnailType(*dataType, false),
 							itemStored:   stored,
 							itemModified: modified,
+							modJobEnded:  modJobEnded,
 						})
 					}
 				}
@@ -289,10 +295,12 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 				}
 
 				// if the thumbnail was generated when or after the item was stored, and also after
-				// it was modified (if modified at all), then we do not need to generate it, so we
-				// can remove it from the task queue -- this is considered progress anyway
+				// it was modified (if modified at all), and also after any import job that modified
+				// it completed, then we do not need to generate it, so we can remove it from the
+				// task queue -- this is considered progress anyway
 				if thumbGenerated >= task.itemStored &&
-					(task.itemModified == nil || thumbGenerated >= *task.itemModified) {
+					(task.itemModified == nil || thumbGenerated >= *task.itemModified) &&
+					(task.modJobEnded == nil || thumbGenerated >= *task.modJobEnded) {
 					pageResults = slices.Delete(pageResults, i, i+1)
 
 					// two possibilities: this could either be a thumbnail we already generated as part of this job,
@@ -444,8 +452,9 @@ type thumbnailTask struct {
 	ThumbType string `json:"thumb_type,omitempty"`
 
 	// used only temporarily to determine if a thumbnail task should be kept
-	itemStored   int64
-	itemModified *int64
+	itemStored   int64  // when the associated item was stored in the DB
+	itemModified *int64 // when the associated item was last manually modified
+	modJobEnded  *int64 // when the job that last modified associated item ended
 }
 
 // thumbnailAndThumbhash returns the thumbnail, even if this returns an error because thumbhash

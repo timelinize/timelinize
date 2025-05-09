@@ -367,7 +367,7 @@ on('click', '#start-import', async event => {
 			},
 			processing_options: {
 				integrity: $('#integrity-checks').checked,
-				overwrite_modifications: $('#overwrite-modifications').checked,
+				overwrite_local_changes: $('#overwrite-local-changes').checked,
 				item_unique_constraints: {
 					// TODO: it occurred to me that an item need not be from the same
 					// data source to be the exact same thing; like if I copy a photo
@@ -384,20 +384,16 @@ on('click', '#start-import', async event => {
 					"data": true,
 					"location": true
 				},
-				// item_field_updates: {
-				// 	"attribute_id": 2,
-				// 	"classification_id": 2,
-				// 	"original_location": 2,
-				// 	"intermediate_location": 2,
-				// 	"timestamp": 2,
-				// 	"timespan": 2,
-				// 	"timeframe": 2,
-				// 	"time_offset": 2,
-				// 	"time_uncertainty": 2,
-				// 	"data": 2,
-				// 	"metadata": 2,
-				// 	"location": 2
-				// }
+				// item_update_preferences: [
+				// 	{
+				// 		"field": "data",
+				// 		"priorities": [
+				// 			{
+				// 				"size": "bigger"
+				// 			}
+				// 		]
+				// 	}
+				// ],
 				interactive: $('#interactive').checked ? {} : null
 			},
 			estimate_total: $('#estimate-total').checked
