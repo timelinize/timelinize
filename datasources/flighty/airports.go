@@ -9,25 +9,27 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+
+	"github.com/timelinize/timelinize/timeline"
 )
 
 //go:embed airports.csv
-var airportDB []byte
+var airportData []byte
 
-type airportInfo struct {
-	Name      string
-	Latitude  float64
-	Longitude float64
-	Timezone  string
+type AirportInfo struct {
+	IATA     string
+	Name     string
+	Location timeline.Location
+	Timezone string
 }
 
 // Parses the airport database into a map of IATA code to Airport information
 // Remember to remove all references to it when you're done, so the Garbage Collector
 // can remove it from memory.
-func buildAirportDatabase() (map[string]airportInfo, error) {
-	db := make(map[string]airportInfo)
+func buildAirportDatabase() (map[string]AirportInfo, error) {
+	db := make(map[string]AirportInfo)
 
-	r := csv.NewReader(bytes.NewReader(airportDB))
+	r := csv.NewReader(bytes.NewReader(airportData))
 
 	headers, err := r.Read()
 	if err != nil {
@@ -47,7 +49,7 @@ func buildAirportDatabase() (map[string]airportInfo, error) {
 		if err != nil {
 			return db, fmt.Errorf("unable to parse airport db CSV: %w", err)
 		}
-		if len(record) <= len(headers) {
+		if len(record) < len(headers) {
 			continue
 		}
 
@@ -56,12 +58,17 @@ func buildAirportDatabase() (map[string]airportInfo, error) {
 		if latErr != nil || lngErr != nil {
 			continue
 		}
+		loc := timeline.Location{Latitude: &lat, Longitude: &lng}
+		if alt, err := strconv.ParseFloat(record[headerMap[altHeader]], 64); err == nil {
+			loc.Altitude = &alt
+		}
 
-		db[record[headerMap[iataHeader]]] = airportInfo{
-			Name:      record[headerMap[nameHeader]],
-			Latitude:  lat,
-			Longitude: lng,
-			Timezone:  record[headerMap[tzHeader]],
+		iata := record[headerMap[iataHeader]]
+		db[iata] = AirportInfo{
+			IATA:     iata,
+			Name:     record[headerMap[nameHeader]],
+			Location: loc,
+			Timezone: record[headerMap[tzHeader]],
 		}
 	}
 
@@ -73,5 +80,6 @@ const (
 	nameHeader = "name"
 	latHeader  = "latitude"
 	lngHeader  = "longitude"
+	altHeader  = "elevation"
 	tzHeader   = "time_zone"
 )
