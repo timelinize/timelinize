@@ -294,7 +294,7 @@ func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
 	faker := gofakeit.NewFaker(src, false)
 
 	if re.Name != nil {
-		name := faker.Name()
+		name := consistentFakeEntityName(*re.Name)
 		re.Name = &name
 	}
 
@@ -351,26 +351,7 @@ func (e *Entity) Anonymize() {
 	// in the unobfuscated space, but the faker just uses hashing so it doesn't
 	// care about that, and they will have totally different fake names in the
 	// obfuscated space. Oh well.
-	if e.Name != "" {
-		var fakeName string
-		names := strings.Split(strings.ToLower(e.Name), " ")
-		for i, name := range names {
-			name = strings.TrimSpace(name)
-			if name == "" {
-				continue
-			}
-			nameSrc := weakrand.NewPCG(dumbHash(name), 0)
-			nameFaker := gofakeit.NewFaker(nameSrc, false)
-			if fakeName == "" { //nolint:gocritic
-				fakeName = nameFaker.FirstName()
-			} else if i < len(names)-1 {
-				fakeName += " " + nameFaker.MiddleName()
-			} else {
-				fakeName += " " + nameFaker.LastName()
-			}
-		}
-		e.Name = fakeName
-	}
+	e.Name = consistentFakeEntityName(e.Name)
 
 	for i := range e.Attributes {
 		switch e.Attributes[i].Name {
@@ -402,6 +383,32 @@ func (e *Entity) Anonymize() {
 			return resp.Body, err
 		}
 	}
+}
+
+// consistentFakeEntityName generates a fake name seeded by the individual
+// space-separated words in the real name.
+func consistentFakeEntityName(realName string) string {
+	if realName == "" {
+		return ""
+	}
+	var fakeName string
+	names := strings.Split(strings.ToLower(realName), " ")
+	for i, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		nameSrc := weakrand.NewPCG(dumbHash(name), 0)
+		nameFaker := gofakeit.NewFaker(nameSrc, false)
+		if fakeName == "" { //nolint:gocritic
+			fakeName = nameFaker.FirstName()
+		} else if i < len(names)-1 {
+			fakeName += " " + nameFaker.MiddleName()
+		} else {
+			fakeName += " " + nameFaker.LastName()
+		}
+	}
+	return fakeName
 }
 
 func dumbHash(input string) uint64 {
