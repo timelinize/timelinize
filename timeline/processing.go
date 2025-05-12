@@ -1081,7 +1081,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		if (dbItem.Latitude == nil && it.Location.Latitude != nil) ||
 			(dbItem.Longitude == nil && it.Location.Longitude != nil) ||
 			(dbItem.Altitude == nil && it.Location.Altitude != nil) {
-			it.fieldUpdatePolicies["location"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["coordinates"] = updatePolicyPreferIncoming
 		}
 		if (dbItem.Timestamp == nil || dbItem.TimeOffset == nil) && !it.Timestamp.IsZero() {
 			it.fieldUpdatePolicies["timestamp"] = updatePolicyPreferIncoming
@@ -1478,7 +1478,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 				sb.WriteString("(data_text=? OR (data_text IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (data_hash=? OR ? IS NULL)")
-			case "location": //nolint:goconst
+			case "coordinates": //nolint:goconst
 				sb.WriteString("(longitude=? OR (longitude IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (latitude=? OR (latitude IS NULL ")
@@ -1540,7 +1540,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 					it.dataFileHash, it.dataFileHash)
 			case "data_type", "data_text", "data_hash":
 				return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
-			case "location":
+			case "coordinates":
 				args = append(args,
 					it.Location.Longitude, it.Location.Longitude,
 					it.Location.Latitude, it.Location.Latitude,
@@ -1548,7 +1548,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 					it.Location.CoordinateSystem, it.Location.CoordinateSystem)
 			case "longitude", "latitude", "altitude", "coordinate_system", "coordinate_uncertainty":
 				// unlike the data fields, there's no good reason for this other than "the other way doesn't make sense and may be error-prone"
-				return ItemRow{}, errors.New("cannot select on specific components of item location such as latitude or longitude: specify 'location' instead")
+				return ItemRow{}, errors.New("cannot select on specific components of item coordinates such as latitude or longitude: specify 'coordinates' instead")
 			default:
 				return ItemRow{}, fmt.Errorf("item unique constraints configure unsupported/unrecognized field: %s", field)
 			}
@@ -1673,7 +1673,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			appendToQuery("data_text", policy)
 			appendToQuery("data_file", policy)
 			appendToQuery("data_hash", policy)
-		case "location":
+		case "coordinates":
 			appendToQuery("longitude", policy)
 			appendToQuery("latitude", policy)
 			appendToQuery("altitude", policy)
@@ -1713,7 +1713,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			return errors.New("data components cannot be individually configured for updates; use 'data' as field name instead")
 		case "metadata":
 			args = append(args, string(ir.Metadata))
-		case "location":
+		case "coordinates":
 			args = append(args, ir.Longitude)
 			args = append(args, ir.Latitude)
 			args = append(args, ir.Altitude)
@@ -1721,7 +1721,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			args = append(args, ir.CoordinateUncertainty)
 		case "longitude", "latitude", "altitude", "coordinate_system", "coordinate_uncertainty":
 			// unlike the data fields, there's no good reason for this other than "individually doesn't make sense and may be tedious"
-			return errors.New("location components cannot be individually configured for updates; use 'location' as field name instead")
+			return errors.New("location components cannot be individually configured for updates; use 'coordinates' as field name instead")
 		case "note":
 			args = append(args, ir.Note)
 		case "starred":

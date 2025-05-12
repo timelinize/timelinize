@@ -498,7 +498,7 @@ function renderFilterDropdown(containerEl, title, loadKey) {
 }
 
 
-async function newDataSourceSelect(selectEl) {
+async function newDataSourceSelect(selectEl, options) {
 	if ($(selectEl).tomselect) {
 		return $(selectEl).tomselect;
 	}
@@ -520,13 +520,19 @@ async function newDataSourceSelect(selectEl) {
 		return `<div>${escape(data.text)}</div>`;
 	}
 
-	const ts  = await new TomSelect($(selectEl), {
-		maxItems: null,
+	const ts = new TomSelect($(selectEl), {
+		maxItems: options?.maxItems,
 		render: {
 			item: renderTomSelectItemAndOption,
 			option: renderTomSelectItemAndOption
 		}
 	});
+
+	// for a single-select control, it usually makes sense to
+	// initialize empty rather than the first option
+	if (options?.maxItems == 1) {
+		ts.clear(true);
+	}
 
 	// Clear input after selecting matching option from list
 	// (I have no idea why this isn't the default behavior)

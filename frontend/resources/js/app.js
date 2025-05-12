@@ -242,18 +242,17 @@ function on(eventName, elemSelector, handler, capture) {
 	});
 }
 
-function trigger(el, eventType) {
+function trigger(el, eventType, detail) {
 	if (typeof el === 'string') {
 		el = $(el); // assume it was a selector, for convenience
 	}
-
 	// from youmightnotneedjquery.com
 	if (typeof eventType === 'string' && typeof el[eventType] === 'function') {
 		el[eventType]();
 	} else {
 		const event =
 			typeof eventType === 'string'
-				? new Event(eventType, { bubbles: true, cancelable: true })
+				? new CustomEvent(eventType, { bubbles: true, cancelable: true, detail: detail })
 				: eventType;
 		el.dispatchEvent(event);
 	}

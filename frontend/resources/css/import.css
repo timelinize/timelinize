@@ -7,3 +7,13 @@
 	border-color: rgba(var(--tblr-primary-rgb), .5);
 	background-color: rgba(var(--tblr-primary-rgb), .04);
 }
+
+.field-update-pref-priority .ts-control {
+	flex-wrap: nowrap;
+}
+
+.field-update-pref-priority .ts-control > input {
+	margin: 0 !important;
+	min-width: 0;
+	width: 0;
+}

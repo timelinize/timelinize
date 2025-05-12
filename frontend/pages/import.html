@@ -10,7 +10,6 @@
 					Import data
 				</h1>
 			</div>
-			
 		</div>
 	</div>
 </div>
@@ -125,7 +124,18 @@
 
 
 					<div class="col-auto ms-auto d-print-none">
-						<button id="start-import" class="btn btn-primary disabled">
+						<button id="advanced-settings" class="btn" data-bs-target="#modal-advanced-settings" data-bs-toggle="modal">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+								stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								class="icon icon-tabler icons-tabler-outline icon-tabler-settings">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+								<path
+								d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z" />
+								<path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" />
+							</svg>
+							More settings...
+						</button>
+						<button id="start-import" class="btn btn-primary mt-4 disabled">
 							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 								stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 								class="icon icon-tabler icons-tabler-outline icon-tabler-player-play">
@@ -186,6 +196,130 @@
 			</div>
 			<div class="modal-footer">
 				<button type="button" class="btn btn-outline-danger" data-bs-target="#modal-file-picker" data-bs-toggle="modal">Cancel</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+
+<div id="modal-advanced-settings" class="modal modal-blur fade" data-bs-backdrop="static" tabindex="-1" aria-modal="true" role="dialog">
+	<div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3 class="modal-title">Advanced import settings</h3>
+				<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+			  </div>
+			<div class="modal-body">
+				<label class="form-label">Unique constraints</label>
+				<div class="form-hint mb-3">Select which properties of an item must be the same as an existing item for it to be considered a duplicate:</div>
+
+				<div class="row g3">
+					<div class="col-6">
+						<label class="form-check">
+							<input class="form-check-input" type="checkbox" id="unique-data-source">
+							<span class="form-check-label">Data source</span>
+							<span class="form-check-description">Items must be from the same data source.</span>
+						</label>
+					</div>
+					<div class="col-6">
+						<label class="form-check">
+							<input class="form-check-input" type="checkbox" id="unique-original-location">
+							<span class="form-check-label">Original location</span>
+							<span class="form-check-description">Items must have same place/file of origin.</span>
+						</label>
+					</div>
+					<div class="col-6">
+						<label class="form-check">
+							<input class="form-check-input" type="checkbox" id="unique-filename" checked>
+							<span class="form-check-label">Filename</span>
+							<span class="form-check-description">Items must have the same filename.</span>
+						</label>
+					</div>
+					<div class="col-6">
+						<label class="form-check">
+							<input class="form-check-input" type="checkbox" id="unique-timestamp" checked>
+							<span class="form-check-label">Timestamp</span>
+							<span class="form-check-description">Items must have originated at the same time.</span>
+						</label>
+					</div>
+					<div class="col-6">
+						<label class="form-check">
+							<input class="form-check-input" type="checkbox" id="unique-coords" checked>
+							<span class="form-check-label">Coordinates</span>
+							<span class="form-check-description">Items must have the exact same coordinates.</span>
+						</label>
+					</div>
+					<div class="col-6">
+						<label class="form-check">
+							<input class="form-check-input" type="checkbox" id="unique-classification" checked>
+							<span class="form-check-label">Classification</span>
+							<span class="form-check-description">Items must be the same type of thing.</span>
+						</label>
+					</div>
+					<div class="col-6">
+						<label class="form-check">
+							<input class="form-check-input" type="checkbox" id="unique-data" checked>
+							<span class="form-check-label">Content</span>
+							<span class="form-check-description">Item must have exact same data (text or file; does not include
+								coordinates or metadata).</span>
+						</label>
+					</div>
+				</div>
+			</div>
+			<div class="modal-body">
+				<label class="form-label">Rules for updating items</label>
+				<div class="form-hint mb-3">Configure how duplicate items will be used to update existing items:</div>
+
+				<div class="table-vcenter mb-3">
+					<table class="table mb-0" id="update-prefs-table">
+						<thead>
+							<tr>
+								<th>What to update</th>
+								<th>Which to keep</th>
+								<th class="text-center" data-bs-toggle="tooltip"
+									data-bs-original-title="Allow an empty value to overwrite a non-empty value">
+									Deletions
+								</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							
+						</tbody>
+					</table>
+					<div class="row align-items-center my-3 mx-1" id="no-rules">
+						<div class="col-auto">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-cancel">
+								<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+								<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"></path>
+								<path d="M18.364 5.636l-12.728 12.728"></path>
+							</svg>
+						</div>
+						<div class="col">
+							<div class="font-weight-medium">No update rules</div>
+							<div class="text-secondary">Duplicate items will be skipped</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="row mb-3 align-items-end">
+					<div class="col-auto">
+						<div class="btn" id="add-update-prefs-row">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+								stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								class="icon icon-1">
+								<path d="M12 5l0 14"></path>
+								<path d="M5 12l14 0"></path>
+							</svg>
+							Add rule
+						</div>
+					</div>
+				</div>
+
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn me-auto" data-bs-dismiss="modal">Cancel</button>
+				<button type="button" class="btn btn-primary" data-bs-dismiss="modal">Save settings</button>
 			</div>
 		</div>
 	</div>
@@ -328,4 +462,88 @@
 			</a>
 		</td>
 	</tr>
+</template>
+
+<template id="tpl-item-update-prefs-row">
+	<tr>
+		<td>
+			<select class="form-select field-name">
+				<option></option>
+				<option value="data">Content</option>
+				<option value="attribute_id">Owner</option>
+				<option value="metadata">Metadata</option>
+				<option value="coordinates">Coordinates</option>
+				<option value="data_source_name">Data source</option>
+				<option value="classification_id">Class</option>
+				<option value="original_location">Original location</option>
+				<option value="intermediate_location">Intermediate location</option>
+				<option value="filename">Filename</option>
+				<option value="timestamp">Timestamp</option>
+			</select>
+		</td>
+		<td class="field-update-priorities">
+			
+		</td>
+		<td class="text-center">
+			<div class="form-switch">
+				<input class="form-check-input field-update-deletes" type="checkbox">
+			</div>
+		</td>
+		<td>
+			<a class="btn-action delete-rule" title="Delete rule">
+				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					class="icon icon-tabler icons-tabler-outline icon-tabler-trash">
+					<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+					<path d="M4 7l16 0" />
+					<path d="M10 11l0 6" />
+					<path d="M14 11l0 6" />
+					<path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" />
+					<path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />
+				</svg>
+			</a>
+		</td>
+	</tr>
+</template>
+
+<template id="tpl-field-update-pref-priority">
+	<div class="row g-2 py-1 field-update-pref-priority">
+		<div class="col">
+			<select class="form-select priority-property">
+				<option value="incoming">Incoming</option>
+				<option value="existing">Existing</option>
+				<option value="data_source">Data source is ...</option>
+				<option value="media_type">Content type is ...</option>
+				<option value="size_larger">Larger content size</option>
+				<option value="size_smaller">Smaller content size</option>
+				<option value="ts_earlier">Earlier timestamp</option>
+				<option value="ts_later">Later timestamp</option>
+			</select>
+			<div class="priority-value-input-container">
+
+			</div>
+		</div>
+		<div class="col-auto align-self-center">
+			<a class="btn-action delete-priority d-none" title="Delete priority">
+				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					class="icon icon-tabler icons-tabler-outline icon-tabler-trash">
+					<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+					<path d="M4 7l16 0" />
+					<path d="M10 11l0 6" />
+					<path d="M14 11l0 6" />
+					<path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" />
+					<path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" />
+				</svg>
+			</a>
+			<a class="btn-action add-priority d-none" title="Add priority">
+				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+					stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					class="icon icon-1">
+					<path d="M12 5l0 14"></path>
+					<path d="M5 12l14 0"></path>
+				</svg>
+			</a>
+		</div>
+	</div>
 </template>

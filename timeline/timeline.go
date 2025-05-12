@@ -1361,6 +1361,20 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 		}
 		for property, v := range priority {
 			switch property {
+			case "keep":
+				if v == "incoming" {
+					if pref.Nulls {
+						return updatePolicyOverwriteExisting, nil
+					}
+					return updatePolicyPreferIncoming, nil
+				} else if v == "existing" {
+					if pref.Nulls {
+						// TODO: This could be an error, since this is the same as no update policy at all -- no reason to hard-code a static policy like this
+						return updatePolicyKeepExisting, nil
+					}
+					return updatePolicyPreferExisting, nil
+				}
+				return 0, fmt.Errorf("the 'keep' update policy must be either 'incoming' or 'existing', got: '%s'", v)
 			case "data_source":
 				if existing.DataSourceName != nil && *existing.DataSourceName == p.ds.Name {
 					// both incoming and existing have the same data source,

@@ -369,37 +369,68 @@ on('click', '#start-import', async event => {
 				integrity: $('#integrity-checks').checked,
 				overwrite_local_changes: $('#overwrite-local-changes').checked,
 				item_unique_constraints: {
-					// TODO: it occurred to me that an item need not be from the same
-					// data source to be the exact same thing; like if I copy a photo
-					// from my iPhone and import it with Media data source, but later
-					// from the iPhone data source, it should be considered the same, right?
-					// "data_source_name": true,
-					"classification_name": true,
-					// "original_location": true,
-					// "intermediate_location": true,
-					"filename": true, // TODO: <-- this one might only apply to some data sources, like photo libraries...
-					"timestamp": true,
-					"timespan": true,
-					"timeframe": true,
-					"data": true,
-					"location": true
+					"data_source_name": $('#unique-data-source').checked,
+					"original_location": $('#unique-original-location').checked,
+					"filename": $('#unique-filename').checked,
+					"timestamp": $('#unique-timestamp').checked,
+					"coordinates": $('#unique-coords').checked,
+					"classification_name": $('#unique-classification').checked,
+					"data": $('#unique-data').checked,
 				},
-				// item_update_preferences: [
-				// 	{
-				// 		"field": "data",
-				// 		"priorities": [
-				// 			{
-				// 				"size": "bigger"
-				// 			}
-				// 		]
-				// 	}
-				// ],
 				interactive: $('#interactive').checked ? {} : null
 			},
 			estimate_total: $('#estimate-total').checked
 		}
 	};
 
+	// collect item update preferences
+	$$('#update-prefs-table tbody tr').forEach(rowEl => {
+		const fieldName = $('.field-name', rowEl).value;
+		if (!fieldName) {
+			return;
+		}
+		const priorities = [];
+		$$('.field-update-pref-priority', rowEl).forEach(priorityEl => {
+			const prop = $('.priority-property', priorityEl).value;
+			if (prop == "incoming") {
+				priorities.push({ "keep": "incoming" });
+			} else if (prop == "existing") {
+				priorities.push({ "keep": "existing" });
+			} else if (prop == "data_source") {
+				const dataSourceEl = $('select.priority-data-source', priorityEl);
+				if (dataSourceEl) {
+					priorities.push({ "data_source": dataSourceEl.value });
+				}
+			} else if (prop == "media_type") {
+				const mediaTypeEl = $('.priority-media-type', priorityEl);
+				if (mediaTypeEl) {
+					priorities.push({ "media_type": mediaTypeEl.value });
+				}
+			} else if (prop == "size_larger") {
+				priorities.push({ "size": "bigger" });
+			} else if (prop == "size_smaller") {
+				priorities.push({ "size": "smaller" });
+			} else if (prop == "ts_earlier") {
+				priorities.push({ "timestamp": "ealier" });
+			} else if (prop == "ts_later") {
+				priorities.push({ "timestamp": "later" });
+			}
+		});
+		if (!priorities.length) {
+			return;
+		}
+		const rule = {
+			field: $('.field-name', rowEl).value,
+			priorities: priorities,
+			nulls: $('.field-update-deletes', rowEl).checked
+		};
+		if (!importParams.job.processing_options.item_update_preferences) {
+			importParams.job.processing_options.item_update_preferences = [];
+		}
+		importParams.job.processing_options.item_update_preferences.push(rule);
+	});
+
+	// collect data source options
 	for (const dsgroup of $$('.file-import-plan-dsgroup')) {
 		importParams.job.plan.files.push({
 			data_source_name: dsgroup.ds.name,
@@ -411,7 +442,7 @@ on('click', '#start-import', async event => {
 	console.log("IMPORT PARAMS:", importParams)
 
 	const result = await app.Import(importParams);
-	console.log("JOB STARTED:", result);
+	console.log("JOB STARTED:", result)
 
 	notify({
 		type: "success",
@@ -533,6 +564,131 @@ function dataSourceOptions(ds) {
 
 	return dsOpt;
 }
+
+
+
+// ITEM UPDATE PREFERENCES
+
+// add rule/preference row
+on('click', '#add-update-prefs-row', e => {
+	$('#no-rules').classList.add('d-none');
+
+	// no technical limitation, just an arbitrary one to keep the UI sane
+	if ($$('#update-prefs-table tbody tr').length >= 15) {
+		return;
+	}
+
+	// make new row, and get last row so we can copy values from it
+	const rowEl = cloneTemplate('#tpl-item-update-prefs-row');
+	const lastRowEl = $('#update-prefs-table tbody tr:last-child');
+
+	// make new priority for the new row
+	const priorityEl = cloneTemplate('#tpl-field-update-pref-priority');
+	$('.add-priority', priorityEl).classList.remove('d-none');
+	$('.field-update-priorities', rowEl).append(priorityEl);
+	
+	// add the row element early so we can trigger events within it as we copy things into it
+	$('#update-prefs-table tbody').append(rowEl);
+
+	// copy the priorities from the last rule row into the new one
+	const lastPriorities = $('.field-update-priorities', lastRowEl);
+	if (lastRowEl) {
+		$$('.field-update-pref-priority', lastPriorities).forEach((lastPriorityEl, i) => {
+			// either this is the first priority element, which we already made above for the new row,
+			// or we need to make another new priority element if the last row has more than one
+			let newPriorityEl = $(`.field-update-pref-priority:nth-child(${i+1})`, rowEl);
+			if (!newPriorityEl) {
+				$('.add-priority', rowEl).click();
+				newPriorityEl = $(`.field-update-pref-priority:nth-child(${i+1})`, rowEl);
+			}
+			// copy the property, and trigger the change event so it can set up a possible value input
+			// (we attach the data source value if it's a data source priority because the change event
+			// will create a data source tomselect, which is an async operation, and we need to set it
+			// to the same value after that completes, which only the event handler can do)
+			$('.priority-property', newPriorityEl).value = $(`.priority-property`, lastPriorityEl).value;
+			trigger($('.priority-property', newPriorityEl), 'change', { tsVal: $(`select.priority-data-source`, lastPriorityEl)?.value });
+			// media source priority needs its value copied over too, but that's much simpler than the async data source selector
+			if ($('.priority-media-type', newPriorityEl)) {
+				$('.priority-media-type', newPriorityEl).value = $(`.priority-media-type`, lastPriorityEl).value;
+			}
+		});
+	}
+});
+
+// delete rule row
+on('click', '#update-prefs-table .delete-rule', e => {
+	e.target.closest('tr').remove();
+
+	if ($$('#update-prefs-table tbody tr').length == 0) {
+		$('#no-rules').classList.remove('d-none');
+	}
+});
+
+// when a priority property is changed in a rule, set up a value input if necessary
+on('change', '#update-prefs-table .priority-property', async e => {
+	const containerEl = e.target.closest('.field-update-pref-priority');
+	$('.priority-value-input-container', containerEl).innerHTML = '';
+
+	if (e.target.value == 'data_source') {
+		$('.priority-value-input-container', containerEl).innerHTML = '<select class="priority-data-source form-select mt-1" placeholder="Data source" autocomplete="off"></select>';
+		const dsSel = await newDataSourceSelect($('.priority-data-source', containerEl), {
+			maxItems: 1
+		});
+		if (e.detail?.tsVal) {
+			dsSel.setValue(e.detail.tsVal);
+		}
+	} else if (e.target.value == "media_type") {
+		$('.priority-value-input-container', containerEl).innerHTML = '<input class="priority-media-type form-control mt-1" placeholder="Media type">';
+	}
+});
+
+// delete priority from rule row
+on('click', '#update-prefs-table .delete-priority', e => {
+	const tr = e.target.closest('tr');
+
+	e.target.closest('.field-update-pref-priority').remove();
+
+	// make sure "+" (add priority) is only shown on the last one,
+	// and that "-" (delete priority) is only shown if there is more than one
+	const priorities = $$('.field-update-pref-priority', tr);
+	if (priorities.length == 1) {
+		priorities.forEach(el => {
+			$('.delete-priority', el).classList.add('d-none');
+		});
+	}
+	$$('.field-update-pref-priority:not(:last-child)', tr).forEach(el => {
+		$('.add-priority', el).classList.add('d-none');
+	});
+	$('.field-update-pref-priority:last-child .add-priority', tr).classList.remove('d-none');
+});
+
+// add priority to rule row
+on('click', '#update-prefs-table .add-priority', e => {
+	const priorityEl = cloneTemplate('#tpl-field-update-pref-priority');
+
+	const containerEl = e.target.closest('.field-update-priorities');
+	containerEl.append(priorityEl);
+	
+	// only allow up to a few priorities -- no technical reason per-se,
+	// but I think more than a few gets a bit ridiculous
+	const tr = e.target.closest('tr');
+	if ($$('.field-update-pref-priority', tr).length < 3) {
+		$('.add-priority', priorityEl).classList.remove('d-none');
+	}
+
+	// make sure that "-" (delete priority) is shown if there is more than one,
+	// and hide "+" (add priority) on all but the new one we just appended
+	$$('.field-update-pref-priority', tr).forEach(el => {
+		$('.delete-priority', el).classList.remove('d-none');
+	});
+
+	$$('.field-update-pref-priority:not(:last-child)', tr).forEach(el => {
+		$('.add-priority', el).classList.add('d-none');
+	});
+});
+
+
+
 
 
 // // TODO: generalize input validation
