@@ -175,6 +175,9 @@ tlz.pageControllers = {
 
 	"/pages/import.html": {
 		load() {
+			// TODO: If this works, maybe this could be a more standard pattern for "global" vars on a specific page load only (see also the delete in the unload below)
+			window.page = {};
+
 			$('#timeframe').append(newDatePicker({
 				passthru: {
 					range: true
@@ -183,6 +186,9 @@ tlz.pageControllers = {
 				timeToggle: true,
 				noApply: true
 			}));
+		},
+		unload() {
+			delete window.page;
 		}
 	},
 

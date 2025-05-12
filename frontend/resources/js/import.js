@@ -368,15 +368,7 @@ on('click', '#start-import', async event => {
 			processing_options: {
 				integrity: $('#integrity-checks').checked,
 				overwrite_local_changes: $('#overwrite-local-changes').checked,
-				item_unique_constraints: {
-					"data_source_name": $('#unique-data-source').checked,
-					"original_location": $('#unique-original-location').checked,
-					"filename": $('#unique-filename').checked,
-					"timestamp": $('#unique-timestamp').checked,
-					"coordinates": $('#unique-coords').checked,
-					"classification_name": $('#unique-classification').checked,
-					"data": $('#unique-data').checked,
-				},
+				item_unique_constraints: page.itemUniqueConstraints,
 				interactive: $('#interactive').checked ? {} : null
 			},
 			estimate_total: $('#estimate-total').checked
@@ -384,51 +376,9 @@ on('click', '#start-import', async event => {
 	};
 
 	// collect item update preferences
-	$$('#update-prefs-table tbody tr').forEach(rowEl => {
-		const fieldName = $('.field-name', rowEl).value;
-		if (!fieldName) {
-			return;
-		}
-		const priorities = [];
-		$$('.field-update-pref-priority', rowEl).forEach(priorityEl => {
-			const prop = $('.priority-property', priorityEl).value;
-			if (prop == "incoming") {
-				priorities.push({ "keep": "incoming" });
-			} else if (prop == "existing") {
-				priorities.push({ "keep": "existing" });
-			} else if (prop == "data_source") {
-				const dataSourceEl = $('select.priority-data-source', priorityEl);
-				if (dataSourceEl) {
-					priorities.push({ "data_source": dataSourceEl.value });
-				}
-			} else if (prop == "media_type") {
-				const mediaTypeEl = $('.priority-media-type', priorityEl);
-				if (mediaTypeEl) {
-					priorities.push({ "media_type": mediaTypeEl.value });
-				}
-			} else if (prop == "size_larger") {
-				priorities.push({ "size": "bigger" });
-			} else if (prop == "size_smaller") {
-				priorities.push({ "size": "smaller" });
-			} else if (prop == "ts_earlier") {
-				priorities.push({ "timestamp": "ealier" });
-			} else if (prop == "ts_later") {
-				priorities.push({ "timestamp": "later" });
-			}
-		});
-		if (!priorities.length) {
-			return;
-		}
-		const rule = {
-			field: $('.field-name', rowEl).value,
-			priorities: priorities,
-			nulls: $('.field-update-deletes', rowEl).checked
-		};
-		if (!importParams.job.processing_options.item_update_preferences) {
-			importParams.job.processing_options.item_update_preferences = [];
-		}
-		importParams.job.processing_options.item_update_preferences.push(rule);
-	});
+	if (page.itemUpdatePrefs?.length) {
+		importParams.job.processing_options.item_update_preferences = page.itemUpdatePrefs;
+	}
 
 	// collect data source options
 	for (const dsgroup of $$('.file-import-plan-dsgroup')) {
@@ -457,7 +407,6 @@ on('click', '#start-import', async event => {
 		// otherwise, redirect to job status, I guess
 		navigateSPA(`/jobs/${repoID}/${result.job_id}`, true);
 	}
-
 });
 
 function dataSourceOptions(ds) {
@@ -568,6 +517,126 @@ function dataSourceOptions(ds) {
 
 
 // ITEM UPDATE PREFERENCES
+
+// load stored settings when modal is opened, or reset to default UI if no settings are saved
+on('show.bs.modal', '#modal-advanced-settings', () => {
+	if (page.itemUniqueConstraints) {
+		$('#unique-data-source').checked = page.itemUniqueConstraints.data_source_name;
+		$('#unique-original-location').checked = page.itemUniqueConstraints.original_location;
+		$('#unique-filename').checked = page.itemUniqueConstraints.filename;
+		$('#unique-timestamp').checked = page.itemUniqueConstraints.timestamp;
+		$('#unique-coords').checked = page.itemUniqueConstraints.coordinates;
+		$('#unique-classification').checked = page.itemUniqueConstraints.classification_name;
+		$('#unique-data').checked = page.itemUniqueConstraints.data;
+	}
+	if (page.itemUpdatePrefs) {
+		// reset previous UI
+		$('#update-prefs-table tbody').replaceChildren();
+		$('#no-rules').classList.remove('d-none');
+
+		for (const pref of page.itemUpdatePrefs) {
+			// add new rule row
+			$('#add-update-prefs-row').click();
+			const newRowEl = $('#update-prefs-table tbody tr:last-child');
+
+			// fill out field and delete options
+			$('.field-name', newRowEl).value = pref.field;
+			$('.field-update-deletes', newRowEl).checked = pref.nulls;
+
+			// fill out each priority
+			if (!pref.priorities) {
+				continue;
+			}
+			pref.priorities.forEach((priority, i) => {
+				// add new priority if it's not the first one, since adding a rule row adds one priority
+				if (i > 0) {
+					$('.add-priority', newRowEl).click();
+				}
+				const priorityEl = $('.field-update-pref-priority:last-child', newRowEl);
+				for (const key in priority) {
+					if (key == "keep") {
+						$('.priority-property', priorityEl).value = priority[key];
+					} else if (key == "data_source") {
+						$('.priority-property', priorityEl).value = key;
+						trigger($('.priority-property', priorityEl), 'change', { tsVal: priority[key] });
+					} else if (key == "media_type") {
+						$('.priority-property', priorityEl).value = key;
+						trigger($('.priority-property', priorityEl), 'change');
+						$('.priority-media-type', priorityEl).value = priority[key];
+					} else if (key == "size") {
+						$('.priority-property', priorityEl).value = priority[key] == "bigger" ? "size_larger" : "size_smaller";
+					} else if (key == "timestamp") {
+						$('.priority-property', priorityEl).value = priority[key] == "earlier" ? "ts_earlier" : "ts_later";
+					}
+				}
+			});
+		}
+	}
+});
+
+// save settings when button is clicked (only saved for duration of page load; that's probably best tbh)
+on('click', '#save-settings', () => {
+	saveAdvancedSettings();
+});
+
+function saveAdvancedSettings() {
+	page.itemUniqueConstraints = {
+		"data_source_name": $('#unique-data-source').checked,
+		"original_location": $('#unique-original-location').checked,
+		"filename": $('#unique-filename').checked,
+		"timestamp": $('#unique-timestamp').checked,
+		"coordinates": $('#unique-coords').checked,
+		"classification_name": $('#unique-classification').checked,
+		"data": $('#unique-data').checked,
+	};
+	saveItemUpdatePreferences();
+}
+
+function saveItemUpdatePreferences() {
+	page.itemUpdatePrefs = [];
+	$$('#update-prefs-table tbody tr').forEach(rowEl => {
+		const fieldName = $('.field-name', rowEl).value;
+		if (!fieldName) {
+			return;
+		}
+		const priorities = [];
+		$$('.field-update-pref-priority', rowEl).forEach(priorityEl => {
+			const prop = $('.priority-property', priorityEl).value;
+			if (prop == "incoming") {
+				priorities.push({ "keep": "incoming" });
+			} else if (prop == "existing") {
+				priorities.push({ "keep": "existing" });
+			} else if (prop == "data_source") {
+				const dataSourceEl = $('select.priority-data-source', priorityEl);
+				if (dataSourceEl) {
+					priorities.push({ "data_source": dataSourceEl.value });
+				}
+			} else if (prop == "media_type") {
+				const mediaTypeEl = $('.priority-media-type', priorityEl);
+				if (mediaTypeEl) {
+					priorities.push({ "media_type": mediaTypeEl.value });
+				}
+			} else if (prop == "size_larger") {
+				priorities.push({ "size": "bigger" });
+			} else if (prop == "size_smaller") {
+				priorities.push({ "size": "smaller" });
+			} else if (prop == "ts_earlier") {
+				priorities.push({ "timestamp": "ealier" });
+			} else if (prop == "ts_later") {
+				priorities.push({ "timestamp": "later" });
+			}
+		});
+		if (!priorities.length) {
+			return;
+		}
+		const rule = {
+			field: $('.field-name', rowEl).value,
+			priorities: priorities,
+			nulls: $('.field-update-deletes', rowEl).checked
+		};
+		page.itemUpdatePrefs.push(rule);
+	});
+}
 
 // add rule/preference row
 on('click', '#add-update-prefs-row', e => {
@@ -687,7 +756,9 @@ on('click', '#update-prefs-table .add-priority', e => {
 	});
 });
 
-
+on('click', '#save-settings', e => {
+	
+});
 
 
 
