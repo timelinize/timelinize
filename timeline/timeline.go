@@ -124,7 +124,7 @@ func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
 		// since the user doesn't know the folder needs to be empty (they may even think
 		// the timeline is a single file, so any folder will do) -- try to create a
 		// new, empty parent folder for a timeline if it doesn't exist yet
-		repoPath = filepath.Join(repoPath, "My timeline")
+		repoPath = filepath.Join(repoPath, "My Timeline")
 		err := os.MkdirAll(repoPath, 0755)
 		if err != nil {
 			return nil, fmt.Errorf("folder already existed but was not empty (%s), so tried to create new empty repo folder within it: %w", problematicFile, err)
@@ -251,7 +251,7 @@ func AssessFolder(fpath string) FolderAssessment {
 	// timeline is a single file and that they can put it in any folder; to that end,
 	// we can recommend creating the timeline in a new "file" in that folder (but it's
 	// actually a folder, of course)
-	proposedPath := filepath.Join(fpath, "My timeline")
+	proposedPath := filepath.Join(fpath, "My Timeline")
 
 	info, err = os.Stat(proposedPath)
 	if errors.Is(err, fs.ErrNotExist) {
