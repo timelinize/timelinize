@@ -23,7 +23,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"io/fs"
 	"path"
 	"path/filepath"
 	"strings"
@@ -72,10 +71,10 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	if dirEntry.IsDir() && path.Ext(dirEntry.Name()) == ".photoslibrary" {
 		confidence += .2
 	}
-	if info, err := fs.Stat(dirEntry.FS, "database/Photos.sqlite"); err == nil && !info.IsDir() {
+	if info, err := dirEntry.Stat("database/Photos.sqlite"); err == nil && !info.IsDir() {
 		confidence += .6
 	}
-	if info, err := fs.Stat(dirEntry.FS, mediaFilesDir); err == nil && info.IsDir() {
+	if info, err := dirEntry.Stat(mediaFilesDir); err == nil && info.IsDir() {
 		confidence += .2
 	}
 	return timeline.Recognition{Confidence: confidence}, nil
