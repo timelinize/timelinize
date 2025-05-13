@@ -137,7 +137,7 @@ function updateFilterResults() {
 	// if the results take a while to load, show a loading indicator
 	let slowLoadingHandle = setTimeout(function() {
 		const span = document.createElement('span');
-		span.classList.add('slow-loader');
+		span.classList.add('slow-loader', 'filter-loader');
 		$('.filter-results:not(.d-none)')?.insertAdjacentElement('beforebegin', span);
 	}, 1000);
 	
@@ -157,7 +157,7 @@ function updateFilterResults() {
 		
 		// hide any loading indicator
 		clearTimeout(slowLoadingHandle);
-		$('.slow-loader')?.remove();
+		$('.slow-loader.filter-loader')?.remove();
 	}, 250);
 }
 

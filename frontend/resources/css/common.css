@@ -901,7 +901,6 @@ iframe {
 	position: relative;
 	margin: 50px auto;
 	animation: loaderRotate 1s linear infinite;
-	content: ''; /* I have NO idea why this is necessary, but the element completely disappears if there is no content (either in markup or here in CSS) */
 }
 .modal-body .slow-loader {
 	margin: 25px auto;

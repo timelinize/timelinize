@@ -108,7 +108,7 @@ async function navigateSPA(addrBarDestination, scrollToTop) {
 	if (!$('#app-loader')) {
 		slowLoadingHandle = setTimeout(function() {
 			const span = document.createElement('span');
-			span.classList.add('slow-loader');
+			span.classList.add('slow-loader', 'page-loader');
 			$('#page-content').insertAdjacentElement('beforebegin', span);
 		}, 1000);
 	}
@@ -193,7 +193,7 @@ async function navigateSPA(addrBarDestination, scrollToTop) {
 			// hide any loading indicator (or prevent it from appearing in the first place)
 			if (slowLoadingHandle) {
 				clearTimeout(slowLoadingHandle);
-				$('.slow-loader')?.remove();
+				$('.slow-loader.page-loader')?.remove();
 			}
 
 			// fade the content in, but wait a little bit for the page to have a chance to render
