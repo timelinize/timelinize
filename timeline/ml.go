@@ -137,7 +137,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 				AND items.id > ?
 			ORDER BY items.id
 			LIMIT ?
-			`, ej.ItemsFromImportJob, lastItemID, pageSize)
+			`, ej.ItemsFromImportJob, ej.ItemsFromImportJob, lastItemID, pageSize)
 		if err != nil {
 			job.tl.dbMu.RUnlock()
 			return fmt.Errorf("failed querying page of database table: %w", err)
