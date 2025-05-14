@@ -1,5 +1,5 @@
 // This file handles pulling information from the CC 4.0 BY-SA licenced airport location database available at:
-// https://github.com/lxndrblz/Airports/tree/main
+// https://github.com/lxndrblz/Airports
 package flighty
 
 import (
@@ -12,6 +12,8 @@ import (
 
 	"github.com/timelinize/timelinize/timeline"
 )
+
+//go:generate curl -L -o airports.csv https://raw.githubusercontent.com/lxndrblz/Airports/master/airports.csv
 
 //go:embed airports.csv
 var airportData []byte
