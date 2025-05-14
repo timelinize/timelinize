@@ -181,7 +181,7 @@ func (tl *Timeline) chartRecentDaysItemCount(ctx context.Context, params url.Val
 			data_source_name,
 			count()
 		FROM extended_items
-		WHERE timestamp > unixepoch()*1000 - ?
+		WHERE timestamp > unixepoch()*1000 - ? AND date IS NOT NULL   -- sometimes date is null; rare, but I've seen it; not sure why
 		GROUP BY date, data_source_name
 		LIMIT 2000`, minTime)
 	if err != nil {
@@ -315,7 +315,10 @@ func (tl *Timeline) AttributeStats(ctx context.Context, params url.Values) (any,
 		FROM entity_attributes
 		JOIN attributes ON attributes.id = entity_attributes.attribute_id
 		JOIN items ON items.attribute_id = attributes.id
-		WHERE entity_attributes.entity_id = ? AND items.timestamp IS NOT NULL
+		WHERE entity_attributes.entity_id = ?
+			AND items.timestamp IS NOT NULL
+			AND year IS NOT NULL
+			AND month IS NOT NULL
 		GROUP BY year, month, entity_attributes.attribute_id
 		ORDER BY year, month, attributes.value`, entityID)
 	if err != nil {
