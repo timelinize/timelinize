@@ -126,7 +126,8 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			}
 
 			p := &timeline.Entity{
-				Name: strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
+				Name:     strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
+				Metadata: make(timeline.Metadata),
 			}
 			if p.Name == "" {
 				if name := card.Name(); name != nil {
