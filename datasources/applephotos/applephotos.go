@@ -55,7 +55,7 @@ type Options struct {
 	IncludeTrashed bool `json:"include_trashed"`
 }
 
-// FileImporter can import from the Apple Contacts database.
+// FileImporter can import from the Apple Photos database, whether from Mac or iPhone.
 type FileImporter struct {
 	// These callback functions allow for reuse in multiple settings: importing directly
 	// from a Photos library on a Mac, or from a Photos library on an iPhone backup. Both have

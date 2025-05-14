@@ -409,6 +409,14 @@ func (tl *Timeline) runJob(row Job) error {
 
 	// run the job asynchronously -- never block the calling goroutine!
 	go func(job *ActiveJob, logger, statusLog *zap.Logger, row Job, action JobAction) {
+		// don't allow a job, which is doing who-knows-what and processing who-knows-what
+		// input, to bring down the program
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("panic", zap.Any("error", r))
+			}
+		}()
+
 		// when we're done here, clean up our map of active jobs
 		defer func() {
 			tl.activeJobsMu.Lock()

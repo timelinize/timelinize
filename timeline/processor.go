@@ -54,6 +54,13 @@ type processor struct {
 }
 
 func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint json.RawMessage) error {
+	// don't allow the importer, which is processing who-knows-what input, to completely bring down the app
+	defer func() {
+		if r := recover(); r != nil {
+			p.log.Error("panic", zap.Any("error", r))
+		}
+	}()
+
 	params := ImportParams{
 		Log:               p.log.With(zap.String("filename", dirEntry.FullPath())),
 		Timeframe:         p.ij.ProcessingOptions.Timeframe,
