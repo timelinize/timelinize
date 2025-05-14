@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"os"
@@ -600,6 +601,17 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, ig *Graph) err
 }
 
 func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item) (latentID, error) {
+	// quick input validation: timestamps outside a certain range are invalid and obviously wrong (cannot be serialized to JSON)
+	if !validTime(it.Timestamp) {
+		it.Timestamp = time.Time{}
+	}
+	if !validTime(it.Timespan) {
+		it.Timespan = time.Time{}
+	}
+	if !validTime(it.Timeframe) {
+		it.Timeframe = time.Time{}
+	}
+
 	// skip item if outside of timeframe (data source should do this for us, but
 	// ultimately we should enforce it: it just means the data source is being
 	// less efficient than it could be)
@@ -1479,9 +1491,9 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (data_hash=? OR ? IS NULL)")
 			case "coordinates": //nolint:goconst
-				sb.WriteString("(longitude=? OR (longitude IS NULL ")
+				sb.WriteString("((?<=longitude AND longitude<?) OR (longitude IS NULL ")
 				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL)) AND (latitude=? OR (latitude IS NULL ")
+				sb.WriteString(" ? IS NULL)) AND ((?<=latitude AND latitude<?) OR (latitude IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (altitude=? OR (altitude IS NULL ")
 				sb.WriteString(op)
@@ -1541,9 +1553,11 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 			case "data_type", "data_text", "data_hash":
 				return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
 			case "coordinates":
+				lowLon, highLon := coordBounds(it.Location.Longitude)
+				lowLat, highLat := coordBounds(it.Location.Latitude)
 				args = append(args,
-					it.Location.Longitude, it.Location.Longitude,
-					it.Location.Latitude, it.Location.Latitude,
+					lowLon, highLon, it.Location.Longitude,
+					lowLat, highLat, it.Location.Latitude,
 					it.Location.Altitude, it.Location.Altitude,
 					it.Location.CoordinateSystem, it.Location.CoordinateSystem)
 			case "longitude", "latitude", "altitude", "coordinate_system", "coordinate_uncertainty":
@@ -1808,6 +1822,31 @@ func detectContentType(peekedBytes []byte, it *Item) {
 	}
 
 	it.Content.MediaType = contentType
+}
+
+// validTime returns true if the time is considered valid for our application.
+// For example, JSON-serializing a time with a year > 9999 panics.
+func validTime(t time.Time) bool {
+	const maxJSONSerializableYear = 9999
+	return t.Year() <= maxJSONSerializableYear
+}
+
+// coordBounds returns a lower and higher bound for the given coordinate
+// (either latitude or longitude), within which range an other coordinate
+// can be considered equivalent, since not all GPS sensors have the same
+// level of precision.
+func coordBounds(latOrLon *float64) (lo, hi *float64) {
+	if latOrLon == nil {
+		return
+	}
+	x := *latOrLon
+	const precision = 1e5 // the number after e is how many decimal places of precision (4 ~= 11.1 meters, 5 ~= 1.1 meters, 6 ~= 11 centimeters)
+	low, high := math.Floor(x*precision)/precision, math.Ceil(x*precision)/precision
+	if low == high {
+		// if the input is less precision than our target, separate the min and max by 1 unit of precision
+		high += 1 / precision
+	}
+	return &low, &high
 }
 
 // TODO: do we really need to use the default 32-byte digest? What if 16 bytes or even 8 is enough for us?
