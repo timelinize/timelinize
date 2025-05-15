@@ -123,9 +123,13 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 			$('.accordion-button', dsGroupElem).dataset.bsTarget = "#"+collapseID;
 			tlz.collapseCounter++;
 
-			// render the DS group and its options modal
+			// render the DS group and, if it has options, its options modal (otherwise remove the Options button)
 			$('#file-imports-container').append(dsGroupElem);
-			renderDataSourceOptionsModal(dsGroupElem, ds);
+			if ($(`#tpl-dsopt-${ds.name}`)) {
+				renderDataSourceOptionsModal(ds);
+			} else {
+				$('.import-dsgroup-opt-button', dsGroupElem).remove();
+			}
 		}
 
 		// don't add duplicate filenames
@@ -219,7 +223,7 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 	updateExpandCollapseAll();
 });
 
-async function renderDataSourceOptionsModal(dsgroupElem, ds) {
+async function renderDataSourceOptionsModal(ds) {
 	// start with creating (or getting?) the modal and setting it up with the DS info
 	let dsOptModal = $(`#modal-import-dsopt-${ds.name}`);
 	if (!dsOptModal) {
@@ -230,16 +234,6 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 	$('.modal-title', dsOptModal).append(document.createTextNode(ds.title));
 
 	const dsOptElem = cloneTemplate(`#tpl-dsopt-${ds.name}`);
-
-	if (!dsOptElem) {
-		$('.import-dsgroup-opt-button', dsgroupElem).remove();
-		return;
-	}
-
-	if (ds.name == "smsbackuprestore") {
-		const owner = await getOwner(tlz.openRepos[0]);
-		$('.smsbackuprestore-owner-phone', dsOptElem).value = entityAttribute(owner, "phone_number");
-	}
 	
 	// render the data source options template, then the modal to the DOM
 	$('.modal-body', dsOptModal).replaceChildren(dsOptElem);
@@ -380,13 +374,25 @@ on('click', '#start-import', async event => {
 		importParams.job.processing_options.item_update_preferences = page.itemUpdatePrefs;
 	}
 
-	// collect data source options
+	// collect data source options - if there are any input validation errors, show an alert and redirect to that dsOpt modal after it
 	for (const dsgroup of $$('.file-import-plan-dsgroup')) {
-		importParams.job.plan.files.push({
-			data_source_name: dsgroup.ds.name,
-			data_source_options: dataSourceOptions(dsgroup.ds),
-			filenames: dsgroup.filenames
-		});
+		try {
+			importParams.job.plan.files.push({
+				data_source_name: dsgroup.ds.name,
+				data_source_options: await dataSourceOptions(dsgroup.ds),
+				filenames: dsgroup.filenames
+			});
+		} catch (err) {
+			// TODO: It might be good to show the data source name and icon in the modal?
+			console.log("Data source options error:", err)
+			$('#modal-error .modal-error-dismiss').dataset.bsTarget = `#modal-import-dsopt-${dsgroup.ds.name}`;
+			$('#modal-error .modal-error-dismiss').dataset.bsToggle = 'modal';
+			$('#modal-error .modal-error-title').innerText = err.title;
+			$('#modal-error .modal-error-message').innerText = err.message;
+			const errorModal = new bootstrap.Modal('#modal-error');
+			errorModal.show();
+			return;
+		}
 	}
 
 	console.log("IMPORT PARAMS:", importParams)
@@ -409,9 +415,8 @@ on('click', '#start-import', async event => {
 	}
 });
 
-function dataSourceOptions(ds) {
+async function dataSourceOptions(ds) {
 	dsoptContainer = $(`#modal-import-dsopt-${ds.name}`);
-	console.log(dsoptContainer);
 	if (!dsoptContainer) {
 		return;
 	}
@@ -427,16 +432,25 @@ function dataSourceOptions(ds) {
 	}
 	if (ds.name == "smsbackuprestore") {
 		const ownerPhoneInput = $('.smsbackuprestore-owner-phone', dsoptContainer);
-		console.log("INPUT:", ownerPhoneInput)
-		if (!ownerPhoneInput.value) {
-			// TODO: generalize field validation (see also the focusout event above)
-			ownerPhoneInput.classList.add('is-invalid');
-			ownerPhoneInput.classList.remove('is-valid');
+		if (ownerPhoneInput.value) {
+			dsOpt = {
+				owner_phone_number: ownerPhoneInput.value
+			};
+		} else {
+			// this DS requires we input the phone number of the phone that created the data,
+			// so if the input field was left empty, ensure the repo owner has a phone number
+			const owner = await getOwner(tlz.openRepos[0]);
+			if (getEntityAttribute(owner, 'phone_number').length == 0) {
+				ownerPhoneInput.classList.add('is-invalid');
+				ownerPhoneInput.classList.remove('is-valid');
+				throw {
+					elem: ownerPhoneInput,
+					title: "Phone number required",
+					message: "The data source doesn't provide a phone number by itself. When no phone number is entered here as part of the data source options, we use the phone number of the timeline owner, but no phone number is known for the timeline owner. Please enter a phone number."
+				}
+			}
 			return;
 		}
-		dsOpt = {
-			owner_phone_number: ownerPhoneInput.value
-		};
 	}
 	if (ds.name == "google_location") {
 		dsOpt = {};

@@ -327,6 +327,14 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID uint64) erro
 				}
 				defer tx.Rollback()
 
+				// ensure job was not aborted while we were waiting for it to start
+				var unabortedJobCount int
+				err = tx.QueryRowContext(ctx, `SELECT count() FROM jobs WHERE id=? AND state!=? LIMIT 1`, jobID, JobAborted).Scan(&unabortedJobCount)
+				if errors.Is(err, sql.ErrNoRows) || unabortedJobCount == 0 {
+					logger.Error("job was aborted before it started")
+					return
+				}
+
 				if err = start(tx); err != nil {
 					logger.Error("could not start scheduled job", zap.Error(err))
 					return

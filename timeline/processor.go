@@ -61,6 +61,14 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 		}
 	}()
 
+	// add timeline owner to the context, since that is useful if data sources need an
+	// item owner that is otherwise unknown
+	const ownerEntityID = 1
+	owner, err := p.tl.LoadEntity(ownerEntityID)
+	if err == nil {
+		ctx = context.WithValue(ctx, RepoOwnerCtxKey, owner)
+	}
+
 	params := ImportParams{
 		Log:               p.log.With(zap.String("filename", dirEntry.FullPath())),
 		Timeframe:         p.ij.ProcessingOptions.Timeframe,
@@ -106,7 +114,7 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 	params.Pipeline = graphs
 
 	// even if we estimated size above, use a fresh file importer to avoid any potentially reused state (TODO: necessary?)
-	err := p.ds.NewFileImporter().FileImport(ctx, dirEntry, params)
+	err = p.ds.NewFileImporter().FileImport(ctx, dirEntry, params)
 	// handle error in a little bit (see below)
 
 	// sending on the pipeline must be complete by now; signal to workers to exit
@@ -119,3 +127,7 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 
 	return err
 }
+
+type ctxKey string
+
+var RepoOwnerCtxKey ctxKey = "repo_owner"

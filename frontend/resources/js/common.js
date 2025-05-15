@@ -222,6 +222,21 @@ on('click', '[data-bs-toggle="switch-icon"]', e => {
 });
 
 
+// Returns an array of the attrbutes with the given name on the entity.
+function getEntityAttribute(entity, attributeName) {
+	const attrs = [];
+	if (!entity.attributes) {
+		return attrs;
+	}
+	for (const attr of entity.attributes) {
+		if (attr.name == attributeName) {
+			attrs.push(attr)
+		}
+	}
+	return attrs;
+}
+
+
 // Dynamic timestamps which update as much as every second to always show a correct
 // relative time on the screen. Pass in the element to put the relative text in
 // and the timestamp string from a JSON object.

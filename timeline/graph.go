@@ -267,6 +267,10 @@ type Item struct {
 	// words, each part of the same item that is conveyed to the
 	// processor must have the same retrieval key, and no other
 	// item globally must use the same key at any time.
+	// Only set this field if the Item is or may not be complete
+	// (e.g. if you know it will be processed in multiple pieces),
+	// since setting a retrieval key forces reprocessing of the
+	// item, which is less efficient than skipping duplicates.
 	Retrieval ItemRetrieval `json:"retrieval,omitempty"`
 
 	// Used for storing state during processing; either the
