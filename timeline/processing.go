@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"maps"
 	"math"
 	"mime"
 	"net/http"
@@ -38,8 +39,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"maps"
 
 	"github.com/google/uuid"
 	"github.com/zeebo/blake3"
