@@ -39,6 +39,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"maps"
+
 	"github.com/google/uuid"
 	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
@@ -492,9 +494,7 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 					copy(anonItem.Owner.Attributes, item.Owner.Attributes)
 					for i := range anonItem.Owner.Attributes {
 						anonItem.Owner.Attributes[i].Metadata = make(Metadata)
-						for k, v := range anonItem.Owner.Attributes[i].Metadata {
-							anonItem.Owner.Attributes[i].Metadata[k] = v
-						}
+						maps.Copy(anonItem.Owner.Attributes[i].Metadata, item.Owner.Attributes[i].Metadata)
 					}
 					anonItem.Owner.Anonymize()
 					item = &anonItem
@@ -502,16 +502,12 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 				if entity != nil {
 					anonEntity := *entity
 					anonEntity.Metadata = make(Metadata, len(entity.Metadata))
-					for k, v := range entity.Metadata {
-						anonEntity.Metadata[k] = v
-					}
+					maps.Copy(anonEntity.Metadata, entity.Metadata)
 					anonEntity.Attributes = make([]Attribute, len(entity.Attributes))
 					copy(anonEntity.Attributes, entity.Attributes)
 					for i := range anonEntity.Attributes {
 						anonEntity.Attributes[i].Metadata = make(Metadata)
-						for k, v := range entity.Attributes[i].Metadata {
-							anonEntity.Attributes[i].Metadata[k] = v
-						}
+						maps.Copy(anonEntity.Attributes[i].Metadata, entity.Attributes[i].Metadata)
 					}
 					anonEntity.ID = g.rowID.id()
 					anonEntity.Anonymize()
