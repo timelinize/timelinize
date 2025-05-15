@@ -1095,8 +1095,16 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 			(dbItem.Altitude == nil && it.Location.Altitude != nil) {
 			it.fieldUpdatePolicies["coordinates"] = updatePolicyPreferIncoming
 		}
-		if (dbItem.Timestamp == nil || dbItem.TimeOffset == nil) && !it.Timestamp.IsZero() {
-			it.fieldUpdatePolicies["timestamp"] = updatePolicyPreferIncoming
+		if !it.Timestamp.IsZero() {
+			// time and zone are stored separately in the DB, so consider those parts separately (not doing so was a bug: we reprocessed items unnecessarily)
+			if dbItem.Timestamp == nil {
+				it.fieldUpdatePolicies["timestamp"] = updatePolicyPreferIncoming
+			} else if dbItem.TimeOffset == nil {
+				_, offsetSec := it.Timestamp.Zone()
+				if offsetSec != 0 {
+					it.fieldUpdatePolicies["timestamp"] = updatePolicyPreferIncoming
+				}
+			}
 		}
 		if dbItem.Timespan == nil && !it.Timespan.IsZero() {
 			it.fieldUpdatePolicies["timespan"] = updatePolicyPreferIncoming
@@ -1126,9 +1134,8 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 			err := json.Unmarshal(dbItem.Metadata, &decoded)
 			if err == nil {
 				for k, incomingVal := range it.Metadata {
-					// this is not perfect, since the value could be any type, but string seems most common
-					if incomingVal == nil || incomingVal == "" {
-						continue
+					if it.Metadata.isEmpty(incomingVal) {
+						continue // empty values will get elided before storing, so ignore them
 					}
 					if _, ok := decoded[k]; !ok {
 						// incoming item has metadata field that DB does not; we should strive to be additive
@@ -1715,6 +1722,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		case "timeframe":
 			args = append(args, ir.timeframeUnix())
 		case "time_offset":
+			// TODO: should this be bundled with timestamp? would users ever want to update time but not the zone? what if an incoming timestamp is more correct but lacks zone?
 			args = append(args, ir.TimeOffset)
 		case "time_uncertainty":
 			args = append(args, ir.TimeUncertainty)
