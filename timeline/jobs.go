@@ -724,6 +724,8 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	j.currentCheckpoint = checkpoint
+
 	// no-op if last sync was too recent and the job isn't done yet (job done <==> tx!=nil)
 	if time.Since(j.lastSync) < jobSyncInterval && tx == nil {
 		return nil
@@ -982,8 +984,8 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 		if err != nil {
 			return err
 		}
-		if state != JobStarted && state != JobPaused {
-			return fmt.Errorf("job %d is in %s state and cannot be unpaused", jobID, state)
+		if state != JobStarted && state != JobPaused && state != JobFailed {
+			return fmt.Errorf("job %d is in %s state and cannot be resumed", jobID, state)
 		}
 		return tl.StartJob(ctx, jobID, false)
 	}
@@ -993,7 +995,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
 	tl.dbMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("job unpaused, but error updating job state in DB: %w", err)
+		return fmt.Errorf("job resumed, but error updating job state in DB: %w", err)
 	}
 
 	// unpause by closing the pause channel, delete the pause channel,
