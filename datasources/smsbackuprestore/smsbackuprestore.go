@@ -39,9 +39,9 @@ import (
 
 func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
-		Name:            "smsbackuprestore",
+		Name:            "sms_backup_restore",
 		Title:           "SMS Backup & Restore",
-		Icon:            "smsbackuprestore.png",
+		Icon:            "sms_backup_restore.png",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})

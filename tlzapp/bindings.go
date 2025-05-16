@@ -30,6 +30,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -589,6 +590,53 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 	for _, p := range pairings {
 		plan.Files = append(plan.Files, p...)
 	}
+
+	// improve import speed by putting large, DB-bound data sources first, to take advantage of when the DB is the fastest (when it is small)
+	dsPriorities := []string{
+		// contact lists are an excellent first import since they can give names to entities right off the bat
+		"vcard",
+		"contact_list",
+		"apple_contacts",
+
+		// then we prioritize data sources with large amounts of items in a single file; when the DB
+		// is small, imports are fastest, so putting data sources with the most smallest items up
+		// first makes imports faster
+		"google_location",
+		"sms_backup_restore",
+
+		// these next ones are a blend of lots of items and I/O heavy
+		"imessage",
+		"iphone",
+
+		// the remaining ones are mostly I/O heavy but can still have lots of items
+		"apple_photos",
+		"google_photos",
+		"icloud",
+		"media",
+		"whatsapp",
+		"facebook",
+		"instagram",
+		"twitter",
+	}
+	slices.SortStableFunc(plan.Files, func(a, b timeline.ProposedFileImport) int {
+		if len(a.DataSources) == 0 || len(b.DataSources) == 0 {
+			return 0
+		}
+		aDS, bDS := a.DataSources[0].DataSource.Name, b.DataSources[0].DataSource.Name
+		aIdx, bIdx := slices.Index(dsPriorities, aDS), slices.Index(dsPriorities, bDS)
+		if aIdx < 0 && bIdx >= 0 {
+			return 1
+		}
+		if aIdx >= 0 && bIdx < 0 {
+			return -1
+		}
+		if aIdx < bIdx {
+			return -1
+		} else if aIdx > bIdx {
+			return 1
+		}
+		return 0
+	})
 
 	return plan, nil
 }

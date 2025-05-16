@@ -42,7 +42,7 @@ func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
 		Name:            "google_location",
 		Title:           "Google Location History",
-		Icon:            "googlelocation.svg",
+		Icon:            "google_location.svg",
 		Description:     "A Google Takeout archive containing location history data.",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },

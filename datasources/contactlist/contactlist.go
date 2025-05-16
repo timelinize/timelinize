@@ -35,9 +35,9 @@ import (
 
 func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
-		Name:            "contactlist",
+		Name:            "contact_list",
 		Title:           "Contact List",
-		Icon:            "contactlist.svg",
+		Icon:            "contact_list.svg",
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})
 	if err != nil {

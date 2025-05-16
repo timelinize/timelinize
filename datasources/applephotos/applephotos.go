@@ -35,9 +35,9 @@ import (
 
 func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
-		Name:            "applephotos",
+		Name:            "apple_photos",
 		Title:           "Apple Photos",
-		Icon:            "applephotos.svg",
+		Icon:            "apple_photos.svg",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})
@@ -412,7 +412,7 @@ func makeEntity(personDetectionType, personGenderType *int, personFullName, pers
 		},
 		Attributes: []timeline.Attribute{
 			{
-				Name:     "applephotos_zperson",
+				Name:     "apple_photos_zperson",
 				Value:    personUUID,
 				Identity: true,
 			},

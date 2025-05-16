@@ -303,9 +303,9 @@ async function renderDataSourceOptionsModal(ds) {
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 	}
-	if (ds.name == "applephotos") {
+	if (ds.name == "apple_photos") {
 		// This data source can sometimes detect its owner, so it's not required for us to assume!
-		newEntitySelect($('.applephotos-owner', dsOptElem), 1);
+		newEntitySelect($('.apple_photos-owner', dsOptElem), 1);
 	}
 }
 
@@ -430,8 +430,8 @@ async function dataSourceOptions(ds) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
 	}
-	if (ds.name == "smsbackuprestore") {
-		const ownerPhoneInput = $('.smsbackuprestore-owner-phone', dsoptContainer);
+	if (ds.name == "sms_backup_restore") {
+		const ownerPhoneInput = $('.sms_backup_restore-owner-phone', dsoptContainer);
 		if (ownerPhoneInput.value) {
 			dsOpt = {
 				owner_phone_number: ownerPhoneInput.value
@@ -515,11 +515,11 @@ async function dataSourceOptions(ds) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
 	}
-	if (ds.name == "applephotos") {
+	if (ds.name == "apple_photos") {
 		dsOpt = {
-			include_trashed: $('.applephotos-trashed', dsoptContainer).checked
+			include_trashed: $('.apple_photos-trashed', dsoptContainer).checked
 		};
-		const owner = $('.applephotos-owner', dsoptContainer).tomselect.getValue();
+		const owner = $('.apple_photos-owner', dsoptContainer).tomselect.getValue();
 		if (owner.length) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
@@ -777,7 +777,7 @@ on('click', '#save-settings', e => {
 
 
 // // TODO: generalize input validation
-// on('focusout', '.smsbackuprestore-owner-phone', async event => {
+// on('focusout', '.sms_backup_restore-owner-phone', async event => {
 // 	if (event.target.value) {
 // 		event.target.classList.remove('is-invalid');
 // 		event.target.classList.add('is-valid');

@@ -183,7 +183,7 @@ func (fakeDataSource) Recognize(_ context.Context, _ DirEntry, _ RecognizeParams
 func (fake *fakeDataSource) FileImport(_ context.Context, _ DirEntry, params ImportParams) error {
 	var class Classification
 	switch fake.realDS.Name {
-	case "smsbackuprestore":
+	case "sms_backup_restore":
 		class = ClassMessage
 	case "google_location":
 		class = ClassLocation
@@ -194,7 +194,7 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ DirEntry, params Imp
 	}
 
 	switch fake.realDS.Name {
-	case "contactlist", "vcard":
+	case "contact_list", "vcard":
 		for i := range fake.peopleCorpus {
 			params.Pipeline <- &Graph{Entity: &fake.peopleCorpus[i]}
 		}
@@ -222,7 +222,7 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ DirEntry, params Imp
 			}
 		}
 
-	case "smsbackuprestore":
+	case "sms_backup_restore":
 		for range gofakeit.Number(100, 10000) {
 			owner := fake.peopleCorpus[weakrand.IntN(len(fake.peopleCorpus))] //nolint:gosec
 			owner = onlyKeepAttribute(owner, AttributePhoneNumber)
