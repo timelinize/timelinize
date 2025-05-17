@@ -368,6 +368,11 @@ function connectLog() {
 			return;
 		}
 
+		// if the owner entity just had its picture set, update it in the UI
+		if (l.logger == "job.action" && l.msg == "new owner picture") {
+			updateRepoOwners(true);
+		}
+
 		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.id}`)) {
 			// this page is for this import job, so display its table
 			$('.job-import-stream-container').classList.remove('d-none');

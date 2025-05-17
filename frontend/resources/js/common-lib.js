@@ -1025,7 +1025,11 @@ function entityPicture(entity) {
 	if (entity.picture.startsWith("http://") || entity.picture.startsWith("https://")) {
 		return entity.picture;
 	}
-	return `/repo/${tlz.openRepos[0].instance_id}/${entity.picture}`;
+	let entityPicture = `/repo/${tlz.openRepos[0].instance_id}/${entity.picture}`;
+	if (entity.forceUpdate) {
+		entityPicture += `?nocache=${new Date().getTime()}`; // classic cachebuster trick
+	}
+	return entityPicture;
 }
 
 // TODO: consider changing second param to preview=false, so that by default

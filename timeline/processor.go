@@ -63,7 +63,6 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 
 	// add timeline owner to the context, since that is useful if data sources need an
 	// item owner that is otherwise unknown
-	const ownerEntityID = 1
 	owner, err := p.tl.LoadEntity(ownerEntityID)
 	if err == nil {
 		ctx = context.WithValue(ctx, RepoOwnerCtxKey, owner)
@@ -131,3 +130,5 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 type ctxKey string
 
 var RepoOwnerCtxKey ctxKey = "repo_owner"
+
+const ownerEntityID = 1

@@ -401,6 +401,8 @@ func (p *processor) processEntityPicture(ctx context.Context, e Entity) (string,
 		pictureFile += ".webp"
 	case imageGif:
 		pictureFile += ".gif"
+	case ImageAVIF:
+		pictureFile += ".avif"
 	case ImageJPEG, "":
 		fallthrough
 	default:
@@ -564,6 +566,10 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 				}
 				setClause += "picture_file=?"
 				args = append(args, pictureFile)
+				// notify the UI that a new profile picture can be displayed
+				if entity.ID == ownerEntityID {
+					p.log.Info("new owner picture", zap.String("picture_file", pictureFile))
+				}
 			}
 		}
 		setClause = strings.TrimSuffix(setClause, ", ")
@@ -791,7 +797,7 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 			return fmt.Errorf("entity to merge specified more than once (%d)", id)
 		}
 		seen[id] = struct{}{}
-		if id == 1 {
+		if id == ownerEntityID {
 			// TODO: always keep entity 1 for now, since that's the repo owner... until we figure out a better solution
 			entityIDToKeep, entityIDsToMerge[i], id = id, entityIDToKeep, entityIDToKeep
 		}

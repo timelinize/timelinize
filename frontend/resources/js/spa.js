@@ -279,6 +279,7 @@ async function updateRepoOwners(forced) {
 			}
 		}
 
+		repoOwner.forceUpdate = forced; // can notify UI to load new profile picture or other details, if applicable
 		$('#repo-owner-name').innerText = repoOwner.name;
 		$('#repo-owner-title').innerText = birthPlace;
 		$('#repo-owner-avatar').innerHTML = avatar(false, repoOwner, "avatar-sm");
