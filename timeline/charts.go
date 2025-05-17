@@ -71,11 +71,14 @@ func (tl *Timeline) chartRecentItems(ctx context.Context, params url.Values) (an
 	// go back 11 months to the start of the last November, since we don't want to include partial October
 	// that happened 12 months ago) -- with that value, we can then select the count of items in each period
 	// that are newer than the cutoff date we calculated in the CTE.
+	// (The `date(min(timestamp/1000, unixepoch()), 'unixepoch')` bit is because the highest item timestamp
+	// in the DB might be in the future (calendar events, for example), and may often be wrong (bad data),
+	// so we only go from the last item OR today's timestamp, whichever is earlier.)
 	//nolint:gosec // all our values are hard-coded
 	query := fmt.Sprintf(`
 	WITH bounds AS (
 		SELECT unixepoch(
-			(SELECT date(timestamp/1000, 'unixepoch') FROM items ORDER BY timestamp DESC LIMIT 1),
+			(SELECT date(min(timestamp/1000, unixepoch()), 'unixepoch') FROM items ORDER BY timestamp DESC LIMIT 1),
 			'%s',
 			'start of %s'
 			)*1000 AS earliest_timestamp
@@ -175,13 +178,16 @@ func (tl *Timeline) chartRecentDaysItemCount(ctx context.Context, params url.Val
 	minTime := msPerDay * days
 
 	// the LIMIT is arbitrary, just to prevent an accidentally huge resultset
+	// (the `date(min(timestamp/1000, unixepoch()), 'unixepoch'))` bit is the same as similar in another chart query,
+	// to prevent future-timestampped items, which are usually wrong or from calendars, from crowding out all
+	// the other data on the chart; so the latest timestamp we accept is today's date)
 	rows, err := tl.db.QueryContext(ctx, `
 		SELECT
-			strftime('%Y-%m-%d', date(timestamp/1000, 'unixepoch')) AS date,
+			strftime('%Y-%m-%d', date(min(timestamp/1000, unixepoch()), 'unixepoch')) AS date,
 			data_source_name,
 			count()
 		FROM extended_items
-		WHERE timestamp > unixepoch()*1000 - ? AND date IS NOT NULL   -- sometimes date is null; rare, but I've seen it; not sure why
+		WHERE timestamp > unixepoch()*1000 - ?
 		GROUP BY date, data_source_name
 		LIMIT 2000`, minTime)
 	if err != nil {
@@ -250,6 +256,9 @@ func (tl *Timeline) chartDataSourceUsage(ctx context.Context) (any, error) {
 	// the readability of the chart. Finally, we limit to 1000 results to avoid burdening the frontend.
 	// Another idea is to not constrain by timestamp and instead to sample every Nth row, for example
 	// (but still would want to ensure timestamp is not null).
+	//
+	// Oh, and we make sure to set the end date to the last item, or today's date if the last item is in
+	// the future, since future items are outliers and throw off the whole chart.
 	rows, err := tl.db.QueryContext(ctx, `
 		SELECT
 			data_source_name,
@@ -260,7 +269,8 @@ func (tl *Timeline) chartDataSourceUsage(ctx context.Context) (any, error) {
 			END AS hour,
 			count()
 		FROM extended_items
-		WHERE timestamp > unixepoch((SELECT date(timestamp/1000, 'unixepoch') FROM items ORDER BY timestamp DESC LIMIT 1), '-730 days')*1000
+		WHERE timestamp > unixepoch((SELECT date(min(timestamp/1000, unixepoch()), 'unixepoch') FROM items ORDER BY timestamp DESC LIMIT 1), '-730 days')*1000
+			AND timestamp <= unixepoch()*1000
 		GROUP BY strftime('%Y %W', date(timestamp/1000, 'unixepoch')), hour
 		ORDER BY data_source_name, timestamp
 		LIMIT 2000`)
