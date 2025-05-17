@@ -84,18 +84,11 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 			content = content[:len(content)-1]
 		}
 
-		var rootKey timeline.ItemRetrieval
-		// Note: This isn't perfect; if someone renames a contact in their address book then the same message in a new export won't match.
-		// We can't use a hash of the content of the message, as the key use-case here is to be able to add in "caption" text, if Meta fixes
-		// the bug where caption text is omitted from files when exporting (as adding that omitted caption would alter the hash).
-		rootKey.SetKey(fmt.Sprintf("whatsapp-%s-%s", timestamp.Format(time.DateTime), name))
-
 		message := &timeline.Graph{
 			Item: &timeline.Item{
 				Classification: timeline.ClassMessage,
 				Timestamp:      timestamp,
 				Owner:          owner,
-				Retrieval:      rootKey,
 			},
 		}
 
