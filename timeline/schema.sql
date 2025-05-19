@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	"hash" BLOB, -- for preventing duplicate jobs; opaque to everything except the code creating the job
 	"state" TEXT NOT NULL DEFAULT 'queued', -- queued, started, paused, aborted, succeeded, failed
 	"hostname" TEXT, -- hostname of the machine the job was created and configured on
-	"created" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp job was stored/enqueued in unix milliseconds UTC
+	"created" INTEGER NOT NULL DEFAULT (cast(round(unixepoch('subsec')*1000) AS INTEGER)), -- timestamp job was stored/enqueued in unix milliseconds UTC
 	"updated" INTEGER, -- timestamp of last DB sync (in unix milliseconds UTC)
 	"start" INTEGER, -- timestamp job was actually started in unix milliseconds UTC *could be future, so not called "started")
 	"ended" INTEGER, -- timestamp in unix milliseconds UTC when job ended (not paused)

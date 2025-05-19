@@ -98,7 +98,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 	}
 	defer tx.Rollback()
 
-	jobID, err := tl.storeJob(tx, job)
+	jobID, created, err := tl.storeJob(tx, job)
 	if err != nil {
 		return 0, err
 	}
@@ -111,7 +111,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 		zap.String("repo_id", tl.ID().String()),
 		zap.Uint64("id", jobID),
 		zap.String("type", string(job.Type)),
-		zap.Time("created", time.Now()),
+		zap.Time("created", created),
 		zap.Timep("start", job.Start),
 		zap.Uint64p("parent_job_id", parentJobIDPtr),
 		zap.Intp("size", totalPtr))
@@ -130,7 +130,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 
 // storeJob adds the job to the database. It does not start it.
 // TODO: Job configs could be compressed to save space in the DB...
-func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, error) {
+func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, time.Time, error) {
 	job.Hash = job.hash()
 
 	hostname, err := os.Hostname()
@@ -146,10 +146,10 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, error) {
 		`SELECT count() FROM jobs WHERE hash=? AND state=? LIMIT 1`,
 		job.Hash, JobQueued).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("checking for duplicate job: %w", err)
+		return 0, time.Time{}, fmt.Errorf("checking for duplicate job: %w", err)
 	}
 	if count > 0 {
-		return 0, nil
+		return 0, time.Time{}, nil
 	}
 
 	var start *int64
@@ -159,16 +159,19 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, error) {
 	}
 
 	var id uint64
+	var createdUnix int64
 	err = tx.QueryRowContext(tl.ctx, `
 		INSERT INTO jobs (type, configuration, hash, hostname, start, total, repeat, parent_job_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING id`,
-		job.Type, job.Config, job.Hash, job.Hostname, start, job.Total, job.Repeat, job.ParentJobID).Scan(&id)
+		RETURNING id, created`,
+		job.Type, job.Config, job.Hash, job.Hostname, start, job.Total, job.Repeat, job.ParentJobID).Scan(&id, &createdUnix)
 	if err != nil {
-		return 0, fmt.Errorf("inserting new job row: %w", err)
+		return 0, time.Time{}, fmt.Errorf("inserting new job row: %w", err)
 	}
 
-	return id, nil
+	created := time.UnixMilli(createdUnix)
+
+	return id, created, nil
 }
 
 // loadJob loads a job from the database, using tx if set. A lock MUST be obtained on the

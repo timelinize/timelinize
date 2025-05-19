@@ -1303,22 +1303,24 @@ type InteractiveGraph struct {
 	DataFileReady chan struct{}
 }
 
-// fieldUpdatePolicy values specify how to update a field/column of an item in the DB.
+// FieldUpdatePolicy values specify how to update a field/column of an item in the DB.
 // It's a lower level of abstraction than field update preferences, which are user-facing.
-type fieldUpdatePolicy int
+//
+// For the metadata field, this policy is applied per-metadata-key.
+type FieldUpdatePolicy int
 
 const (
-	updatePolicyKeepExisting fieldUpdatePolicy = iota
-
-	// COALESCE(existing, incoming)
-	updatePolicyPreferExisting
-
-	// COALESCE(incoming, existing)
-	updatePolicyPreferIncoming
+	UpdatePolicyKeepExisting FieldUpdatePolicy = iota
 
 	// SET existing=incoming
 	// (i.e. prefer incoming even if incoming is NULL)
-	updatePolicyOverwriteExisting
+	UpdatePolicyOverwriteExisting
+
+	// COALESCE(existing, incoming)
+	UpdatePolicyPreferExisting
+
+	// COALESCE(incoming, existing)
+	UpdatePolicyPreferIncoming
 )
 
 // FieldUpdatePreference describes a user's preference for updating part of an item.
@@ -1333,7 +1335,7 @@ type FieldUpdatePreference struct {
 func (p *processor) distillUpdatePolicies(incoming *Item, existing ItemRow) error {
 	// reset target map if already populated
 	if len(incoming.fieldUpdatePolicies) > 0 {
-		incoming.fieldUpdatePolicies = make(map[string]fieldUpdatePolicy)
+		incoming.fieldUpdatePolicies = make(map[string]FieldUpdatePolicy)
 	}
 	for _, pref := range p.ij.ProcessingOptions.ItemUpdatePreferences {
 		policy, err := p.distillUpdatePolicy(pref, incoming, existing)
@@ -1343,9 +1345,9 @@ func (p *processor) distillUpdatePolicies(incoming *Item, existing ItemRow) erro
 		// Only create a policy if it's not the default (to keep existing; i.e. no-op),
 		// since we use the size of the policies map as an indicator that we need to
 		// process the item.
-		if policy != updatePolicyKeepExisting {
+		if policy != UpdatePolicyKeepExisting {
 			if incoming.fieldUpdatePolicies == nil {
-				incoming.fieldUpdatePolicies = make(map[string]fieldUpdatePolicy)
+				incoming.fieldUpdatePolicies = make(map[string]FieldUpdatePolicy)
 			}
 			incoming.fieldUpdatePolicies[pref.Field] = policy
 		}
@@ -1353,7 +1355,7 @@ func (p *processor) distillUpdatePolicies(incoming *Item, existing ItemRow) erro
 	return nil
 }
 
-func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *Item, existing ItemRow) (fieldUpdatePolicy, error) {
+func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *Item, existing ItemRow) (FieldUpdatePolicy, error) {
 	for i, priority := range pref.Priorities {
 		// can only have 1 priority specified per map; the map just allows arbitrary keys
 		if len(priority) != 1 {
@@ -1364,15 +1366,15 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 			case "keep":
 				if v == "incoming" {
 					if pref.Nulls {
-						return updatePolicyOverwriteExisting, nil
+						return UpdatePolicyOverwriteExisting, nil
 					}
-					return updatePolicyPreferIncoming, nil
+					return UpdatePolicyPreferIncoming, nil
 				} else if v == "existing" {
 					if pref.Nulls {
 						// TODO: This could be an error, since this is the same as no update policy at all -- no reason to hard-code a static policy like this
-						return updatePolicyKeepExisting, nil
+						return UpdatePolicyKeepExisting, nil
 					}
-					return updatePolicyPreferExisting, nil
+					return UpdatePolicyPreferExisting, nil
 				}
 				return 0, fmt.Errorf("the 'keep' update policy must be either 'incoming' or 'existing', got: '%s'", v)
 			case "data_source":
@@ -1383,15 +1385,15 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 				}
 				if existing.DataSourceName != nil && *existing.DataSourceName == v {
 					if pref.Nulls {
-						return updatePolicyKeepExisting, nil
+						return UpdatePolicyKeepExisting, nil
 					}
-					return updatePolicyPreferExisting, nil
+					return UpdatePolicyPreferExisting, nil
 				}
 				if p.ds.Name == v {
 					if pref.Nulls {
-						return updatePolicyOverwriteExisting, nil
+						return UpdatePolicyOverwriteExisting, nil
 					}
-					return updatePolicyPreferIncoming, nil
+					return UpdatePolicyPreferIncoming, nil
 				}
 			case "media_type":
 				if existing.DataType != nil && *existing.DataType == incoming.Content.MediaType {
@@ -1401,15 +1403,15 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 				}
 				if existing.DataType != nil && *existing.DataType == v {
 					if pref.Nulls {
-						return updatePolicyKeepExisting, nil
+						return UpdatePolicyKeepExisting, nil
 					}
-					return updatePolicyPreferExisting, nil
+					return UpdatePolicyPreferExisting, nil
 				}
 				if incoming.Content.MediaType == v {
 					if pref.Nulls {
-						return updatePolicyOverwriteExisting, nil
+						return UpdatePolicyOverwriteExisting, nil
 					}
-					return updatePolicyPreferIncoming, nil
+					return UpdatePolicyPreferIncoming, nil
 				}
 			case "size":
 				const bigger, smaller = "bigger", "smaller"
@@ -1450,28 +1452,28 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 				if v == bigger {
 					if existingDataLen > incomingDataLen {
 						if pref.Nulls {
-							return updatePolicyKeepExisting, nil
+							return UpdatePolicyKeepExisting, nil
 						}
-						return updatePolicyPreferExisting, nil
+						return UpdatePolicyPreferExisting, nil
 					}
 					if incomingDataLen > existingDataLen {
 						if pref.Nulls {
-							return updatePolicyOverwriteExisting, nil
+							return UpdatePolicyOverwriteExisting, nil
 						}
-						return updatePolicyPreferIncoming, nil
+						return UpdatePolicyPreferIncoming, nil
 					}
 				} else if v == smaller {
 					if existingDataLen < incomingDataLen {
 						if pref.Nulls {
-							return updatePolicyKeepExisting, nil
+							return UpdatePolicyKeepExisting, nil
 						}
-						return updatePolicyPreferExisting, nil
+						return UpdatePolicyPreferExisting, nil
 					}
 					if incomingDataLen < existingDataLen {
 						if pref.Nulls {
-							return updatePolicyOverwriteExisting, nil
+							return UpdatePolicyOverwriteExisting, nil
 						}
-						return updatePolicyPreferIncoming, nil
+						return UpdatePolicyPreferIncoming, nil
 					}
 				}
 			case "timestamp":
@@ -1487,28 +1489,28 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 				if v == earlier {
 					if existing.Timestamp != nil && (incoming.Timestamp.IsZero() || existing.Timestamp.Before(incoming.Timestamp)) {
 						if pref.Nulls {
-							return updatePolicyKeepExisting, nil
+							return UpdatePolicyKeepExisting, nil
 						}
-						return updatePolicyPreferExisting, nil
+						return UpdatePolicyPreferExisting, nil
 					}
 					if !incoming.Timestamp.IsZero() && (existing.Timestamp == nil || incoming.Timestamp.Before(*existing.Timestamp)) {
 						if pref.Nulls {
-							return updatePolicyOverwriteExisting, nil
+							return UpdatePolicyOverwriteExisting, nil
 						}
-						return updatePolicyPreferIncoming, nil
+						return UpdatePolicyPreferIncoming, nil
 					}
 				} else if v == later {
 					if existing.Timestamp != nil && (incoming.Timestamp.IsZero() || existing.Timestamp.After(incoming.Timestamp)) {
 						if pref.Nulls {
-							return updatePolicyKeepExisting, nil
+							return UpdatePolicyKeepExisting, nil
 						}
-						return updatePolicyPreferExisting, nil
+						return UpdatePolicyPreferExisting, nil
 					}
 					if !incoming.Timestamp.IsZero() && (existing.Timestamp == nil || incoming.Timestamp.After(*existing.Timestamp)) {
 						if pref.Nulls {
-							return updatePolicyOverwriteExisting, nil
+							return UpdatePolicyOverwriteExisting, nil
 						}
-						return updatePolicyPreferIncoming, nil
+						return UpdatePolicyPreferIncoming, nil
 					}
 				}
 			default:
@@ -1516,7 +1518,7 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 			}
 		}
 	}
-	return updatePolicyKeepExisting, nil
+	return UpdatePolicyKeepExisting, nil
 }
 
 // Files belonging at the root within the timeline repository.

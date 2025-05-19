@@ -16,6 +16,7 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+//nolint:goconst
 package timeline
 
 import (
@@ -747,6 +748,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	}
 	it.makeIDHash(dsName)
 	it.makeContentHash()
+	it.Metadata.Clean()
 
 	// if the item is already in our DB, load it
 	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true)
@@ -1019,6 +1021,184 @@ func (p *processor) integrityCheck(dbItem ItemRow) error {
 // it returns true for dataFile if at least the dataFile should be processed.
 // Valid return values: false false, true false, true true.
 func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFileIncoming bool) (item bool, dataFile bool) {
+	if it == nil {
+		return false, false
+	}
+
+	// when the function returns, we can trim update policies by comparing what values wealready have with
+	// what's going in (except for data files, of course) -- if it turns out they're all the same, then
+	// no updates are needed; or depending on the policy, even if they're not the same, no updates may be
+	// needed, which can, in theory, greatly speed up repeated imports, since we skip redundant DB writes
+	defer func() {
+		if !item && !dataFile {
+			return // already not reprocessing, so don't worry about double-checking
+		}
+		for field, policy := range it.fieldUpdatePolicies {
+			// "keep existing" is the same as "no update", and it's simpler to just remove it from the map so that the
+			// only policies that exist are those which actually perform an update
+			if policy == UpdatePolicyKeepExisting {
+				delete(it.fieldUpdatePolicies, field)
+				continue
+			}
+			switch field {
+			case "attribute_id":
+				if (dbItem.AttributeID == nil && it.Owner.IsEmpty()) || // both empty
+					// (tedious to determine attribute ID equality, so we'll just not worry about it)
+					(it.Owner.IsEmpty() && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "classification_id":
+				if (dbItem.ClassificationID == nil && it.Classification.id == nil) || // both empty
+					// (tedious to determine classification ID equality, so we'll just not worry about it)
+					(it.Classification.Name == "" && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "original_location":
+				if (dbItem.OriginalLocation == nil && it.OriginalLocation == "") || // both empty
+					(dbItem.OriginalLocation != nil && *dbItem.OriginalLocation == it.OriginalLocation) || // both the same
+					(it.OriginalLocation == "" && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "intermediate_location":
+				if (dbItem.IntermediateLocation == nil && it.IntermediateLocation == "") || // both empty
+					(dbItem.IntermediateLocation != nil && *dbItem.IntermediateLocation == it.IntermediateLocation) || // both the same
+					(it.IntermediateLocation == "" && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "filename":
+				if (dbItem.Filename == nil && it.Content.Filename == "") || // both empty
+					(dbItem.Filename != nil && *dbItem.Filename == it.Content.Filename) || // both the same
+					(it.Content.Filename == "" && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "timestamp":
+				if (dbItem.Timestamp == nil && it.Timestamp.IsZero()) || // both empty
+					(dbItem.Timestamp != nil && dbItem.Timestamp.Equal(it.Timestamp)) || // both the same
+					(it.Timestamp.IsZero() && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "timespan":
+				if (dbItem.Timespan == nil && it.Timespan.IsZero()) || // both empty
+					(dbItem.Timespan != nil && dbItem.Timespan.Equal(it.Timespan)) || // both the same
+					(it.Timespan.IsZero() && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "timeframe":
+				if (dbItem.Timeframe == nil && it.Timeframe.IsZero()) || // both empty
+					(dbItem.Timeframe != nil && dbItem.Timeframe.Equal(it.Timeframe)) || // both the same
+					(it.Timeframe.IsZero() && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "time_offset":
+				_, offsetSec := it.Timestamp.Zone()
+				if (dbItem.TimeOffset == nil && offsetSec == 0) || // both empty
+					(dbItem.TimeOffset != nil && *dbItem.TimeOffset == offsetSec) || // both the same
+					(offsetSec == 0 && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "time_uncertainty":
+				if (dbItem.TimeUncertainty == nil && it.TimeUncertainty == 0) || // both empty
+					(dbItem.TimeUncertainty != nil && *dbItem.TimeUncertainty == int64(it.TimeUncertainty)) || // both the same
+					(it.TimeUncertainty == 0 && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "data":
+				// only handling the case where data is text and small enough to fit nicely into DB page
+				if (dbItem.DataText == nil && it.dataText == nil) || // both empty
+					(dbItem.DataText != nil && it.dataText != nil && *dbItem.DataText == *it.dataText) || // both the same
+					(it.Content.Data == nil && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "metadata":
+				// easy cases first: both metadatas are empty, or the incoming would be a no-op
+				if (dbItem.Metadata == nil && len(it.Metadata) == 0) || // both empty
+					(len(it.Metadata) == 0 && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+					break
+				}
+
+				// If metadata has an update policy that involves what already exists in the DB (KeepExisting and OverwriteExisting don't care what's
+				// already in the DB, only the Prefer* policies do), we decode it and merge the metadata keys according to the policy.
+				// Currently, our logic here is additive: when combining, we can add keys that don't already exist, or change the values of keys,
+				// but we'll never delete keys. Maybe future options can enable that if needed.
+				if policy >= UpdatePolicyPreferExisting && dbItem.Metadata != nil {
+					var existingMetadata Metadata
+					if err := json.Unmarshal(dbItem.Metadata, &existingMetadata); err != nil {
+						p.log.Error("could not unmarshal existing item metadata to combine with incoming metadata; it may get overwritten",
+							zap.Uint64("row_id", dbItem.ID),
+							zap.String("filename", it.Content.Filename),
+							zap.String("item_original_id", it.ID),
+							zap.Error(err))
+					}
+					var metadataUpdateRequired bool // once we're done comparing keys/values, we may not need to update metadata at all
+					for k, v := range existingMetadata {
+						// iterating metadata keys that are already in the DB
+						if policy == UpdatePolicyPreferExisting {
+							if incomingV, ok := it.Metadata[k]; ok {
+								metadataUpdateRequired = metadataUpdateRequired || incomingV != v
+							}
+							it.Metadata[k] = v
+						} else if policy == UpdatePolicyPreferIncoming {
+							if incomingV, ok := it.Metadata[k]; !ok {
+								it.Metadata[k] = v
+							} else if incomingV != v {
+								metadataUpdateRequired = true
+							}
+						}
+					}
+					if !metadataUpdateRequired {
+						// the above loop should have told us if we need to update based on what's already in the DB,
+						// but now check to see if there's new keys incoming that the DB row doesn't have yet
+						for k := range it.Metadata {
+							if _, ok := existingMetadata[k]; !ok {
+								metadataUpdateRequired = true
+								break
+							}
+						}
+					}
+					if !metadataUpdateRequired {
+						delete(it.fieldUpdatePolicies, field)
+					}
+				}
+
+				// only handling the case where data is text and small enough to fit nicely into DB page
+				if (dbItem.Metadata == nil && len(it.Metadata) == 0) || // both empty
+					// computing equality is non-trivial, so we don't do that
+					(len(it.Metadata) == 0 && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "coordinates":
+				// skipping coordinate_system and coordinate_uncertainty for now
+				if (dbItem.Longitude == nil && it.Location.Longitude == nil && dbItem.Latitude == nil && it.Location.Latitude == nil && dbItem.Altitude == nil && it.Location.Altitude == nil) || // both empty
+					((dbItem.Longitude != nil && it.Location.Longitude != nil && *dbItem.Longitude == *it.Location.Longitude) &&
+						(dbItem.Latitude != nil && it.Location.Latitude != nil && *dbItem.Latitude == *it.Location.Latitude) &&
+						(dbItem.Altitude != nil && it.Location.Altitude != nil && *dbItem.Altitude == *it.Location.Altitude)) || // both the same
+					(it.Location.Longitude == nil && it.Location.Latitude == nil && it.Location.Altitude == nil && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			}
+		}
+		item = item && len(it.fieldUpdatePolicies) > 0
+		dataFile = item && dataFile && it.fieldUpdatePolicies["data"] > 0
+	}()
+
+	// the presence of a retrieval key implies that the data source may not be able to fully
+	// provide the whole item in one import, so in that case, always reprocess, but make sure
+	// to account for the update overrides specified by the data source
+	if len(it.Retrieval.key) > 0 {
+		if it.fieldUpdatePolicies == nil {
+			it.fieldUpdatePolicies = make(map[string]FieldUpdatePolicy)
+		}
+		for field, policy := range it.Retrieval.FieldUpdatePolicies {
+			it.fieldUpdatePolicies[field] = policy
+			if field == "data" && policy != UpdatePolicyKeepExisting {
+				dataFile = true
+			}
+		}
+		item = true
+		return
+	}
+
 	// An item may be referenced by the data source more than once, and thus the same item may be processed concurrently;
 	// when this happens, multiple data files are created in the repo: the first will presumably have the original filename,
 	// while the later ones will have random strings appended. The problem is if a later one end up finishing first, the
@@ -1060,13 +1240,13 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// least safely add new info I think
 	if dbItem.JobID != nil && *dbItem.JobID == p.ij.job.id {
 		if it.fieldUpdatePolicies == nil {
-			it.fieldUpdatePolicies = make(map[string]fieldUpdatePolicy)
+			it.fieldUpdatePolicies = make(map[string]FieldUpdatePolicy)
 		}
 
 		// if there's an incoming data file and we don't have one, then update
 		if dbItem.DataText == nil && dbItem.DataFile == nil && (it.dataText != nil || it.Content.Data != nil) {
 			dataFile = true
-			it.fieldUpdatePolicies["data"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["data"] = UpdatePolicyPreferIncoming
 		}
 
 		// if incoming item is linked to an owner attribute, but the one in the DB is null,
@@ -1080,7 +1260,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 				}
 			}
 			if hasIDAttr {
-				it.fieldUpdatePolicies["attribute_id"] = updatePolicyPreferIncoming
+				it.fieldUpdatePolicies["attribute_id"] = UpdatePolicyPreferIncoming
 			}
 		}
 
@@ -1088,60 +1268,42 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		if (dbItem.Latitude == nil && it.Location.Latitude != nil) ||
 			(dbItem.Longitude == nil && it.Location.Longitude != nil) ||
 			(dbItem.Altitude == nil && it.Location.Altitude != nil) {
-			it.fieldUpdatePolicies["coordinates"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["coordinates"] = UpdatePolicyPreferIncoming
 		}
 		if !it.Timestamp.IsZero() {
 			// time and zone are stored separately in the DB, so consider those parts separately (not doing so was a bug: we reprocessed items unnecessarily)
 			if dbItem.Timestamp == nil {
-				it.fieldUpdatePolicies["timestamp"] = updatePolicyPreferIncoming
+				it.fieldUpdatePolicies["timestamp"] = UpdatePolicyPreferIncoming
 			} else if dbItem.TimeOffset == nil {
 				_, offsetSec := it.Timestamp.Zone()
 				if offsetSec != 0 {
-					it.fieldUpdatePolicies["timestamp"] = updatePolicyPreferIncoming
+					it.fieldUpdatePolicies["time_offset"] = UpdatePolicyPreferIncoming
 				}
 			}
 		}
 		if dbItem.Timespan == nil && !it.Timespan.IsZero() {
-			it.fieldUpdatePolicies["timespan"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["timespan"] = UpdatePolicyPreferIncoming
 		}
 		if dbItem.Timeframe == nil && !it.Timeframe.IsZero() {
-			it.fieldUpdatePolicies["timeframe"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["timeframe"] = UpdatePolicyPreferIncoming
 		}
 		if dbItem.Filename == nil && it.Content.Filename != "" {
-			it.fieldUpdatePolicies["filename"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["filename"] = UpdatePolicyPreferIncoming
 		}
 		if dbItem.Classification == nil && it.Classification.Name != "" {
-			it.fieldUpdatePolicies["classification_id"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["classification_id"] = UpdatePolicyPreferIncoming
 		}
 		if dbItem.OriginalLocation == nil && it.OriginalLocation != "" {
-			it.fieldUpdatePolicies["original_location"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["original_location"] = UpdatePolicyPreferIncoming
 		}
 		if dbItem.OriginalID == nil && it.ID != "" {
-			it.fieldUpdatePolicies["original_id"] = updatePolicyPreferIncoming
+			it.fieldUpdatePolicies["original_id"] = UpdatePolicyPreferIncoming
 		}
 
 		// metadata is a little tricky, especially to decide efficiently, unless
 		// the incoming item obiously has some and the existing one does not...
-		if len(it.Metadata) > 0 && len(dbItem.Metadata) == 0 {
-			it.fieldUpdatePolicies["metadata"] = updatePolicyOverwriteExisting
-		} else if len(it.Metadata) > 0 {
-			var decoded Metadata
-			err := json.Unmarshal(dbItem.Metadata, &decoded)
-			if err == nil {
-				for k, incomingVal := range it.Metadata {
-					if it.Metadata.isEmpty(incomingVal) {
-						continue // empty values will get elided before storing, so ignore them
-					}
-					if _, ok := decoded[k]; !ok {
-						// incoming item has metadata field that DB does not; we should strive to be additive
-						// so I guess we take this as a hint to replace the existing... but obviously, there
-						// could be fields that DB has that the incoming item does not...
-						// TODO: we may need a way to apply metadata merge policy ?
-						it.fieldUpdatePolicies["metadata"] = updatePolicyOverwriteExisting
-						break
-					}
-				}
-			}
+		if len(it.Metadata) > 0 {
+			it.fieldUpdatePolicies["metadata"] = UpdatePolicyPreferIncoming
 		}
 
 		item = len(it.fieldUpdatePolicies) > 0
@@ -1153,20 +1315,6 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 				zap.String("item_original_id", it.ID))
 		}
 
-		return
-	}
-
-	// the presence of a retrieval key implies that the data source may not be able to fully
-	// provide the whole item in one import, so in that case, always reprocess, but make sure
-	// to account for the update overrides specified by the data source
-	if len(it.Retrieval.key) > 0 {
-		if it.fieldUpdatePolicies == nil {
-			it.fieldUpdatePolicies = make(map[string]fieldUpdatePolicy)
-		}
-		for _, field := range it.Retrieval.PreferFields {
-			it.fieldUpdatePolicies[field] = updatePolicyOverwriteExisting
-		}
-		item, dataFile = true, true
 		return
 	}
 
@@ -1206,7 +1354,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	// if the item data is explicitly configured to overwrite existing, then it
 	// should always be reprocessed, even if NULL
 	dataUpdatePolicy, dataUpdateEnabled := it.fieldUpdatePolicies["data"]
-	if dataUpdatePolicy == updatePolicyOverwriteExisting {
+	if dataUpdatePolicy == UpdatePolicyOverwriteExisting {
 		return true, true
 	}
 
@@ -1232,7 +1380,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		// by this point, we know that if it has a data file, it has good integrity
 		// (if integrity checks are enabled) and it was completely downloaded (hash
 		// exists), so we should update it according to configured policy
-		if dataUpdatePolicy == updatePolicyPreferExisting {
+		if dataUpdatePolicy == UpdatePolicyPreferExisting {
 			// only update data file if there is NOT an existing one
 			dataFile = dbItem.DataFile == nil
 		} else if dataUpdatePolicy > 0 {
@@ -1276,13 +1424,10 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 		return fmt.Errorf("getting person associated with item: %w", err)
 	}
 
-	// remove unnecessary entries first
-	it.Metadata.Clean()
-
 	// encode metadata as JSON
 	var metadata json.RawMessage
 	if len(it.Metadata) > 0 {
-		metadata, err = json.Marshal(it.Metadata)
+		metadata, err = json.Marshal(it.Metadata) // should already be cleaned
 		if err != nil {
 			return fmt.Errorf("encoding metadata as JSON: %w", err)
 		}
@@ -1339,7 +1484,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 			ir.TimeOffset = &offsetSec
 		}
 	}
-	if !it.Timespan.IsZero() && !it.Timeframe.Equal(it.Timestamp) {
+	if !it.Timespan.IsZero() && !it.Timespan.Equal(it.Timestamp) {
 		ir.Timespan = &it.Timespan
 	}
 	if !it.Timeframe.IsZero() && !it.Timeframe.Equal(it.Timestamp) {
@@ -1488,11 +1633,11 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 			// and allow any value in that range to be a match?
 
 			switch field {
-			case "data": //nolint:goconst
+			case "data":
 				sb.WriteString("(data_text=? OR (data_text IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (data_hash=? OR ? IS NULL)")
-			case "coordinates": //nolint:goconst
+			case "coordinates":
 				sb.WriteString("((?<=longitude AND longitude<?) OR (longitude IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND ((?<=latitude AND latitude<?) OR (latitude IS NULL ")
@@ -1539,7 +1684,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 					filename = &it.Content.Filename
 				}
 				args = append(args, filename, filename)
-			case "timestamp": //nolint:goconst
+			case "timestamp":
 				timestamp := it.timestampUnix()
 				args = append(args, timestamp, timestamp)
 			case "timespan":
@@ -1594,7 +1739,7 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 
 // insertOrUpdateItem inserts the fully-populated ir into the database (TODO: finish godoc)
 func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool,
-	fieldUpdatePolicies map[string]fieldUpdatePolicy) (uint64, itemStoreResult, error) {
+	fieldUpdatePolicies map[string]FieldUpdatePolicy) (uint64, itemStoreResult, error) {
 	// new item? insert it
 	if ir.ID == 0 {
 		var rowID uint64
@@ -1644,9 +1789,14 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		needsComma = true
 	}
 
-	appendToQuery := func(field string, policy fieldUpdatePolicy) {
+	appendToQuery := func(field string, policy FieldUpdatePolicy) {
+		if field == "metadata" {
+			// we already applied the update policy on a per-key basis earlier, which also merged
+			// keys the DB row already had, so we can always safely prefer the incoming metadata
+			policy = UpdatePolicyPreferIncoming
+		}
 		switch policy {
-		case updatePolicyPreferExisting:
+		case UpdatePolicyPreferExisting:
 			if needsComma {
 				sb.WriteString(", ")
 			}
@@ -1654,7 +1804,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			sb.WriteString("=COALESCE(")
 			sb.WriteString(field)
 			sb.WriteString(", ?)")
-		case updatePolicyOverwriteExisting:
+		case UpdatePolicyOverwriteExisting:
 			if allowOverwrite {
 				if needsComma {
 					sb.WriteString(", ")
@@ -1664,7 +1814,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 				break
 			}
 			fallthrough
-		case updatePolicyPreferIncoming:
+		case UpdatePolicyPreferIncoming:
 			if needsComma {
 				sb.WriteString(", ")
 			}
@@ -1676,9 +1826,10 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		needsComma = true
 	}
 
-	applyUpdatePolicy := func(field string, policy fieldUpdatePolicy) error {
-		if policy < 0 {
-			// this happens if we're still waiting for information before we can
+	applyUpdatePolicy := func(field string, policy FieldUpdatePolicy) error {
+		if policy <= 0 {
+			// 0  = no update
+			// -1 = this happens if we're still waiting for information before we can
 			// apply the policy; the processor should do this again later
 			return nil
 		}

@@ -794,7 +794,18 @@ function mapPageFilterParams(repo) {
 		max_longitude: 180,
 		related: 1,
 		limit: 500, // TODO: ... paginate?
-		flat: true
+		flat: true,
+		relations: [
+			// don't show motion pictures / live photos, since they are not
+			// considered their own item in a gallery sense, and perhaps
+			// more importantly, we don't want to have to generate a thumbnail
+			// for them (literally no need for a thumbnail of those, just
+			// wasted CPU time and storage space)
+			{
+				"not": true,
+				"relation_label": "motion"
+			}
+		]
 	};
 	commonFilterSearchParams(params);
 

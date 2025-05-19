@@ -195,6 +195,8 @@ func (g *Graph) String() string {
 // Item represents an item on the timeline.
 type Item struct {
 	// The unique ID of the item assigned by the data source.
+	// It is usually discouraged to invent an ID when one does
+	// not exist.
 	ID string `json:"id,omitempty"`
 
 	// Item classification, i.e. the kind of thing it represents.
@@ -202,8 +204,8 @@ type Item struct {
 	// programs know how to display, visualize, and even query
 	// the item; and helps users know how to think about it.
 	// For example, we display and think of chat messages very
-	// differently than we do memos-to-self, social media posts,
-	// and emails.
+	// differently than we do personal notes and social media
+	// posts.
 	Classification Classification `json:"classification,omitempty"`
 
 	// The timestamp when the item originated. If multiple
@@ -267,6 +269,7 @@ type Item struct {
 	// words, each part of the same item that is conveyed to the
 	// processor must have the same retrieval key, and no other
 	// item globally must use the same key at any time.
+	//
 	// Only set this field if the Item is or may not be complete
 	// (e.g. if you know it will be processed in multiple pieces),
 	// since setting a retrieval key forces reprocessing of the
@@ -292,7 +295,7 @@ type Item struct {
 	skipThumb           bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
 	oldDataFile         string                       // when replacing a data file, used to clean things up at the end of processing the item
 	existingRow         ItemRow                      // only used if a field update policy requires info about the incoming data file
-	fieldUpdatePolicies map[string]fieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
+	fieldUpdatePolicies map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
@@ -304,15 +307,16 @@ type Item struct {
 type ItemRetrieval struct {
 	key []byte
 
-	// Column names to prefer from the incoming item over whatever is stored in the DB;
-	// overrides user's configured update policies. This is useful if multiple separate
-	// parts of an item may overlap, but one part is more reliable or preferred over
-	// another part. For example, in Google Takeout archives, some photo metadata is both
-	// embedded as EXIF and available in a sidecar JSON file, but it's fairly well known
-	// that the JSON file's metadata is less correct sometimes, for some reason. So even
+	// When the item is loaded using its retrieval key, you can specify which
+	// update policy should be used for each field. This overrides user's
+	// configured update policies for the specified fields. This is useful if multiple
+	// separate parts of an item may overlap, but one part is more reliable or preferred
+	// over another part. For example, in Google Takeout archives, some photo metadata
+	// is both embedded as EXIF and available in a sidecar JSON file, but it's fairly
+	// well known that the JSON file's metadata is less correct sometimes. So even
 	// though both have metadata, when importing from the actual image, we prefer that,
 	// and this tells the processor to do so.
-	PreferFields []string `json:"prefer_fields,omitempty"`
+	FieldUpdatePolicies map[string]FieldUpdatePolicy `json:"field_update_policies,omitempty"`
 }
 
 // SetKey sets the retrieval key for this item. It should be a globally unique
@@ -1025,7 +1029,7 @@ type Relation struct {
 // which help programs know how to read/parse data, classes help programs
 // know how to semantically interpret or display them.
 type Classification struct {
-	id          *int64
+	id          *uint64
 	Standard    bool     `json:"standard"`
 	Name        string   `json:"name"`
 	Labels      []string `json:"labels,omitempty"`
