@@ -97,6 +97,8 @@ async function itemPageMain() {
 
 	if (item.original_path) {
 		$('#item-original-path').innerText = item.original_path;
+	} else if (item.filename) {
+		$('#item-original-path').innerText = item.filename;
 	} else {
 		$('#item-original-path').parentElement.remove();
 	}
@@ -226,7 +228,7 @@ async function itemPageMain() {
 				entTpl.href = `/entities/${repoID}/${rel.to_entity.id}`;
 
 				// then, if we have face detection info, show it on hover of their name
-				if (rel.metadata["Center X"] && rel.metadata["Center Y"] && rel.metadata["Size"]) {
+				if (rel.metadata?.["Center X"] && rel.metadata?.["Center Y"] && rel.metadata?.["Size"]) {
 					// small faces/outlines are harder to see, so we want those to appear a little larger,
 					// whereas larger ones don't need to be scaled up as much
 					const sizeScaled = rel.metadata["Size"] * (rel.metadata["Size"] > 0.05 ? 2 : 4);
@@ -252,8 +254,12 @@ async function itemPageMain() {
 						boxEl.classList.add('d-none');
 					};					
 				}
-
 				$('#related-entities').append(entTpl);
+				$('#primary-entities').classList.remove('d-none');
+				if (!item.owner) {
+					$('#related-entities').classList.add('border-top-0');
+					$('#entity-link').classList.add('d-none');
+				}
 			}
 		}
 	}

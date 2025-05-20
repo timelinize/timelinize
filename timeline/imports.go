@@ -292,6 +292,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 				// during import is (probably?) not desired, so use a "regular" file system
 				var fsys fs.FS
 				if archives.PathContainsArchive(filepath.ToSlash(fsRoot)) {
+					// TODO: I'd love to know what the archive file is named, for troubleshooting multi-archive Google Takeouts
 					fsys = &archives.DeepFS{Root: fsRoot, Context: job.Context()}
 				} else {
 					fsys, err = archives.FileSystem(job.ctx, fsRoot, nil)

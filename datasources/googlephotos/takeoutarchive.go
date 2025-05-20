@@ -119,6 +119,13 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	}
 
 	fpath := path.Join(folderPath, d.Name())
+
+	// skip sidecar movie files ("live photos") because we'll connect them when
+	// we process the actual photograph (hopefully they're in the same archive!)
+	if media.IsSidecarVideo(dirEntry.FS, fpath) {
+		return nil
+	}
+
 	f, err := dirEntry.FS.Open(fpath)
 	if err != nil {
 		return err
@@ -219,6 +226,8 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			"time_uncertainty":      tsUpdatePolicy,
 			"coordinates":           timeline.UpdatePolicyPreferIncoming,
 		}
+
+		media.ConnectMotionPhoto(opt.Log, dirEntry, mediaFilePath, ig)
 	}
 
 	// if item has an "-edited" variant, relate it
