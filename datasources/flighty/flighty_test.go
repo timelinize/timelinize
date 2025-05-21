@@ -145,7 +145,7 @@ func TestFileImport(t *testing.T) {
 					t.Fatalf("unknown item in flight %d's collection (%+v)", i, edge.To.Item)
 				}
 			default:
-				t.Fatalf("unknown related item to flight %d (%s)", i, edge.Relation.Label)
+				t.Fatalf("unknown related item to flight %d (%s)", i, edge.Label)
 			}
 		}
 		if needsNote {
@@ -203,12 +203,12 @@ func itemContentString(item *timeline.Item) (string, error) {
 }
 
 func parseExampleTime(t *testing.T, timeStr string) time.Time {
-	if tt, err := time.Parse("2006-01-02 15:04:05 -0700 MST", timeStr); err == nil {
+	tt, err := time.Parse("2006-01-02 15:04:05 -0700 MST", timeStr)
+	if err == nil {
 		return tt
-	} else {
-		t.Errorf("unable to parse example time: %v", err)
-		return time.Time{}
 	}
+	t.Errorf("unable to parse example time: %v", err)
+	return time.Time{}
 }
 
 func newLocation(lat, lng, alt float64) timeline.Location {
