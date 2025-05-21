@@ -1,11 +1,13 @@
-package flighty
+package airports_test
 
 import (
 	"testing"
+
+	"github.com/timelinize/timelinize/internal/airports"
 )
 
 func Test_buildAirportDatabase(t *testing.T) {
-	db, err := buildAirportDatabase()
+	db, err := airports.BuildDB()
 	if err != nil {
 		t.Fatalf("the airport database must always be buildable: %v", err)
 	}
@@ -27,7 +29,7 @@ func Test_buildAirportDatabase(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		ai, ok := db[tc.IATA]
+		ai, ok := db.LookupIATA(tc.IATA)
 		if !ok {
 			t.Fatalf("airport with IATA code %s should exist, but doesn't", tc.IATA)
 		}
