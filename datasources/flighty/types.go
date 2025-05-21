@@ -3,17 +3,19 @@ package flighty
 import (
 	"fmt"
 	"time"
+
+	"github.com/timelinize/timelinize/internal/airports"
 )
 
-type Flight struct {
+type flight struct {
 	ID string
 
 	Airline string
 	Number  uint
 
-	From       AirportInfo
-	To         AirportInfo
-	DivertedTo *AirportInfo
+	From       airports.Info
+	To         airports.Info
+	DivertedTo *airports.Info
 
 	TakeOffTime time.Time
 	LandingTime time.Time
@@ -24,12 +26,12 @@ type Flight struct {
 	Notes      string
 }
 
-func (f Flight) WasDiverted() bool {
+func (f flight) WasDiverted() bool {
 	return f.DivertedTo != nil
 }
 
 // Returns the 'To' Airport, or the 'DivertedTo' Airport, if one is present
-func (f Flight) Destination() AirportInfo {
+func (f flight) Destination() airports.Info {
 	if f.WasDiverted() {
 		return *f.DivertedTo
 	}
@@ -38,7 +40,7 @@ func (f Flight) Destination() AirportInfo {
 
 // Returns a short (English) markdown formatted description of the flight (from, to, diversions)
 // TODO: How to handle localisation here?
-func (f Flight) Description() string {
+func (f flight) Description() string {
 	desc := fmt.Sprintf("Flight from _%s_ to _%s_", f.From.Name, f.To.Name)
 
 	if f.WasDiverted() {

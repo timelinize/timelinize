@@ -1,6 +1,6 @@
 // This file handles pulling information from the CC 4.0 BY-SA licenced airport location database available at:
 // https://github.com/lxndrblz/Airports
-package flighty
+package airports
 
 import (
 	"bytes"
@@ -18,18 +18,20 @@ import (
 //go:embed airports.csv
 var airportData []byte
 
-type AirportInfo struct {
+type Info struct {
 	IATA     string
 	Name     string
 	Location timeline.Location
 	Timezone string
 }
 
-// Parses the airport database into a map of IATA code to Airport information
+type DB map[string]Info
+
+// Parses the embedded Airport CSV file into a map addressable by the airport IATA code.
 // Remember to remove all references to it when you're done, so the Garbage Collector
 // can remove it from memory.
-func buildAirportDatabase() (map[string]AirportInfo, error) {
-	db := make(map[string]AirportInfo)
+func BuildDB() (DB, error) {
+	db := make(DB)
 
 	r := csv.NewReader(bytes.NewReader(airportData))
 
@@ -66,7 +68,7 @@ func buildAirportDatabase() (map[string]AirportInfo, error) {
 		}
 
 		iata := record[headerMap[iataHeader]]
-		db[iata] = AirportInfo{
+		db[iata] = Info{
 			IATA:     iata,
 			Name:     record[headerMap[nameHeader]],
 			Location: loc,
@@ -75,6 +77,12 @@ func buildAirportDatabase() (map[string]AirportInfo, error) {
 	}
 
 	return db, nil
+}
+
+// Looks up airport information by the provided IATA code.
+func (db DB) LookupIATA(iata string) (Info, bool) {
+	info, ok := db[iata]
+	return info, ok
 }
 
 const (
