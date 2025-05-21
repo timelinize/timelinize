@@ -446,8 +446,15 @@ func (tl *Timeline) runJob(row Job) error {
 		// or at least record the errors even if it gets marked as "succeeded"
 		// (maybe "succeeded" is too specific/optimistic a term, maybe "completed" or "done" or "finished" instead?)
 
+		// type conversion for checkpoint; it's easier for actions to use []byte, but we like using *string
+		// for database since most DB viewers make it easier to read TEXT columns than BLOB columns
+		var chkpt []byte
+		if row.Checkpoint != nil {
+			chkpt = []byte(*row.Checkpoint)
+		}
+
 		// run the job; we'll handle the error by logging the result and updating the state
-		actionErr := action.Run(job, row.Checkpoint)
+		actionErr := action.Run(job, chkpt)
 
 		var newState JobState
 		switch {
@@ -707,7 +714,7 @@ func (j *ActiveJob) Message(message string) {
 // loop. For example, if a job started at unit of work ("task"?) index 0 and
 // finished up through 3, the progress value would have been updated to be 4
 // and the checkpoint would contain index 4. The job would then resume with
-// starting at index 4, which had not been completed yet.
+// starting at index 4, which had not been started yet.
 //
 // Checkpoint values are opaque and MUST be JSON-marshallable. They will be
 // returned to the job action in the form of JSON bytes.
@@ -754,7 +761,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 	}
 
 	q := `UPDATE jobs SET progress=?, total=?, message=?, checkpoint=?, updated=? WHERE id=?` // TODO: LIMIT 1
-	vals := []any{j.currentProgress, j.currentTotal, j.currentMessage, chkpt, time.Now().UnixMilli(), j.id}
+	vals := []any{j.currentProgress, j.currentTotal, j.currentMessage, string(chkpt), time.Now().UnixMilli(), j.id}
 
 	var err error
 	if tx == nil {
@@ -1106,7 +1113,7 @@ type Job struct {
 	Message     *string        `json:"message,omitempty"`
 	Total       *int           `json:"total,omitempty"`
 	Progress    *int           `json:"progress,omitempty"`
-	Checkpoint  []byte         `json:"checkpoint,omitempty"`
+	Checkpoint  *string        `json:"checkpoint,omitempty"`
 	Repeat      *time.Duration `json:"repeat,omitempty"`
 	ParentJobID *uint64        `json:"parent_job_id,omitempty"`
 
