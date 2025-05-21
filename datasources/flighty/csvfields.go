@@ -5,19 +5,6 @@ import (
 	"reflect"
 )
 
-func fieldsFromCSV(headerMap map[string]int, record []string, fields ...string) ([]string, error) {
-	values := make([]string, len(fields))
-	for i, field := range fields {
-		idx, ok := headerMap[field]
-		if !ok {
-			return nil, fmt.Errorf("csv does not contain the %s field", field)
-		}
-
-		values[i] = record[idx]
-	}
-	return values, nil
-}
-
 type fieldLookup func(string) string
 type recordParser func([]string) fieldLookup
 
@@ -29,7 +16,7 @@ func checkFields(headers []string) (recordParser, error) {
 
 	// Ensure all the necessary columns are present
 	v := reflect.ValueOf(flightyFields)
-	for i := 0; i < v.NumField(); i++ {
+	for i := range v.NumField() {
 		header := v.Field(i).String()
 		if _, ok := headerMap[header]; !ok {
 			return nil, fmt.Errorf("csv is missing the needed '%s' column", header)

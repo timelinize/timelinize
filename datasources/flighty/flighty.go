@@ -3,6 +3,7 @@ package flighty
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -78,7 +79,7 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 
 	for {
 		rec, err := r.Read()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -187,8 +188,6 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 		params.Pipeline <- journey
 	}
 
-	// Make sure the airport DB can be garbage collected
-	airportDB = nil
 	return nil
 }
 
@@ -214,23 +213,23 @@ func parseFlightDetails(row fieldLookup, airportDB map[string]airports.Info) (fl
 	}
 
 	// Locations of airports
-	if airport, err := extractAirport(airportDB, row, flightyFields.FromIATA); err != nil {
+	airport, err := extractAirport(airportDB, row, flightyFields.FromIATA)
+	if err != nil {
 		return details, err
-	} else {
-		details.From = *airport
 	}
+	details.From = *airport
 
-	if airport, err := extractAirport(airportDB, row, flightyFields.ToIATA); err != nil {
+	airport, err = extractAirport(airportDB, row, flightyFields.ToIATA)
+	if err != nil {
 		return details, err
-	} else {
-		details.To = *airport
 	}
+	details.To = *airport
 
-	if airport, err := extractAirport(airportDB, row, flightyFields.DivertedToIATA); err != nil {
+	airport, err = extractAirport(airportDB, row, flightyFields.DivertedToIATA)
+	if err != nil {
 		return details, err
-	} else {
-		details.DivertedTo = airport
 	}
+	details.DivertedTo = airport
 
 	// Times
 
@@ -276,5 +275,5 @@ func parseAirportTime(actual, scheduled string, airport airports.Info) (time.Tim
 		return t, nil
 	}
 
-	return time.Time{}, fmt.Errorf("unable to extract an actual or scheduled time")
+	return time.Time{}, errors.New("unable to extract an actual or scheduled time")
 }
