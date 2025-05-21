@@ -1169,9 +1169,12 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 				}
 			case "coordinates":
 				// skipping coordinate_system and coordinate_uncertainty for now
+				// use same decimal precision as loadItemRow does
+				lowLon, highLon := coordBounds(it.Location.Longitude)
+				lowLat, highLat := coordBounds(it.Location.Latitude)
 				if (dbItem.Longitude == nil && it.Location.Longitude == nil && dbItem.Latitude == nil && it.Location.Latitude == nil && dbItem.Altitude == nil && it.Location.Altitude == nil) || // both empty
-					((dbItem.Longitude != nil && it.Location.Longitude != nil && *dbItem.Longitude == *it.Location.Longitude) &&
-						(dbItem.Latitude != nil && it.Location.Latitude != nil && *dbItem.Latitude == *it.Location.Latitude) &&
+					((dbItem.Longitude != nil && it.Location.Longitude != nil && (*lowLon <= *dbItem.Longitude && *dbItem.Longitude < *highLon)) &&
+						(dbItem.Latitude != nil && it.Location.Latitude != nil && (*lowLat <= *dbItem.Latitude && *dbItem.Latitude < *highLat)) &&
 						(dbItem.Altitude != nil && it.Location.Altitude != nil && *dbItem.Altitude == *it.Location.Altitude)) || // both the same
 					(it.Location.Longitude == nil && it.Location.Latitude == nil && it.Location.Altitude == nil && policy != UpdatePolicyOverwriteExisting) { // update would no-op
 					delete(it.fieldUpdatePolicies, field)
