@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/timelinize/timelinize/internal/airports"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -53,7 +54,7 @@ func (Importer) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timel
 func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	dsOpt := params.DataSourceOptions.(*Options)
 
-	airportDB, err := buildAirportDatabase()
+	airportDB, err := airports.BuildDB()
 	if err != nil {
 		return fmt.Errorf("unable to load airport database: %w", err)
 	}
@@ -191,10 +192,10 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 	return nil
 }
 
-func parseFlightDetails(row fieldLookup, airportDB map[string]AirportInfo) (Flight, error) {
+func parseFlightDetails(row fieldLookup, airportDB map[string]airports.Info) (flight, error) {
 	flightNumber, _ := strconv.ParseUint(row(flightyFields.FlightNumber), 10, 0)
 
-	details := Flight{
+	details := flight{
 		ID: row(flightyFields.ID),
 
 		Airline: row(flightyFields.Airline),
@@ -248,7 +249,7 @@ func parseFlightDetails(row fieldLookup, airportDB map[string]AirportInfo) (Flig
 	return details, nil
 }
 
-func extractAirport(airportDB map[string]AirportInfo, row fieldLookup, field string) (*AirportInfo, error) {
+func extractAirport(airportDB airports.DB, row fieldLookup, field string) (*airports.Info, error) {
 	iata := row(field)
 	if iata == "" {
 		return nil, nil
@@ -261,7 +262,7 @@ func extractAirport(airportDB map[string]AirportInfo, row fieldLookup, field str
 	return &airport, nil
 }
 
-func parseAirportTime(actual, scheduled string, airport AirportInfo) (time.Time, error) {
+func parseAirportTime(actual, scheduled string, airport airports.Info) (time.Time, error) {
 	tz, err := time.LoadLocation(airport.Timezone)
 	if err != nil {
 		return time.Time{}, err
