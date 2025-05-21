@@ -123,9 +123,6 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 
 		meta.Clean()
 
-		var collKey timeline.ItemRetrieval
-		collKey.SetKey(f.ID)
-
 		coll := &timeline.Item{
 			ID:             f.ID,
 			Classification: timeline.ClassCollection,
@@ -137,14 +134,10 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 			Timespan:  f.LandingTime,
 			Owner:     owner,
 			Metadata:  meta,
-			Retrieval: collKey,
 		}
 		journey.Item = coll
 
 		if f.Notes != "" {
-			var noteKey timeline.ItemRetrieval
-			noteKey.SetKey(f.ID + "-notes")
-
 			note := &timeline.Item{
 				Classification: timeline.ClassMessage,
 				Timestamp:      f.LandingTime,
@@ -152,31 +145,22 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 				Content: timeline.ItemData{
 					Data: timeline.StringData(f.Notes),
 				},
-				Retrieval: noteKey,
 			}
 			journey.ToItem(timeline.RelAttachment, note)
 		}
-
-		var takeoffKey timeline.ItemRetrieval
-		takeoffKey.SetKey(f.ID + "-takeoff")
 
 		takeoff := &timeline.Item{
 			Classification: timeline.ClassLocation,
 			Location:       f.From.Location,
 			Timestamp:      f.TakeOffTime,
 			Owner:          owner,
-			Retrieval:      takeoffKey,
 		}
 		journey.ToItemWithValue(timeline.RelInCollection, takeoff, "takeoff")
-
-		var landingKey timeline.ItemRetrieval
-		landingKey.SetKey(f.ID + "-landing")
 
 		landing := &timeline.Item{
 			Classification: timeline.ClassLocation,
 			Timestamp:      f.LandingTime,
 			Owner:          owner,
-			Retrieval:      landingKey,
 		}
 		if f.WasDiverted() {
 			landing.Location = f.DivertedTo.Location
