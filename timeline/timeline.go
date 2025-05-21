@@ -1364,12 +1364,13 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 		for property, v := range priority {
 			switch property {
 			case "keep":
-				if v == "incoming" {
+				switch v {
+				case "incoming":
 					if pref.Nulls {
 						return UpdatePolicyOverwriteExisting, nil
 					}
 					return UpdatePolicyPreferIncoming, nil
-				} else if v == "existing" {
+				case "existing":
 					if pref.Nulls {
 						// TODO: This could be an error, since this is the same as no update policy at all -- no reason to hard-code a static policy like this
 						return UpdatePolicyKeepExisting, nil
@@ -1449,7 +1450,8 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 					// so size isn't a good distinguisher
 					continue
 				}
-				if v == bigger {
+				switch v {
+				case bigger:
 					if existingDataLen > incomingDataLen {
 						if pref.Nulls {
 							return UpdatePolicyKeepExisting, nil
@@ -1462,7 +1464,7 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 						}
 						return UpdatePolicyPreferIncoming, nil
 					}
-				} else if v == smaller {
+				case smaller:
 					if existingDataLen < incomingDataLen {
 						if pref.Nulls {
 							return UpdatePolicyKeepExisting, nil
@@ -1486,7 +1488,8 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 					// both incoming and existing have the same timestamp, so this isn't a good distinguisher
 					continue
 				}
-				if v == earlier {
+				switch v {
+				case earlier:
 					if existing.Timestamp != nil && (incoming.Timestamp.IsZero() || existing.Timestamp.Before(incoming.Timestamp)) {
 						if pref.Nulls {
 							return UpdatePolicyKeepExisting, nil
@@ -1499,7 +1502,7 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 						}
 						return UpdatePolicyPreferIncoming, nil
 					}
-				} else if v == later {
+				case later:
 					if existing.Timestamp != nil && (incoming.Timestamp.IsZero() || existing.Timestamp.After(incoming.Timestamp)) {
 						if pref.Nulls {
 							return UpdatePolicyKeepExisting, nil

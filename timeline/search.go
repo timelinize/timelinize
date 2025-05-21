@@ -490,7 +490,7 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 	}
 	or := func(clause string, val any) {
 		if clauseCount > 0 {
-			q += " OR "
+			q += " OR " //nolint:goconst,nolintlint
 		}
 		q += clause
 		args = append(args, val)
@@ -886,7 +886,7 @@ func (tl *Timeline) expandRelationshipSingle(ctx context.Context, tx *sql.Tx, sr
 		LEFT JOIN entities AS to_entity   ON to_entity.id   = to_ea.entity_id
 		WHERE (relationships.from_item_id=? OR relationships.to_item_id=?) AND items.hidden IS NULL
 		GROUP BY relationships.id
-		LIMIT 10`, sr.ItemRow.ID, sr.ItemRow.ID, sr.ItemRow.ID)
+		LIMIT 10`, sr.ID, sr.ID, sr.ID)
 	if err != nil {
 		return fmt.Errorf("querying db for relationships: %w", err)
 	}
