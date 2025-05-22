@@ -415,7 +415,7 @@ func readMP4Metadata(logger *zap.Logger, item *timeline.Item, fileSeeker io.Read
 
 			// traverse child nodes
 			return h.Expand()
-		} else if h.BoxInfo.Context.UnderUdta && h.BoxInfo.Type == [4]byte{'©', 'x', 'y', 'z'} {
+		} else if h.BoxInfo.UnderUdta && h.BoxInfo.Type == [4]byte{'©', 'x', 'y', 'z'} {
 			// Google cameras store location data in this box
 			var buf bytes.Buffer
 			_, err := h.ReadData(&buf)

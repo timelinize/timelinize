@@ -89,9 +89,10 @@ func isFlag(s string) bool {
 // autoType returns the value of str in its JSON type.
 func autoType(str string) interface{} {
 	s := strings.TrimSpace(strings.ToLower(str))
-	if s == "true" {
+	switch s {
+	case "true":
 		return true
-	} else if s == "false" {
+	case "false":
 		return false
 	}
 	if num, err := strconv.Atoi(s); err == nil {
