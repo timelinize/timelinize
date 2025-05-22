@@ -380,7 +380,7 @@ function connectLog() {
 			const tableElem = $(`.job-import-stream.job-id-${l.id}`);
 			const rowElem = cloneTemplate('#tpl-job-import-stream-row');
 
-			let location = l?.lat?.toFixed(4) || "";
+			let location = l?.lat?.toFixed?.(4) || "";
 			if (l.lon) {
 				if (location != "") location += ", ";
 				location += l.lon.toFixed(4);
@@ -472,8 +472,11 @@ function connectLog() {
 		tlz.loggerSocket.retrying = true;
 		setTimeout(connectLog, 500);
 	}
-	tlz.loggerSocket.socket.onerror = lostConnection;
 	tlz.loggerSocket.socket.onclose = lostConnection;
+	tlz.loggerSocket.socket.onerror = event => {
+		const logFn = event.type == "error" ? console.error : console.warn;
+		logFn("Logger socket error:", event);
+	};
 }
 connectLog();
 
