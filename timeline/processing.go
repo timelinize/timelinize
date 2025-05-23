@@ -36,6 +36,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1170,8 +1171,8 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 			case "coordinates":
 				// skipping coordinate_system and coordinate_uncertainty for now
 				// use same decimal precision as loadItemRow does
-				lowLon, highLon := coordBounds(it.Location.Longitude)
-				lowLat, highLat := coordBounds(it.Location.Latitude)
+				lowLon, highLon := latLonBounds(it.Location.Longitude)
+				lowLat, highLat := latLonBounds(it.Location.Latitude)
 				if (dbItem.Longitude == nil && it.Location.Longitude == nil && dbItem.Latitude == nil && it.Location.Latitude == nil && dbItem.Altitude == nil && it.Location.Altitude == nil) || // both empty
 					((dbItem.Longitude != nil && it.Location.Longitude != nil && (*lowLon <= *dbItem.Longitude && *dbItem.Longitude < *highLon)) &&
 						(dbItem.Latitude != nil && it.Location.Latitude != nil && (*lowLat <= *dbItem.Latitude && *dbItem.Latitude < *highLat)) &&
@@ -1703,8 +1704,8 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 			case "data_type", "data_text", "data_hash":
 				return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
 			case "coordinates":
-				lowLon, highLon := coordBounds(it.Location.Longitude)
-				lowLat, highLat := coordBounds(it.Location.Latitude)
+				lowLon, highLon := latLonBounds(it.Location.Longitude)
+				lowLat, highLat := latLonBounds(it.Location.Latitude)
 				args = append(args,
 					lowLon, highLon, it.Location.Longitude,
 					lowLat, highLat, it.Location.Latitude,
@@ -1988,22 +1989,30 @@ func validTime(t time.Time) bool {
 	return t.Year() <= maxJSONSerializableYear
 }
 
-// coordBounds returns a lower and higher bound for the given coordinate
-// (either latitude or longitude), within which range an other coordinate
-// can be considered equivalent, since not all GPS sensors have the same
-// level of precision.
-func coordBounds(latOrLon *float64) (lo, hi *float64) {
+func latLonBounds(latOrLon *float64) (lo, hi *float64) {
 	if latOrLon == nil {
 		return
 	}
 	x := *latOrLon
-	const precision = 1e5 // the number after e is how many decimal places of precision (4 ~= 11.1 meters, 5 ~= 1.1 meters, 6 ~= 11 centimeters)
+	const maxPrecision = 1e5 // the exponent is how many decimal places of precision (4 ~= 11.1 meters, 5 ~= 1.1 meters, 6 ~= 11 centimeters)
+	precision := math.Pow(10, float64(numDecimalPlaces(x)))
+	if precision > maxPrecision {
+		precision = maxPrecision
+	}
 	low, high := math.Floor(x*precision)/precision, math.Ceil(x*precision)/precision
 	if low == high {
 		// if the input is less precision than our target, separate the min and max by 1 unit of precision
 		high += 1 / precision
 	}
 	return &low, &high
+}
+
+func numDecimalPlaces(x float64) int {
+	s := strconv.FormatFloat(x, 'f', -1, 64)
+	if decimalPoint := strings.IndexByte(s, '.'); decimalPoint >= 0 {
+		return len(s) - decimalPoint - 1
+	}
+	return 0
 }
 
 // TODO: do we really need to use the default 32-byte digest? What if 16 bytes or even 8 is enough for us?
