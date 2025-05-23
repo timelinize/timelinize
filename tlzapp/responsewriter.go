@@ -162,7 +162,7 @@ func (rr *responseRecorder) WriteHeader(statusCode int) {
 		if rr.shouldBuffer == nil {
 			rr.stream = true
 		} else {
-			rr.stream = !rr.shouldBuffer(rr.statusCode, rr.responseWriterWrapper.Header())
+			rr.stream = !rr.shouldBuffer(rr.statusCode, rr.Header())
 		}
 	}
 
