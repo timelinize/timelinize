@@ -290,6 +290,7 @@ function betterToHuman(luxonDuration, opts) {
 
 function freezePage(modal) {
 	if (modal) {
+		console.log("Showing modal");
 		tlz.loggerSocket.modal.show();
 	}
 	for (const [key, itvl] of Object.entries(tlz.intervals)) {
@@ -303,6 +304,7 @@ function freezePage(modal) {
 function unfreezePage(modal) {
 	if (modal) {
 		tlz.loggerSocket.modal.hide();
+		console.log("Modal hidden");
 	}
 	for (const [key, itvl] of Object.entries(tlz.intervals)) {
 		if (itvl.interval) {
@@ -461,14 +463,15 @@ function connectLog() {
 		if (tlz.loggerSocket.retrying) {
 			return;
 		}
-		// if a disconnect message isn't showing already, display it
-		if (!tlz.loggerSocket.modal) {
-			tlz.loggerSocket.modal = new bootstrap.Modal($('#modal-disconnected'));
-			freezePage(tlz.loggerSocket.modal);
-		}
 		// log this event, then retry after a moment
 		const logFn = event.type == "error" ? console.error : console.warn;
 		logFn("Lost connection to logger socket; retrying:", event);
+		// if a disconnect message isn't showing already, display it
+		if (!tlz.loggerSocket.modal) {
+			console.log("Making modal and freezing page")
+			tlz.loggerSocket.modal = new bootstrap.Modal($('#modal-disconnected'));
+			freezePage(tlz.loggerSocket.modal);
+		}
 		tlz.loggerSocket.retrying = true;
 		setTimeout(connectLog, 500);
 	}

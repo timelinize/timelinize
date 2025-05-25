@@ -539,7 +539,8 @@ on('show.bs.modal', '#modal-advanced-settings', () => {
 		$('#unique-original-location').checked = page.itemUniqueConstraints.original_location;
 		$('#unique-filename').checked = page.itemUniqueConstraints.filename;
 		$('#unique-timestamp').checked = page.itemUniqueConstraints.timestamp;
-		$('#unique-coords').checked = page.itemUniqueConstraints.coordinates;
+		$('#unique-latlon').checked = page.itemUniqueConstraints.latlon;
+		$('#unique-altitude').checked = page.itemUniqueConstraints.altitude;
 		$('#unique-classification').checked = page.itemUniqueConstraints.classification_name;
 		$('#unique-data').checked = page.itemUniqueConstraints.data;
 	}
@@ -594,15 +595,36 @@ on('click', '#save-settings', () => {
 });
 
 function saveAdvancedSettings() {
-	page.itemUniqueConstraints = {
-		"data_source_name": $('#unique-data-source').checked,
-		"original_location": $('#unique-original-location').checked,
-		"filename": $('#unique-filename').checked,
-		"timestamp": $('#unique-timestamp').checked,
-		"coordinates": $('#unique-coords').checked,
-		"classification_name": $('#unique-classification').checked,
-		"data": $('#unique-data').checked,
-	};
+	page.itemUniqueConstraints = {};
+	// The API actually uses the presence of any key as "yes" to being a unique
+	// constraint; the value is whether to strictly enforce NULLs. Our UI doesn't
+	// yet offer toggling strict nulls for unique constraints, so for now we only
+	// treat the checkboxes as cues to add them to the unique constraints at all,
+	// and we assume strict nulls (i.e. if incoming is NULL, db row must also have NULL)
+	if ($('#unique-data-source').checked) {
+		page.itemUniqueConstraints["data_source_name"] = true;
+	}
+	if ($('#unique-original-location').checked) {
+		page.itemUniqueConstraints["original_location"] = true;
+	}
+	if ($('#unique-filename').checked) {
+		page.itemUniqueConstraints["filename"] = true;
+	}
+	if ($('#unique-timestamp').checked) {
+		page.itemUniqueConstraints["timestamp"] = true;
+	}
+	if ($('#unique-latlon').checked) {
+		page.itemUniqueConstraints["latlon"] = true;
+	}
+	if ($('#unique-altitude').checked && !$('#unique-altitude').getAttribute('disabled')) {
+		page.itemUniqueConstraints["altitude"] = true;
+	}
+	if ($('#unique-classification').checked) {
+		page.itemUniqueConstraints["classification_name"] = true;
+	}
+	if ($('#unique-data').checked) {
+		page.itemUniqueConstraints["data"] = true;
+	}
 	saveItemUpdatePreferences();
 }
 
@@ -770,8 +792,13 @@ on('click', '#update-prefs-table .add-priority', e => {
 	});
 });
 
-on('click', '#save-settings', e => {
-	
+// altitude is only usable as a unique constraint if lat/lon also is
+on('change', '#unique-latlon', e => {
+	if (e.target.checked) {
+		$('#unique-altitude').removeAttribute('disabled', true);
+	} else {
+		$('#unique-altitude').setAttribute('disabled', true);
+	}
 });
 
 

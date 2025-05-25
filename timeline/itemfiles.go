@@ -153,17 +153,25 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 			p.log.Debug("after detecting duplicate item file, could not update relevant relationships (to->from)",
 				zap.Error(fmt.Errorf("updating relationships referencing to_item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
-		if _, err := tx.Exec(`UPDATE collection_items SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not update relevant collection items",
-				zap.Error(fmt.Errorf("updating collection_items referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
-		}
-		if _, err := tx.Exec(`UPDATE curation_elements SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+		if _, err := tx.Exec(`UPDATE story_elements SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant curation elements",
-				zap.Error(fmt.Errorf("updating curation_elements referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
+				zap.Error(fmt.Errorf("updating story_elements referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
 		if _, err := tx.Exec(`UPDATE tagged SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant tags",
 				zap.Error(fmt.Errorf("updating tagged referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
+		}
+		if _, err := tx.Exec(`UPDATE notes SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+			p.log.Debug("after detecting duplicate item file, could not update relevant notes",
+				zap.Error(fmt.Errorf("updating notes referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
+		}
+		if _, err := tx.Exec(`UPDATE logs SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+			p.log.Debug("after detecting duplicate item file, could not update relevant logs",
+				zap.Error(fmt.Errorf("updating notes referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
+		}
+		if _, err := tx.Exec(`UPDATE settings SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+			p.log.Debug("after detecting duplicate item file, could not update relevant settings",
+				zap.Error(fmt.Errorf("updating settings referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
 		if _, err = tx.Exec(`DELETE FROM items WHERE id=?`, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not delete item row",

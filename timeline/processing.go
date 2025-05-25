@@ -753,11 +753,13 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 
 	// if the item is already in our DB, load it
 	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true)
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("looking up item in database: %w", err)
 	}
 	if ir.ID > 0 {
 		// found it in our DB; skip it?
+
+		// TODO: What if it's pending deletion? why are we even checking deleted items? (the 'true' in the loadItemRow above)
 
 		// first we need to distill user's update preferences down to update policies for the DB
 		if err := p.distillUpdatePolicies(it, ir); err != nil {
@@ -875,13 +877,13 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 	// if the relationship explicitly has a "from" node set, use that;
 	// otherwise, assume this node is the "from" side
 	if err := p.linkRelation(ctx, ig, tx, r, &rawRel, relationFrom); err != nil {
-		return err
+		return fmt.Errorf("linking from relation: %w", err)
 	}
 
 	// if the relationship explicitly has a "to" node set, use that;
 	// otherwise, assume this node is the "to" side
 	if err := p.linkRelation(ctx, ig, tx, r, &rawRel, relationTo); err != nil {
-		return err
+		return fmt.Errorf("linking to relation: %w", err)
 	}
 
 	err := p.tl.storeRelationship(ctx, tx, rawRel)
@@ -1168,16 +1170,28 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 					(len(it.Metadata) == 0 && policy != UpdatePolicyOverwriteExisting) { // update would no-op
 					delete(it.fieldUpdatePolicies, field)
 				}
-			case "coordinates":
+			case "latlon":
 				// skipping coordinate_system and coordinate_uncertainty for now
 				// use same decimal precision as loadItemRow does
-				lowLon, highLon := latLonBounds(it.Location.Longitude)
-				lowLat, highLat := latLonBounds(it.Location.Latitude)
-				if (dbItem.Longitude == nil && it.Location.Longitude == nil && dbItem.Latitude == nil && it.Location.Latitude == nil && dbItem.Altitude == nil && it.Location.Altitude == nil) || // both empty
-					((dbItem.Longitude != nil && it.Location.Longitude != nil && (*lowLon <= *dbItem.Longitude && *dbItem.Longitude < *highLon)) &&
-						(dbItem.Latitude != nil && it.Location.Latitude != nil && (*lowLat <= *dbItem.Latitude && *dbItem.Latitude < *highLat)) &&
-						(dbItem.Altitude != nil && it.Location.Altitude != nil && *dbItem.Altitude == *it.Location.Altitude)) || // both the same
-					(it.Location.Longitude == nil && it.Location.Latitude == nil && it.Location.Altitude == nil && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude)
+				lowLat, highLat, latDecimals := latLonBounds(it.Location.Latitude)
+				lowAlt, highAlt := altitudeBounds(it.Location.Altitude)
+				// since altitude is another unique constraint, but requires latlon, build the
+				// logic with lat+lon first, then we can factor in altitude before evaluating
+				allNil := dbItem.Longitude == nil && it.Location.Longitude == nil && dbItem.Latitude == nil && it.Location.Latitude == nil
+				valuesWithinBounds := (dbItem.Longitude != nil && it.Location.Longitude != nil && (*lowLon <= coordRound(*dbItem.Longitude, lonDecimals) && coordRound(*dbItem.Longitude, lonDecimals) <= *highLon)) &&
+					(dbItem.Latitude != nil && it.Location.Latitude != nil && (*lowLat <= coordRound(*dbItem.Latitude, latDecimals) && coordRound(*dbItem.Latitude, latDecimals) <= *highLat))
+				wouldNoOp := policy != UpdatePolicyOverwriteExisting && it.Location.Longitude == nil && it.Location.Latitude == nil
+				// if altitude, the third dimension/coordinate, is to be used, then factor it in now
+				if _, ok := it.fieldUpdatePolicies["altitude"]; ok {
+					allNil = allNil && dbItem.Altitude == nil && it.Location.Altitude == nil
+					valuesWithinBounds = valuesWithinBounds &&
+						(dbItem.Altitude != nil && it.Location.Altitude != nil && (*lowAlt <= *dbItem.Altitude && *dbItem.Altitude < *highAlt))
+					wouldNoOp = wouldNoOp && it.Location.Altitude == nil
+				}
+				if allNil || // both empty
+					valuesWithinBounds || // both the same
+					wouldNoOp { // update would no-op
 					delete(it.fieldUpdatePolicies, field)
 				}
 			}
@@ -1565,27 +1579,17 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 	} else {
 		// select the row by the various properties of the item
 
-		// Without a row ID, we first try matching on the data source + item original ID, if
-		// provided. That is a very fast, reliable, and simple lookup. If it doesn't return
-		// any results OR if no original ID was provided, we use the long-form query that
-		// compares every configured field.
-
-		if dataSourceName != nil && it.ID != "" {
-			row := tx.QueryRow(`SELECT `+itemDBColumns+`
-				FROM extended_items AS items
-				WHERE data_source_name=? AND original_id=?
-				LIMIT 1`, dataSourceName, &it.ID)
-			ir, err := scanItemRow(row, nil)
-			if err == nil {
-				return ir, nil
-			}
-			if !errors.Is(err, sql.ErrNoRows) {
-				return ItemRow{}, fmt.Errorf("querying by original id: %w", err)
-			}
-		} else if len(uniqueConstraints) == 0 {
-			// if no fields were specified (by mistake?), this could be problematic
-			// as it would match any item with the same data source, I think
+		if len(uniqueConstraints) == 0 && (dataSourceName == nil || it.ID == "") {
+			// if no unique constraints were specified (by mistake?), this could be problematic
+			// as it would match, uh, probably any item from the same data source
 			return ItemRow{}, errors.New("missing unique constraints; at least 1 required when no original ID specified")
+		}
+
+		// an easy way to select an item is by the ID assigned from the data source;
+		// this should be exclusive enough to uniquely select an item
+		if dataSourceName != nil && it.ID != "" {
+			sb.WriteString(`(data_source_name=? AND original_id=?) OR `)
+			args = append(args, dataSourceName, it.ID)
 		}
 
 		// check for identical item that may have been deleted; there are two "row hashes" we check:
@@ -1641,14 +1645,16 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 				sb.WriteString("(data_text=? OR (data_text IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (data_hash=? OR ? IS NULL)")
-			case "coordinates":
-				sb.WriteString("((?<=longitude AND longitude<?) OR (longitude IS NULL ")
+			case "latlon":
+				sb.WriteString("((? <= round(longitude, ?) AND round(longitude, ?) <= ?) OR (longitude IS NULL ")
 				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL)) AND ((?<=latitude AND latitude<?) OR (latitude IS NULL ")
-				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL)) AND (altitude=? OR (altitude IS NULL ")
+				sb.WriteString(" ? IS NULL)) AND ((? <= round(latitude, ?) AND round(latitude, ?) <= ?) OR (latitude IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL)) AND (coordinate_system=? OR (coordinate_system IS NULL ")
+				sb.WriteString(op)
+				sb.WriteString(" ? IS NULL))")
+			case "altitude":
+				sb.WriteString("((? <= altitude AND altitude < ?) OR (altitude IS NULL ")
 				sb.WriteString(op)
 				sb.WriteString(" ? IS NULL))")
 			default:
@@ -1703,17 +1709,23 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 					it.dataFileHash, it.dataFileHash)
 			case "data_type", "data_text", "data_hash":
 				return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
-			case "coordinates":
-				lowLon, highLon := latLonBounds(it.Location.Longitude)
-				lowLat, highLat := latLonBounds(it.Location.Latitude)
+			case "latlon":
+				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude)
+				lowLat, highLat, latDecimals := latLonBounds(it.Location.Latitude)
 				args = append(args,
-					lowLon, highLon, it.Location.Longitude,
-					lowLat, highLat, it.Location.Latitude,
-					it.Location.Altitude, it.Location.Altitude,
+					lowLon, lonDecimals, lonDecimals, highLon, it.Location.Longitude,
+					lowLat, latDecimals, latDecimals, highLat, it.Location.Latitude,
 					it.Location.CoordinateSystem, it.Location.CoordinateSystem)
-			case "longitude", "latitude", "altitude", "coordinate_system", "coordinate_uncertainty":
+			case "altitude":
+				// doesn't make sense on its own
+				if _, ok := uniqueConstraints["latlon"]; !ok {
+					return ItemRow{}, errors.New("altitude requires latlon also be used as a unique constraint")
+				}
+				lowAlt, highAlt := altitudeBounds(it.Location.Altitude)
+				args = append(args, lowAlt, highAlt, it.Location.Altitude)
+			case "longitude", "latitude", "coordinate_system", "coordinate_uncertainty":
 				// unlike the data fields, there's no good reason for this other than "the other way doesn't make sense and may be error-prone"
-				return ItemRow{}, errors.New("cannot select on specific components of item coordinates such as latitude or longitude: specify 'coordinates' instead")
+				return ItemRow{}, errors.New("cannot select on specific components of item coordinates such as latitude or longitude: specify 'latlon'+'altitude' instead")
 			default:
 				return ItemRow{}, fmt.Errorf("item unique constraints configure unsupported/unrecognized field: %s", field)
 			}
@@ -1989,22 +2001,39 @@ func validTime(t time.Time) bool {
 	return t.Year() <= maxJSONSerializableYear
 }
 
-func latLonBounds(latOrLon *float64) (lo, hi *float64) {
+func coordRound(x float64, decimalPlaces int) float64 {
+	magnitude := math.Pow(10, float64(decimalPlaces)) //nolint:mnd
+	return math.Round(x*magnitude) / magnitude
+}
+
+// latLonBounds returns low and high bounds for an acceptable lat/lon value,
+// as well as the decimal precision used, which can be useful in SQL queries
+// for its round() function.
+func latLonBounds(latOrLon *float64) (lo, hi *float64, decimalPlaces int) {
 	if latOrLon == nil {
 		return
 	}
 	x := *latOrLon
-	const maxPrecision = 1e5 // the exponent is how many decimal places of precision (4 ~= 11.1 meters, 5 ~= 1.1 meters, 6 ~= 11 centimeters)
-	precision := math.Pow(10, float64(numDecimalPlaces(x)))
-	if precision > maxPrecision {
-		precision = maxPrecision
-	}
+	// how many decimal places of precision (4 ~= 11.1 meters, 5 ~= 1.1 meters, 6 ~= 11 centimeters)
+	const maxDecimalPlaces = 5
+	decimalPlaces = min(numDecimalPlaces(x), maxDecimalPlaces)
+	precision := math.Pow(10, float64(decimalPlaces)) //nolint:mnd
 	low, high := math.Floor(x*precision)/precision, math.Ceil(x*precision)/precision
 	if low == high {
 		// if the input is less precision than our target, separate the min and max by 1 unit of precision
 		high += 1 / precision
 	}
-	return &low, &high
+	return &low, &high, decimalPlaces
+}
+
+func altitudeBounds(altMeters *float64) (lo, hi *float64) {
+	if altMeters == nil {
+		return
+	}
+	// altitude is in meters, I don't think sub-meter precision is necessary
+	l, h := math.Floor(*altMeters), math.Ceil(*altMeters)
+	lo, hi = &l, &h
+	return
 }
 
 func numDecimalPlaces(x float64) int {

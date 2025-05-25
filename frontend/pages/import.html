@@ -244,9 +244,16 @@
 					</div>
 					<div class="col-6">
 						<label class="form-check">
-							<input class="form-check-input" type="checkbox" id="unique-coords" checked>
+							<input class="form-check-input" type="checkbox" id="unique-latlon" checked>
 							<span class="form-check-label">Coordinates</span>
-							<span class="form-check-description">Items must have the exact same coordinates.</span>
+							<span class="form-check-description">Items must be at approximately equal latitude and longitude (precision truncated to ~1 meter).</span>
+						</label>
+					</div>
+					<div class="col-6">
+						<label class="form-check">
+							<input class="form-check-input" type="checkbox" id="unique-altitude">
+							<span class="form-check-label">Altitude</span>
+							<span class="form-check-description">Only helpful if sensor is accurate. Requires coordinates.</span>
 						</label>
 					</div>
 					<div class="col-6">

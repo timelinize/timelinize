@@ -21,10 +21,8 @@ package timeline
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -375,9 +373,9 @@ func (it *Item) makeContentHash() {
 }
 
 func (it Item) String() string {
-	return fmt.Sprintf("[id=%s class=%+v owner=%+v timestamp=%s timespan=%s orig_path=%s inter_path=%s location=%s content=%p meta=%v]",
+	return fmt.Sprintf("[id=%s class=%+v owner=%+v timestamp=%s timespan=%s orig_path=%s inter_path=%s location=%s filename=%s content=%p meta=%v retkey=%x]",
 		it.ID, it.Classification, it.Owner, it.Timestamp, it.Timespan, it.OriginalLocation,
-		it.IntermediateLocation, it.Location, it.Content.Data, it.Metadata)
+		it.IntermediateLocation, it.Location, it.Content.Filename, it.Content.Data, it.Metadata, it.Retrieval.key)
 }
 
 // HasContent returns true if the item has data or a location.
@@ -828,9 +826,6 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	allTargets := append(itemTargets, targetsAfterItemCols...) //nolint:gocritic // I am explicitly self-documenting how the first batch of targets are for the item, then there's the rest
 
 	err := row.Scan(allTargets...)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ir, nil
-	}
 	if err != nil {
 		return ir, fmt.Errorf("scanning item row: %w", err)
 	}
