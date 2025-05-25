@@ -1997,8 +1997,8 @@ func detectContentType(peekedBytes []byte, it *Item) {
 // validTime returns true if the time is considered valid for our application.
 // For example, JSON-serializing a time with a year > 9999 panics.
 func validTime(t time.Time) bool {
-	const maxJSONSerializableYear = 9999
-	return t.Year() <= maxJSONSerializableYear
+	const minJSONSerializableYear, maxJSONSerializableYear = 0, 9999
+	return minJSONSerializableYear <= t.Year() && t.Year() <= maxJSONSerializableYear
 }
 
 func coordRound(x float64, decimalPlaces int) float64 {
