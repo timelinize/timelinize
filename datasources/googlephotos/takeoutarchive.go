@@ -43,6 +43,14 @@ const googlePhotosPath = "Takeout/Google Photos"
 func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeline.ImportParams, dirEntry timeline.DirEntry) error {
 	fimp.truncatedNames = make(map[string]int)
 
+	var checkpoint string
+	if opt.Checkpoint != nil {
+		err := json.Unmarshal(opt.Checkpoint, &checkpoint)
+		if err != nil {
+			return fmt.Errorf("decoding checkpoint: %w", err)
+		}
+	}
+
 	albumFolders, err := fs.ReadDir(dirEntry.FS, dirEntry.Filename)
 	if err != nil {
 		return fmt.Errorf("getting album list from %s: %w", googlePhotosPath, err)
@@ -94,8 +102,15 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		})
 
 		for _, d := range albumItems {
+			fpath := path.Join(thisAlbumFolderPath, dirEntry.Name())
+			if checkpoint != "" {
+				if fpath != checkpoint {
+					continue // keep going until we find the checkpoint position
+				}
+				checkpoint = "" // at the checkpoint; clear it so we process all further items
+			}
 			if err := fimp.processAlbumItem(ctx, albumMeta, thisAlbumFolderPath, d, opt, dirEntry); err != nil {
-				return fmt.Errorf("processing album item '%s': %w", path.Join(thisAlbumFolderPath, dirEntry.Name()), err)
+				return fmt.Errorf("processing album item '%s': %w", fpath, err)
 			}
 		}
 	}
@@ -238,6 +253,8 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 		edited := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 		ig.ToItem(timeline.RelEdit, edited.Item)
 	}
+
+	ig.Checkpoint = fpath
 
 	opt.Pipeline <- ig
 
