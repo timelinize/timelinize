@@ -30,6 +30,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -200,7 +201,7 @@ func (a App) AddEntity(repoID string, entity timeline.Entity) error {
 	return tl.StoreEntity(context.TODO(), entity)
 }
 
-func (a App) GetEntity(repoID string, entityID int64) (timeline.Entity, error) {
+func (a App) GetEntity(repoID string, entityID uint64) (timeline.Entity, error) {
 	tl, err := getOpenTimeline(repoID)
 	if err != nil {
 		return timeline.Entity{}, err
@@ -590,6 +591,53 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		plan.Files = append(plan.Files, p...)
 	}
 
+	// improve import speed by putting large, DB-bound data sources first, to take advantage of when the DB is the fastest (when it is small)
+	dsPriorities := []string{
+		// contact lists are an excellent first import since they can give names to entities right off the bat
+		"vcard",
+		"contact_list",
+		"apple_contacts",
+
+		// then we prioritize data sources with large amounts of items in a single file; when the DB
+		// is small, imports are fastest, so putting data sources with the most smallest items up
+		// first makes imports faster
+		"google_location",
+		"sms_backup_restore",
+
+		// these next ones are a blend of lots of items and I/O heavy
+		"imessage",
+		"iphone",
+
+		// the remaining ones are mostly I/O heavy but can still have lots of items
+		"apple_photos",
+		"google_photos",
+		"icloud",
+		"media",
+		"whatsapp",
+		"facebook",
+		"instagram",
+		"twitter",
+	}
+	slices.SortStableFunc(plan.Files, func(a, b timeline.ProposedFileImport) int {
+		if len(a.DataSources) == 0 || len(b.DataSources) == 0 {
+			return 0
+		}
+		aDS, bDS := a.DataSources[0].DataSource.Name, b.DataSources[0].DataSource.Name
+		aIdx, bIdx := slices.Index(dsPriorities, aDS), slices.Index(dsPriorities, bDS)
+		if aIdx < 0 && bIdx >= 0 {
+			return 1
+		}
+		if aIdx >= 0 && bIdx < 0 {
+			return -1
+		}
+		if aIdx < bIdx {
+			return -1
+		} else if aIdx > bIdx {
+			return 1
+		}
+		return 0
+	})
+
 	return plan, nil
 }
 
@@ -644,7 +692,7 @@ type ImportParameters struct {
 	// DataSource timeline.DataSource // required: Name, Title, Icon, Description
 }
 
-func (a App) Import(params ImportParameters) (int64, error) {
+func (a App) Import(params ImportParameters) (uint64, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
 		return 0, err
@@ -660,7 +708,7 @@ func (a App) Import(params ImportParameters) (int64, error) {
 	return tl.CreateJob(params.Job, scheduled, 0, 0, 0)
 }
 
-func (App) NextGraph(repoID string, jobID int64) (*timeline.Graph, error) {
+func (App) NextGraph(repoID string, jobID uint64) (*timeline.Graph, error) {
 	tl, err := getOpenTimeline(repoID)
 	if err != nil {
 		return nil, err
@@ -668,7 +716,7 @@ func (App) NextGraph(repoID string, jobID int64) (*timeline.Graph, error) {
 	return tl.Timeline.NextGraphFromImport(jobID)
 }
 
-func (App) SubmitGraph(repoID string, jobID int64, g *timeline.Graph, skip bool) error {
+func (App) SubmitGraph(repoID string, jobID uint64, g *timeline.Graph, skip bool) error {
 	tl, err := getOpenTimeline(repoID)
 	if err != nil {
 		return err
@@ -867,7 +915,7 @@ func (a App) LoadConversation(ctx context.Context, params timeline.ItemSearchPar
 	return convo, nil
 }
 
-func (a App) MergeEntities(repo string, base int64, others []int64) error {
+func (a App) MergeEntities(repo string, base uint64, others []uint64) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -875,7 +923,7 @@ func (a App) MergeEntities(repo string, base int64, others []int64) error {
 	return tl.MergeEntities(a.ctx, base, others)
 }
 
-func (a App) DeleteItems(repo string, itemRowIDs []int64, options timeline.DeleteOptions) error {
+func (a App) DeleteItems(repo string, itemRowIDs []uint64, options timeline.DeleteOptions) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -883,7 +931,7 @@ func (a App) DeleteItems(repo string, itemRowIDs []int64, options timeline.Delet
 	return tl.DeleteItems(a.ctx, itemRowIDs, options)
 }
 
-func (a App) Jobs(repo string, jobIDs []int64, mostRecent int) ([]timeline.Job, error) {
+func (a App) Jobs(repo string, jobIDs []uint64, mostRecent int) ([]timeline.Job, error) {
 	if repo != "" {
 		tl, err := getOpenTimeline(repo)
 		if err != nil {
@@ -894,7 +942,7 @@ func (a App) Jobs(repo string, jobIDs []int64, mostRecent int) ([]timeline.Job, 
 	return nil, errors.New("TODO: Getting jobs other than by specific IDs not yet implemented")
 }
 
-func (a App) CancelJob(ctx context.Context, repo string, jobID int64) error {
+func (a App) CancelJob(ctx context.Context, repo string, jobID uint64) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -902,7 +950,7 @@ func (a App) CancelJob(ctx context.Context, repo string, jobID int64) error {
 	return tl.CancelJob(ctx, jobID)
 }
 
-func (a App) PauseJob(ctx context.Context, repo string, jobID int64) error {
+func (a App) PauseJob(ctx context.Context, repo string, jobID uint64) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -910,7 +958,7 @@ func (a App) PauseJob(ctx context.Context, repo string, jobID int64) error {
 	return tl.PauseJob(ctx, jobID)
 }
 
-func (a App) UnpauseJob(ctx context.Context, repo string, jobID int64) error {
+func (a App) UnpauseJob(ctx context.Context, repo string, jobID uint64) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -918,7 +966,7 @@ func (a App) UnpauseJob(ctx context.Context, repo string, jobID int64) error {
 	return tl.UnpauseJob(ctx, jobID)
 }
 
-func (a App) StartJob(ctx context.Context, repo string, jobID int64, startOver bool) error {
+func (a App) StartJob(ctx context.Context, repo string, jobID uint64, startOver bool) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err

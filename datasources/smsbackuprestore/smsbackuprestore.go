@@ -39,9 +39,9 @@ import (
 
 func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
-		Name:            "smsbackuprestore",
+		Name:            "sms_backup_restore",
 		Title:           "SMS Backup & Restore",
-		Icon:            "smsbackuprestore.png",
+		Icon:            "sms_backup_restore.png",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})
@@ -122,8 +122,17 @@ type Options struct {
 func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	dsOpt := *params.DataSourceOptions.(*Options)
 
+	// we need the phone number of the phone that originated this file; if no phone number
+	// was given to the DS options, we try the timeline repo owner's phone number
 	if dsOpt.OwnerPhoneNumber == "" {
-		return errors.New("owner phone number cannot be empty")
+		if repoOwner, ok := ctx.Value(timeline.RepoOwnerCtxKey).(timeline.Entity); ok {
+			if ownerPhone, ok := repoOwner.AttributeValue(timeline.AttributePhoneNumber).(string); ok {
+				dsOpt.OwnerPhoneNumber = ownerPhone
+			}
+		}
+	}
+	if dsOpt.OwnerPhoneNumber == "" {
+		return errors.New("originating phone number cannot be empty")
 	}
 
 	// standardize phone number, and ensure it is marked as identity

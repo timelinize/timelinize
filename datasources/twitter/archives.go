@@ -70,7 +70,7 @@ func (c *Client) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 	c.owner = acc.entity(ctx, dirEntry.FS)
 
 	// first pass - add tweets to timeline
-	err = c.processArchive(ctx, dirEntry.FS, params.Pipeline, c.makeItemGraphFromTweet, dsOpt)
+	err = c.processArchive(ctx, dirEntry.FS, params, c.makeItemGraphFromTweet, dsOpt)
 	if err != nil {
 		return fmt.Errorf("processing tweets: %w", err)
 	}
@@ -82,7 +82,7 @@ func (c *Client) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 	// 	return fmt.Errorf("processing tweets round 2: %v", err)
 	// }
 
-	err = c.processDirectMessages(ctx, dirEntry.FS, params.Pipeline, dsOpt)
+	err = c.processDirectMessages(ctx, dirEntry.FS, params, dsOpt)
 	if err != nil {
 		return fmt.Errorf("processing direct messages: %w", err)
 	}
@@ -90,7 +90,7 @@ func (c *Client) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 	return nil
 }
 
-func (c *Client) processArchive(ctx context.Context, fsys fs.FS, itemChan chan<- *timeline.Graph, processFunc archiveProcessFn, opt Options) error {
+func (c *Client) processArchive(ctx context.Context, fsys fs.FS, params timeline.ImportParams, processFunc archiveProcessFn, opt Options) error {
 	file, err := fsys.Open(tweetsFile)
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func (c *Client) processArchive(ctx context.Context, fsys fs.FS, itemChan chan<-
 		return fmt.Errorf("reading tweet file preface: %w", err)
 	}
 
-	err = c.processTweetsFromArchive(ctx, itemChan, file, fsys, processFunc, opt)
+	err = c.processTweetsFromArchive(ctx, params, file, fsys, processFunc, opt)
 	if err != nil {
 		return fmt.Errorf("processing tweet file: %w", err)
 	}
@@ -111,7 +111,7 @@ func (c *Client) processArchive(ctx context.Context, fsys fs.FS, itemChan chan<-
 	return nil
 }
 
-func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan chan<- *timeline.Graph, _ Options) error {
+func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, params timeline.ImportParams, _ Options) error {
 	file, err := fsys.Open(dmsFile)
 	if err != nil {
 		return err
@@ -222,14 +222,14 @@ func (c *Client) processDirectMessages(ctx context.Context, fsys fs.FS, itemChan
 				})
 			}
 
-			itemChan <- ig
+			params.Pipeline <- ig
 		}
 	}
 
 	return nil
 }
 
-func (c *Client) processTweetsFromArchive(ctx context.Context, itemChan chan<- *timeline.Graph, file io.Reader, fsys fs.FS, processFunc archiveProcessFn, opt Options) error {
+func (c *Client) processTweetsFromArchive(ctx context.Context, params timeline.ImportParams, file io.Reader, fsys fs.FS, processFunc archiveProcessFn, opt Options) error {
 	dec := json.NewDecoder(file)
 
 	// read array opening bracket '['
@@ -256,14 +256,14 @@ func (c *Client) processTweetsFromArchive(ctx context.Context, itemChan chan<- *
 			continue
 		}
 
-		ig, err := processFunc(ctx, t, fsys, opt)
+		ig, err := processFunc(ctx, params, t, fsys, opt)
 		if err != nil {
 			return fmt.Errorf("processing tweet: %w", err)
 		}
 
 		// send the tweet(s) for processing
 		if ig != nil {
-			itemChan <- ig
+			params.Pipeline <- ig
 		}
 	}
 
@@ -394,7 +394,7 @@ func stripPreface(f io.Reader) error {
 // archiveProcessFn is a function that processes a
 // tweet from a Twitter export archive and returns
 // an ItemGraph created from t.
-type archiveProcessFn func(ctx context.Context, t tweet, fsys fs.FS, opt Options) (*timeline.Graph, error)
+type archiveProcessFn func(ctx context.Context, params timeline.ImportParams, t tweet, fsys fs.FS, opt Options) (*timeline.Graph, error)
 
 const (
 	manifestFile = "data/manifest.js"

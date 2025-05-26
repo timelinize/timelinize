@@ -572,7 +572,7 @@ func isoIEC14496Timestamp(ts uint64) time.Time {
 	return time.Unix(int64(unixSec), 0) //nolint:gosec // This could technically overflow but I don't think the incoming timestamp is going to be THAT big
 }
 
-// The difference between January 1, 1904 (the epoch used by MP4 file metadata)
+// The difference between January 1, 1904 (the Mac epoch used by MP4 file metadata)
 // and January 1, 1970 (the Unix epoch) in seconds.
 const isoIEC14496_12_5thEdition_2015EpochToUnixEpochSeconds uint64 = 2082844800 //nolint // Yeah screw it, I'm using underscores for this one
 

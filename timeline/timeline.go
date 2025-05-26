@@ -31,6 +31,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -55,15 +56,15 @@ type Timeline struct {
 
 	// caches of name -> ID
 	cachesMu        sync.RWMutex // protects these maps
-	classifications map[string]int64
-	entityTypes     map[string]int64
-	relations       map[string]int64
-	dataSources     map[string]int64
+	classifications map[string]uint64
+	entityTypes     map[string]uint64
+	relations       map[string]uint64
+	dataSources     map[string]uint64
 
 	obfuscationMode func() (ObfuscationOptions, bool)
 
 	// currently-running jobs for this timeline
-	activeJobs   map[int64]*ActiveJob
+	activeJobs   map[uint64]*ActiveJob
 	activeJobsMu sync.RWMutex
 
 	// The database handle and its mutex. Why a mutex for a DB handle? Because
@@ -123,7 +124,7 @@ func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
 		// since the user doesn't know the folder needs to be empty (they may even think
 		// the timeline is a single file, so any folder will do) -- try to create a
 		// new, empty parent folder for a timeline if it doesn't exist yet
-		repoPath = filepath.Join(repoPath, "My timeline")
+		repoPath = filepath.Join(repoPath, "My Timeline")
 		err := os.MkdirAll(repoPath, 0755)
 		if err != nil {
 			return nil, fmt.Errorf("folder already existed but was not empty (%s), so tried to create new empty repo folder within it: %w", problematicFile, err)
@@ -148,12 +149,13 @@ func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
 	return openAndProvisionTimeline(ctx, repoPath, cacheDir)
 }
 
-// directoryEmpty returns true if dirPath is an empty directory. If false,
-// the name of the first discovered file is returned. If deletePointlessFiles
-// is true, then unintentional files (like .DS_Store) will be deleted while
-// considering whether a dir is empty. (It is not required to delete the file
-// to still consider it empty, but if preparing an empty dir for deletion,
-// emptying the dir of pointless files will come in handy.)
+// directoryEmpty returns true if dirPath is an empty directory except for some
+// common, but non-critical, OS files. If false, the name of the first discovered
+// file is returned. If deletePointlessFiles is true, then those implicit OS files
+// (like .DS_Store) will be deleted while considering whether a dir is empty.
+// (It is not required to delete the file to still consider it empty, but if
+// preparing an empty dir for deletion, emptying the dir of pointless files will
+// come in handy.)
 func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, error) {
 	dir, err := os.Open(dirPath)
 	if err != nil {
@@ -168,9 +170,14 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 		return false, "", fmt.Errorf("reading folder contents: %w", err)
 	}
 
+	pointlessFiles := map[string]struct{}{
+		".DS_Store": {},
+		"Thumbs.db": {},
+	}
+
 	for _, f := range fileList {
 		// ignore, and possibly delete, pointless files
-		if f == ".DS_Store" || f == "Thumbs.db" {
+		if _, ok := pointlessFiles[f]; ok {
 			if deletePointlessFiles {
 				err := os.Remove(filepath.Join(dirPath, f))
 				if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -244,7 +251,7 @@ func AssessFolder(fpath string) FolderAssessment {
 	// timeline is a single file and that they can put it in any folder; to that end,
 	// we can recommend creating the timeline in a new "file" in that folder (but it's
 	// actually a folder, of course)
-	proposedPath := filepath.Join(fpath, "My timeline")
+	proposedPath := filepath.Join(fpath, "My Timeline")
 
 	info, err = os.Stat(proposedPath)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -387,10 +394,18 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	// if err != nil {
 	// 	return nil, fmt.Errorf("resetting item_data: %w", err)
 	// }
-	// // _, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id>1`)
-	// // if err != nil {
-	// // 	return nil, fmt.Errorf("resetting entities: %w", err)
-	// // }
+	// _, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id > 1`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting entities: %w", err)
+	// }
+	// _, err = db.ExecContext(ctx, `DELETE FROM attributes WHERE id NOT IN (SELECT attribute_id FROM entity_attributes WHERE entity_id = 1)`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting attributes: %w", err)
+	// }
+	// _, err = db.ExecContext(ctx, `DELETE FROM entity_attributes WHERE entity_id > 1`)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resetting entity_attributes: %w", err)
+	// }
 	// _, err = db.ExecContext(ctx, `DELETE FROM relationships`)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("resetting relationships: %w", err)
@@ -430,7 +445,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 		classifications: classes,
 		entityTypes:     entityTypes,
 		relations:       relations,
-		activeJobs:      make(map[int64]*ActiveJob),
+		activeJobs:      make(map[uint64]*ActiveJob),
 	}
 
 	// start maintenance goroutine; this erases items that have been
@@ -463,11 +478,12 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var jobID int64
+		var jobID uint64
 		err := rows.Scan(&jobID)
 		if err != nil {
 			return nil, fmt.Errorf("scanning row for resuming job: %w", err)
 		}
+		Log.Info("resuming job that was queued or interrupted", zap.Uint64("job_id", jobID))
 		if err = tl.StartJob(ctx, jobID, false); err != nil {
 			return nil, fmt.Errorf("starting job %d from last open: %w", jobID, err)
 		}
@@ -479,7 +495,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	return tl, nil
 }
 
-func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]int64, error) {
+func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]uint64, error) {
 	nameCol := "name"
 	if table == "relations" {
 		nameCol = "label" // TODO: this is annoying... right?
@@ -490,12 +506,12 @@ func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]in
 	}
 	defer rows.Close()
 
-	namesToIDs := make(map[string]int64)
+	namesToIDs := make(map[string]uint64)
 	for rows.Next() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		var rowID int64
+		var rowID uint64
 		var name string
 		err := rows.Scan(&rowID, &name)
 		if err != nil {
@@ -588,7 +604,7 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, relID, rel.value,
 		rel.fromItemID, rel.fromAttributeID,
 		rel.toItemID, rel.toAttributeID,
-		rel.start, rel.end, rel.metadata,
+		rel.start, rel.end, string(rel.metadata),
 	)
 	if err != nil {
 		return fmt.Errorf("inserting relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
@@ -597,7 +613,7 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 	return nil
 }
 
-func (tl *Timeline) entityTypeNameToID(name string) (int64, error) {
+func (tl *Timeline) entityTypeNameToID(name string) (uint64, error) {
 	tl.cachesMu.RLock()
 	id, ok := tl.entityTypes[name]
 	tl.cachesMu.RUnlock()
@@ -620,7 +636,7 @@ func (tl *Timeline) entityTypeNameToID(name string) (int64, error) {
 	return id, nil
 }
 
-func (tl *Timeline) classificationNameToID(name string) (int64, error) {
+func (tl *Timeline) classificationNameToID(name string) (uint64, error) {
 	tl.cachesMu.RLock()
 	id, ok := tl.classifications[name]
 	tl.cachesMu.RUnlock()
@@ -710,7 +726,7 @@ func (tl *Timeline) StoreEntity(ctx context.Context, entity Entity) error {
 // is not an identity attribute. It just ensures that the attribute is linked with the
 // existing entity. If the attribute does not yet exist it will be created. The ID of
 // the attribute is returned.
-func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, entityID int64, attr Attribute) (int64, error) {
+func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, entityID uint64, attr Attribute) (uint64, error) {
 	attrID, err := storeAttribute(ctx, tx, attr)
 	if err != nil {
 		return 0, err
@@ -738,7 +754,7 @@ func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, en
 	return attrID, nil
 }
 
-func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
+func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	p := Entity{ID: id}
 
 	tl.dbMu.RLock()
@@ -805,7 +821,7 @@ func (tl *Timeline) LoadEntity(id int64) (Entity, error) {
 	return p, tx.Commit()
 }
 
-func (tl *Timeline) NextGraphFromImport(jobID int64) (*Graph, error) {
+func (tl *Timeline) NextGraphFromImport(jobID uint64) (*Graph, error) {
 	ij, err := tl.loadInteractiveImportJob(jobID)
 	if err != nil {
 		return nil, err
@@ -831,7 +847,7 @@ func (tl *Timeline) NextGraphFromImport(jobID int64) (*Graph, error) {
 	return g.Graph, nil
 }
 
-func (tl *Timeline) SubmitGraph(jobID int64, g *Graph, skip bool) error {
+func (tl *Timeline) SubmitGraph(jobID uint64, g *Graph, skip bool) error {
 	ij, err := tl.loadInteractiveImportJob(jobID)
 	if err != nil {
 		return err
@@ -851,7 +867,7 @@ func (tl *Timeline) SubmitGraph(jobID int64, g *Graph, skip bool) error {
 	return nil
 }
 
-func (tl *Timeline) loadInteractiveImportJob(jobID int64) (*ImportJob, error) {
+func (tl *Timeline) loadInteractiveImportJob(jobID uint64) (*ImportJob, error) {
 	tl.activeJobsMu.RLock()
 	job, ok := tl.activeJobs[jobID]
 	tl.activeJobsMu.RUnlock()
@@ -884,7 +900,7 @@ type DeleteOptions struct {
 
 // DeleteItems deletes data from the items table with the given row IDs, according to the given deletion options.
 // If a retention period is configured, it marks items for erasure; otherwise it erases them right away.
-func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options DeleteOptions) error {
+func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, options DeleteOptions) error {
 	if len(itemRowIDs) == 0 {
 		return nil
 	}
@@ -969,7 +985,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 		}
 
 		// delete data files only if they are no longer referenced by any items
-		numFilesDeleted, err := tl.deleteDataFiles(tl.ctx, Log, dataFilesToDelete)
+		numFilesDeleted, err := tl.deleteRepoFiles(tl.ctx, Log, dataFilesToDelete)
 		if err != nil {
 			Log.Error("error when deleting data files of erased items (items have already been marked as deleted in DB)", zap.Error(err))
 		}
@@ -1003,7 +1019,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []int64, options
 	}
 
 	Log.Info("marked item(s) for deletion",
-		zap.Int64s("ids", itemRowIDs),
+		zap.Uint64s("ids", itemRowIDs),
 		zap.String("retention_period", retention.String()),
 		zap.Time("deletion_scheduled", deleteAt))
 
@@ -1068,7 +1084,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 		return fmt.Errorf("committing deletion transaction: %w", err)
 	}
 
-	_, err = tl.deleteDataFiles(ctx, Log, dataFilesToDelete)
+	_, err = tl.deleteRepoFiles(ctx, Log, dataFilesToDelete)
 	if err != nil {
 		return fmt.Errorf("deleting data files (after deleting associated item rows from DB): %w", err)
 	}
@@ -1076,7 +1092,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 	return nil
 }
 
-func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs []int64) ([]int64, error) {
+func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs []uint64) ([]uint64, error) {
 	startingLen := len(rowIDs)
 
 	rowIDArray, rowIDArgs := sqlArray(rowIDs)
@@ -1095,7 +1111,7 @@ func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs [
 	}
 
 	for rows.Next() {
-		var id int64
+		var id uint64
 		err := rows.Scan(&id)
 		if err != nil {
 			defer rows.Close()
@@ -1120,10 +1136,51 @@ func (tl *Timeline) followItemSubtrees(ctx context.Context, tx *sql.Tx, rowIDs [
 	return rowIDs, nil
 }
 
+// deleteRepoFile deletes the file at pathInRepo, which is a path relative
+// to the repo root, or a path within the repo root (if the given path is
+// prefixed by the repo root, then it is treated as an absolute OS path).
+// Empty parent directories are then deleted until the first non-empty
+// directory within the repo dir, to keep the repo tidy.
+func (tl *Timeline) deleteRepoFile(pathInRepo string) error {
+	// normalize the input path: if the path is an absolute OS filepath,
+	// trim the repo path prefix off, and convert it into a path within
+	// the repo, which we always use the slash as separator
+	// (i.e. "C:\repo\a\b\c" => "a/b/c" where repo dir is "C:\repo", note
+	// how we also trim the slash between "repo" and "a")
+	if strings.HasPrefix(pathInRepo, tl.repoDir) {
+		pathInRepo = strings.TrimPrefix(filepath.ToSlash(strings.TrimPrefix(pathInRepo, tl.repoDir)), "/")
+	}
+
+	err := os.Remove(tl.FullPath(pathInRepo))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+
+	for p := path.Dir(pathInRepo); p != "."; p = path.Dir(p) {
+		fullPath := tl.FullPath(p)
+		isEmpty, _, err := directoryEmpty(fullPath, true)
+		if err != nil {
+			return fmt.Errorf("deleted %q, but could not check parent folder %q: %w",
+				pathInRepo, fullPath, err)
+		}
+		if isEmpty {
+			if err := os.Remove(fullPath); err != nil {
+				return fmt.Errorf("deleted %q, but could not clean up empty parent folder %q: %w",
+					pathInRepo, fullPath, err)
+			}
+		} else {
+			// we have to stop at the first non-empty parent folder
+			return nil
+		}
+	}
+
+	return nil
+}
+
 // sqlArray builds a placeholder array for SQL queries that will have
 // all the row IDs in it, e.g. "(?, ?, ?)" for use with 'IN' clauses,
 // returning the array as a string and also the values to pass in.
-func sqlArray(rowIDs []int64) (string, []any) {
+func sqlArray(rowIDs []uint64) (string, []any) {
 	var sb strings.Builder
 	rowIDArgs := make([]any, 0, len(rowIDs))
 	sb.WriteRune('(')
@@ -1211,7 +1268,7 @@ type ProcessingOptions struct {
 	Timeframe Timeframe `json:"timeframe,omitempty"`
 
 	// If true, items with manual modifications may be updated, overwriting local changes.
-	OverwriteModifications bool `json:"overwrite_modifications,omitempty"`
+	OverwriteLocalChanges bool `json:"overwrite_local_changes,omitempty"`
 
 	// Names of columns in the items table to check for sameness when loading an item
 	// that doesn't have data_source+original_id. The field/column is the same if the
@@ -1219,9 +1276,9 @@ type ProcessingOptions struct {
 	// however, strict NULL comparison is applied, where NULL=NULL only.
 	ItemUniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
 
-	// The policies to apply when updating an item in the DB, specified per-field.
-	// Note: Some fields are described in aggregate, such as data and location.
-	ItemFieldUpdates map[string]fieldUpdatePolicy `json:"item_field_updates,omitempty"`
+	// How to update existing items, specified per-field.
+	// If not set, items that already exist will simply be skipped.
+	ItemUpdatePreferences []FieldUpdatePreference `json:"item_update_preferences,omitempty"`
 
 	// TODO: WIP (Should this be in importjob or processingoptions?)
 	Interactive *InteractiveImport `json:"interactive,omitempty"`
@@ -1246,22 +1303,223 @@ type InteractiveGraph struct {
 	DataFileReady chan struct{}
 }
 
-// fieldUpdatePolicy values specify how to update a field/column of an item in the DB.
-type fieldUpdatePolicy int
+// FieldUpdatePolicy values specify how to update a field/column of an item in the DB.
+// It's a lower level of abstraction than field update preferences, which are user-facing.
+//
+// For the metadata field, this policy is applied per-metadata-key.
+type FieldUpdatePolicy int
 
 const (
-	// COALESCE(existing, incoming)
-	updatePolicyPreferExisting fieldUpdatePolicy = iota + 1
-
-	// COALESCE(incoming, existing)
-	updatePolicyPreferIncoming
+	UpdatePolicyKeepExisting FieldUpdatePolicy = iota
 
 	// SET existing=incoming
 	// (i.e. prefer incoming even if incoming is NULL)
-	updatePolicyOverwriteExisting
+	UpdatePolicyOverwriteExisting
 
-	// TODO: choose one based on properties of the item? like larger or smaller one, etc... (e.g. if we want to prefer the higher-quality photo...)
+	// COALESCE(existing, incoming)
+	UpdatePolicyPreferExisting
+
+	// COALESCE(incoming, existing)
+	UpdatePolicyPreferIncoming
 )
+
+// FieldUpdatePreference describes a user's preference for updating part of an item.
+type FieldUpdatePreference struct {
+	Field      string           `json:"field"`
+	Priorities []map[string]any `json:"priorities"`
+	Nulls      bool             `json:"nulls,omitempty"` // if true, nulls can overwrite data
+}
+
+// distillUpdatePolicies converts the user's update preferences for the import
+// into update policies for this item for the DB.
+func (p *processor) distillUpdatePolicies(incoming *Item, existing ItemRow) error {
+	// reset target map if already populated
+	if len(incoming.fieldUpdatePolicies) > 0 {
+		incoming.fieldUpdatePolicies = make(map[string]FieldUpdatePolicy)
+	}
+	for _, pref := range p.ij.ProcessingOptions.ItemUpdatePreferences {
+		policy, err := p.distillUpdatePolicy(pref, incoming, existing)
+		if err != nil {
+			return fmt.Errorf("distilling update policy from preference %+v: %w", pref, err)
+		}
+		// Only create a policy if it's not the default (to keep existing; i.e. no-op),
+		// since we use the size of the policies map as an indicator that we need to
+		// process the item.
+		if policy != UpdatePolicyKeepExisting {
+			if incoming.fieldUpdatePolicies == nil {
+				incoming.fieldUpdatePolicies = make(map[string]FieldUpdatePolicy)
+			}
+			incoming.fieldUpdatePolicies[pref.Field] = policy
+		}
+	}
+	return nil
+}
+
+func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *Item, existing ItemRow) (FieldUpdatePolicy, error) {
+	for i, priority := range pref.Priorities {
+		// can only have 1 priority specified per map; the map just allows arbitrary keys
+		if len(priority) != 1 {
+			return 0, fmt.Errorf("only one priority may be specified per array element, got %d at %d: %v", len(priority), i, priority)
+		}
+		for property, v := range priority {
+			switch property {
+			case "keep":
+				if v == "incoming" {
+					if pref.Nulls {
+						return UpdatePolicyOverwriteExisting, nil
+					}
+					return UpdatePolicyPreferIncoming, nil
+				} else if v == "existing" {
+					if pref.Nulls {
+						// TODO: This could be an error, since this is the same as no update policy at all -- no reason to hard-code a static policy like this
+						return UpdatePolicyKeepExisting, nil
+					}
+					return UpdatePolicyPreferExisting, nil
+				}
+				return 0, fmt.Errorf("the 'keep' update policy must be either 'incoming' or 'existing', got: '%s'", v)
+			case "data_source":
+				if existing.DataSourceName != nil && *existing.DataSourceName == p.ds.Name {
+					// both incoming and existing have the same data source,
+					// so this isn't a good distinguisher
+					continue
+				}
+				if existing.DataSourceName != nil && *existing.DataSourceName == v {
+					if pref.Nulls {
+						return UpdatePolicyKeepExisting, nil
+					}
+					return UpdatePolicyPreferExisting, nil
+				}
+				if p.ds.Name == v {
+					if pref.Nulls {
+						return UpdatePolicyOverwriteExisting, nil
+					}
+					return UpdatePolicyPreferIncoming, nil
+				}
+			case "media_type":
+				if existing.DataType != nil && *existing.DataType == incoming.Content.MediaType {
+					// both incoming and existing have the same media type,
+					// so this isn't a good distinguisher
+					continue
+				}
+				if existing.DataType != nil && *existing.DataType == v {
+					if pref.Nulls {
+						return UpdatePolicyKeepExisting, nil
+					}
+					return UpdatePolicyPreferExisting, nil
+				}
+				if incoming.Content.MediaType == v {
+					if pref.Nulls {
+						return UpdatePolicyOverwriteExisting, nil
+					}
+					return UpdatePolicyPreferIncoming, nil
+				}
+			case "size":
+				const bigger, smaller = "bigger", "smaller"
+				if v != bigger && v != smaller {
+					return 0, fmt.Errorf("unknown policy for 'size' property: %v (expected bigger or smaller)", v)
+				}
+				if incoming.dataFileIn != nil && incoming.dataFileSize == 0 && incoming.dataFileHash == nil {
+					// there's a data file incoming, and we don't know its size yet;
+					// we can't determine size until after processing the incoming data...
+					// signal to the processor that the data file should be processed,
+					// but before finalizing things at the end of the pipeline, do all
+					// this again to know how to handle the item
+					return -1, nil
+				}
+				// existing item content could be either in the DB or on disk, so
+				// whichever it is, get the length of it
+				existingDataLen := -1 // default to -1 to suggest nil existing data
+				if existing.DataText != nil {
+					existingDataLen = len(*existing.DataText)
+				} else if existing.DataFile != nil {
+					info, err := os.Stat(p.tl.FullPath(*existing.DataFile))
+					if err != nil {
+						return 0, err
+					}
+					existingDataLen = int(info.Size())
+				} // TODO: else if existing.DataID != nil ... get len from other DB table
+				incomingDataLen := -1 // default to -1 to suggest nil incoming data
+				if incoming.dataText != nil {
+					incomingDataLen = len(*incoming.dataText)
+				} else if incoming.dataFileSize > 0 {
+					incomingDataLen = int(incoming.dataFileSize)
+				}
+				if incomingDataLen == existingDataLen {
+					// both incoming and existing have the same content length,
+					// so size isn't a good distinguisher
+					continue
+				}
+				if v == bigger {
+					if existingDataLen > incomingDataLen {
+						if pref.Nulls {
+							return UpdatePolicyKeepExisting, nil
+						}
+						return UpdatePolicyPreferExisting, nil
+					}
+					if incomingDataLen > existingDataLen {
+						if pref.Nulls {
+							return UpdatePolicyOverwriteExisting, nil
+						}
+						return UpdatePolicyPreferIncoming, nil
+					}
+				} else if v == smaller {
+					if existingDataLen < incomingDataLen {
+						if pref.Nulls {
+							return UpdatePolicyKeepExisting, nil
+						}
+						return UpdatePolicyPreferExisting, nil
+					}
+					if incomingDataLen < existingDataLen {
+						if pref.Nulls {
+							return UpdatePolicyOverwriteExisting, nil
+						}
+						return UpdatePolicyPreferIncoming, nil
+					}
+				}
+			case "timestamp":
+				const earlier, later = "earlier", "later"
+				if v != earlier && v != later {
+					return 0, fmt.Errorf("unknown policy for 'timestamp' property: %v (expected earlier or later)", v)
+				}
+				if existing.Timestamp != nil && !incoming.Timestamp.IsZero() &&
+					existing.Timestamp.Equal(incoming.Timestamp) {
+					// both incoming and existing have the same timestamp, so this isn't a good distinguisher
+					continue
+				}
+				if v == earlier {
+					if existing.Timestamp != nil && (incoming.Timestamp.IsZero() || existing.Timestamp.Before(incoming.Timestamp)) {
+						if pref.Nulls {
+							return UpdatePolicyKeepExisting, nil
+						}
+						return UpdatePolicyPreferExisting, nil
+					}
+					if !incoming.Timestamp.IsZero() && (existing.Timestamp == nil || incoming.Timestamp.Before(*existing.Timestamp)) {
+						if pref.Nulls {
+							return UpdatePolicyOverwriteExisting, nil
+						}
+						return UpdatePolicyPreferIncoming, nil
+					}
+				} else if v == later {
+					if existing.Timestamp != nil && (incoming.Timestamp.IsZero() || existing.Timestamp.After(incoming.Timestamp)) {
+						if pref.Nulls {
+							return UpdatePolicyKeepExisting, nil
+						}
+						return UpdatePolicyPreferExisting, nil
+					}
+					if !incoming.Timestamp.IsZero() && (existing.Timestamp == nil || incoming.Timestamp.After(*existing.Timestamp)) {
+						if pref.Nulls {
+							return UpdatePolicyOverwriteExisting, nil
+						}
+						return UpdatePolicyPreferIncoming, nil
+					}
+				}
+			default:
+				return 0, fmt.Errorf("unknown property '%s'", property)
+			}
+		}
+	}
+	return UpdatePolicyKeepExisting, nil
+}
 
 // Files belonging at the root within the timeline repository.
 const (

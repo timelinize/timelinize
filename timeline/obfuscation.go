@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	weakrand "math/rand"
+	weakrand "math/rand/v2"
 	"mime"
 	"net/http"
 	"path"
@@ -33,7 +33,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brianvoe/gofakeit/v6"
+	"github.com/brianvoe/gofakeit/v7"
 	"go.uber.org/zap"
 )
 
@@ -183,7 +183,7 @@ func (fakeDataSource) Recognize(_ context.Context, _ DirEntry, _ RecognizeParams
 func (fake *fakeDataSource) FileImport(_ context.Context, _ DirEntry, params ImportParams) error {
 	var class Classification
 	switch fake.realDS.Name {
-	case "smsbackuprestore":
+	case "sms_backup_restore":
 		class = ClassMessage
 	case "google_location":
 		class = ClassLocation
@@ -194,7 +194,7 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ DirEntry, params Imp
 	}
 
 	switch fake.realDS.Name {
-	case "contactlist", "vcard":
+	case "contact_list", "vcard":
 		for i := range fake.peopleCorpus {
 			params.Pipeline <- &Graph{Entity: &fake.peopleCorpus[i]}
 		}
@@ -222,13 +222,13 @@ func (fake *fakeDataSource) FileImport(_ context.Context, _ DirEntry, params Imp
 			}
 		}
 
-	case "smsbackuprestore":
+	case "sms_backup_restore":
 		for range gofakeit.Number(100, 10000) {
-			owner := fake.peopleCorpus[weakrand.Intn(len(fake.peopleCorpus))] //nolint:gosec
+			owner := fake.peopleCorpus[weakrand.IntN(len(fake.peopleCorpus))] //nolint:gosec
 			owner = onlyKeepAttribute(owner, AttributePhoneNumber)
 
-			numSentences := weakrand.Intn(5) //nolint:gosec
-			sentLen := weakrand.Intn(10) + 2 //nolint:gosec
+			numSentences := weakrand.IntN(5) //nolint:gosec
+			sentLen := weakrand.IntN(10) + 2 //nolint:gosec
 
 			// TODO: MMS, attachments, sent to...
 			params.Pipeline <- &Graph{
@@ -290,11 +290,11 @@ func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
 	}
 
 	// using the entity's ID as seed ensures consistency of faked data for this entity
-	src := weakrand.New(weakrand.NewSource(*re.ID)) //nolint:gosec
-	faker := gofakeit.NewCustom(src)
+	src := weakrand.NewPCG(*re.ID, 0)
+	faker := gofakeit.NewFaker(src, false)
 
 	if re.Name != nil {
-		name := faker.Name()
+		name := consistentFakeEntityName(*re.Name)
 		re.Name = &name
 	}
 
@@ -338,12 +338,20 @@ func (e *Entity) Anonymize() {
 	}
 
 	// using the entity's ID as seed ensures consistency of faked data for this entity
-	src := weakrand.New(weakrand.NewSource(e.ID)) //nolint:gosec
-	faker := gofakeit.NewCustom(src)
+	src := weakrand.NewPCG(e.ID, 0)
+	faker := gofakeit.NewFaker(src, false)
 
-	if e.Name != "" {
-		e.Name = faker.Name()
-	}
+	// but to fake the name, we actually use a faker with a seed based on each
+	// space-separated part of the name; this means that names like Betty will
+	// always be replaced with the same fake name, so if you have entities "Betty
+	// Jane" and "Betty Jane Smith" who are actually the same person, then you
+	// will see more consistent fake names like "Kristen May" and "Kristen May
+	// Pike" -- keeping the name pattern, which is more helpful in demos.
+	// This isn't perfect though, like "Matt" is obviously short for "Matthew"
+	// in the unobfuscated space, but the faker just uses hashing so it doesn't
+	// care about that, and they will have totally different fake names in the
+	// obfuscated space. Oh well.
+	e.Name = consistentFakeEntityName(e.Name)
 
 	for i := range e.Attributes {
 		switch e.Attributes[i].Name {
@@ -375,6 +383,40 @@ func (e *Entity) Anonymize() {
 			return resp.Body, err
 		}
 	}
+}
+
+// consistentFakeEntityName generates a fake name seeded by the individual
+// space-separated words in the real name.
+func consistentFakeEntityName(realName string) string {
+	if realName == "" {
+		return ""
+	}
+	var fakeName string
+	names := strings.Split(strings.ToLower(realName), " ")
+	for i, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		nameSrc := weakrand.NewPCG(dumbHash(name), 0)
+		nameFaker := gofakeit.NewFaker(nameSrc, false)
+		if fakeName == "" { //nolint:gocritic
+			fakeName = nameFaker.FirstName()
+		} else if i < len(names)-1 {
+			fakeName += " " + nameFaker.MiddleName()
+		} else {
+			fakeName += " " + nameFaker.LastName()
+		}
+	}
+	return fakeName
+}
+
+func dumbHash(input string) uint64 {
+	var checksum uint64
+	for i, ch := range input {
+		checksum += uint64(int(ch) * (i + 1)) //nolint:gosec
+	}
+	return checksum
 }
 
 // Anonymize obfuscates the item.
@@ -430,7 +472,7 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 				zap.Error(err))
 			extensions = []string{"." + faker.FileExtension()}
 		}
-		fakeName := faker.Word() + faker.Password(true, true, true, false, false, weakrand.Intn(3)+2) + extensions[0] //nolint:gosec
+		fakeName := faker.Word() + faker.Password(true, true, true, false, false, weakrand.IntN(3)+2) + extensions[0] //nolint:gosec
 		ir.Filename = &fakeName
 	}
 
@@ -495,17 +537,17 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 // For non-ASCII, it's just randomly shifted.
 func randRune(ch rune) rune {
 	if ch >= '0' && ch <= '9' {
-		return rune(weakrand.Intn('9'-'0') + '0') //nolint:gosec
+		return rune(weakrand.IntN('9'-'0') + '0') //nolint:gosec
 	}
 	if ch >= 'a' && ch <= 'z' {
-		return rune(weakrand.Intn('z'-'a') + 'a') //nolint:gosec
+		return rune(weakrand.IntN('z'-'a') + 'a') //nolint:gosec
 	}
 	if ch >= 'A' && ch <= 'Z' {
-		return rune(weakrand.Intn('Z'-'A') + 'A') //nolint:gosec
+		return rune(weakrand.IntN('Z'-'A') + 'A') //nolint:gosec
 	}
 	if ch > 127 {
 		// ¯\_(ツ)_/¯
-		ch += rune(weakrand.Intn(20) - 10) //nolint:gosec
+		ch += rune(weakrand.IntN(20) - 10) //nolint:gosec
 	}
 	return ch
 }
@@ -551,12 +593,12 @@ func (l ObfuscatedLocation) Contains(lat, lon float64) bool {
 }
 
 // Obfuscate returns obfuscated lat/lon values.
-func (l ObfuscatedLocation) Obfuscate(lat, lon float64, rowID int64) (float64, float64) {
+func (l ObfuscatedLocation) Obfuscate(lat, lon float64, rowID uint64) (float64, float64) {
 	faker := gofakeit.New(rowID)
 
 	// translate all points within the circle a fixed vector; necessary to prevent
 	// averaging the smattering of points to find the original center(s)
-	circleFaker := gofakeit.New(int64((l.Lat + l.Lon) * 1e7))
+	circleFaker := gofakeit.New(uint64((l.Lat + l.Lon) * 1e7))
 
 	// then shift each point a little bit individually to prevent map overlay attacks
 	// where you estimate the initial translation by seeing what map features the

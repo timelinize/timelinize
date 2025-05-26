@@ -51,7 +51,7 @@ type ItemSearchParams struct {
 	DataSourceName []string `json:"data_source,omitempty"`
 	JobID          []int64  `json:"job_id,omitempty"`
 	AttributeID    []int64  `json:"attribute_id,omitempty"`
-	EntityID       []int64  `json:"entity_id,omitempty"`
+	EntityID       []uint64 `json:"entity_id,omitempty"`
 	Classification []string `json:"classification,omitempty"`
 	OriginalID     []string `jsson:"original_id,omitempty"`
 	DataType       []string `json:"data_type,omitempty"`
@@ -66,18 +66,9 @@ type ItemSearchParams struct {
 	ToAttributeID []int64 `json:"to_attribute_id,omitempty"`
 	ToEntityID    []int64 `json:"to_entity_id,omitempty"`
 
-	// TODO: make this work: the idea is that you should be able to query like: "return only items
-	// that relate in a certain way to or from the item described by the search parameters"
-	// for example, getting the item that has the sidecar motion photo for a specific data file:
-	// 	SELECT items.*
-	// 	FROM items
-	// 	JOIN items AS itemsFrom ON itemsFrom.id = relationships.from_item_id
-	// 	JOIN relationships ON relationships.to_item_id = items.id
-	// 	JOIN relations ON relations.id = relationships.relation_id
-	// 	WHERE itemsFrom.data_file='data/2022/04/media/IMG_4796.jpg' AND relations.label='motion';
-	//
-	// // filter by relationship to other items
-	// Relations RelationParams `json:"relations,omitempty"`
+	// filter by relationship to other items
+	// TODO: We can probably wrap ToAttributeID, ToEntityID, and maybe Astructured into this?
+	Relations []RelationParams `json:"relations,omitempty"`
 
 	// bounding box searches
 	StartTimestamp       *time.Time `json:"start_timestamp,omitempty"`
@@ -168,7 +159,7 @@ type ItemSearchParams struct {
 	Deleted bool `json:"deleted,omitempty"`
 
 	// stores the converted names to row IDs
-	classificationIDs []int64
+	classificationIDs []uint64
 }
 
 type SearchResults struct {
@@ -189,7 +180,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	params.SemanticText = strings.TrimSpace(params.SemanticText)
 
 	// get the DB query string and associated arguments
-	q, args, err := tl.prepareSearchQuery(params)
+	q, args, err := tl.prepareSearchQuery(ctx, params)
 	if err != nil {
 		return SearchResults{}, err
 	}
@@ -240,7 +231,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		// on the coordinates which is much more efficient
 		if params.GeoJSON {
 			// read the coordinate data
-			var rowID int64
+			var rowID uint64
 			var lat, lon *float64
 			targets := []any{&rowID, &lat, &lon}
 			if params.WithTotal {
@@ -317,7 +308,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		// filter results for relevance by passing them through the classifier...
 		// this is kind of a hack, but it's a well-known difficult problem apparently,
 		// for any KNN search, to only show relevant results
-		itemFiles := make(map[int64]string)
+		itemFiles := make(map[uint64]string)
 		for _, result := range results {
 			if result.DataFile == nil || result.DataType == nil {
 				continue
@@ -394,7 +385,7 @@ func (tl *Timeline) convertNamesToIDs(params *ItemSearchParams) {
 	tl.cachesMu.RUnlock()
 }
 
-func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, error) {
+func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchParams) (string, []any, error) {
 	if (params.Latitude == nil && params.Longitude != nil) || (params.Latitude != nil && params.Longitude == nil) {
 		return "", nil, errors.New("location proximity search must include both lat and lon coordinates")
 	}
@@ -463,10 +454,11 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		LEFT JOIN entity_attributes ON attributes.id = entity_attributes.attribute_id
 		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`
 
+	// TODO: It's possible that we could move all these (ToAttributeID, ToEntityID, rootItemsOnly) into RelationParams
 	if len(params.ToAttributeID) > 0 || len(params.ToEntityID) > 0 {
 		q += `
 		JOIN relationships ON relationships.from_item_id = items.id`
-	} else if rootItemsOnly {
+	} else if rootItemsOnly || len(params.Relations) > 0 {
 		q += `
 		LEFT JOIN relationships ON relationships.to_item_id = items.id
 		LEFT JOIN relations ON relations.id = relationships.relation_id`
@@ -691,6 +683,19 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 		})
 	}
 
+	// factor in relationships
+	for _, relParam := range params.Relations {
+		op := "IS"
+		if relParam.Not {
+			op = "IS NOT"
+		}
+		and(func() {
+			if relParam.RelationLabel != "" {
+				or("relations.label "+op+" ?", relParam.RelationLabel)
+			}
+		})
+	}
+
 	if !params.OnlyTotal {
 		q += "\n\t\tGROUP BY items.id"
 	}
@@ -777,8 +782,11 @@ func (tl *Timeline) prepareSearchQuery(params ItemSearchParams) (string, []any, 
 			targetVectorClause = "(SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)"
 			args = append(args, params.SimilarTo)
 		} else if params.SemanticText != "" {
-			// search relative to an arbitrary input (TODO: support image inputs too)
-			embedding, err := generateEmbedding(tl.ctx, "text/plain", []byte(params.SemanticText), nil)
+			// search relative to an arbitrary input (TODO: support image inputs too) - python server must be online
+			if !pythonServerReady(ctx, false) {
+				return "", nil, errors.New("python server not ready")
+			}
+			embedding, err := generateEmbedding(ctx, "text/plain", []byte(params.SemanticText), nil)
 			if err != nil {
 				return "", nil, err
 			}
@@ -886,7 +894,8 @@ func (tl *Timeline) expandRelationshipSingle(ctx context.Context, tx *sql.Tx, sr
 
 	for rows.Next() {
 		var rel Related
-		var fromItemID, toItemID, relStart, relEnd *int64
+		var fromItemID, toItemID *uint64
+		var relStart, relEnd *int64
 		var fromEntity, toEntity relatedEntity
 		var relMeta *string
 		err := rows.Scan(&rel.RelationshipID, &rel.Directed, &rel.Label, &rel.Value, &relStart, &relEnd, &relMeta, &fromItemID, &toItemID,
@@ -941,7 +950,7 @@ func (tl *Timeline) expandRelationshipSingle(ctx context.Context, tx *sql.Tx, sr
 	return nil
 }
 
-func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID int64) (*SearchResult, error) {
+func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID uint64) (*SearchResult, error) {
 	ir, err := tl.loadItemRow(ctx, tx, itemRowID, nil, nil, nil, false)
 	if err != nil {
 		return nil, fmt.Errorf("loading related item row: %w", err)
@@ -981,19 +990,18 @@ type SearchResult struct {
 	Score    float64 `json:"score,omitempty"`
 }
 
-// TODO: Finish making this work
-// type RelationParams struct {
-// 	FromItem      bool   `json:"from_item,omitempty"`
-// 	ToItem        bool   `json:"to_item,omitempty"`
-// 	RelationLabel string `json:"relation_label,omitempty"`
-// }
+// RelationParams describes a search using item relations.
+type RelationParams struct {
+	Not           bool   `json:"not,omitempty"` // if true, only match items that do NOT have this relation
+	RelationLabel string `json:"relation_label,omitempty"`
+}
 
 // relatedEntity is a subset of Entity (so we need to make sure
 // the JSON field names are the same), but with pointer field
 // types because it is left-joined in queries which means they
 // can be null.
 type relatedEntity struct {
-	ID        *int64            `json:"id"`
+	ID        *uint64           `json:"id"`
 	Name      *string           `json:"name,omitempty"`
 	Picture   *string           `json:"picture,omitempty"`
 	Attribute nullableAttribute `json:"attribute,omitempty"` // TODO: experimental

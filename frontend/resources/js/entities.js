@@ -183,6 +183,11 @@ on('click', '#confirm-merge-entities', async e => {
 	// close modal and update list
 	done();
 	filterAndRenderEntitiesList();
+
+	// also update owner picture at the top if its entity was in the merge
+	if (keepID == 1 || ids[0] == 1) {
+		updateRepoOwners(true);
+	}
 });
 
 on('hidden.bs.modal', '#confirm-merge-entities', async e => {

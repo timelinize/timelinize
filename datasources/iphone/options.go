@@ -21,4 +21,11 @@ package iphone
 // Options configures the data source.
 type Options struct {
 	SkipSpam bool `json:"skip_spam"` // TODO: not implemented (haven't seen is_spam=1 in a DB yet)
+
+	// If enabled, import photos and videos directly from the camera roll
+	// (DCIM folder) instead of using the Photos app library. This is how
+	// iPhone photo/videos were imported before Photos library support was
+	// implemented. It may provide less metadata than the Photos library,
+	// but may also import files not indexed by the Photos library.
+	CameraRoll bool `json:"camera_roll"`
 }

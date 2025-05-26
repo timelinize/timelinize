@@ -22,6 +22,7 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -30,6 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
@@ -311,11 +313,48 @@ func provisionThumbsDB(ctx context.Context, thumbsDB *sql.DB, repoID uuid.UUID) 
 func (tl *Timeline) explainQueryPlan(ctx context.Context, tx *sql.Tx, q string, args ...any) {
 	logger := Log.Named("query_planner")
 
+	// convert some common pointer types to values as that's how they are used in the DB
+	argsToDisplay := make([]any, len(args))
+	for i, arg := range args {
+		switch v := arg.(type) {
+		case *string:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *time.Time:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *int:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *int64:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *uint64:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *float64:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case []byte:
+			if v != nil {
+				argsToDisplay[i] = hex.EncodeToString(v)
+			}
+		default:
+			argsToDisplay[i] = v
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
 	fmt.Fprintln(w, "\nQUERY PLAN FOR:\n============================================================================================")
 	fmt.Fprintln(w, q)
 	fmt.Fprintln(w, "============================================================================================")
-	fmt.Fprintln(w, args...)
+	fmt.Fprintln(w, argsToDisplay...)
 	fmt.Fprintln(w, "============================================================================================")
 
 	explainQ := "EXPLAIN QUERY PLAN " + q

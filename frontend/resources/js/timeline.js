@@ -37,6 +37,17 @@ async function loadAllGroups(maxGroups = 50) {
 function timelineFilterParams(lastItem) {
 	const params = {
 		related: 1,
+		relations: [
+			// don't show motion pictures / live photos, since they are not
+			// considered their own item in a gallery sense, and perhaps
+			// more importantly, we don't want to have to generate a thumbnail
+			// for them (literally no need for a thumbnail of those, just
+			// wasted CPU time and storage space)
+			{
+				"not": true,
+				"relation_label": "motion"
+			}
+		],
 		// offset: limit * (currentPageNum()-1), // TODO: figure out how to paginate the timeline
 		limit: 100
 	};

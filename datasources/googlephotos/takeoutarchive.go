@@ -43,6 +43,14 @@ const googlePhotosPath = "Takeout/Google Photos"
 func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeline.ImportParams, dirEntry timeline.DirEntry) error {
 	fimp.truncatedNames = make(map[string]int)
 
+	var checkpoint string
+	if opt.Checkpoint != nil {
+		err := json.Unmarshal(opt.Checkpoint, &checkpoint)
+		if err != nil {
+			return fmt.Errorf("decoding checkpoint: %w", err)
+		}
+	}
+
 	albumFolders, err := fs.ReadDir(dirEntry.FS, dirEntry.Filename)
 	if err != nil {
 		return fmt.Errorf("getting album list from %s: %w", googlePhotosPath, err)
@@ -76,7 +84,8 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		}
 
 		// read album folder contents, then sort in what I think is the same way
-		// Google does before truncating long filenames
+		// Google does before truncating long filenames -- this is crucial to
+		// matching up filenames correctly (metadata + media files)
 		albumItems, err := fs.ReadDir(dirEntry.FS, thisAlbumFolderPath)
 		if err != nil {
 			return err
@@ -93,8 +102,15 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		})
 
 		for _, d := range albumItems {
+			fpath := path.Join(thisAlbumFolderPath, dirEntry.Name())
+			if checkpoint != "" {
+				if fpath != checkpoint {
+					continue // keep going until we find the checkpoint position
+				}
+				checkpoint = "" // at the checkpoint; clear it so we process all further items
+			}
 			if err := fimp.processAlbumItem(ctx, albumMeta, thisAlbumFolderPath, d, opt, dirEntry); err != nil {
-				return fmt.Errorf("processing album item '%s': %w", path.Join(thisAlbumFolderPath, dirEntry.Name()), err)
+				return fmt.Errorf("processing album item '%s': %w", fpath, err)
 			}
 		}
 	}
@@ -118,6 +134,13 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	}
 
 	fpath := path.Join(folderPath, d.Name())
+
+	// skip sidecar movie files ("live photos") because we'll connect them when
+	// we process the actual photograph (hopefully they're in the same archive!)
+	if media.IsSidecarVideo(dirEntry.FS, fpath) {
+		return nil
+	}
+
 	f, err := dirEntry.FS.Open(fpath)
 	if err != nil {
 		return err
@@ -167,14 +190,59 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 
 	ig := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 
-	// tell the processor we prefer embedded metadata rather than sidecar info, by
-	// only preferring the filename read from the sidecar file (because it should
-	// contain the full/original name of the file which may have been truncated
-	// in the export archive)
+	// Between the JSON file and the actual media file, we typically prefer the
+	// filename in the JSON file and everything else that overlaps in the media
+	// file, since Google's metadata is known to be wrong sometimes (!?). However,
+	// in a rare singular case of corrupted input, I have found non-nil timestamp
+	// data that was completely wrong in the mvhd box of an MP4 file, captured on
+	// an Android phone, with several other videos even that same hour that were
+	// correct / not corrupted. The corrupted timestamp was 4165689599 (confirmed
+	// via ffprobe), which apparently equates to 2036-01-01, but should have been
+	// 2016-11-27. (The time was also truncated.) I can't explain the corruption.
+	// I think in general, photos and videos from Google Takeout aren't from the
+	// future, and probably aren't RIGHT at midnight on New Years (okay to be fair,
+	// that's not so unlikely) -- maybe we can prefer the metadata timestamp in
+	// those cases; though I'm not sure if this heuristic is reliable.
 	if path.Ext(fpath) == ".json" {
-		ig.Item.Retrieval.PreferFields = []string{"filename"}
+		// metadata file should have good filename and metadata, but we prefer
+		// the embedded timestamp if possible
+		ig.Item.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+			"filename":         timeline.UpdatePolicyOverwriteExisting,
+			"metadata":         timeline.UpdatePolicyPreferIncoming, // applied per-key, so keys unique to this file will be kept
+			"timestamp":        timeline.UpdatePolicyPreferExisting,
+			"timespan":         timeline.UpdatePolicyPreferExisting,
+			"timeframe":        timeline.UpdatePolicyPreferExisting,
+			"time_offset":      timeline.UpdatePolicyPreferExisting,
+			"time_uncertainty": timeline.UpdatePolicyPreferExisting,
+		}
 	} else {
-		ig.Item.Retrieval.PreferFields = []string{"data", "original_location", "intermediate_location", "timestamp", "timespan", "timeframe", "time_offset", "time_uncertainty", "location"}
+		// always use the embedded timestamp, unless it happens to be in the future or right
+		// at the midnight of a new year (one of my own files had a corrupted timestamp,
+		// explained above) - if this timestamp seems wrong, zero it out so we can use the
+		// metadata file timestamp's instead
+		tsUpdatePolicy := timeline.UpdatePolicyOverwriteExisting
+		if ig.Item.Timestamp.IsZero() ||
+			(ig.Item.Timestamp.Year() > time.Now().Year() ||
+				(ig.Item.Timestamp.Month() == time.January && ig.Item.Timestamp.Day() == 1 &&
+					ig.Item.Timestamp.Hour() == 0 && ig.Item.Timestamp.Minute() == 0 && ig.Item.Timestamp.Second() == 0)) {
+			tsUpdatePolicy = timeline.UpdatePolicyKeepExisting
+			ig.Item.Timestamp = time.Time{}
+		}
+		ig.Item.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+			"data":                  timeline.UpdatePolicyOverwriteExisting,
+			"original_location":     timeline.UpdatePolicyOverwriteExisting,
+			"intermediate_location": timeline.UpdatePolicyOverwriteExisting,
+			"filename":              timeline.UpdatePolicyPreferExisting,
+			"metadata":              timeline.UpdatePolicyPreferIncoming,
+			"timestamp":             tsUpdatePolicy,
+			"timespan":              tsUpdatePolicy,
+			"timeframe":             tsUpdatePolicy,
+			"time_offset":           tsUpdatePolicy,
+			"time_uncertainty":      tsUpdatePolicy,
+			"coordinates":           timeline.UpdatePolicyPreferIncoming,
+		}
+
+		media.ConnectMotionPhoto(opt.Log, dirEntry, mediaFilePath, ig)
 	}
 
 	// if item has an "-edited" variant, relate it
@@ -185,6 +253,8 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 		edited := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 		ig.ToItem(timeline.RelEdit, edited.Item)
 	}
+
+	ig.Checkpoint = fpath
 
 	opt.Pipeline <- ig
 
@@ -234,6 +304,11 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 		}
 	}
 
+	// set a timestamp if we only have the metadata file
+	if item.Timestamp.IsZero() {
+		item.Timestamp = itemMeta.parsedPhotoTakenTime
+	}
+
 	// the retrieval key is crucial so that we can store what data we have from an item
 	// as we get it, without getting the whole item, even across different imports; it
 	// consists of the data source name to avoid conflicts with other DSes, the name of
@@ -270,7 +345,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 	}
 
 	for _, person := range itemMeta.People {
-		ig.ToEntity(timeline.RelDepicts, &timeline.Entity{
+		ig.ToEntity(timeline.RelIncludes, &timeline.Entity{
 			Name: person.Name,
 			Attributes: []timeline.Attribute{
 				{

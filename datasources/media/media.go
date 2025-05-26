@@ -75,7 +75,7 @@ type Options struct {
 	FolderIsAlbum bool `json:"folder_is_album,omitempty"`
 
 	// The ID of the owner entity. REQUIRED if entity is to be related in DB.
-	OwnerEntityID int64 `json:"owner_entity_id"`
+	OwnerEntityID uint64 `json:"owner_entity_id"`
 }
 
 // FileImporter can import the data from a file.
@@ -405,7 +405,7 @@ var (
 		".m4v":  {},
 		".mkv":  {},
 		".mov":  {},
-		".mp":   {}, // Google Photos / Pixel phones motion pictures... sigh
+		".mp":   {}, // One generation of Google Photos / Pixel phones motion pictures... sigh
 		".mp4":  {},
 		".mpeg": {},
 		".mpg":  {},
@@ -429,6 +429,7 @@ var (
 		".mp3":  {},
 		".oga":  {},
 		".ogg":  {},
+		".opus": {},
 		".wav":  {},
 		".wma":  {},
 	}

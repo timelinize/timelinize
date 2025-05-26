@@ -25,30 +25,170 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"go.uber.org/zap"
 )
 
-const mlServer = "http://127.0.0.1:12003/"
+const (
+	PyHost = "127.0.0.1"
+	PyPort = 12003
+)
 
 type embeddingJob struct {
 	// be sure not to include duplicates in this list
 	ItemIDs []int64 `json:"item_ids,omitempty"`
+
+	// infer items from the given import job
+	ItemsFromImportJob uint64 `json:"items_from_import_job,omitempty"`
 }
 
 func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
-	var startIdx int
+	var chkpt embeddingJobCheckpoint
 	if checkpoint != nil {
-		if err := json.Unmarshal(checkpoint, &startIdx); err != nil {
+		if err := json.Unmarshal(checkpoint, &chkpt); err != nil {
 			job.logger.Error("failed to resume from checkpoint", zap.Error(err))
 		}
+		job.Logger().Info("resuming from checkpoint",
+			zap.Int64("page_start", chkpt.PageStart),
+			zap.Int("position", chkpt.IndexOnPage),
+			zap.Int("configured_item_count", len(ej.ItemIDs)),
+			zap.Uint64("items_from_import_job", ej.ItemsFromImportJob))
 	}
 
+	// if the embeddings to generate were explicitly enumerated, simply do those
+	if len(ej.ItemIDs) > 0 {
+		job.Logger().Info("waiting until Python server is ready")
+		if !pythonServerReady(job.ctx, true) {
+			return errors.New("python server not ready")
+		}
+		job.Logger().Info("generating embeddings using predefined list", zap.Int("count", len(ej.ItemIDs)))
+		return ej.processInBatches(job, ej.ItemIDs, 0, chkpt.IndexOnPage)
+	}
+
+	if ej.ItemsFromImportJob == 0 {
+		return errors.New("no items; expecting either individual items listed, or an import job")
+	}
+
+	logger := job.Logger().With(zap.Uint64("import_job_id", ej.ItemsFromImportJob))
+
+	logger.Info("counting total size of job")
+
+	const mostOfQuery = `FROM items
+			LEFT JOIN embeddings ON embeddings.id = items.embedding_id
+			LEFT JOIN jobs ON jobs.id = items.modified_job_id
+			WHERE (items.job_id=? OR items.modified_job_id=?)
+				AND (items.data_type LIKE 'image/%' OR items.data_type LIKE 'text/%')
+				AND (items.data_id IS NOT NULL OR items.data_text IS NOT NULL OR items.data_file IS NOT NULL)
+				AND (items.embedding_id IS NULL
+					OR embeddings.generated < items.stored
+					OR (embeddings.generated < items.modified
+						AND embeddings.generated < jobs.ended))`
+
+	job.tl.dbMu.RLock()
+	var jobSize int
+	err := job.tl.db.QueryRowContext(job.ctx, `
+		SELECT count()
+			`+mostOfQuery,
+		ej.ItemsFromImportJob, ej.ItemsFromImportJob).Scan(&jobSize)
+	job.tl.dbMu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("failed counting size of job: %w", err)
+	}
+	job.SetTotal(jobSize)
+
+	if jobSize == 0 {
+		logger.Info("nothing to do", zap.Int("count", jobSize))
+		return nil
+	}
+
+	logger.Info("waiting until Python server is ready")
+
+	if !pythonServerReady(job.ctx, true) {
+		return errors.New("python server not ready")
+	}
+
+	logger.Info("generating embeddings for items from import job", zap.Int("count", jobSize))
+
+	var thisPageStart int64
+	lastItemID := chkpt.PageStart
+
+	for {
+		var pageResults []int64
+
+		const pageSize = 1000
+
+		thisPageStart = lastItemID
+
+		// select items from the configured import job that have a data type we can generate embeddings for,
+		// and which actually have data, and which do not yet have embeddings (OR the embedding is outdated
+		// and the item was updated more recently than the embedding), and which are on this page of results
+		job.tl.dbMu.RLock()
+		rows, err := job.tl.db.QueryContext(job.ctx, `
+			SELECT items.id, items.stored, items.data_type
+			`+mostOfQuery+`
+				AND items.id > ?
+			ORDER BY items.id
+			LIMIT ?
+			`, ej.ItemsFromImportJob, ej.ItemsFromImportJob, lastItemID, pageSize)
+		if err != nil {
+			job.tl.dbMu.RUnlock()
+			return fmt.Errorf("failed querying page of database table: %w", err)
+		}
+		var hadRow bool
+		for rows.Next() {
+			hadRow = true
+
+			var rowID, stored int64
+			var dataType *string
+
+			err := rows.Scan(&rowID, &stored, &dataType)
+			if err != nil {
+				defer rows.Close()
+				job.tl.dbMu.RUnlock()
+				return fmt.Errorf("failed to scan row from database page: %w", err)
+			}
+
+			// Keep the last item ID as a fast way to offset for the next page
+			lastItemID = rowID
+
+			if qualifiesForEmbedding(dataType) {
+				pageResults = append(pageResults, rowID)
+			}
+		}
+		rows.Close()
+		job.tl.dbMu.RUnlock()
+		if err = rows.Err(); err != nil {
+			return fmt.Errorf("iterating rows for researching embeddings failed: %w", err)
+		}
+
+		if !hadRow {
+			break // all done!
+		}
+
+		if len(pageResults) == 0 {
+			continue
+		}
+
+		if err := ej.processInBatches(job, pageResults, thisPageStart, chkpt.IndexOnPage); err != nil {
+			return fmt.Errorf("processing page of embedding tasks: %w", err)
+		}
+
+		// clear this so that we don't skip items on the next page after the first one, when resuming from a checkpoint!
+		chkpt.IndexOnPage = 0
+	}
+
+	return nil
+}
+
+func (ej embeddingJob) processInBatches(job *ActiveJob, itemIDs []int64, firstItemIDOfPage int64, startIndexInPage int) error {
 	// run each task in a goroutine which we group by batch; this allows
 	// us to throttle concurrent goroutines, run tasks in parallel for speed,
 	// and checkpoint after the entire batch has finished, which allows for
@@ -59,7 +199,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 	// all goroutines must be done before we return
 	defer wg.Wait()
 
-	for i := startIdx; i < len(ej.ItemIDs); i++ {
+	for i := startIndexInPage; i < len(itemIDs); i++ {
 		if err := job.Continue(); err != nil {
 			return err
 		}
@@ -69,14 +209,17 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 		if i%batchSize == batchSize-1 {
 			wg.Wait()
 
-			if err := job.Checkpoint(i); err != nil {
+			if err := job.Checkpoint(embeddingJobCheckpoint{
+				PageStart:   firstItemIDOfPage,
+				IndexOnPage: i,
+			}); err != nil {
 				job.logger.Error("failed to save checkpoint",
 					zap.Int("position", i),
 					zap.Error(err))
 			}
 		}
 
-		itemID := ej.ItemIDs[i]
+		itemID := itemIDs[i]
 
 		// proceed to spawn a new goroutine as part of this batch
 		wg.Add(1)
@@ -93,9 +236,6 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 			job.Progress(1)
 		}(job, itemID)
 	}
-
-	// all goroutines must be done before we return
-	wg.Wait()
 
 	return nil
 }
@@ -193,7 +333,7 @@ func generateEmbedding(ctx context.Context, dataType string, data []byte, filena
 		return nil, errors.New("content type is required")
 	}
 
-	endpoint := mlServer + "/embedding"
+	endpoint := pyServerURL("/embedding")
 
 	var body io.Reader
 	if data != nil {
@@ -245,8 +385,8 @@ func generateEmbedding(ctx context.Context, dataType string, data []byte, filena
 }
 
 // TODO: endpoint currently works for images only
-func classify(ctx context.Context, itemFiles map[int64]string, labels []string) (map[int64]float64, error) {
-	endpoint := mlServer + "/classify"
+func classify(ctx context.Context, itemFiles map[uint64]string, labels []string) (map[uint64]float64, error) {
+	endpoint := pyServerURL("/classify")
 
 	jsonBytes, err := json.Marshal(itemFiles)
 	if err != nil {
@@ -281,7 +421,7 @@ func classify(ctx context.Context, itemFiles map[int64]string, labels []string) 
 		return nil, fmt.Errorf("got error status from ML server: HTTP %d (message='%s')", resp.StatusCode, msg)
 	}
 
-	var scores map[int64]float64
+	var scores map[uint64]float64
 	err = json.NewDecoder(resp.Body).Decode(&scores)
 	if err != nil {
 		return nil, fmt.Errorf("decoding JSON response: %w", err)
@@ -294,4 +434,46 @@ func qualifiesForEmbedding(mimeType *string) bool {
 	return mimeType != nil &&
 		(strings.HasPrefix(*mimeType, "image/") ||
 			strings.HasPrefix(*mimeType, "text/"))
+}
+
+type embeddingJobCheckpoint struct {
+	PageStart   int64 `json:"page_start"`
+	IndexOnPage int   `json:"index_on_page"`
+}
+
+func pythonServerReady(ctx context.Context, wait bool) bool {
+	healthCheckURL := pyServerURL("/health-check")
+
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthCheckURL, nil)
+		if err != nil {
+			panic("could not construct health check request: " + err.Error())
+		}
+
+		resp, err := pythonServerHTTPClient.Do(req)
+		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			resp.Body.Close()
+			return true
+		}
+
+		if !wait {
+			return false
+		}
+
+		const pause = 500 * time.Millisecond
+		select {
+		case <-time.After(pause):
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
+func pyServerURL(path string) string {
+	hostPort := net.JoinHostPort(PyHost, strconv.Itoa(PyPort))
+	return fmt.Sprintf("http://%s%s", hostPort, path)
+}
+
+var pythonServerHTTPClient = &http.Client{
+	Timeout: 2 * time.Second,
 }

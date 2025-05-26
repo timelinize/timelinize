@@ -24,6 +24,7 @@ import (
 	tlcmd "github.com/timelinize/timelinize/cmd"
 	// plug in data sources
 	_ "github.com/timelinize/timelinize/datasources/applecontacts"
+	_ "github.com/timelinize/timelinize/datasources/applephotos"
 	_ "github.com/timelinize/timelinize/datasources/calendar"
 	_ "github.com/timelinize/timelinize/datasources/contactlist"
 	_ "github.com/timelinize/timelinize/datasources/email"
@@ -46,6 +47,7 @@ import (
 	_ "github.com/timelinize/timelinize/datasources/telegram"
 	_ "github.com/timelinize/timelinize/datasources/twitter"
 	_ "github.com/timelinize/timelinize/datasources/vcard"
+	_ "github.com/timelinize/timelinize/datasources/whatsapp"
 )
 
 // Package main is the entry point of the application.

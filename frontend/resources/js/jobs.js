@@ -487,7 +487,7 @@ function jobProgressUpdate(job) {
 			elem.classList.add('d-none');
 		}
 		for (const elem of $$(`.unpause-job.job-id-${job.id}`)) {
-			elem.classList.add('d-none');
+			elem.classList.remove('d-none');
 		}
 		for (const elem of $$(`.cancel-job.job-id-${job.id}`)) {
 			elem.classList.add('d-none');

@@ -20,7 +20,9 @@
 package vcard
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"io/fs"
@@ -124,7 +126,8 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			}
 
 			p := &timeline.Entity{
-				Name: strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
+				Name:     strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
+				Metadata: make(timeline.Metadata),
 			}
 			if p.Name == "" {
 				if name := card.Name(); name != nil {
@@ -181,14 +184,21 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 					}
 				}
 			}
-			// otherwise, try downloading the picture from a URL in the vcard, although the link is often dead
+			// otherwise, try downloading the picture from the vCard; I have seen URLs and base64,
+			// but URLs are often dead, and the vcard package loses some base64 values, for some reason
 			if p.NewPicture == nil {
-				photoURL := card.PreferredValue(vcard.FieldPhoto)
-				if photoURL == "" {
-					photoURL = card.PreferredValue(vcard.FieldLogo)
+				photo := card.PreferredValue(vcard.FieldPhoto)
+				if photo == "" {
+					photo = card.PreferredValue(vcard.FieldLogo)
 				}
-				if photoURL != "" {
-					p.NewPicture = timeline.DownloadData(photoURL)
+				if strings.HasPrefix(strings.ToLower(photo), "http") {
+					p.NewPicture = timeline.DownloadData(photo)
+				} else if photo != "" {
+					// assume base64 encoding I guess; the parser kind of loses the "tail" information... but we have seen base64 photos
+					p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+						photoBytes, err := base64.StdEncoding.DecodeString(photo)
+						return io.NopCloser(bytes.NewReader(photoBytes)), err
+					}
 				}
 			}
 

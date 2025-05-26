@@ -498,7 +498,7 @@ function renderFilterDropdown(containerEl, title, loadKey) {
 }
 
 
-async function newDataSourceSelect(selectEl) {
+async function newDataSourceSelect(selectEl, options) {
 	if ($(selectEl).tomselect) {
 		return $(selectEl).tomselect;
 	}
@@ -520,13 +520,19 @@ async function newDataSourceSelect(selectEl) {
 		return `<div>${escape(data.text)}</div>`;
 	}
 
-	const ts  = await new TomSelect($(selectEl), {
-		maxItems: null,
+	const ts = new TomSelect($(selectEl), {
+		maxItems: options?.maxItems,
 		render: {
 			item: renderTomSelectItemAndOption,
 			option: renderTomSelectItemAndOption
 		}
 	});
+
+	// for a single-select control, it usually makes sense to
+	// initialize empty rather than the first option
+	if (options?.maxItems == 1) {
+		ts.clear(true);
+	}
 
 	// Clear input after selecting matching option from list
 	// (I have no idea why this isn't the default behavior)
@@ -841,9 +847,7 @@ async function newFilePicker(name, options) {
 		// reset the filepath box, listing table, and selected path(s),
 		// then emit event (intentionally named uniquely from standard events)
 		$('.file-picker-path').value = listing.dir;
-		const upElem = $('.file-picker-up', filePicker);
 		$('.file-picker-table tbody', filePicker).innerHTML = '';
-		$('.file-picker-table tbody', filePicker).append(upElem);
 		filePicker.filepaths = {};
 		filePicker.dispatchEvent(new CustomEvent("selection", { bubbles: true }));
 
@@ -1021,7 +1025,11 @@ function entityPicture(entity) {
 	if (entity.picture.startsWith("http://") || entity.picture.startsWith("https://")) {
 		return entity.picture;
 	}
-	return `/repo/${tlz.openRepos[0].instance_id}/${entity.picture}`;
+	let entityPicture = `/repo/${tlz.openRepos[0].instance_id}/${entity.picture}`;
+	if (entity.forceUpdate) {
+		entityPicture += `?nocache=${new Date().getTime()}`; // classic cachebuster trick
+	}
+	return entityPicture;
 }
 
 // TODO: consider changing second param to preview=false, so that by default
@@ -1171,7 +1179,7 @@ function itemTimestampDisplay(item, endItem) {
 				dateTime: `${dt.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)} ${dt.toLocaleString(DateTime.TIME_WITH_SECONDS)}`,
 				weekdayDate: `${dt.weekdayLong}, ${dt.toLocaleString(DateTime.DATE_MED)}`,
 				dateWithWeekday: `${dt.toLocaleString(DateTime.DATE_MED)} (${dt.weekdayLong})`,
-				time: `${dt.hour() % 12} o'clock` // TODO: have it be like "1pm" instead of "13 o'clock"
+				time: `${dt.hour % 12} o'clock` // TODO: have it be like "1pm" instead of "13 o'clock"
 			};
 		} else {
 			if (itvl.hasSame('day')) {
@@ -1496,7 +1504,7 @@ function itemContentElement(item, opts) {
 				return noContentElem();
 			}
 		}
-		else if (item.data_type.startsWith("audio/"))
+		else if (item.data_type.startsWith("audio/") || item.data_type == "application/ogg")
 		{
 			const audioTag = document.createElement('audio');
 			audioTag.classList.add('content');
@@ -1917,6 +1925,7 @@ function renderMessageItem(item, options) {
 			for (const [reaction, rels] of Object.entries(reactions)) {
 				var reactElem = document.createElement('div');
 				reactElem.classList.add('message-reaction');
+				reactElem.dataset.bsToggle = "tooltip";
 				var emojiElem = document.createElement('span');
 				emojiElem.classList.add('emoji');
 				emojiElem.textContent = reaction;
@@ -2185,6 +2194,8 @@ const PreviewModal = (function() {
 			} else {
 				$$('#modal-preview .btn-next').forEach(elem => elem.classList.add('disabled'));
 			}
+
+			$('#modal-preview .btn-primary').href = `/items/${item.repo_id}/${item.id}`;
 
 			// TODO: is this used/needed?
 			private.currentItem = item;

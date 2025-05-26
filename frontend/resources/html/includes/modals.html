@@ -103,7 +103,7 @@
 
 
 
-<template id="tpl-dsopt-smsbackuprestore">
+<template id="tpl-dsopt-sms_backup_restore">
 	<div class="mb-3">
 		<div class="row">
 			<div class="col-auto">
@@ -111,10 +111,10 @@
 			</div>
 			<div class="col">
 				<div class="mb-3">
-					<label class="form-label required">Your phone number</label>
-					<input type="text" class="smsbackuprestore-owner-phone form-control" placeholder="123-456-7890"
+					<label class="form-label required">Owner phone number</label>
+					<input type="text" class="sms_backup_restore-owner-phone form-control" placeholder="+1-123-456-7890"
 						required>
-					<small class="form-hint">Type the phone number of the owner of this file.</small>
+					<small class="form-hint">The phone number that originated this file. A phone number is required, so if this is empty, the timeline owner's phone number will be used (if it is already in the timeline).</small>
 				</div>
 			</div>
 		</div>
@@ -229,6 +229,35 @@
 				<label class="form-check mb-1">
 					<input class="icloud-recently-deleted form-check-input" type="checkbox">
 					<span class="form-check-label">Import recently deleted items</span>
+				</label>
+				<div class="small form-hint">
+					By default, deleted content is not imported. If checked, recently deleted photos and videos will
+					also be included in the import.
+				</div>
+			</div>
+		</div>
+
+	</fieldset>
+</template>
+
+<template id="tpl-dsopt-apple_photos">
+	<fieldset class="form-fieldset mb-0">
+		<div class="mb-4 row">
+			<label class="col-4 col-form-label">Owner</label>
+			<div class="col">
+				<select class="apple_photos-owner form-select" placeholder="Name or contact info">
+				</select>
+				<div class="small form-hint">
+					Select the person whose Apple Photos library this belongs to.
+				</div>
+			</div>
+		</div>
+		<div class="mb-4 row">
+			<label class="col-4 fw-medium">Import trashed items</label>
+			<div class="col">
+				<label class="form-check mb-1">
+					<input class="apple_photos-trashed form-check-input" type="checkbox">
+					<span class="form-check-label">Include photos and videos that are in the trash</span>
 				</label>
 				<div class="small form-hint">
 					By default, deleted content is not imported. If checked, recently deleted photos and videos will

@@ -66,7 +66,7 @@ func (s *server) handleAddEntity(w http.ResponseWriter, r *http.Request) error {
 
 type getEntityPayload struct {
 	RepoID   string `json:"repo_id"`
-	EntityID int64  `json:"entity_id"`
+	EntityID uint64 `json:"entity_id"`
 }
 
 func (s *server) handleGetEntity(w http.ResponseWriter, r *http.Request) error {
@@ -76,9 +76,9 @@ func (s *server) handleGetEntity(w http.ResponseWriter, r *http.Request) error {
 }
 
 type mergeEntitiesPayload struct {
-	RepoID         string  `json:"repo_id"`
-	BaseEntityID   int64   `json:"base_entity_id"`
-	OtherEntityIDs []int64 `json:"other_entity_ids"`
+	RepoID         string   `json:"repo_id"`
+	BaseEntityID   uint64   `json:"base_entity_id"`
+	OtherEntityIDs []uint64 `json:"other_entity_ids"`
 }
 
 func (s *server) handleMergeEntities(w http.ResponseWriter, r *http.Request) error {
@@ -98,9 +98,9 @@ func (s *server) handleCharts(w http.ResponseWriter, r *http.Request) error {
 }
 
 type jobsPayload struct {
-	RepoID     string  `json:"repo_id"`
-	JobIDs     []int64 `json:"job_ids"`
-	MostRecent int     `json:"most_recent"`
+	RepoID     string   `json:"repo_id"`
+	JobIDs     []uint64 `json:"job_ids"`
+	MostRecent int      `json:"most_recent"`
 }
 
 func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) error {
@@ -116,7 +116,7 @@ func (s *server) handleCancelJobs(w http.ResponseWriter, r *http.Request) error 
 		err := s.app.CancelJob(r.Context(), payload.RepoID, jobID)
 		if err != nil {
 			s.log.Error("canceling job failed",
-				zap.Int64("job_id", jobID),
+				zap.Uint64("job_id", jobID),
 				zap.Error(err))
 			if firstErr == nil {
 				firstErr = err
@@ -128,7 +128,7 @@ func (s *server) handleCancelJobs(w http.ResponseWriter, r *http.Request) error 
 
 type jobPayload struct {
 	RepoID    string `json:"repo_id"`
-	JobID     int64  `json:"job_id"`
+	JobID     uint64 `json:"job_id"`
 	StartOver bool   `json:"start_over,omitempty"` // only used with StartJob
 }
 
@@ -295,7 +295,7 @@ func (s *server) handleImport(w http.ResponseWriter, r *http.Request) error {
 
 func (s *server) handleNextGraph(w http.ResponseWriter, r *http.Request) error {
 	repoID, jobIDStr := r.FormValue("repo_id"), r.FormValue("job_id")
-	jobID, err := strconv.ParseInt(jobIDStr, 10, 64)
+	jobID, err := strconv.ParseUint(jobIDStr, 10, 64)
 	if err != nil {
 		return jsonResponse(w, nil, fmt.Errorf("job ID must be an integer: %w", err))
 	}
@@ -305,7 +305,7 @@ func (s *server) handleNextGraph(w http.ResponseWriter, r *http.Request) error {
 
 type submitGraphPayload struct {
 	RepoID string          `json:"repo_id"`
-	JobID  int64           `json:"job_id"`
+	JobID  uint64          `json:"job_id"`
 	Graph  *timeline.Graph `json:"graph"`
 	Skip   bool            `json:"skip"`
 }
@@ -341,8 +341,8 @@ func (s *server) handleConversation(w http.ResponseWriter, r *http.Request) erro
 }
 
 type deleteItemsPayload struct {
-	RepoID  string  `json:"repo_id"`
-	ItemIDs []int64 `json:"item_ids"`
+	RepoID  string   `json:"repo_id"`
+	ItemIDs []uint64 `json:"item_ids"`
 	timeline.DeleteOptions
 }
 

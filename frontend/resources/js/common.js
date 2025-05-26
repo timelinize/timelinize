@@ -124,6 +124,9 @@ function currentPageNum() {
 	return Number(new URLSearchParams(window.location.search).get('page') || 1);
 }
 
+function activateTooltips() {
+	const tooltipList = [...$$('[data-bs-toggle="tooltip"]')].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl))
+}
 
 // updateFilterResults runs the page's render function again to replace .filter-results
 // with the latest parameters in the query string.
@@ -134,7 +137,7 @@ function updateFilterResults() {
 	// if the results take a while to load, show a loading indicator
 	let slowLoadingHandle = setTimeout(function() {
 		const span = document.createElement('span');
-		span.classList.add('slow-loader');
+		span.classList.add('slow-loader', 'filter-loader');
 		$('.filter-results:not(.d-none)')?.insertAdjacentElement('beforebegin', span);
 	}, 1000);
 	
@@ -147,11 +150,14 @@ function updateFilterResults() {
 		// (need brief timeout to allow time for paint, I guess; otherwise browser just flashes in the content)
 		setTimeout(function() {
 			$$('.filter-results:not(.d-none)').forEach(elem => elem.classList.remove('opacity0'));
+			
+			// activate custom/Bootstrap tooltips on the page
+			activateTooltips();
 		}, 25);
 		
 		// hide any loading indicator
 		clearTimeout(slowLoadingHandle);
-		$('.slow-loader')?.remove();
+		$('.slow-loader.filter-loader')?.remove();
 	}, 250);
 }
 
@@ -216,6 +222,21 @@ on('click', '[data-bs-toggle="switch-icon"]', e => {
 });
 
 
+// Returns an array of the attrbutes with the given name on the entity.
+function getEntityAttribute(entity, attributeName) {
+	const attrs = [];
+	if (!entity.attributes) {
+		return attrs;
+	}
+	for (const attr of entity.attributes) {
+		if (attr.name == attributeName) {
+			attrs.push(attr)
+		}
+	}
+	return attrs;
+}
+
+
 // Dynamic timestamps which update as much as every second to always show a correct
 // relative time on the screen. Pass in the element to put the relative text in
 // and the timestamp string from a JSON object.
@@ -269,6 +290,7 @@ function betterToHuman(luxonDuration, opts) {
 
 function freezePage(modal) {
 	if (modal) {
+		console.log("Showing modal");
 		tlz.loggerSocket.modal.show();
 	}
 	for (const [key, itvl] of Object.entries(tlz.intervals)) {
@@ -282,6 +304,7 @@ function freezePage(modal) {
 function unfreezePage(modal) {
 	if (modal) {
 		tlz.loggerSocket.modal.hide();
+		console.log("Modal hidden");
 	}
 	for (const [key, itvl] of Object.entries(tlz.intervals)) {
 		if (itvl.interval) {
@@ -347,6 +370,11 @@ function connectLog() {
 			return;
 		}
 
+		// if the owner entity just had its picture set, update it in the UI
+		if (l.logger == "job.action" && l.msg == "new owner picture") {
+			updateRepoOwners(true);
+		}
+
 		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.id}`)) {
 			// this page is for this import job, so display its table
 			$('.job-import-stream-container').classList.remove('d-none');
@@ -354,7 +382,7 @@ function connectLog() {
 			const tableElem = $(`.job-import-stream.job-id-${l.id}`);
 			const rowElem = cloneTemplate('#tpl-job-import-stream-row');
 
-			let location = l?.lat?.toFixed(4) || "";
+			let location = l?.lat?.toFixed?.(4) || "";
 			if (l.lon) {
 				if (location != "") location += ", ";
 				location += l.lon.toFixed(4);
@@ -435,19 +463,23 @@ function connectLog() {
 		if (tlz.loggerSocket.retrying) {
 			return;
 		}
-		// if a disconnect message isn't showing already, display it
-		if (!tlz.loggerSocket.modal) {
-			tlz.loggerSocket.modal = new bootstrap.Modal($('#modal-disconnected'));
-			freezePage(tlz.loggerSocket.modal);
-		}
 		// log this event, then retry after a moment
 		const logFn = event.type == "error" ? console.error : console.warn;
 		logFn("Lost connection to logger socket; retrying:", event);
+		// if a disconnect message isn't showing already, display it
+		if (!tlz.loggerSocket.modal) {
+			console.log("Making modal and freezing page")
+			tlz.loggerSocket.modal = new bootstrap.Modal($('#modal-disconnected'));
+			freezePage(tlz.loggerSocket.modal);
+		}
 		tlz.loggerSocket.retrying = true;
 		setTimeout(connectLog, 500);
 	}
-	tlz.loggerSocket.socket.onerror = lostConnection;
 	tlz.loggerSocket.socket.onclose = lostConnection;
+	tlz.loggerSocket.socket.onerror = event => {
+		const logFn = event.type == "error" ? console.error : console.warn;
+		logFn("Logger socket error:", event);
+	};
 }
 connectLog();
 
@@ -561,7 +593,7 @@ function moveMapInto(mapContainerElem) {
 			}
 		}
 
-		if (resizeCount >= 2) {
+		if (resizeCount >= 3) {
 			// we're done, so no need to observe anymore
 			observer.disconnect();
 		}

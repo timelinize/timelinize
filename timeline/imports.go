@@ -34,10 +34,13 @@ import (
 )
 
 type importJobCheckpoint struct {
-	EstimatedSize  *int64 `json:"estimated_size"` // only set if currently in the estimating phase
-	OuterIndex     int    `json:"outer_index"`
-	InnerIndex     int    `json:"inner_index"`
-	ThumbnailCount int64  `json:"thumbnail_count"`
+	EstimatedSize *int64 `json:"estimated_size"` // only set if currently in the estimating phase
+	OuterIndex    int    `json:"outer_index"`
+	InnerIndex    int    `json:"inner_index"`
+
+	// these fields remember the count of new items that will need thumbnails or embeddings
+	ThumbnailCount int64 `json:"thumbnail_count"`
+	EmbeddingCount int64 `json:"embedding_count"`
 
 	// This is passed through to the data source; and we would be using
 	// json.RawMessage here so that, when loading a checkpoint, the
@@ -149,7 +152,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 		estimating = chkpt.EstimatedSize != nil
 	}
 
-	// two iterations: first to estimate size if enabled, then to actually import items
+	// two iterations of the phase loop: first to estimate size if enabled, then to actually import items
 	for {
 		// this should be cumulative across all the files
 		var totalSizeEstimate *int64
@@ -164,6 +167,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 			job.Message("Estimating total import size")
 		}
 
+		// outer loop: iterate the datasource+filename combos
 		for i := chkpt.OuterIndex; i < len(ij.Plan.Files); i++ {
 			if err := job.Context().Err(); err != nil {
 				return err
@@ -187,7 +191,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 			logger := job.Logger().With(zap.String("data_source_name", ds.Name))
 
-			// process each filename one at a time
+			// inner loop: iterate the filenames assigned to this data source configuration
 			for j := chkpt.InnerIndex; j < len(fileImport.Filenames); j++ {
 				if err := job.Context().Err(); err != nil {
 					return err
@@ -289,6 +293,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 				// during import is (probably?) not desired, so use a "regular" file system
 				var fsys fs.FS
 				if archives.PathContainsArchive(filepath.ToSlash(fsRoot)) {
+					// TODO: I'd love to know what the archive file is named, for troubleshooting multi-archive Google Takeouts
 					fsys = &archives.DeepFS{Root: fsRoot, Context: job.Context()}
 				} else {
 					fsys, err = archives.FileSystem(job.ctx, fsRoot, nil)
@@ -347,6 +352,11 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 				// the data source checkpoint is only applicable to the starting point (the filename we resumed from)
 				chkpt.DataSourceCheckpoint = nil
+
+				// reset the checkpoint's inner index back to 0, since when we advance the outer loop
+				// we should always start its file list at 0 (otherwise we skip import tasks completely
+				// if it's > 0!)
+				chkpt.InnerIndex = 0
 			}
 		}
 
@@ -357,8 +367,12 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 			job.FlushProgress()
 			job.Logger().Info("done with size estimation", zap.Int64("estimated_size", total))
 
-			// loop once more to import items (don't estimate again)
+			// loop once more to import items (don't estimate again); and make sure we start the
+			// next phase from the beginning of the outer list (even if we resumed a checkpoint
+			// and the starting outer index is > 0), because the starting index only applies to
+			// that phase; we don't want to skip tasks for our import job!
 			estimating = false
+			chkpt.OuterIndex = 0
 			continue
 		}
 
@@ -497,6 +511,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 
 	// nothing to do if no items were empty
 	if len(emptyItems) == 0 {
+		ij.job.Logger().Info("no empty items to delete")
 		return nil
 	}
 
@@ -513,6 +528,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 func (ij ImportJob) generateThumbnailsForImportedItems() {
 	thumbnailCount := atomic.LoadInt64(ij.thumbnailCount)
 	if thumbnailCount == 0 {
+		ij.job.Logger().Info("no items qualify for thumbnail, so skipping thumbnail generation job")
 		return
 	}
 
@@ -522,79 +538,23 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 		TasksFromImportJob: ij.job.ID(),
 	}
 
-	if _, err := ij.job.tl.CreateJob(job, time.Time{}, 0, int(thumbnailCount), ij.job.id); err != nil {
+	// thumbnail job will calculate its total size
+	if _, err := ij.job.tl.CreateJob(job, time.Time{}, 0, 0, ij.job.id); err != nil {
 		ij.job.Logger().Error("creating thumbnail job", zap.Error(err))
 		return
 	}
 }
 
 func (ij ImportJob) generateEmbeddingsForImportedItems() {
-	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx, `
-		SELECT id, data_id, data_type, data_file
-		FROM items
-		WHERE job_id=?
-			AND data_type IS NOT NULL
-			AND (data_id IS NOT NULL OR data_text IS NOT NULL OR data_file IS NOT NULL)
-		`, ij.job.id)
-	if err != nil {
-		ij.job.tl.dbMu.RUnlock()
-		ij.job.Logger().Error("unable to generate embeddings from this import", zap.Error(err))
-		return
+	ij.job.Logger().Info("creating embeddings job from import")
+
+	job := embeddingJob{
+		ItemsFromImportJob: ij.job.ID(),
 	}
 
-	var job embeddingJob
-	var idMap = make(map[int64]struct{}) // prevent duplicates
-
-	for rows.Next() {
-		var rowID int64
-		var dataID *int64
-		var dataType, dataFile *string
-
-		// TODO: dataID and dataFile are not used...?
-		err := rows.Scan(&rowID, &dataID, &dataType, &dataFile)
-		if err != nil {
-			defer rows.Close()
-			ij.job.Logger().Error("unable to scan row to generate embeddings from this import", zap.Error(err))
-			ij.job.tl.dbMu.RUnlock()
-			return
-		}
-
-		if !qualifiesForEmbedding(dataType) {
-			continue
-		}
-
-		idMap[rowID] = struct{}{}
-	}
-	rows.Close()
-	ij.job.tl.dbMu.RUnlock()
-
-	if err = rows.Err(); err != nil {
-		ij.job.Logger().Error("iterating rows for generating embeddings failed", zap.Error(err))
-		return
-	}
-
-	if len(idMap) == 0 {
-		ij.job.Logger().Debug("no embeddings to generate from this job")
-		return
-	}
-
-	total := len(idMap)
-
-	// now that our read lock on the DB is released, we can take our time generating embeddings in the background
-
-	ij.job.Logger().Info("generating embeddings for imported items", zap.Int("count", total))
-
-	// convert map to slice; it's more concise in the DB and ordering is important with checkpoints
-	job.ItemIDs = make([]int64, len(idMap))
-	var i int
-	for id := range idMap {
-		job.ItemIDs[i] = id
-		i++
-	}
-
-	if _, err = ij.job.tl.CreateJob(job, time.Time{}, 0, total, ij.job.id); err != nil {
-		ij.job.Logger().Error("creating embedding job", zap.Error(err))
+	// embedding job will calculate its total size
+	if _, err := ij.job.tl.CreateJob(job, time.Time{}, 0, 0, ij.job.id); err != nil {
+		ij.job.Logger().Error("creating embeddings job", zap.Error(err))
 		return
 	}
 }

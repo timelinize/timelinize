@@ -39,14 +39,20 @@ on('show.bs.modal', '#modal-timeline-folder', async event => {
 
 on('selection', '#modal-timeline-folder .file-picker', event => {
 	if (event.target.selected().length == 1) {
-		$('#select-timeline-folder').classList.remove('disabled');
+		$('#select-timeline-folder').innerText = "Use Selected Folder";
 	} else {
-		$('#select-timeline-folder').classList.add('disabled');
+		$('#select-timeline-folder').innerText = "Select This Folder";
 	}
 });
 
 on('click', '#select-timeline-folder', event => {
-	const selectedDirs = $('#modal-timeline-folder .file-picker').selected();
+	let selectedDirs = $('#modal-timeline-folder .file-picker').selected();
+	if (!selectedDirs.length) {
+		const currentPath = $('#modal-timeline-folder .file-picker-path').value;
+		if (currentPath) {
+			selectedDirs = [currentPath];
+		}
+	}
 	if (selectedDirs.length != 1) {
 		return;
 	}
@@ -72,7 +78,7 @@ on('click', '#continue', async () => {
 			}
 
 			// otherwise, if there is at least one person, return to app
-			await navigateSPA('/');
+			await navigateSPA('/', true);
 
 			notify({
 				type: "success",
@@ -129,7 +135,7 @@ on('click', '#continue', async () => {
 		await updateRepoOwners();
 
 		// continue to app
-		await navigateSPA('/');
+		await navigateSPA('/', true);
 
 		notify({
 			type: "success",

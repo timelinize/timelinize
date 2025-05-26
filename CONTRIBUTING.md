@@ -5,6 +5,7 @@ The project welcomes contributions!
 
 Please note the following development values, goals, or priorities:
 
+- **Please disclose the use of LLMs or "AI"; we prefer hand-written, human-understood code.** We understand if you want AI assistance, but we ask that you disclose the use of AI tools. It affects our code review. Given the human-centered nature of our project, we prefer hand-crafted contributions.
 - **Avoid dependencies unless they are really needed.** For example, we don't use testing frameworks for Go code because the `testing` package works just fine, even if it is a few more lines of code. Some dependencies are obviously needed given the scope of this application, but in general avoid adding new ones just because they're familiar or save a few lines of code.
 - **No build steps for the frontend.** The web UI should "just work" without needing extra compilation or external tools installed.
 - **No frontend JavaScript frameworks.** With a little bootstrapping, vanilla JS works very well. Please do not introduce any JS frameworks. Vendored JS libraries are OK if they provide essential functionality.

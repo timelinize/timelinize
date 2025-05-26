@@ -242,18 +242,17 @@ function on(eventName, elemSelector, handler, capture) {
 	});
 }
 
-function trigger(el, eventType) {
+function trigger(el, eventType, detail) {
 	if (typeof el === 'string') {
 		el = $(el); // assume it was a selector, for convenience
 	}
-
 	// from youmightnotneedjquery.com
 	if (typeof eventType === 'string' && typeof el[eventType] === 'function') {
 		el[eventType]();
 	} else {
 		const event =
 			typeof eventType === 'string'
-				? new Event(eventType, { bubbles: true, cancelable: true })
+				? new CustomEvent(eventType, { bubbles: true, cancelable: true, detail: detail })
 				: eventType;
 		el.dispatchEvent(event);
 	}
@@ -325,14 +324,14 @@ function notify(params) {
 	}
 
 	if (params.title) {
-		$('.alert-title', notifElem).innerText = params.title;
+		$('.alert-heading', notifElem).innerText = params.title;
 	} else {
-		$('.alert-title', notifElem).remove();
+		$('.alert-heading', notifElem).remove();
 	}
 	if (params.message) {
-		$('.text-secondary', notifElem).innerText = params.message;
+		$('.alert-description', notifElem).innerText = params.message;
 	} else {
-		$('.text-secondary', notifElem).remove();
+		$('.alert-description', notifElem).remove();
 	}
 	$('.alert-icon', notifElem).innerHTML = icons[params.type];
 
@@ -404,7 +403,7 @@ async function closeRepository() {
 	tlz.openRepos = await app.OpenRepositories();
 	store('open_repos', tlz.openRepos);
 	if (!tlz.openRepos.length) {
-		await navigateSPA('/setup');
+		await navigateSPA('/setup', true);
 		notify({
 			type: 'success',
 			title: "Logged out",

@@ -1,12 +1,11 @@
 <template id="tpl-alert">
-	<div class="alert bg-white alert-show" role="alert">
-		<div class="d-flex">
-			<div class="alert-icon"></div>
-			<div>
-				<h4 class="alert-title"></h4>
-				<div class="text-secondary"></div>
-			</div>
+	<div class="alert alert-minor alert-dismissible bg-white alert-show" role="alert">
+		<div class="alert-icon"></div>
+		<div>
+			<h4 class="alert-heading"></h4>
+			<div class="alert-description"></div>
 		</div>
+		<a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
 		<div class="alert-timer-progress-bar-container"> 
 			<div class="alert-timer-progress-bar"></div>
 		</div>
@@ -357,8 +356,6 @@
 						<th class="file-picker-col-size"><button class="table-sort" data-sort="sort-size">Size</button></th>
 						<th><button class="table-sort" data-sort="sort-modified">Modified</button></th>
 					</tr>
-				</thead>
-				<tbody class="table-tbody">
 					<tr class="file-picker-up">
 						<td class="sort-name" colspan="3">
 							<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-arrow-back-up" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -369,6 +366,9 @@
 							Up
 						</td>
 					</tr>
+				</thead>
+				<tbody class="table-tbody">
+					
 				</tbody>
 			</table>
 		</div>

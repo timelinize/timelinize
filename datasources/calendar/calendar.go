@@ -46,7 +46,7 @@ type Options struct {
 	// The ID of the owner entity. REQUIRED for linking
 	// entity in DB when calendar provides no/insufficient
 	// owner information.
-	OwnerEntityID int64 `json:"owner_entity_id"`
+	OwnerEntityID uint64 `json:"owner_entity_id"`
 }
 
 // FileImport imports data from a file.

@@ -21,11 +21,7 @@ package timeline
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -142,7 +138,7 @@ func (tl *Timeline) deleteExpiredItems(logger *zap.Logger) error {
 	}
 
 	// now that the database shows the new truth, delete the data files to match
-	numFilesDeleted, err := tl.deleteDataFiles(tl.ctx, logger, dataFilesToDelete)
+	numFilesDeleted, err := tl.deleteRepoFiles(tl.ctx, logger, dataFilesToDelete)
 	if err != nil {
 		logger.Error("error when deleting data files of erased items (items have already been marked as deleted in DB)", zap.Error(err))
 	}
@@ -156,7 +152,7 @@ func (tl *Timeline) deleteExpiredItems(logger *zap.Logger) error {
 	return nil
 }
 
-func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []int64, dataFiles []string) error {
+func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []uint64, dataFiles []string) error {
 	tl.thumbsMu.Lock()
 	defer tl.thumbsMu.Unlock()
 
@@ -182,7 +178,7 @@ func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []int64, da
 	return thumbsTx.Commit()
 }
 
-func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (rowIDs []int64, dataFilesToDelete []string, err error) {
+func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (rowIDs []uint64, dataFilesToDelete []string, err error) {
 	now := time.Now().Unix()
 
 	// this query selects the rows that are pending deletion ("in the trash") and returns their
@@ -211,7 +207,7 @@ func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (ro
 	dataFilesMap := make(map[string]struct{})
 
 	for rows.Next() {
-		var id int64
+		var id uint64
 		var dataFile *string
 		var otherItemsUsingFile int
 		if err := rows.Scan(&id, &dataFile, &otherItemsUsingFile); err != nil {
@@ -235,7 +231,7 @@ func (tl *Timeline) findExpiredDeletedItems(ctx context.Context, tx *sql.Tx) (ro
 	return
 }
 
-func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs []int64, preserveUserNotes bool) error {
+func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs []uint64, preserveUserNotes bool) error {
 	if len(rowIDs) == 0 {
 		return nil
 	}
@@ -270,53 +266,16 @@ func (tl *Timeline) deleteDataInItemRows(ctx context.Context, tx *sql.Tx, rowIDs
 	return nil
 }
 
-func (tl *Timeline) deleteDataFiles(ctx context.Context, logger *zap.Logger, dataFilesToDelete []string) (int, error) {
+func (tl *Timeline) deleteRepoFiles(ctx context.Context, logger *zap.Logger, dataFilesToDelete []string) (int, error) {
 	for _, dataFile := range dataFilesToDelete {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-
-		dataFileFullPath := tl.FullPath(dataFile)
-		err := os.Remove(dataFileFullPath)
-		if errors.Is(err, fs.ErrNotExist) {
-			logger.Warn("data file appears to have already been deleted",
-				zap.String("data_file", dataFile),
+		if err := tl.deleteRepoFile(dataFile); err != nil {
+			logger.Warn("deleting file within repo",
+				zap.String("repo_file", dataFile),
 				zap.Error(err))
-		} else if err != nil {
-			logger.Error("could not delete item data file",
-				zap.String("data_file", dataFile),
-				zap.Error(err))
-			continue
-		}
-
-		// if parent dir is empty, delete it too (go up to 2 parent dirs = data source folder then month)
-		var parentDir string
-		for range 2 {
-			parentDir = filepath.Dir(dataFileFullPath)
-
-			isEmpty, _, err := directoryEmpty(parentDir, true)
-			if err != nil {
-				// this is optional but is nice for staying tidy; don't break here
-				logger.Error("checking if parent dir is empty",
-					zap.String("dir", parentDir),
-					zap.Error(err))
-				break
-			}
-
-			if isEmpty {
-				logger.Debug("cleaning up empty parent directory",
-					zap.String("parent_dir", parentDir),
-					zap.Error(err))
-
-				if err := os.Remove(parentDir); err != nil {
-					logger.Error("removing empty parent directory",
-						zap.String("dir", parentDir),
-						zap.Error(err))
-					break
-				}
-			}
 		}
 	}
-
 	return len(dataFilesToDelete), nil
 }

@@ -363,11 +363,18 @@ async function renderMapData(newMapData) {
 			return arr;
 		}
 
-		tlz.map.tl_addSource('journey', {
-			type: 'geojson',
-			lineMetrics: true,
-			data: geojsonLines
-		});
+		const addSource = function() {
+			tlz.map.tl_addSource('journey', {
+				type: 'geojson',
+				lineMetrics: true,
+				data: geojsonLines
+			});
+		};
+		if (tlz.map.isStyleLoaded()) {
+			addSource();
+		} else {
+			tlz.map.on('load', addSource);
+		}
 		tlz.map.tl_addLayer({
 			id: "route",
 			type: "line",
@@ -787,7 +794,18 @@ function mapPageFilterParams(repo) {
 		max_longitude: 180,
 		related: 1,
 		limit: 500, // TODO: ... paginate?
-		flat: true
+		flat: true,
+		relations: [
+			// don't show motion pictures / live photos, since they are not
+			// considered their own item in a gallery sense, and perhaps
+			// more importantly, we don't want to have to generate a thumbnail
+			// for them (literally no need for a thumbnail of those, just
+			// wasted CPU time and storage space)
+			{
+				"not": true,
+				"relation_label": "motion"
+			}
+		]
 	};
 	commonFilterSearchParams(params);
 
@@ -938,10 +956,17 @@ function loadAndRenderHeatmap(repo) {
 function renderHeatmap() {
 	tlz.map.tl_removeLayer('items-sample');
 	tlz.map.tl_removeSource('all-items');
-	tlz.map.tl_addSource('all-items', {
-		type: 'geojson',
-		data: mapData.heatmap
-	});
+	const addSource = function() { // source can't be added until style loads, apparently: https://stackoverflow.com/q/40557070
+		tlz.map.tl_addSource('all-items', {
+			type: 'geojson',
+			data: mapData.heatmap
+		});
+	};
+	if (tlz.map.isStyleLoaded()) {
+		addSource();
+	} else {
+		tlz.map.on('load', addSource);
+	}
 	// Docs: https://docs.mapbox.com/mapbox-gl-js/style-spec/layers/#heatmap
 	tlz.map.tl_addLayer(
 		{

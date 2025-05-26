@@ -110,7 +110,7 @@
         "github.com/adrianmo/go-nmea",
         "github.com/apognu/gocal",
         "github.com/asg017/sqlite-vec-go-bindings/cgo",
-        "github.com/brianvoe/gofakeit/v6",
+        "github.com/brianvoe/gofakeit/v7",
         "github.com/caddyserver/caddy/v2",
         "github.com/davidbyttow/govips/v2/vips",
         "github.com/galdor/go-thumbhash",

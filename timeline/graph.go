@@ -21,10 +21,8 @@ package timeline
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -195,6 +193,8 @@ func (g *Graph) String() string {
 // Item represents an item on the timeline.
 type Item struct {
 	// The unique ID of the item assigned by the data source.
+	// It is usually discouraged to invent an ID when one does
+	// not exist.
 	ID string `json:"id,omitempty"`
 
 	// Item classification, i.e. the kind of thing it represents.
@@ -202,8 +202,8 @@ type Item struct {
 	// programs know how to display, visualize, and even query
 	// the item; and helps users know how to think about it.
 	// For example, we display and think of chat messages very
-	// differently than we do memos-to-self, social media posts,
-	// and emails.
+	// differently than we do personal notes and social media
+	// posts.
 	Classification Classification `json:"classification,omitempty"`
 
 	// The timestamp when the item originated. If multiple
@@ -228,6 +228,7 @@ type Item struct {
 	TimeUncertainty time.Duration `json:"time_uncertainty,omitempty"`
 
 	// The coordinates where the item originated.
+	// TODO: Rename to Geolocation or Coordinates?
 	Location Location `json:"location,omitempty"`
 
 	// The person who owns, created, or originated the item. At
@@ -266,6 +267,11 @@ type Item struct {
 	// words, each part of the same item that is conveyed to the
 	// processor must have the same retrieval key, and no other
 	// item globally must use the same key at any time.
+	//
+	// Only set this field if the Item is or may not be complete
+	// (e.g. if you know it will be processed in multiple pieces),
+	// since setting a retrieval key forces reprocessing of the
+	// item, which is less efficient than skipping duplicates.
 	Retrieval ItemRetrieval `json:"retrieval,omitempty"`
 
 	// Used for storing state during processing; either the
@@ -275,14 +281,19 @@ type Item struct {
 	dataText *string
 
 	// state for processing pipeline phases
-	row          ItemRow
-	dataFileIn   io.ReadCloser
-	dataFileOut  *os.File
-	dataFileSize int64
-	dataFileName string
-	dataFileHash []byte // should only be set if dataFileSize > 0
-	idHash       []byte
-	contentHash  []byte
+	row                 ItemRow
+	dataFileIn          io.ReadCloser
+	dataFileOut         *os.File
+	dataFileSize        int64
+	dataFileName        string // path to the data file relative to the repo root
+	dataFileHash        []byte // a non-nil hash indicates the file has been downloaded (if 0 size, it will be an empty slice, as opposed to hash's IV)
+	desiredDataFileName string // base filename (sans path) the processor tried to get for the file, but may have been taken
+	idHash              []byte
+	contentHash         []byte
+	skipThumb           bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
+	oldDataFile         string                       // when replacing a data file, used to clean things up at the end of processing the item
+	existingRow         ItemRow                      // only used if a field update policy requires info about the incoming data file
+	fieldUpdatePolicies map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
@@ -294,15 +305,16 @@ type Item struct {
 type ItemRetrieval struct {
 	key []byte
 
-	// Column names to prefer from the incoming item over whatever is stored in the DB;
-	// overrides user's configured update policies. This is useful if multiple separate
-	// parts of an item may overlap, but one part is more reliable or preferred over
-	// another part. For example, in Google Takeout archives, some photo metadata is both
-	// embedded as EXIF and available in a sidecar JSON file, but it's fairly well known
-	// that the JSON file's metadata is less correct sometimes, for some reason. So even
+	// When the item is loaded using its retrieval key, you can specify which
+	// update policy should be used for each field. This overrides user's
+	// configured update policies for the specified fields. This is useful if multiple
+	// separate parts of an item may overlap, but one part is more reliable or preferred
+	// over another part. For example, in Google Takeout archives, some photo metadata
+	// is both embedded as EXIF and available in a sidecar JSON file, but it's fairly
+	// well known that the JSON file's metadata is less correct sometimes. So even
 	// though both have metadata, when importing from the actual image, we prefer that,
 	// and this tells the processor to do so.
-	PreferFields []string `json:"prefer_fields,omitempty"`
+	FieldUpdatePolicies map[string]FieldUpdatePolicy `json:"field_update_policies,omitempty"`
 }
 
 // SetKey sets the retrieval key for this item. It should be a globally unique
@@ -361,9 +373,9 @@ func (it *Item) makeContentHash() {
 }
 
 func (it Item) String() string {
-	return fmt.Sprintf("[id=%s class=%+v owner=%+v timestamp=%s timespan=%s orig_path=%s inter_path=%s location=%s content=%p meta=%v]",
+	return fmt.Sprintf("[id=%s class=%+v owner=%+v timestamp=%s timespan=%s orig_path=%s inter_path=%s location=%s filename=%s content=%p meta=%v retkey=%x]",
 		it.ID, it.Classification, it.Owner, it.Timestamp, it.Timespan, it.OriginalLocation,
-		it.IntermediateLocation, it.Location, it.Content.Data, it.Metadata)
+		it.IntermediateLocation, it.Location, it.Content.Filename, it.Content.Data, it.Metadata, it.Retrieval.key)
 }
 
 // HasContent returns true if the item has data or a location.
@@ -526,7 +538,7 @@ type Metadata map[string]any
 // (TODO: Should false be considered empty?)
 func (m Metadata) Clean() {
 	for k, v := range m {
-		if k == "" {
+		if strings.TrimSpace(k) == "" {
 			delete(m, k)
 			continue
 		}
@@ -537,11 +549,13 @@ func (m Metadata) Clean() {
 }
 
 // StringsToSpecificType applies StringToSpecificType() to all
-// string values in the metadata map.
+// string and *string values in the metadata map.
 func (m Metadata) StringsToSpecificType() {
 	for key, anyVal := range m {
 		if strVal, ok := anyVal.(string); ok {
 			m[key] = StringToSpecificType(strVal)
+		} else if strPVal, ok := anyVal.(*string); ok && strPVal != nil {
+			m[key] = StringToSpecificType(*strPVal)
 		}
 	}
 }
@@ -556,16 +570,13 @@ func StringToSpecificType(s string) any {
 	if v, err := strconv.ParseFloat(s, 64); err == nil {
 		return v
 	}
-
 	// we could use ParseBool, but we'd risk converting other strings
 	// like "t" or "no" to true/false which might not be desired
-	if v := strings.ToLower(strings.TrimSpace(s)); v == "true" {
-		return v
+	if lowerTrimmed := strings.ToLower(strings.TrimSpace(s)); lowerTrimmed == "true" {
+		return true
+	} else if lowerTrimmed == "false" {
+		return false
 	}
-	if v := strings.ToLower(strings.TrimSpace(s)); v == "false" {
-		return v
-	}
-
 	return s
 }
 
@@ -574,13 +585,19 @@ func (Metadata) isEmpty(v any) bool {
 		return true
 	} else if str, ok := v.(string); ok && strings.TrimSpace(str) == "" {
 		return true
+	} else if str, ok := v.(*string); ok && (str == nil || strings.TrimSpace(*str) == "") {
+		return true
 	} else if buf, ok := v.([]byte); ok && len(bytes.TrimSpace(buf)) == 0 {
 		return true
 	} else if t, ok := v.(time.Time); ok && t.IsZero() {
 		return true
+	} else if t, ok := v.(*time.Time); ok && (t == nil || t.IsZero()) {
+		return true
 	} else if d, ok := v.(time.Duration); ok && d == 0 {
 		return true
 	} else if n, ok := v.(int); ok && n == 0 {
+		return true
+	} else if n, ok := v.(*int); ok && (n == nil || *n == 0) {
 		return true
 	} else if n, ok := v.(int8); ok && n == 0 {
 		return true
@@ -589,6 +606,8 @@ func (Metadata) isEmpty(v any) bool {
 	} else if n, ok := v.(int32); ok && n == 0 {
 		return true
 	} else if n, ok := v.(int64); ok && n == 0 {
+		return true
+	} else if n, ok := v.(*int64); ok && (n == nil || *n == 0) {
 		return true
 	} else if n, ok := v.(uint); ok && n == 0 {
 		return true
@@ -605,6 +624,8 @@ func (Metadata) isEmpty(v any) bool {
 		return true
 	} else if n, ok := v.(float64); ok &&
 		(n < 0.00000000000001 && n > -0.00000000000001) {
+		return true
+	} else if n, ok := v.(*float64); ok && (n == nil || *n == 0) {
 		return true
 	}
 	return false
@@ -698,22 +719,22 @@ var (
 	RelReply        = Relation{Label: "reply", Directed: true}                           // "<from_item> is reply to <to_item>"
 	RelQuotes       = Relation{Label: "quotes", Directed: true}                          // "<from_item> quotes <to>", or "<to> is quoted by <from>"
 	RelReacted      = Relation{Label: "reacted", Directed: true}                         // "<from_entity>" reacted to <to_item> with <value>"
-	RelDepicts      = Relation{Label: "depicts", Directed: true}                         // flexible, but most common is: "<from_item> depicts <to_entity>"
-	RelEdit         = Relation{Label: "edit", Directed: true}                            // "<to_item> is edit of <from_item>"
 	RelInCollection = Relation{Label: "in_collection", Directed: true}                   // "<from_item> is in collection <to_item> at position <value>"
-	RelAt           = Relation{Label: "at", Directed: true}                              // "<from_item> is at <to_entity>"
+	RelEdit         = Relation{Label: "edit", Directed: true}                            // "<to_item> is edit of <from_item>"
+	RelIncludes     = Relation{Label: "includes", Directed: true}                        // "<from_item> includes <to_entity>" (has, depicts, portrays, contains... doesn't have to be item->entity either)
+	// RelAt           = Relation{Label: "at", Directed: true}                              // "<from_item> is at <to_entity>" (to indicate something at a particular place, for instance)
 	// RelTranscript = Relation{Label: "transcript", Directed: true, Subordinating: true} // "<from_item> is transcribed by <to_item>"
 )
 
 // ItemRow has the structure of an item's row in our DB.
 type ItemRow struct {
-	ID                   int64           `json:"id"`
-	EmbeddingID          *int64          `json:"embedding_id,omitempty"`
-	DataSourceID         *int64          `json:"data_source_id,omitempty"` // row ID, used only for insertion into the DB
-	JobID                *int64          `json:"job_id,omitempty"`
-	ModifiedJobID        *int64          `json:"modified_job_id,omitempty"`
-	AttributeID          *int64          `json:"attribute_id,omitempty"`
-	ClassificationID     *int64          `json:"classification_id,omitempty"` // row ID, used only internally
+	ID                   uint64          `json:"id"`
+	EmbeddingID          *uint64         `json:"embedding_id,omitempty"`
+	DataSourceID         *uint64         `json:"data_source_id,omitempty"` // row ID, used only for insertion into the DB
+	JobID                *uint64         `json:"job_id,omitempty"`
+	ModifiedJobID        *uint64         `json:"modified_job_id,omitempty"`
+	AttributeID          *uint64         `json:"attribute_id,omitempty"`
+	ClassificationID     *uint64         `json:"classification_id,omitempty"` // row ID, used only internally
 	OriginalID           *string         `json:"original_id,omitempty"`
 	OriginalLocation     *string         `json:"original_location,omitempty"`
 	IntermediateLocation *string         `json:"intermediate_location,omitempty"`
@@ -805,9 +826,6 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	allTargets := append(itemTargets, targetsAfterItemCols...) //nolint:gocritic // I am explicitly self-documenting how the first batch of targets are for the item, then there's the rest
 
 	err := row.Scan(allTargets...)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ir, nil
-	}
 	if err != nil {
 		return ir, fmt.Errorf("scanning item row: %w", err)
 	}
@@ -954,8 +972,8 @@ type Relationship struct {
 type rawRelationship struct {
 	Relation
 	value                       any
-	fromItemID, fromAttributeID *int64
-	toItemID, toAttributeID     *int64
+	fromItemID, fromAttributeID *uint64
+	toItemID, toAttributeID     *uint64
 	start, end                  *int64
 	metadata                    json.RawMessage
 }
@@ -964,16 +982,16 @@ func (rr rawRelationship) String() string {
 	const n = "nil"
 	fromItemID, fromAttributeID, toItemID, toAttributeID := n, n, n, n
 	if rr.fromItemID != nil {
-		fromItemID = strconv.FormatInt(*rr.fromItemID, 10)
+		fromItemID = strconv.FormatUint(*rr.fromItemID, 10)
 	}
 	if rr.fromAttributeID != nil {
-		fromAttributeID = strconv.FormatInt(*rr.fromAttributeID, 10)
+		fromAttributeID = strconv.FormatUint(*rr.fromAttributeID, 10)
 	}
 	if rr.toItemID != nil {
-		toItemID = strconv.FormatInt(*rr.toItemID, 10)
+		toItemID = strconv.FormatUint(*rr.toItemID, 10)
 	}
 	if rr.toAttributeID != nil {
-		toAttributeID = strconv.FormatInt(*rr.toAttributeID, 10)
+		toAttributeID = strconv.FormatUint(*rr.toAttributeID, 10)
 	}
 	return fmt.Sprintf("[label=%s directed=%t value=%v fromItemID=%s fromAttributeID=%s toItemID=%s toAttributeID=%s start=%d end=%d]",
 		rr.Relation.Label, rr.Relation.Directed, rr.value, fromItemID, fromAttributeID, toItemID, toAttributeID, rr.start, rr.end)
@@ -1006,7 +1024,7 @@ type Relation struct {
 // which help programs know how to read/parse data, classes help programs
 // know how to semantically interpret or display them.
 type Classification struct {
-	id          *int64
+	id          *uint64
 	Standard    bool     `json:"standard"`
 	Name        string   `json:"name"`
 	Labels      []string `json:"labels,omitempty"`

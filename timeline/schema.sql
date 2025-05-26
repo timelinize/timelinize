@@ -44,14 +44,14 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	"hash" BLOB, -- for preventing duplicate jobs; opaque to everything except the code creating the job
 	"state" TEXT NOT NULL DEFAULT 'queued', -- queued, started, paused, aborted, succeeded, failed
 	"hostname" TEXT, -- hostname of the machine the job was created and configured on
-	"created" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp job was stored/enqueued in unix milliseconds UTC
+	"created" INTEGER NOT NULL DEFAULT (cast(round(unixepoch('subsec')*1000) AS INTEGER)), -- timestamp job was stored/enqueued in unix milliseconds UTC
 	"updated" INTEGER, -- timestamp of last DB sync (in unix milliseconds UTC)
 	"start" INTEGER, -- timestamp job was actually started in unix milliseconds UTC *could be future, so not called "started")
-	"ended" INTEGER, -- timestamp in unix milliseconds UTC (TODO: only when finalized, or paused too?)
+	"ended" INTEGER, -- timestamp in unix milliseconds UTC when job ended (not paused)
 	"message" TEXT, -- brief message describing current status to be shown to the user, changes less frequently than log emissions
 	"total" INTEGER, -- total number of units to complete
 	"progress" INTEGER, -- number of units completed towards the total count
-	"checkpoint" BLOB, -- required state for resuming an incomplete job
+	"checkpoint" TEXT, -- required state for resuming an incomplete job, as a JSON serialization
 	-- if job is scheduled to run automatically at a certain interval, the following fields track that state
 	"repeat" INTEGER, -- when this job is started, next job should be scheduled (inserted for future start) this many seconds from start time (not to be started if previous still running)
 	"parent_job_id" INTEGER, -- the job before this one that scheduled or created this one, forming a chain or linked list
@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 -- similarity searches are possible. This requires the sqlite-vec module.
 CREATE TABLE IF NOT EXISTS "embeddings" (
 	"id" INTEGER PRIMARY KEY,
+	"generated" INTEGER NOT NULL DEFAULT (unixepoch()), -- when the embedding was generated (timestamp in unix seconds UTC)
 	"embedding" BLOB -- TODO: could define as float[768] (unless STRICT) and then use `check(typeof(contents_embedding) == 'blob' AND vec_length(contents_embedding) == 768)`
 ) STRICT;
 

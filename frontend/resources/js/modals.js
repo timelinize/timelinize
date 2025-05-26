@@ -37,13 +37,19 @@ on('change', '#modal-merge-entity select', e => {
 });
 
 on('click', '#do-entity-merge', async e => {
-	const keepID = $('#modal-merge-entity .entity-keep').tomselect.getValue();
-	const mergeID = $('#modal-merge-entity .entity-merge').tomselect.getValue();
+	let keepID = $('#modal-merge-entity .entity-keep').tomselect.getValue();
+	let mergeID = $('#modal-merge-entity .entity-merge').tomselect.getValue();
 	if (!keepID || !mergeID) return;
-	await app.MergeEntities(tlz.openRepos[0].instance_id, Number(keepID), [Number(mergeID)]);
+	keepID = Number(keepID);
+	mergeID = Number(mergeID);
+	await app.MergeEntities(tlz.openRepos[0].instance_id, keepID, [mergeID]);
 	notify({
 		type: "success",
 		title: `Entities merged`,
 		duration: 2000
 	});
+	// also update owner picture at the top if its entity was in the merge
+	if (keepID == 1 || mergeID == 1) {
+		updateRepoOwners(true);
+	}
 });

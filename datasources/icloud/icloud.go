@@ -52,7 +52,7 @@ func init() {
 // Options configures the data source.
 type Options struct {
 	// The ID of the owner entity. REQUIRED if entity is to be related in DB.
-	OwnerEntityID int64 `json:"owner_entity_id"`
+	OwnerEntityID uint64 `json:"owner_entity_id"`
 
 	// Whether to import recently deleted items.
 	RecentlyDeleted bool `json:"recently_deleted"`

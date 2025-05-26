@@ -8,7 +8,7 @@ require (
 	github.com/adrianmo/go-nmea v1.10.0
 	github.com/apognu/gocal v0.9.1
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
-	github.com/brianvoe/gofakeit/v6 v6.28.0
+	github.com/brianvoe/gofakeit/v7 v7.2.1
 	github.com/caddyserver/caddy/v2 v2.9.1
 	github.com/davidbyttow/govips/v2 v2.16.0
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
@@ -18,7 +18,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/maruel/natural v1.1.1
-	github.com/mattn/go-sqlite3 v1.14.24
+	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/mholt/archives v0.1.1
 	github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e
 	github.com/mholt/goexif2 v0.0.0-20230302025153-4d89d35092b2
@@ -60,7 +60,7 @@ require (
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ebitengine/purego v0.8.2 // indirect
+	github.com/ebitengine/purego v0.8.3 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
 	github.com/go-kit/kit v0.13.0 // indirect
