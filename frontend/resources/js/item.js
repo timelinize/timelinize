@@ -227,22 +227,17 @@ async function itemPageMain() {
 				// TODO: instead of going to the entity page, open a modal with more relationship details
 				entTpl.href = `/entities/${repoID}/${rel.to_entity.id}`;
 
-				// then, if we have face detection info, show it on hover of their name
-				if (rel.metadata?.["Center X"] && rel.metadata?.["Center Y"] && rel.metadata?.["Size"]) {
-					// small faces/outlines are harder to see, so we want those to appear a little larger,
-					// whereas larger ones don't need to be scaled up as much
-					const sizeScaled = rel.metadata["Size"] * (rel.metadata["Size"] > 0.05 ? 2 : 4);
-
+				function addCircle(centerX, centerY, sizeX, sizeY) {
 					const boxEl = document.createElement('div');
 					boxEl.id = `face-circle-rel-${rel.relationship_id}`;
 					boxEl.classList.add('face-circle', 'd-none');
 					const imgRect = $('#item-content').getBoundingClientRect();
-					const width = imgRect.width * sizeScaled;
-					const height = imgRect.height * sizeScaled;
+					const width = imgRect.width * sizeX;
+					const height = imgRect.height * sizeY;
 					boxEl.style.width = width+"px";
 					boxEl.style.height = height+"px";
-					boxEl.style.left = `${(rel.metadata["Center X"]-sizeScaled/2)*imgRect.width}px`;
-					boxEl.style.bottom = `${(rel.metadata["Center Y"]-sizeScaled/2)*imgRect.height}px`; // NOTE: Apple's y-coord is from the bottom!!
+					boxEl.style.left = `${(centerX-sizeX/2)*imgRect.width}px`;
+					boxEl.style.bottom = `${(centerY-sizeY/2)*imgRect.height}px`; // NOTE: Apple's y-coord is from the bottom, not top!!
 					boxEl.innerText = rel.to_entity.name || "unknown";
 					$('#item-content').append(boxEl);
 
@@ -252,8 +247,20 @@ async function itemPageMain() {
 					};
 					entTpl.onmouseout = function() {
 						boxEl.classList.add('d-none');
-					};					
+					};
 				}
+
+				// then, if we have face detection info, show it on hover of their name
+				// (if not face directly, "body detection" will work also)
+				if (rel.metadata?.["Center X"] && rel.metadata?.["Center Y"] && rel.metadata?.["Size"]) {
+					// small faces/outlines are harder to see, so we want those to appear a little larger,
+					// whereas larger ones don't need to be scaled up as much
+					const sizeScaled = rel.metadata["Size"] * (rel.metadata["Size"] > 0.05 ? 2 : 4);
+					addCircle(rel.metadata["Center X"], rel.metadata["Center Y"], sizeScaled, sizeScaled);
+				} else if (rel.metadata?.["Body center X"] && rel.metadata?.["Body center Y"] && rel.metadata?.["Body width"] && rel.metadata?.["Body height"]) {
+					addCircle(rel.metadata["Body center X"], rel.metadata["Body center Y"], rel.metadata?.["Body width"], rel.metadata?.["Body height"])
+				}
+
 				$('#related-entities').append(entTpl);
 				$('#primary-entities').classList.remove('d-none');
 				if (!item.owner) {
