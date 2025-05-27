@@ -216,15 +216,15 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			"time_uncertainty": timeline.UpdatePolicyPreferExisting,
 		}
 	} else {
-		// always use the embedded timestamp, unless it happens to be in the future or right
-		// at the midnight of a new year (one of my own files had a corrupted timestamp,
-		// explained above) - if this timestamp seems wrong, zero it out so we can use the
-		// metadata file timestamp's instead
+		// always use the embedded timestamp, unless it looks like it is bad (I've encountered
+		// several corrupt or very wrong embedded timestamps that actually cause UI bugs b/c
+		// they're so wrong they can't be serialized to JSON) -- the processor will also try to
+		// clear them, but in our case there are timestamps that generically "look valid", yet
+		// we can know are invalid, and in those cases we can likely lean on the timestamp in
+		// the JSON file, so we just need to adjust the update policy for timestamps based on
+		// what we can infer about the timestamp
 		tsUpdatePolicy := timeline.UpdatePolicyOverwriteExisting
-		if ig.Item.Timestamp.IsZero() ||
-			(ig.Item.Timestamp.Year() > time.Now().Year() ||
-				(ig.Item.Timestamp.Month() == time.January && ig.Item.Timestamp.Day() == 1 &&
-					ig.Item.Timestamp.Hour() == 0 && ig.Item.Timestamp.Minute() == 0 && ig.Item.Timestamp.Second() == 0)) {
+		if isBadTimestamp(ig.Item.Timestamp) {
 			tsUpdatePolicy = timeline.UpdatePolicyKeepExisting
 			ig.Item.Timestamp = time.Time{}
 		}
@@ -571,4 +571,26 @@ func (fimp *FileImporter) determineMediaFilenameInArchive(jsonFilePath string, i
 
 	// short filenames are great... so simple (I think)
 	return path.Join(dir, itemMeta.Title)
+}
+
+// isBadTimestamp tries to detect timestamps that are bad/corrupted, which would generally come from
+// embedded metadata like EXIF or XMP, where either there is a parser bug or actual corruption. I have
+// encountered both on my data sets, and I've encountered these specific situations.
+// The processor will actually strip timestamps that are invalid (like, year is super out-of-range and
+// can't be serialized by JSON), but in the case of a corrupt offset (TZ), it will only strip the offset;
+// but in our case we can do better than that probably, since the sidecar json file usually has a valid
+// and correct timestamp in the rare case the EXIF/XMP data is wrong. So we want to prefer the timestamp
+// from the JSON when we detect a timestamp that the processor may still consider valid, but which we
+// assume is probably wrong. For example: future year, exactly midnight on new years, or corrupted
+// offset. In these cases, the timestamp from JSON should be preferred. In order to prefer the JSON
+// timestamp, we need to clear any bad, embedded timestamp, since otherwise it will be preferred.
+func isBadTimestamp(t time.Time) bool {
+	futureYear := t.Year() > time.Now().Year()
+	exactlyMidnightOnNewYears := t.Month() == time.January && t.Day() == 1 && t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+
+	const maxTimezoneOffsetSecFromUTC = 50400 // most distant time zone from UTC is apparently +-14 hours
+	_, offsetSec := t.Zone()
+	offsetCorrupted := offsetSec > maxTimezoneOffsetSecFromUTC || offsetSec < -maxTimezoneOffsetSecFromUTC
+
+	return t.IsZero() || futureYear || exactlyMidnightOnNewYears || offsetCorrupted
 }

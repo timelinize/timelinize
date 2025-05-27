@@ -599,15 +599,9 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, ig *Graph) err
 
 func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item) (latentID, error) {
 	// quick input validation: timestamps outside a certain range are invalid and obviously wrong (cannot be serialized to JSON)
-	if !validTime(it.Timestamp) {
-		it.Timestamp = time.Time{}
-	}
-	if !validTime(it.Timespan) {
-		it.Timespan = time.Time{}
-	}
-	if !validTime(it.Timeframe) {
-		it.Timeframe = time.Time{}
-	}
+	it.Timestamp = validTime(it.Timestamp)
+	it.Timespan = validTime(it.Timespan)
+	it.Timeframe = validTime(it.Timeframe)
 
 	// skip item if outside of timeframe (data source should do this for us, but
 	// ultimately we should enforce it: it just means the data source is being
@@ -1994,11 +1988,26 @@ func detectContentType(peekedBytes []byte, it *Item) {
 	it.Content.MediaType = contentType
 }
 
-// validTime returns true if the time is considered valid for our application.
-// For example, JSON-serializing a time with a year > 9999 panics.
-func validTime(t time.Time) bool {
+// validTime returns a valid form of the given time, as far as our application is concerned.
+// For example, JSON-serializing a time with a year > 9999 panics, so we clear/ignore the
+// time value altogether in that case. Or, if the timezone offset is a ridiculous number,
+// we drop the time zone but keep the rest of the data.
+func validTime(t time.Time) time.Time {
+	// make sure time zone is within bounds; if not, just strip it; I found several that shifted the year into the 6000s BC
+	const maxTimezoneOffsetSecFromUTC = 50400 // most distant time zone from UTC is apparently +-14 hours
+	if _, offsetSec := t.Zone(); offsetSec > maxTimezoneOffsetSecFromUTC || offsetSec < -maxTimezoneOffsetSecFromUTC {
+		t = time.Date(t.Year(), t.Month(), t.Day(),
+			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(),
+			time.UTC)
+	}
+
+	// make sure year is within bounds
 	const minJSONSerializableYear, maxJSONSerializableYear = 0, 9999
-	return minJSONSerializableYear <= t.Year() && t.Year() <= maxJSONSerializableYear
+	if t.Year() <= minJSONSerializableYear || maxJSONSerializableYear <= t.Year() {
+		return time.Time{}
+	}
+
+	return t
 }
 
 func coordRound(x float64, decimalPlaces int) float64 {
