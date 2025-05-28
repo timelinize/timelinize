@@ -1,199 +1,249 @@
-[linters]
-    enable = [
-        "asasalint",
-        "asciicheck",
-        "bidichk",
-        "bodyclose",
-        "canonicalheader",
-        "copyloopvar",
-        "decorder",
-        "depguard",
-        "dogsled",
-        "dupl",
-        "dupword",
-        "durationcheck",
-        "errcheck",
-        # "errchkjson", TODO: This one is broken, still need to file an issue
-        "errname",
-        "errorlint",
-        "fatcontext",
-        #"forbidigo", TODO: enable to forbid accidental "fmt.Print*" statements
-        "gci",
-        "gocheckcompilerdirectives",
-        "gochecksumtype",
-        "goconst",
-        "gocritic",
-        "gofmt",
-        #"goheader", TODO: this one is broken (https://github.com/denis-tingaikin/go-header/issues/41)
-        "goimports",
-        "gomoddirectives",
-        "goprintffuncname",
-        "gosec",
-        "gosimple",
-        "gosmopolitan",
-        "govet",
-        "inamedparam",
-        "ineffassign",
-        "interfacebloat",
-        "intrange",
-        "loggercheck",
-        "makezero",
-        "mirror",
-        "misspell",
-        "mnd",
-        "musttag",
-        "noctx",
-        "nolintlint",
-        "nosprintfhostport",
-        "perfsprint",
-        "prealloc",
-        "predeclared",
-        "reassign",
-        "revive",
-        "rowserrcheck",
-        "sqlclosecheck",
-        "staticcheck",
-        "stylecheck",
-        "tagalign",
-        "unconvert",
-        "unparam",
-        "unused",
-        "usetesting",
-        "usestdlibvars",
-        "wastedassign",
-        "whitespace",
-    ]
-
+version = '2'
 
 [run]
-    tests = true
-    timeout = "10m"
-
+tests = true
 
 [output]
-    show-stats = true
-    sort-results = true
+[output.formats]
+[output.formats.text]
+path = 'stdout'
 
-    [[output.formats]]
-        format = "colored-line-number"
+[linters]
+enable = [
+  'asasalint',
+  'asciicheck',
+  'bidichk',
+  'bodyclose',
+  'canonicalheader',
+  'copyloopvar',
+  'decorder',
+  'depguard',
+  'dogsled',
+  'dupl',
+  'dupword',
+  'durationcheck',
+  'errchkjson',
+  'errname',
+  'errorlint',
+  'fatcontext',
+  #"forbidigo", TODO: enable to forbid accidental "fmt.Print*" statements
+  'gocheckcompilerdirectives',
+  'gochecksumtype',
+  'goconst',
+  'gocritic',
+  #"goheader", TODO: this one is broken (https://github.com/denis-tingaikin/go-header/issues/41)
+  'gomoddirectives',
+  'goprintffuncname',
+  'gosec',
+  'gosmopolitan',
+  'inamedparam',
+  'interfacebloat',
+  'intrange',
+  'loggercheck',
+  'makezero',
+  'mirror',
+  'misspell',
+  'mnd',
+  'musttag',
+  'noctx',
+  'nolintlint',
+  'nosprintfhostport',
+  'perfsprint',
+  'prealloc',
+  'predeclared',
+  'reassign',
+  'revive',
+  'rowserrcheck',
+  'sqlclosecheck',
+  'staticcheck',
+  'tagalign',
+  'unconvert',
+  'unparam',
+  'usestdlibvars',
+  'usetesting',
+  'wastedassign',
+  'whitespace'
+]
 
+[linters.settings]
+[linters.settings.depguard]
+[linters.settings.depguard.rules]
+[linters.settings.depguard.rules.Main]
+files = [
+  '$all',
+  '!$test'
+]
+allow = [
+  '$gostd',
+  'github.com/dhowden/tag',
+  'github.com/abema/go-mp4',
+  'github.com/adrianmo/go-nmea',
+  'github.com/apognu/gocal',
+  'github.com/asg017/sqlite-vec-go-bindings/cgo',
+  'github.com/brianvoe/gofakeit/v7',
+  'github.com/caddyserver/caddy/v2',
+  'github.com/davidbyttow/govips/v2/vips',
+  'github.com/galdor/go-thumbhash',
+  'github.com/gen2brain/avif',
+  'github.com/google/uuid',
+  'github.com/gorilla/websocket',
+  'github.com/jhillyerd/enmime',
+  'github.com/maruel/natural',
+  'github.com/Masterminds/sprig/v3',
+  'github.com/mattn/go-sqlite3',
+  'github.com/mholt/archives',
+  'github.com/mholt/go-xmp',
+  'github.com/mholt/goexif2/',
+  'github.com/signal-golang/go-vcard',
+  'github.com/strukturag/libheif/go/heif',
+  'github.com/timelinize',
+  'github.com/ttacon/libphonenumber',
+  'github.com/zeebo/blake3',
+  'go.uber.org/zap',
+  'golang.org/x/',
+  'howett.net/plist'
+]
 
-[issues]
-    max-issues-per-linter = 100
-    max-same-issues = 10
-    exclude-files = ["mapmutex.go"]
+[linters.settings.depguard.rules.Tests]
+files = [
+  '$test'
+]
 
-    # unfortunately, the "excludes" list does not take exclusion IDs! sighhh
-    # EXC0001, but I added ".Rollback()" since it's often used in defer
-    [[issues.exclude-rules]]
-        text = "Error return value of .((os\\.)?std(out|err)\\..*|.*Close|.*Flush|os\\.Remove(All)?|.*print(f|ln)?|os\\.(Un)?Setenv|.+\\.Rollback()). is not checked"
-        linters = ["errcheck"]
+# this has to be a list of objects to prevent golangci-lint from panicking (
+[[linters.settings.depguard.rules.Tests.deny]]
+pkg = 'github.com/stretchr/testify'
+desc = 'Please use standard library for tests'
 
-	[[issues.exclude-rules]]
-        path = "_test.go"
-        linters = ["errcheck", "gosec", "noctx", "bodyclose", "forcetypeassert"]
+[[linters.settings.depguard.rules.Tests.deny]]
+pkg = 'github.com/pkg/errors'
+desc = 'Please use standard errors package'
 
-	[[issues.exclude-rules]]
-        path = "_test.go"
-        linters = ["revive"]
-        text = "unchecked-type-assertion:"
-
-
-[linters-settings.depguard]
-
-    [linters-settings.depguard.rules.Main]
-    files = ["$all", "!$test"]
-    allow = [
-        "$gostd",
-	    "github.com/dhowden/tag",
-        "github.com/abema/go-mp4",
-        "github.com/adrianmo/go-nmea",
-        "github.com/apognu/gocal",
-        "github.com/asg017/sqlite-vec-go-bindings/cgo",
-        "github.com/brianvoe/gofakeit/v7",
-        "github.com/caddyserver/caddy/v2",
-        "github.com/davidbyttow/govips/v2/vips",
-        "github.com/galdor/go-thumbhash",
-        "github.com/gen2brain/avif",
-        "github.com/google/uuid",
-        "github.com/gorilla/websocket",
-        "github.com/jhillyerd/enmime",
-        "github.com/maruel/natural",
-        "github.com/Masterminds/sprig/v3",
-        "github.com/mattn/go-sqlite3",
-        "github.com/mholt/archives",
-        "github.com/mholt/go-xmp",
-        "github.com/mholt/goexif2/",
-        "github.com/signal-golang/go-vcard",
-        "github.com/strukturag/libheif/go/heif",
-        "github.com/timelinize",
-        "github.com/ttacon/libphonenumber",
-        "github.com/zeebo/blake3",
-        "go.uber.org/zap",
-        "golang.org/x/",
-        "howett.net/plist",
-    ]
-
-    [linters-settings.depguard.rules.Tests]
-    files = ["$test"]
-
-        # this has to be a list of objects to prevent golangci-lint from panicking (
-        [[linters-settings.depguard.rules.Tests.deny]]
-        pkg = "github.com/stretchr/testify"
-        desc = "Please use standard library for tests"
-
-        [[linters-settings.depguard.rules.Tests.deny]]
-        pkg = "github.com/pkg/errors"
-        desc = "Please use standard errors package"
-
-        [[linters-settings.depguard.rules.Tests.deny]]
-        pkg = "io/ioutil"
-        desc = "Deprecated in Go 1.16; use os and io packages: https://tip.golang.org/doc/go1.16#ioutil"
-
+[[linters.settings.depguard.rules.Tests.deny]]
+pkg = 'io/ioutil'
+desc = 'Deprecated in Go 1.16; use os and io packages: https://tip.golang.org/doc/go1.16#ioutil'
 
 # TODO: This linter is broken: https://github.com/denis-tingaikin/go-header/issues/41
-[linters-settings.goheader]
+[linters.settings.goheader]
 template = """
-	{{ APP_NAME }}
-	Copyright (c) {{ ORIGIN_YEAR }} {{ AUTHOR }}
+\t{{ APP_NAME }}
+\tCopyright (c) {{ ORIGIN_YEAR }} {{ AUTHOR }}
 
-	This program is free software: you can redistribute it and/or modify
-	it under the terms of the GNU Affero General Public License as published
-	by the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
+\tThis program is free software: you can redistribute it and/or modify
+\tit under the terms of the GNU Affero General Public License as published
+\tby the Free Software Foundation, either version 3 of the License, or
+\t(at your option) any later version.
 
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU Affero General Public License for more details.
+\tThis program is distributed in the hope that it will be useful,
+\tbut WITHOUT ANY WARRANTY; without even the implied warranty of
+\tMERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+\tGNU Affero General Public License for more details.
 
-	You should have received a copy of the GNU Affero General Public License
-	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+\tYou should have received a copy of the GNU Affero General Public License
+\talong with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
 
-[linters-settings.goheader.values.const]
-APP_NAME = "Timelinize"
-AUTHOR = "Matthew Holt"
-ORIGIN_YEAR = "2013"
+[linters.settings.goheader.values]
+[linters.settings.goheader.values.const]
+APP_NAME = 'Timelinize'
+AUTHOR = 'Matthew Holt'
+ORIGIN_YEAR = '2013'
 
+# errors not checked (errcheck does this and we configure exceptions)
+[linters.settings.gosec]
+excludes = [
+  'G104'
+]
 
-[linters-settings.gosec]
-excludes = ["G104"] # errors not checked (errcheck does this and we configure exceptions)
-
-
-
-[linters-settings.gosmopolitan]
+[linters.settings.gosmopolitan]
 allow-time-local = true
 
-
-[linters-settings.mnd]
+[linters.settings.mnd]
 # omit "assign" because the assignment into a struct field, for example, is documentation;
 # omit case because enumerating each case can be tedious and they are often self-documenting
 # (TODO: consider omitting operation because math formulas use bare numbers all the time and it gets annoying)
-checks = ["argument", "condition", "operation", "return"]
-
+checks = [
+  'argument',
+  'condition',
+  'operation',
+  'return'
+]
+ignored-files = [
+  '/obfuscation.go$'
+]
 # plain numbers are fine for file permissions
-ignored-functions = ["^os\\.MkdirAll$", "^os\\.Mkdir$", "^os\\.OpenFile$", "^os\\.WriteFile$"]
+ignored-functions = [
+  '^os\.MkdirAll$',
+  '^os\.Mkdir$',
+  '^os\.OpenFile$',
+  '^os\.WriteFile$'
+]
 
-ignored-files = ["/obfuscation.go$"]
+[linters.settings.staticcheck]
+checks = [
+  # The defaults
+  "all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022",
+  # Our modifications
+  "-QF1003", # Allow simple if statements instead of simple switches
+  "-QF1008" # Allow embedded fields in selector expressions
+]
+
+[linters.exclusions]
+generated = 'lax'
+presets = [
+  'comments',
+  'common-false-positives',
+  'legacy',
+  'std-error-handling'
+]
+paths = [
+  'mapmutex.go',
+  'third_party$',
+  'builtin$',
+  'examples$'
+]
+
+# unfortunately, the "excludes" list does not take exclusion IDs! sighhh
+# EXC0001, but I added ".Rollback()" since it's often used in defer
+[[linters.exclusions.rules]]
+linters = [
+  'errcheck'
+]
+text = 'Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print(f|ln)?|os\.(Un)?Setenv|.+\.Rollback()). is not checked'
+
+[[linters.exclusions.rules]]
+linters = [
+  'bodyclose',
+  'errcheck',
+  'forcetypeassert',
+  'gosec',
+  'noctx'
+]
+path = '_test.go'
+
+[[linters.exclusions.rules]]
+linters = [
+  'revive'
+]
+path = '_test.go'
+text = 'unchecked-type-assertion:'
+
+[issues]
+max-issues-per-linter = 100
+max-same-issues = 10
+
+[formatters]
+enable = [
+  'gci',
+  'gofmt',
+  'goimports'
+]
+
+[formatters.exclusions]
+generated = 'lax'
+paths = [
+  'mapmutex.go',
+  'third_party$',
+  'builtin$',
+  'examples$'
+]
