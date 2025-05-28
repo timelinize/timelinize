@@ -903,7 +903,7 @@ func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r R
 		// so we set this here to avoid counting this toward the expected thumbnail
 		// job size later
 		// (TODO: We could move the definition of RelMotion into this package, but, eh. this works for now.)
-		if r.Relation.Label == "motion" && otherGraph.Item != nil {
+		if r.Label == "motion" && otherGraph.Item != nil {
 			otherGraph.Item.skipThumb = true
 		}
 
@@ -912,9 +912,10 @@ func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r R
 			return fmt.Errorf("%s node: %w", fromOrTo, err)
 		}
 		if otherGraph.Item != nil {
-			if fromOrTo == relationFrom {
+			switch fromOrTo {
+			case relationFrom:
 				rawRel.fromItemID = &otherGraph.rowID.itemID
-			} else if fromOrTo == relationTo {
+			case relationTo:
 				rawRel.toItemID = &otherGraph.rowID.itemID
 			}
 		} else if otherGraph.Entity != nil {
@@ -922,18 +923,20 @@ func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r R
 			if err != nil {
 				return fmt.Errorf("getting identifying attribute ID for connected entity (on %s side): %w", fromOrTo, err)
 			}
-			if fromOrTo == relationFrom {
+			switch fromOrTo {
+			case relationFrom:
 				rawRel.fromAttributeID = &attrID
-			} else if fromOrTo == relationTo {
+			case relationTo:
 				rawRel.toAttributeID = &attrID
 			}
 		}
 	} else {
 		switch {
 		case ig.Item != nil:
-			if fromOrTo == relationFrom {
+			switch fromOrTo {
+			case relationFrom:
 				rawRel.fromItemID = &ig.rowID.itemID
-			} else if fromOrTo == relationTo {
+			case relationTo:
 				rawRel.toItemID = &ig.rowID.itemID
 			}
 		case ig.Entity != nil:
@@ -941,9 +944,10 @@ func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r R
 			if err != nil {
 				return fmt.Errorf("getting identifying attribute ID for graph entity (on %s side): %w", fromOrTo, err)
 			}
-			if fromOrTo == relationFrom {
+			switch fromOrTo {
+			case relationFrom:
 				rawRel.fromAttributeID = &attrID
-			} else if fromOrTo == relationTo {
+			case relationTo:
 				rawRel.toAttributeID = &attrID
 			}
 		default:
@@ -1130,12 +1134,13 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 					var metadataUpdateRequired bool // once we're done comparing keys/values, we may not need to update metadata at all
 					for k, v := range existingMetadata {
 						// iterating metadata keys that are already in the DB
-						if policy == UpdatePolicyPreferExisting {
+						switch policy {
+						case UpdatePolicyPreferExisting:
 							if incomingV, ok := it.Metadata[k]; ok {
 								metadataUpdateRequired = metadataUpdateRequired || incomingV != v
 							}
 							it.Metadata[k] = v
-						} else if policy == UpdatePolicyPreferIncoming {
+						case UpdatePolicyPreferIncoming:
 							if incomingV, ok := it.Metadata[k]; !ok {
 								it.Metadata[k] = v
 							} else if incomingV != v {

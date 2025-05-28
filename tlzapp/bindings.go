@@ -713,7 +713,7 @@ func (App) NextGraph(repoID string, jobID uint64) (*timeline.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	return tl.Timeline.NextGraphFromImport(jobID)
+	return tl.NextGraphFromImport(jobID)
 }
 
 func (App) SubmitGraph(repoID string, jobID uint64, g *timeline.Graph, skip bool) error {
@@ -721,7 +721,7 @@ func (App) SubmitGraph(repoID string, jobID uint64, g *timeline.Graph, skip bool
 	if err != nil {
 		return err
 	}
-	return tl.Timeline.SubmitGraph(jobID, g, skip)
+	return tl.SubmitGraph(jobID, g, skip)
 }
 
 func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {

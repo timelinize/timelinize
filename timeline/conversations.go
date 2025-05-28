@@ -177,10 +177,10 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 		)
 
 		if len(params.classificationIDs) > 0 {
-			whereClause += " AND ("
+			whereClause += " AND (" //nolint:goconst,nolintlint
 			for i, classID := range params.classificationIDs {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause += " OR " //nolint:goconst,nolintlint
 				}
 				whereClause += "items.classification_id=?"
 				args = append(args, classID)

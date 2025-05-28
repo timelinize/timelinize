@@ -772,7 +772,7 @@ type ItemRow struct {
 }
 
 func (ir ItemRow) hasContent() bool {
-	return ir.DataID != nil || ir.DataText != nil || ir.DataFile != nil || !ir.Location.IsEmpty()
+	return ir.DataID != nil || ir.DataText != nil || ir.DataFile != nil || !ir.IsEmpty()
 }
 
 func (ir ItemRow) timestampUnix() *int64 {
@@ -818,8 +818,8 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 		&ir.ClassificationID, &ir.OriginalID, &ir.OriginalLocation, &ir.IntermediateLocation, &ir.Filename,
 		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeUncertainty, &stored, &modified,
 		&ir.DataID, &ir.DataType, &ir.DataText, &ir.DataFile, &ir.DataHash,
-		&metadata, &ir.Location.Longitude, &ir.Location.Latitude, &ir.Location.Altitude,
-		&ir.Location.CoordinateSystem, &ir.Location.CoordinateUncertainty, &ir.Note, &ir.Starred,
+		&metadata, &ir.Longitude, &ir.Latitude, &ir.Altitude,
+		&ir.CoordinateSystem, &ir.CoordinateUncertainty, &ir.Note, &ir.Starred,
 		&ir.ThumbHash, &ir.OriginalIDHash, &ir.InitialContentHash, &ir.RetrievalKey,
 		&ir.Hidden, &deleted,
 		&ir.DataSourceName, &ir.DataSourceTitle, &className}
@@ -994,7 +994,7 @@ func (rr rawRelationship) String() string {
 		toAttributeID = strconv.FormatUint(*rr.toAttributeID, 10)
 	}
 	return fmt.Sprintf("[label=%s directed=%t value=%v fromItemID=%s fromAttributeID=%s toItemID=%s toAttributeID=%s start=%d end=%d]",
-		rr.Relation.Label, rr.Relation.Directed, rr.value, fromItemID, fromAttributeID, toItemID, toAttributeID, rr.start, rr.end)
+		rr.Label, rr.Directed, rr.value, fromItemID, fromAttributeID, toItemID, toAttributeID, rr.start, rr.end)
 }
 
 // Relation describes how two nodes in a graph are related.

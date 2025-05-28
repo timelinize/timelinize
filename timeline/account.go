@@ -191,11 +191,11 @@ func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account
 	WHERE data_sources.id = accounts.data_source_id`
 	args := make([]any, 0, len(ids)+len(dataSourceIDs))
 	if len(ids) > 0 || len(dataSourceIDs) > 0 {
-		q += " AND (" //nolint:goconst
+		q += " AND (" //nolint:goconst,nolintlint
 	}
 	for i, id := range ids {
 		if i > 0 {
-			q += " OR " //nolint:goconst
+			q += " OR " //nolint:goconst,nolintlint
 		}
 		q += "accounts.id=?"
 		args = append(args, id)
