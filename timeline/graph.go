@@ -25,8 +25,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"mime"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -542,7 +544,7 @@ func (m Metadata) Clean() {
 			delete(m, k)
 			continue
 		}
-		if m.isEmpty(v) {
+		if isEmpty(v) {
 			delete(m, k)
 		}
 	}
@@ -580,7 +582,7 @@ func StringToSpecificType(s string) any {
 	return s
 }
 
-func (Metadata) isEmpty(v any) bool {
+func isEmpty(v any) bool {
 	if v == nil {
 		return true
 	} else if str, ok := v.(string); ok && strings.TrimSpace(str) == "" {
@@ -594,6 +596,8 @@ func (Metadata) isEmpty(v any) bool {
 	} else if t, ok := v.(*time.Time); ok && (t == nil || t.IsZero()) {
 		return true
 	} else if d, ok := v.(time.Duration); ok && d == 0 {
+		return true
+	} else if d, ok := v.(*time.Duration); ok && (d == nil || *d == 0) {
 		return true
 	} else if n, ok := v.(int); ok && n == 0 {
 		return true
@@ -627,6 +631,15 @@ func (Metadata) isEmpty(v any) bool {
 		return true
 	} else if n, ok := v.(*float64); ok && (n == nil || *n == 0) {
 		return true
+	} else if r, ok := v.(*big.Rat); ok && (r.Cmp(big.NewRat(0, 1)) == 0) {
+		return true
+	} else if !reflect.ValueOf(v).IsValid() {
+		return true
+	}
+	// handle non-nil interface but nil-value-in-interface cases
+	switch reflect.TypeOf(v).Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Array, reflect.Chan, reflect.Slice:
+		return reflect.ValueOf(v).IsNil()
 	}
 	return false
 }
@@ -695,7 +708,7 @@ func (m Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
 			case MetaMergeReplace:
 				m[key] = val
 			case MetaMergeReplaceEmpty:
-				if m.isEmpty(currentVal) {
+				if isEmpty(currentVal) {
 					m[key] = val
 				}
 			}
@@ -705,6 +718,20 @@ func (m Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
 		}
 		m[key] = val
 	}
+}
+
+// sameJSON is useful when comparing deserialized
+// metadata values with unserialized metadata values.
+func sameJSON(a, b any) bool {
+	aJSON, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	bJSON, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(aJSON, bJSON)
 }
 
 // These are the standard relationships that Timelinize
@@ -993,8 +1020,8 @@ func (rr rawRelationship) String() string {
 	if rr.toAttributeID != nil {
 		toAttributeID = strconv.FormatUint(*rr.toAttributeID, 10)
 	}
-	return fmt.Sprintf("[label=%s directed=%t value=%v fromItemID=%s fromAttributeID=%s toItemID=%s toAttributeID=%s start=%d end=%d]",
-		rr.Relation.Label, rr.Relation.Directed, rr.value, fromItemID, fromAttributeID, toItemID, toAttributeID, rr.start, rr.end)
+	return fmt.Sprintf("[label=%s directed=%t value=%v fromItemID=%s fromAttributeID=%s toItemID=%s toAttributeID=%s start=%d end=%d metadata=%s]",
+		rr.Relation.Label, rr.Relation.Directed, rr.value, fromItemID, fromAttributeID, toItemID, toAttributeID, rr.start, rr.end, string(rr.metadata))
 }
 
 // Relation describes how two nodes in a graph are related.

@@ -791,22 +791,84 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 			return 0, fmt.Errorf("opening output data file: %w", err)
 		}
 
+		// mark this data file path as active (and unchanged, for now)
+		activeDataFilesMu.Lock()
+		activeDataFiles[it.dataFileName] = it.dataFileName
+		activeDataFilesMu.Unlock()
+
 		// if we end up returning with an error, it means that the item row was not saved
 		// in the DB; avoid leaving a dangling file reservation and clean up fd resources
+		// as well as any other global state
 		defer func() {
 			if err != nil && it.dataFileOut != nil {
 				it.dataFileIn.Close()
 				it.dataFileOut.Close()
 				_ = p.tl.deleteRepoFile(it.dataFileOut.Name())
+				activeDataFilesMu.Lock()
+				delete(activeDataFiles, it.dataFileName)
+				activeDataFilesMu.Unlock()
 			}
 		}()
 	}
 
 	// make a copy of this 'cause we might use it later to clean up a data file if we ended up setting it to NULL or replacing it
-	// TODO: both, really? ... probably just need this copied to one var
 	startingDataFile := ir.DataFile
 	if ir.DataFile != nil {
 		it.oldDataFile = *ir.DataFile
+
+		// Now, in some cases, there's an edge case to handle: a data file may come in initially without a timestamp,
+		// which defaults to placing it into a folder by today's date; OR, an existing item might be getting an updated
+		// timestamp -- seeing as we organize data files into folders by date, it follows that if the timestamp
+		// is corrected/updated, we should move the data file to match. This is easier when a data file is not shared
+		// by multiple items with different timestamps... I'm not sure which date to use in that case, so here I just
+		// handle the single-item data file case. We see if the timestamp is being updated, and if so, we see if the
+		// data file for this item would be in a different folder based on that timestamp, and if so, we see if the
+		// data file is in use by only 1 item, and if so, we can move the data file. Phew.
+		tsUpdatePol := it.fieldUpdatePolicies["timestamp"]
+		if tsUpdatePol > 0 {
+			// see if the incoming item's timestamp would put the data file in the same folder it's already in,
+			// (ignoring the data source portion at the end)
+			appropriateFolder := p.tl.canonicalItemDataFileDir(it, p.ds.Name)
+			endOfDateComponents := strings.LastIndex(appropriateFolder, "/")
+			if !strings.HasPrefix(it.oldDataFile, appropriateFolder[:endOfDateComponents]) {
+				var count int
+				err := tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? LIMIT 2`, it.oldDataFile).Scan(&count)
+				if err != nil {
+					return 0, fmt.Errorf("could not count how many items refer to data file: %w (data_file=%s)", err, it.dataFileName)
+				} else if count == 1 {
+					newFile, newPath, err := p.tl.openUniqueCanonicalItemDataFile(tx, p.log, it, p.ds.Name)
+					if err != nil {
+						return 0, fmt.Errorf("could not open file to relocate data file with updated timestamp: %w (data_file=%s)", err, it.dataFileName)
+					}
+					newFile.Close()
+					if err := os.Rename(p.tl.FullPath(it.oldDataFile), p.tl.FullPath(newPath)); err != nil {
+						return 0, fmt.Errorf("renaming data file with updated timestamp to relevant path: %w (data_file_old=%s data_file_name=%s)", err, it.dataFileName, newPath)
+					}
+					// Seeing as the data file we're referring to may very well be in the process of being downloaded
+					// currently, we need a way to inform phase 3 of the processor that the file has moved... so we
+					// have this global map (ew, I know, sorry) which we keep track of the changed file name.
+					// I'm not 100% sure the lock around this query is useful, since the query is part of a Tx that isn't committed
+					// until later, but, doing this for now anyway.
+					activeDataFilesMu.Lock()
+					if _, err := tx.ExecContext(ctx, `UPDATE items SET data_file=? WHERE data_file=?`, newPath, it.oldDataFile); err != nil {
+						activeDataFilesMu.Unlock()
+						return 0, fmt.Errorf("updating data_file in items table from '%s' to '%s': %w", it.oldDataFile, newPath, err)
+					}
+					activeDataFiles[it.oldDataFile] = newPath
+					activeDataFilesMu.Unlock()
+					if err := p.tl.cleanDirs(it.oldDataFile); err != nil {
+						p.log.Error("relocated data file with changed timestamp, but failed to clean its old directory tree",
+							zap.String("old_path", it.oldDataFile),
+							zap.Error(err))
+					}
+					it.oldDataFile = newPath
+					ir.DataFile = &newPath
+					p.log.Debug("relocated data file due to changed timestamp",
+						zap.String("old_path", it.oldDataFile),
+						zap.String("new_path", newPath))
+				}
+			}
+		}
 	}
 
 	err = p.fillItemRow(ctx, tx, &ir, it)
@@ -859,15 +921,6 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 		rawRel.end = &unixSec
 	}
 
-	r.Metadata.Clean()
-	if len(r.Metadata) > 0 {
-		metaJSON, err := json.Marshal(r.Metadata)
-		if err != nil {
-			return fmt.Errorf("encoding relationship metadata: %w", err)
-		}
-		rawRel.metadata = metaJSON
-	}
-
 	// if the relationship explicitly has a "from" node set, use that;
 	// otherwise, assume this node is the "from" side
 	if err := p.linkRelation(ctx, ig, tx, r, &rawRel, relationFrom); err != nil {
@@ -880,7 +933,7 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 		return fmt.Errorf("linking to relation: %w", err)
 	}
 
-	err := p.tl.storeRelationship(ctx, tx, rawRel)
+	err := p.tl.storeRelationship(ctx, tx, rawRel, r.Metadata)
 	if err != nil {
 		return fmt.Errorf("storing relationship: %w", err)
 	}
@@ -1114,11 +1167,10 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 					break
 				}
 
-				// If metadata has an update policy that involves what already exists in the DB (KeepExisting and OverwriteExisting don't care what's
-				// already in the DB, only the Prefer* policies do), we decode it and merge the metadata keys according to the policy.
-				// Currently, our logic here is additive: when combining, we can add keys that don't already exist, or change the values of keys,
-				// but we'll never delete keys. Maybe future options can enable that if needed.
-				if policy >= UpdatePolicyPreferExisting && dbItem.Metadata != nil {
+				// Metadata is a bit of a special case in that we apply the update policy to each key of metadata
+				// (except KeepExisting, since that suggests not updating the metadata at all).
+				// Unfortunately this involves decoding the existing JSON and re-encoding values to compare them :')
+				if dbItem.Metadata != nil {
 					var existingMetadata Metadata
 					if err := json.Unmarshal(dbItem.Metadata, &existingMetadata); err != nil {
 						p.log.Error("could not unmarshal existing item metadata to combine with incoming metadata; it may get overwritten",
@@ -1128,17 +1180,20 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 							zap.Error(err))
 					}
 					var metadataUpdateRequired bool // once we're done comparing keys/values, we may not need to update metadata at all
+					// iterate each existing metadata key that's already in the DB, and see whether we need to update metadata
+					// at all, and if so, make sure the incoming metadata reflects the update policy
+					// (we only need to update metadata if a new key is incoming, or if a different value for an existing key is
+					// incoming and the update policy prefers incoming)
 					for k, v := range existingMetadata {
-						// iterating metadata keys that are already in the DB
-						if policy == UpdatePolicyPreferExisting {
-							if incomingV, ok := it.Metadata[k]; ok {
-								metadataUpdateRequired = metadataUpdateRequired || incomingV != v
+						switch policy {
+						case UpdatePolicyPreferExisting:
+							if !isEmpty(v) {
+								it.Metadata[k] = v
 							}
-							it.Metadata[k] = v
-						} else if policy == UpdatePolicyPreferIncoming {
+						case UpdatePolicyPreferIncoming:
 							if incomingV, ok := it.Metadata[k]; !ok {
 								it.Metadata[k] = v
-							} else if incomingV != v {
+							} else if !sameJSON(incomingV, v) {
 								metadataUpdateRequired = true
 							}
 						}
@@ -1153,39 +1208,33 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 							}
 						}
 					}
-					if !metadataUpdateRequired {
+					if metadataUpdateRequired {
+						// ensure the processor updates the metadata field, now that we've done the merging of individual keys
+						it.fieldUpdatePolicies[field] = UpdatePolicyOverwriteExisting
+					} else {
+						// ensure the processor does not unnecessarily update the metadata field
 						delete(it.fieldUpdatePolicies, field)
 					}
-				}
-
-				// only handling the case where data is text and small enough to fit nicely into DB page
-				if (dbItem.Metadata == nil && len(it.Metadata) == 0) || // both empty
-					// computing equality is non-trivial, so we don't do that
-					(len(it.Metadata) == 0 && policy != UpdatePolicyOverwriteExisting) { // update would no-op
-					delete(it.fieldUpdatePolicies, field)
 				}
 			case "latlon":
 				// skipping coordinate_system and coordinate_uncertainty for now
 				// use same decimal precision as loadItemRow does
 				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude)
 				lowLat, highLat, latDecimals := latLonBounds(it.Location.Latitude)
-				lowAlt, highAlt := altitudeBounds(it.Location.Altitude)
-				// since altitude is another unique constraint, but requires latlon, build the
-				// logic with lat+lon first, then we can factor in altitude before evaluating
 				allNil := dbItem.Longitude == nil && it.Location.Longitude == nil && dbItem.Latitude == nil && it.Location.Latitude == nil
 				valuesWithinBounds := (dbItem.Longitude != nil && it.Location.Longitude != nil && (*lowLon <= coordRound(*dbItem.Longitude, lonDecimals) && coordRound(*dbItem.Longitude, lonDecimals) <= *highLon)) &&
 					(dbItem.Latitude != nil && it.Location.Latitude != nil && (*lowLat <= coordRound(*dbItem.Latitude, latDecimals) && coordRound(*dbItem.Latitude, latDecimals) <= *highLat))
 				wouldNoOp := policy != UpdatePolicyOverwriteExisting && it.Location.Longitude == nil && it.Location.Latitude == nil
-				// if altitude, the third dimension/coordinate, is to be used, then factor it in now
-				if _, ok := it.fieldUpdatePolicies["altitude"]; ok {
-					allNil = allNil && dbItem.Altitude == nil && it.Location.Altitude == nil
-					valuesWithinBounds = valuesWithinBounds &&
-						(dbItem.Altitude != nil && it.Location.Altitude != nil && (*lowAlt <= *dbItem.Altitude && *dbItem.Altitude < *highAlt))
-					wouldNoOp = wouldNoOp && it.Location.Altitude == nil
-				}
 				if allNil || // both empty
-					valuesWithinBounds || // both the same
+					valuesWithinBounds || // both (approximately) the same
 					wouldNoOp { // update would no-op
+					delete(it.fieldUpdatePolicies, field)
+				}
+			case "altitude":
+				lowAlt, highAlt := altitudeBounds(it.Location.Altitude)
+				if (dbItem.Altitude == nil && it.Location.Altitude == nil) || // both empty
+					(dbItem.Altitude != nil && it.Location.Altitude != nil && (*lowAlt <= *dbItem.Altitude && *dbItem.Altitude < *highAlt)) || // both (approximately) the same
+					(policy != UpdatePolicyOverwriteExisting && it.Location.Altitude == nil) { // update would no-op
 					delete(it.fieldUpdatePolicies, field)
 				}
 			}
@@ -1195,9 +1244,9 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 	}()
 
 	// the presence of a retrieval key implies that the data source may not be able to fully
-	// provide the whole item in one import, so in that case, always reprocess, but make sure
-	// to account for the update overrides specified by the data source
-	if len(it.Retrieval.key) > 0 {
+	// provide the whole item in one import, so in that case, always reprocess if it hasn't
+	// been modified locally -- make sure to use update policies specified by the data source
+	if len(it.Retrieval.key) > 0 && (dbItem.Modified == nil || p.ij.ProcessingOptions.OverwriteLocalChanges) {
 		if it.fieldUpdatePolicies == nil {
 			it.fieldUpdatePolicies = make(map[string]FieldUpdatePolicy)
 		}
@@ -1278,9 +1327,11 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 
 		// reprocess the item row if there's new data to be added
 		if (dbItem.Latitude == nil && it.Location.Latitude != nil) ||
-			(dbItem.Longitude == nil && it.Location.Longitude != nil) ||
-			(dbItem.Altitude == nil && it.Location.Altitude != nil) {
-			it.fieldUpdatePolicies["coordinates"] = UpdatePolicyPreferIncoming
+			(dbItem.Longitude == nil && it.Location.Longitude != nil) {
+			it.fieldUpdatePolicies["latlon"] = UpdatePolicyPreferIncoming
+			if dbItem.Altitude == nil && it.Location.Altitude != nil {
+				it.fieldUpdatePolicies["altitude"] = UpdatePolicyPreferIncoming
+			}
 		}
 		if !it.Timestamp.IsZero() {
 			// time and zone are stored separately in the DB, so consider those parts separately (not doing so was a bug: we reprocessed items unnecessarily)
@@ -1312,8 +1363,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 			it.fieldUpdatePolicies["original_id"] = UpdatePolicyPreferIncoming
 		}
 
-		// metadata is a little tricky, especially to decide efficiently, unless
-		// the incoming item obiously has some and the existing one does not...
+		// the deferred function above will take care of merging the metadata
 		if len(it.Metadata) > 0 {
 			it.fieldUpdatePolicies["metadata"] = UpdatePolicyPreferIncoming
 		}
@@ -1850,10 +1900,9 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			appendToQuery("data_text", policy)
 			appendToQuery("data_file", policy)
 			appendToQuery("data_hash", policy)
-		case "coordinates":
+		case "latlon":
 			appendToQuery("longitude", policy)
 			appendToQuery("latitude", policy)
-			appendToQuery("altitude", policy)
 			appendToQuery("coordinate_system", policy)
 			appendToQuery("coordinate_uncertainty", policy)
 		default:
@@ -1891,15 +1940,16 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			return errors.New("data components cannot be individually configured for updates; use 'data' as field name instead")
 		case "metadata":
 			args = append(args, string(ir.Metadata))
-		case "coordinates":
+		case "latlon":
 			args = append(args, ir.Longitude)
 			args = append(args, ir.Latitude)
-			args = append(args, ir.Altitude)
 			args = append(args, ir.CoordinateSystem)
 			args = append(args, ir.CoordinateUncertainty)
-		case "longitude", "latitude", "altitude", "coordinate_system", "coordinate_uncertainty":
+		case "altitude":
+			args = append(args, ir.Altitude)
+		case "longitude", "latitude", "coordinate_system", "coordinate_uncertainty":
 			// unlike the data fields, there's no good reason for this other than "individually doesn't make sense and may be tedious"
-			return errors.New("location components cannot be individually configured for updates; use 'coordinates' as field name instead")
+			return errors.New("location components cannot be individually configured for updates other than altitude; use 'latlon' as field name instead")
 		case "note":
 			args = append(args, ir.Note)
 		case "starred":

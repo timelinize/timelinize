@@ -214,6 +214,8 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			"timeframe":        timeline.UpdatePolicyPreferExisting,
 			"time_offset":      timeline.UpdatePolicyPreferExisting,
 			"time_uncertainty": timeline.UpdatePolicyPreferExisting,
+			"latlon":           timeline.UpdatePolicyPreferExisting,
+			"altitude":         timeline.UpdatePolicyPreferExisting,
 		}
 	} else {
 		// always use the embedded timestamp, unless it looks like it is bad (I've encountered
@@ -239,7 +241,8 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			"timeframe":             tsUpdatePolicy,
 			"time_offset":           tsUpdatePolicy,
 			"time_uncertainty":      tsUpdatePolicy,
-			"coordinates":           timeline.UpdatePolicyPreferIncoming,
+			"latlon":                timeline.UpdatePolicyPreferIncoming,
+			"altitude":              timeline.UpdatePolicyPreferIncoming,
 		}
 
 		media.ConnectMotionPhoto(opt.Log, dirEntry, mediaFilePath, ig)

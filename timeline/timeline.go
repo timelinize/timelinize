@@ -557,7 +557,11 @@ func (tl *Timeline) Empty() bool {
 	return err == sql.ErrNoRows
 }
 
-func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRelationship) error {
+// storeRelationship stores the raw relationship into the DB if it doesn't already exist. If it does,
+// the relationship's metadata will be updated with whatever is incoming. Pass in the relationship's
+// metadata in its parsed form, rather than setting it on the rawRelationship, since this method needs
+// to read the metadata in the case of an existing relationship row.
+func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRelationship, incomingMeta Metadata) error {
 	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO relations (label, directed, subordinating) VALUES (?, ?, ?)`,
 		rel.Label, rel.Directed, rel.Subordinating)
 	if err != nil {
@@ -571,13 +575,24 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 		return fmt.Errorf("loading relation ID: %w (rawRelationship=%s)", err, rel)
 	}
 
-	// make sure the relationship is unique; we don't use UNIQUE constraints in the DB because this
+	// get the incoming metadata cleaned and marshaled since we might just insert it and be done
+	incomingMeta.Clean()
+	if len(incomingMeta) > 0 {
+		metaJSON, err := json.Marshal(incomingMeta)
+		if err != nil {
+			return fmt.Errorf("encoding incoming relationship metadata: %w", err)
+		}
+		rel.metadata = metaJSON
+	}
+
+	// see if the relationship is unique; we don't use UNIQUE constraints in the DB because this
 	// check is a little more complex with the potential timeframes; and we only need 1 index to
 	// make it reasonably fast, rather than multiple on the different to/from fields
-	// (I found SELECT 1 to be faster than SELECT count(), but maybe that was just a fluke?)
-	var dupe bool
+	var rowID uint64
+	var rowValue any
+	var rowMeta *string
 	err = tx.QueryRowContext(ctx, `
-		SELECT 1
+		SELECT id, value, metadata
 		FROM relationships
 		WHERE relation_id=?
 			AND from_item_id IS ?
@@ -588,26 +603,58 @@ func (tl *Timeline) storeRelationship(ctx context.Context, tx *sql.Tx, rel rawRe
 		LIMIT 1`, relID,
 		rel.fromItemID, rel.toItemID,
 		rel.fromAttributeID, rel.toAttributeID,
-		rel.start, rel.start, rel.end, rel.end).Scan(&dupe)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("checking for duplicate relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
-	}
-	if dupe {
-		return nil // already in DB
-	}
-
-	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO relationships
+		rel.start, rel.start, rel.end, rel.end).Scan(&rowID, &rowValue, &rowMeta)
+	if errors.Is(err, sql.ErrNoRows) {
+		// relationship does not exist -- simply insert it and we're done!
+		_, err = tx.ExecContext(ctx, `INSERT INTO relationships
 		(relation_id, value,
 			from_item_id, from_attribute_id,
 			to_item_id, to_attribute_id,
 			start, end, metadata)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, relID, rel.value,
-		rel.fromItemID, rel.fromAttributeID,
-		rel.toItemID, rel.toAttributeID,
-		rel.start, rel.end, string(rel.metadata),
-	)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			relID, rel.value,
+			rel.fromItemID, rel.fromAttributeID,
+			rel.toItemID, rel.toAttributeID,
+			rel.start, rel.end, string(rel.metadata),
+		)
+		if err != nil {
+			return fmt.Errorf("inserting relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
+		}
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("checking for duplicate relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
+	}
+
+	// relationship already exists; check if an update is in order (different value or metadata incoming)
+
+	// an update is required if the value is different...
+	doUpdate := rowValue != rel.value
+
+	// if the value is not different, see if new metadata calls for an update (there is not currently a way to delete metadata from relationships)
+	if !doUpdate && len(incomingMeta) > 0 {
+		var existingMeta Metadata
+		if rowMeta != nil {
+			err := json.Unmarshal([]byte(*rowMeta), &existingMeta)
+			if err != nil {
+				return fmt.Errorf("decoding existing relationship row's metadata: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
+			}
+		}
+		// see if any of the incoming metadata keys are new or have a different value
+		for incomingKey, incomingV := range incomingMeta {
+			if rowV, ok := existingMeta[incomingKey]; !ok || incomingV != rowV {
+				doUpdate = true
+				break
+			}
+		}
+	}
+
+	if !doUpdate {
+		return nil
+	}
+
+	_, err = tx.ExecContext(ctx, `UPDATE relationships SET value=?, metadata=? WHERE id=?`, rel.value, rel.metadata, rowID)
 	if err != nil {
-		return fmt.Errorf("inserting relationship: %w (relationID=%d rawRelationship=%s)", err, relID, rel)
+		return fmt.Errorf("updating relationship %d: %w (relationID=%d rawRelationship=%s)", rowID, err, relID, rel)
 	}
 
 	return nil
@@ -1156,6 +1203,12 @@ func (tl *Timeline) deleteRepoFile(pathInRepo string) error {
 		return err
 	}
 
+	return tl.cleanDirs(pathInRepo)
+}
+
+// cleanDirs deletes empty directories starting at pathInRepo, which MUST be relative
+// to the repo path, until there are no more folders left to bubble up.
+func (tl *Timeline) cleanDirs(pathInRepo string) error {
 	for p := path.Dir(pathInRepo); p != "."; p = path.Dir(p) {
 		fullPath := tl.FullPath(p)
 		isEmpty, _, err := directoryEmpty(fullPath, true)
@@ -1173,7 +1226,6 @@ func (tl *Timeline) deleteRepoFile(pathInRepo string) error {
 			return nil
 		}
 	}
-
 	return nil
 }
 

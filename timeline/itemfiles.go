@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -49,6 +50,10 @@ func (p *processor) downloadDataFile(_ context.Context, it *Item) error {
 	h := newHash()
 	dataFileSize, err := p.downloadAndHashDataFile(it, h)
 	if err != nil {
+		// always clean up our global state
+		activeDataFilesMu.Lock()
+		delete(activeDataFiles, it.dataFileName)
+		activeDataFilesMu.Unlock()
 		return err
 	}
 	it.dataFileSize = dataFileSize
@@ -71,6 +76,13 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	if it == nil || it.dataFileOut == nil {
 		return nil
 	}
+
+	// always clean up our global state
+	defer func(dataFileKey string) {
+		activeDataFilesMu.Lock()
+		delete(activeDataFiles, dataFileKey)
+		activeDataFilesMu.Unlock()
+	}(it.dataFileName)
 
 	// if we were waiting on the data file to be downloaded before we can determine if/how
 	// to update some field(s) of the item (a "deferred" update policy), then now is the
@@ -96,6 +108,15 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 			}
 		}
 	}
+
+	// in case the data file path changed while we were downloading it, get the updated value
+	activeDataFilesMu.Lock()
+	updatedDataFilePath := activeDataFiles[it.dataFileName]
+	it.dataFileName = updatedDataFilePath
+	if it.row.DataFile != nil {
+		it.row.DataFile = &updatedDataFilePath
+	}
+	activeDataFilesMu.Unlock()
 
 	// Now that we have a hash of the file, perform one last check WITHOUT row/original IDs to ensure the checksum
 	// will be used in the query, to see if this ITEM is a duplicate. The check we performed before processing the
@@ -539,7 +560,7 @@ func (tl *Timeline) ensureDataFileNameShortEnough(filename string) string {
 	return filename
 }
 
-// replaceWIthExisting checks to see if the checksum of a file already exists in the database for a
+// replaceWithExisting checks to see if the checksum of a file already exists in the database for a
 // file that is not the file with the given canonical path or row ID. It returns true if the file
 // already exists and a replacement occurred; false otherwise (i.e. the file was unique).
 // TODO:/NOTE: If changing a file name, all items with same data_hash must also be updated to use same file name
@@ -723,6 +744,17 @@ func containsBlocklistedWord(s string) bool {
 	}
 	return false
 }
+
+// While data files are processing, maintain a map of its original
+// path in the repo to its current path in the repo. It's possible,
+// while a data file is downloading, that it may be moved when new
+// timestamp information becomes available. In that case, this map
+// is updated to point the old/original path to the new one so the
+// processor can use the right path for DB queries and such.
+var (
+	activeDataFiles   = make(map[string]string)
+	activeDataFilesMu sync.Mutex
+)
 
 // safePathRE matches any undesirable characters in a filepath.
 // Note that this allows dots, so you'll have to strip ".." manually.
