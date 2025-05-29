@@ -402,6 +402,7 @@ async function closeRepository() {
 	await app.CloseRepository(tlz.openRepos[0].instance_id);
 	tlz.openRepos = await app.OpenRepositories();
 	store('open_repos', tlz.openRepos);
+	tlz.jobStats = {};
 	if (!tlz.openRepos.length) {
 		await navigateSPA('/setup', true);
 		notify({
