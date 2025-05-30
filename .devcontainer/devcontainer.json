@@ -1,0 +1,9 @@
+{
+    "name": "Go",
+    "image": "mcr.microsoft.com/vscode/devcontainers/go:dev-1-bookworm",
+    "postCreateCommand": ".devcontainer/post-create.sh",
+    "postStartCommand": ".devcontainer/post-start.sh",
+    "forwardPorts": [
+        12002
+    ]
+}
