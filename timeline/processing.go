@@ -1609,12 +1609,24 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 // is the data source and the original ID.
 // TODO: checkDeleted is more like "use hashes to retrieve rows for deduplication purposes"
 func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, it *Item, dataSourceName *string, uniqueConstraints map[string]bool, checkDeleted bool) (ItemRow, error) {
-	var sb strings.Builder
+	// little helper function that returns the most correct equality operator (IS or =) based on the value being compared against
+	eq := func(arg any) string {
+		if isNil(arg) {
+			return " IS "
+		}
+		return "="
+	}
 
-	sb.WriteString("SELECT ")
+	var sb strings.Builder
+	var args []any
+
+	sb.WriteString(`
+SELECT * FROM (
+	SELECT `)
 	sb.WriteString(itemDBColumns)
-	sb.WriteString(" FROM extended_items AS items WHERE ")
-	args := make([]any, 0, 1+len(uniqueConstraints)*2)
+	sb.WriteString(`
+	FROM extended_items AS items
+	WHERE `)
 
 	if rowID != 0 {
 		// select the row directly with its row ID
@@ -1629,10 +1641,13 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 			return ItemRow{}, errors.New("missing unique constraints; at least 1 required when no original ID specified")
 		}
 
+		args = make([]any, 0, 1+len(uniqueConstraints))
+
 		// an easy way to select an item is by the ID assigned from the data source;
 		// this should be exclusive enough to uniquely select an item
+		// TODO: See if this is optimized
 		if dataSourceName != nil && it.ID != "" {
-			sb.WriteString(`(data_source_name=? AND original_id=?) OR `)
+			sb.WriteString(`(data_source_name=? AND original_id=?)`)
 			args = append(args, dataSourceName, it.ID)
 		}
 
@@ -1647,11 +1662,26 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 		// been either modified OR deleted in our table, since it tracks the content of the item as
 		// it was when it was originally imported from the data source.
 		if checkDeleted {
+			if len(args) > 0 {
+				sb.WriteString("\n\t\tOR ")
+			}
 			sb.WriteString(`
-				((deleted IS NOT NULL AND original_id_hash=?)
-					OR (modified IS NOT NULL OR deleted IS NOT NULL) AND initial_content_hash=?)
-				OR (`)
+					(deleted IS NOT NULL AND original_id_hash`)
+			sb.WriteString(eq(it.idHash))
+			sb.WriteString(`?)
+						OR ((modified IS NOT NULL OR deleted IS NOT NULL) AND initial_content_hash`)
+			sb.WriteString(eq(it.contentHash))
+			sb.WriteString(`?)`)
 			args = append(args, it.idHash, it.contentHash)
+
+			if len(uniqueConstraints) > 0 {
+				sb.WriteString("\n\t\tUNION ALL\n\t\t")
+				sb.WriteString(`SELECT `)
+				sb.WriteString(itemDBColumns)
+				sb.WriteString(`
+	FROM extended_items AS items
+	WHERE `)
+			}
 		}
 
 		// collection items are special cases; always ignore the user's unique constraint settings, since we will almost always
@@ -1667,116 +1697,93 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 
 		// iterate each field to be selected on to finish building WHERE clause
 		firstIter := true
-		for field, strictNull := range uniqueConstraints {
+		for field := range uniqueConstraints {
+			// Note: the value in uniqueConstraints is supposed to be whether NULLs are significant/strictly compared, but it is not currently implemented, and I am not sure if it is useful.
+
 			if !firstIter {
 				sb.WriteString(" AND ")
 			}
 			firstIter = false
 
-			// match other fields, accounting for whether NULL should be compared like a value
-			// (if "OR", either the input or the DB's value can be NULL;
-			// if "AND", both the input and DB's value have to be NULL)
-			op := "OR"
-			if strictNull {
-				op = "AND"
-			}
-
-			// TODO: should we take into account time_uncertainty and coordinate_uncertainty
-			// and allow any value in that range to be a match?
+			// TODO: should we take into account time_uncertainty and coordinate_uncertainty and allow any value in that range to be a match?
 
 			switch field {
 			case "data":
-				sb.WriteString("(data_text=? OR (data_text IS NULL ")
-				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL)) AND (data_hash=? OR ? IS NULL)")
+				sb.WriteString("(data_text")
+				sb.WriteString(eq(it.dataText))
+				sb.WriteString("? AND data_hash")
+				sb.WriteString(eq(it.dataFileHash))
+				sb.WriteString("?)")
+				args = append(args, it.dataText, it.dataFileHash)
 			case "latlon":
-				sb.WriteString("((? <= round(longitude, ?) AND round(longitude, ?) <= ?) OR (longitude IS NULL ")
-				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL)) AND ((? <= round(latitude, ?) AND round(latitude, ?) <= ?) OR (latitude IS NULL ")
-				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL)) AND (coordinate_system=? OR (coordinate_system IS NULL ")
-				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL))")
-			case "altitude":
-				sb.WriteString("((? <= altitude AND altitude < ?) OR (altitude IS NULL ")
-				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL))")
-			default:
-				sb.WriteRune('(')
-				sb.WriteString(field)
-				sb.WriteString("=? OR (")
-				sb.WriteString(field)
-				sb.WriteString(" IS NULL ")
-				sb.WriteString(op)
-				sb.WriteString(" ? IS NULL))")
-			}
-
-			switch field {
-			case "data_source_name":
-				args = append(args, dataSourceName, dataSourceName)
-			case "classification_name":
-				var className *string
-				if it.Classification.Name != "" {
-					className = &it.Classification.Name
-				}
-				args = append(args, className, className)
-			case "original_location":
-				var origLoc *string
-				if it.OriginalLocation != "" {
-					origLoc = &it.OriginalLocation
-				}
-				args = append(args, origLoc, origLoc)
-			case "intermediate_location":
-				var interLoc *string
-				if it.IntermediateLocation != "" {
-					interLoc = &it.IntermediateLocation
-				}
-				args = append(args, interLoc, interLoc)
-			case "filename":
-				var filename *string
-				if it.Content.Filename != "" {
-					filename = &it.Content.Filename
-				}
-				args = append(args, filename, filename)
-			case "timestamp":
-				timestamp := it.timestampUnix()
-				args = append(args, timestamp, timestamp)
-			case "timespan":
-				timespan := it.timespanUnix()
-				args = append(args, timespan, timespan)
-			case "timeframe":
-				timeframe := it.timeframeUnix()
-				args = append(args, timeframe, timeframe)
-			case "data":
-				args = append(args,
-					it.dataText, it.dataText,
-					it.dataFileHash, it.dataFileHash)
-			case "data_type", "data_text", "data_hash":
-				return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
-			case "latlon":
+				sb.WriteString(`(
+							(longitude`)
+				sb.WriteString(eq(it.Location.Longitude))
+				sb.WriteString(`? OR (? <= round(longitude, ?) AND round(longitude, ?) <= ?))
+						AND (latitude`)
+				sb.WriteString(eq(it.Location.Latitude))
+				sb.WriteString(`? OR (? <= round(latitude, ?) AND round(latitude, ?) <= ?))
+						AND coordinate_system`)
+				sb.WriteString(eq(it.Location.CoordinateSystem))
+				sb.WriteString("?)")
 				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude)
 				lowLat, highLat, latDecimals := latLonBounds(it.Location.Latitude)
 				args = append(args,
-					lowLon, lonDecimals, lonDecimals, highLon, it.Location.Longitude,
-					lowLat, latDecimals, latDecimals, highLat, it.Location.Latitude,
-					it.Location.CoordinateSystem, it.Location.CoordinateSystem)
+					it.Location.Longitude, lowLon, lonDecimals, lonDecimals, highLon,
+					it.Location.Latitude, lowLat, latDecimals, latDecimals, highLat,
+					it.Location.CoordinateSystem)
 			case "altitude":
 				// doesn't make sense on its own
 				if _, ok := uniqueConstraints["latlon"]; !ok {
 					return ItemRow{}, errors.New("altitude requires latlon also be used as a unique constraint")
 				}
+				sb.WriteString("(altitude")
+				sb.WriteString(eq(it.Location.Altitude))
+				sb.WriteString("? OR (? <= altitude AND altitude < ?))")
 				lowAlt, highAlt := altitudeBounds(it.Location.Altitude)
-				args = append(args, lowAlt, highAlt, it.Location.Altitude)
-			case "longitude", "latitude", "coordinate_system", "coordinate_uncertainty":
-				// unlike the data fields, there's no good reason for this other than "the other way doesn't make sense and may be error-prone"
-				return ItemRow{}, errors.New("cannot select on specific components of item coordinates such as latitude or longitude: specify 'latlon'+'altitude' instead")
+				args = append(args, it.Location.Altitude, lowAlt, highAlt)
 			default:
-				return ItemRow{}, fmt.Errorf("item unique constraints configure unsupported/unrecognized field: %s", field)
-			}
-		}
+				var arg any
+				switch field {
+				case "data_source_name":
+					arg = dataSourceName
+				case "classification_name":
+					if it.Classification.Name != "" {
+						arg = &it.Classification.Name
+					}
+				case "original_location":
+					if it.OriginalLocation != "" {
+						arg = &it.OriginalLocation
+					}
+				case "intermediate_location":
+					if it.IntermediateLocation != "" {
+						arg = &it.IntermediateLocation
+					}
+				case "filename":
+					if it.Content.Filename != "" {
+						arg = &it.Content.Filename
+					}
+				case "timestamp":
+					arg = it.timestampUnix()
+				case "timespan":
+					arg = it.timespanUnix()
+				case "timeframe":
+					arg = it.timeframeUnix()
+				case "data_type", "data_text", "data_hash":
+					return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
+				case "longitude", "latitude", "coordinate_system", "coordinate_uncertainty":
+					// unlike the data fields, there's no good reason for this other than "the other way doesn't make sense and may be error-prone"
+					return ItemRow{}, errors.New("cannot select on specific components of item coordinates such as latitude or longitude: specify 'latlon'+'altitude' instead")
+				default:
+					return ItemRow{}, fmt.Errorf("item unique constraints configure unsupported/unrecognized field: %s", field)
+				}
 
-		if checkDeleted {
-			sb.WriteRune(')')
+				sb.WriteString(field)
+				sb.WriteString(eq(arg))
+				sb.WriteRune('?')
+
+				args = append(args, arg)
+			}
 		}
 
 		// also honor the retrieval key, if set, which allows an item to be pieced together
@@ -1790,7 +1797,9 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 		}
 	}
 
-	sb.WriteString(" LIMIT 1")
+	sb.WriteString(`
+)
+LIMIT 1`)
 
 	row := tx.QueryRowContext(ctx, sb.String(), args...)
 

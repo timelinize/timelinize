@@ -636,12 +636,7 @@ func isEmpty(v any) bool {
 	} else if !reflect.ValueOf(v).IsValid() {
 		return true
 	}
-	// handle non-nil interface but nil-value-in-interface cases
-	switch reflect.TypeOf(v).Kind() {
-	case reflect.Ptr, reflect.Map, reflect.Array, reflect.Chan, reflect.Slice:
-		return reflect.ValueOf(v).IsNil()
-	}
-	return false
+	return isNil(v)
 }
 
 // HumanizeKeys transforms the keys in m to be more human-friendly.
@@ -717,6 +712,22 @@ func (m Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
 			continue
 		}
 		m[key] = val
+	}
+}
+
+// isNil returns true if v is nil. It returns true even
+// if v is a non-nil interface (has a type) which has a
+// nil value.
+func isNil(v any) bool {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return true
+	}
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Slice, reflect.Map, reflect.Func, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
 	}
 }
 

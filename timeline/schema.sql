@@ -169,7 +169,6 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"attribute_id" INTEGER, -- owner, creator, or originator attributed to this item
 	"classification_id" INTEGER,
 	"original_id" TEXT, -- ID provided by the data source
-	-- "embedding" BLOB, -- TODO: experimental, inline embedding
 	"original_location" TEXT,     -- path or location of the file/data on the original data source; should include filename if applicable
 	"intermediate_location" TEXT, -- path or location of the file/data from the import dataset (e.g. after exporting from the data source); should include filename if application
 	"filename" TEXT, -- name of the original file as named by the owner, if known
@@ -210,6 +209,13 @@ CREATE TABLE IF NOT EXISTS "items" (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
+
+-- These next two partial indexes greatly speed up processing when importing items, or any queries that
+-- check for existing rows that may have been deleted or modified from their original content. Because
+-- they are partial indexes, I have found that they do not greatly impact insert performance since most
+-- new items are not deleted or modified going in.
+CREATE INDEX idx_items_deleted_original_id_hash ON items(deleted, original_id_hash) WHERE deleted IS NOT NULL OR original_id_hash IS NOT NULL;
+CREATE INDEX idx_items_initial_content_hash ON items(initial_content_hash) WHERE modified IS NOT NULL OR deleted IS NOT NULL;
 
 -- Relationships may exist between and across items and entities. A row
 -- in this table is an actual connection between items and/or entities.

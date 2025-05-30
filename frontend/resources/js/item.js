@@ -85,13 +85,13 @@ async function itemPageMain() {
 	$('#item-class-icon').innerHTML = itemClass.icon;
 	$('#item-class-label').innerText = itemClass.label;
 
-	if (item.data_type.startsWith("image/")) {
+	if (item.data_type?.startsWith("image/")) {
 		$('#item-type-label').innerText = "picture";
-	} else if (item.data_type.startsWith("video/")) {
+	} else if (item.data_type?.startsWith("video/")) {
 		$('#item-type-label').innerText = "video";
-	} else if (item.data_type.startsWith("audio/")) {
+	} else if (item.data_type?.startsWith("audio/")) {
 		$('#item-type-label').innerText = "recording";
-	} else if (item.data_type.startsWith("text/")) {
+	} else if (item.data_type?.startsWith("text/")) {
 		$('#item-type-label').innerText = "document";
 	}
 

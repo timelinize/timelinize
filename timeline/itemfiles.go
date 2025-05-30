@@ -200,7 +200,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		}
 
 		return nil
-	} else if err != nil {
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		p.log.Error("could not query to determine item uniqueness after file download", zap.Error(err))
 	}
 
