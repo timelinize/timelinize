@@ -753,8 +753,6 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	if ir.ID > 0 {
 		// found it in our DB; skip it?
 
-		// TODO: What if it's pending deletion? why are we even checking deleted items? (the 'true' in the loadItemRow above)
-
 		// first we need to distill user's update preferences down to update policies for the DB
 		if err := p.distillUpdatePolicies(it, ir); err != nil {
 			return 0, fmt.Errorf("distilling initial update policies: %w", err)
@@ -1072,7 +1070,15 @@ func (p *processor) integrityCheck(dbItem ItemRow) error {
 // Valid return values: false false, true false, true true.
 func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFileIncoming bool) (item bool, dataFile bool) {
 	if it == nil {
-		return false, false
+		return
+	}
+
+	// don't re-import deleted items
+	if dbItem.Deleted != nil {
+		p.log.Error("skipping incoming item since it was previously deleted",
+			zap.Uint64("row_id", dbItem.ID),
+			zap.Time("deleted", *dbItem.Deleted))
+		return
 	}
 
 	// when the function returns, we can trim update policies by comparing what values wealready have with
@@ -1603,11 +1609,12 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 // Otherwise, the rest of the parameters are used to look up the item: the properties of the item
 // itself, together with the data source from which it comes; the Item must not be nil.
 // The last parameter, uniqueConstraints, configures which properties/columns to select on to
-// find the specific item. The most specific, exact matches should use all the available fields
+// find the specific item. The most specific/exact matches should use all the available fields
 // to match; if no columns are specified, then it is an error if the item does not have an
 // original ID. If the original ID is specified, the sole criteria used to look up a unique item
-// is the data source and the original ID.
-// TODO: checkDeleted is more like "use hashes to retrieve rows for deduplication purposes"
+// is the data source and the original ID. If checkDeleted is true, an item which has been deleted
+// will also be included as a possible result, it requires that idHash and contentHash are set on
+// the item already.
 func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, it *Item, dataSourceName *string, uniqueConstraints map[string]bool, checkDeleted bool) (ItemRow, error) {
 	// little helper function that returns the most correct equality operator (IS or =) based on the value being compared against
 	eq := func(arg any) string {
@@ -1617,9 +1624,18 @@ func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, i
 		return "="
 	}
 
+	// Build a highly-optimized query since this occurs in a hot path during imports.
+	// There are two main parts to the optimization (confirmed via EXPLAIN QUERY PLAN):
+	// (1) indexes on the items table on the timestamp column, and then a couple special
+	// partial indexes related to the initial content hash and deleted columns; and (2)
+	// using multiple "branches" that get UNION ALL'ed, which allows the use of those
+	// indexes by the query planner, rather than a big complex outer OR which results in
+	// a full table scan.
+
 	var sb strings.Builder
 	var args []any
 
+	// outer SELECT combines the results of our unioned queries
 	sb.WriteString(`
 SELECT * FROM (
 	SELECT `)
@@ -1674,6 +1690,8 @@ SELECT * FROM (
 			sb.WriteString(`?)`)
 			args = append(args, it.idHash, it.contentHash)
 
+			// the above criteria are sufficient for one query, the next one that uses
+			// the unique constraints will be its own query that gets unioned together
 			if len(uniqueConstraints) > 0 {
 				sb.WriteString("\n\t\tUNION ALL\n\t\t")
 				sb.WriteString(`SELECT `)
