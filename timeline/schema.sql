@@ -214,8 +214,11 @@ CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
 -- check for existing rows that may have been deleted or modified from their original content. Because
 -- they are partial indexes, I have found that they do not greatly impact insert performance since most
 -- new items are not deleted or modified going in.
-CREATE INDEX IF NOT EXISTS idx_items_deleted_original_id_hash ON items(deleted, original_id_hash) WHERE deleted IS NOT NULL OR original_id_hash IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_items_initial_content_hash ON items(initial_content_hash) WHERE modified IS NOT NULL OR deleted IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "idx_items_deleted_original_id_hash" ON "items"("deleted", "original_id_hash") WHERE deleted IS NOT NULL OR original_id_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "idx_items_initial_content_hash" ON "items"("initial_content_hash") WHERE modified IS NOT NULL OR deleted IS NOT NULL;
+
+-- This partial index speeds up processing for items that have IDs assigned by their data source.
+CREATE INDEX IF NOT EXISTS "idx_items_original_id" ON "items"("original_id") WHERE original_ID IS NOT NULL;
 
 -- Relationships may exist between and across items and entities. A row
 -- in this table is an actual connection between items and/or entities.

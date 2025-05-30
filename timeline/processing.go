@@ -1642,11 +1642,11 @@ SELECT * FROM (
 	sb.WriteString(itemDBColumns)
 	sb.WriteString(`
 	FROM extended_items AS items
-	WHERE `)
+	WHERE`)
 
 	if rowID != 0 {
 		// select the row directly with its row ID
-		sb.WriteString("id=?")
+		sb.WriteString(" id=?")
 		args = append(args, rowID)
 	} else {
 		// select the row by the various properties of the item
@@ -1663,7 +1663,7 @@ SELECT * FROM (
 		// this should be exclusive enough to uniquely select an item
 		// TODO: See if this is optimized
 		if dataSourceName != nil && it.ID != "" {
-			sb.WriteString(`(data_source_name=? AND original_id=?)`)
+			sb.WriteString("\n\t\t(data_source_name=? AND original_id=?)")
 			args = append(args, dataSourceName, it.ID)
 		}
 
@@ -1681,24 +1681,20 @@ SELECT * FROM (
 			if len(args) > 0 {
 				sb.WriteString("\n\t\tOR ")
 			}
-			sb.WriteString(`
-					(deleted IS NOT NULL AND original_id_hash`)
+			sb.WriteString("\n\t\t(deleted IS NOT NULL AND original_id_hash")
 			sb.WriteString(eq(it.idHash))
-			sb.WriteString(`?)
-						OR ((modified IS NOT NULL OR deleted IS NOT NULL) AND initial_content_hash`)
+			sb.WriteString("?)\n\t\tOR ((modified IS NOT NULL OR deleted IS NOT NULL) AND initial_content_hash")
 			sb.WriteString(eq(it.contentHash))
-			sb.WriteString(`?)`)
+			sb.WriteString("?)")
 			args = append(args, it.idHash, it.contentHash)
 
 			// the above criteria are sufficient for one query, the next one that uses
 			// the unique constraints will be its own query that gets unioned together
 			if len(uniqueConstraints) > 0 {
-				sb.WriteString("\n\t\tUNION ALL\n\t\t")
-				sb.WriteString(`SELECT `)
+				sb.WriteString("\n\tUNION ALL\n\t")
+				sb.WriteString("SELECT ")
 				sb.WriteString(itemDBColumns)
-				sb.WriteString(`
-	FROM extended_items AS items
-	WHERE `)
+				sb.WriteString("\n\tFROM extended_items AS items\n\tWHERE\n\t\t")
 			}
 		}
 
@@ -1719,7 +1715,7 @@ SELECT * FROM (
 			// Note: the value in uniqueConstraints is supposed to be whether NULLs are significant/strictly compared, but it is not currently implemented, and I am not sure if it is useful.
 
 			if !firstIter {
-				sb.WriteString(" AND ")
+				sb.WriteString("\n\t\tAND ")
 			}
 			firstIter = false
 
@@ -1734,14 +1730,11 @@ SELECT * FROM (
 				sb.WriteString("?)")
 				args = append(args, it.dataText, it.dataFileHash)
 			case "latlon":
-				sb.WriteString(`(
-							(longitude`)
+				sb.WriteString("((longitude")
 				sb.WriteString(eq(it.Location.Longitude))
-				sb.WriteString(`? OR (? <= round(longitude, ?) AND round(longitude, ?) <= ?))
-						AND (latitude`)
+				sb.WriteString("? OR (? <= round(longitude, ?) AND round(longitude, ?) <= ?)) \n\t\t\tAND (latitude")
 				sb.WriteString(eq(it.Location.Latitude))
-				sb.WriteString(`? OR (? <= round(latitude, ?) AND round(latitude, ?) <= ?))
-						AND coordinate_system`)
+				sb.WriteString("? OR (? <= round(latitude, ?) AND round(latitude, ?) <= ?)) \n\t\t\tAND coordinate_system")
 				sb.WriteString(eq(it.Location.CoordinateSystem))
 				sb.WriteString("?)")
 				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude)
@@ -1815,9 +1808,7 @@ SELECT * FROM (
 		}
 	}
 
-	sb.WriteString(`
-)
-LIMIT 1`)
+	sb.WriteString("\n)\nLIMIT 1")
 
 	row := tx.QueryRowContext(ctx, sb.String(), args...)
 

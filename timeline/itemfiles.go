@@ -159,6 +159,8 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 			return fmt.Errorf("deleting duplicate data file %s: %w", it.dataFileOut.Name(), err)
 		}
 
+		it.row.howStored = itemSkipped
+
 		// update references to the newly-inserted row to refer to the existing row instead,
 		// but if the resulting row already exists, it'll fail uniqueness constraints;
 		// we could probably make this operation more robust, but for now we just assume that
