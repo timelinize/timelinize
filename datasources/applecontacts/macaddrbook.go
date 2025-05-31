@@ -69,11 +69,13 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	if info, err := fs.Stat(dirEntry.FS, addressBookFilename); err == nil && !info.IsDir() {
 		confidence += .7
 	}
-	if info, err := fs.Stat(dirEntry.FS, "Metadata"); err == nil && info.IsDir() {
-		confidence += .1
-	}
-	if info, err := fs.Stat(dirEntry.FS, "Sources"); err == nil && info.IsDir() {
-		confidence += .1
+	if confidence > 0 {
+		if info, err := fs.Stat(dirEntry.FS, "Metadata"); err == nil && info.IsDir() {
+			confidence += .1
+		}
+		if info, err := fs.Stat(dirEntry.FS, "Sources"); err == nil && info.IsDir() {
+			confidence += .1
+		}
 	}
 
 	return timeline.Recognition{Confidence: confidence}, nil
