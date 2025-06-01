@@ -59,6 +59,9 @@ jobs:
       - name: Compile application
         env:
           CGO_ENABLED: 1
+          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig:/opt/homebrew/opt/glib/lib/pkgconfig:$PKG_CONFIG_PATH
+          CGO_CFLAGS: "$(pkg-config --cflags gio-2.0)"
+          CGO_LDFLAGS: "$(pkg-config --libs gio-2.0)"
         run: |
           env
           go env
