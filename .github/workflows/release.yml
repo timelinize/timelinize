@@ -42,12 +42,7 @@ jobs:
       - name: Install libraries (macOS)
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-13' }}
         run: |
-          brew install glib
           brew install vips
-          export LIBRARY_PATH="/opt/homebrew/Cellar/glib/2.84.1/lib:$LIBRARY_PATH"
-          export PKG_CONFIG_PATH="/opt/homebrew/Cellar/glib/2.84.1/lib/pkgconfig:$PKG_CONFIG_PATH"
-          pkg-config --libs gio-2.0
-          brew link glib --force
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
