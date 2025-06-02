@@ -325,8 +325,7 @@ func (a *App) serve() error {
 	}
 
 	adminAddr := a.cfg.listenAddr()
-	a.server.fillAllowedHosts(adminAddr)   // restrict allowed Host headers to mitigate DNS rebinding attacks
-	a.server.fillAllowedOrigins(adminAddr) // for CORS enforcement
+	a.server.fillAllowedOrigins(a.cfg.AllowedOrigins, adminAddr) // for CORS enforcement
 
 	ln, err := net.Listen("tcp", adminAddr)
 	if err != nil {
