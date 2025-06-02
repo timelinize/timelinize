@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -34,46 +35,6 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
 )
-
-// // Run runs the HTTP server backed by the given application instance.
-// // It blocks until it is stopped.
-// func Run(listen string, app *application.App) error {
-// 	if serverInstance != nil {
-// 		return fmt.Errorf("server already running")
-// 	}
-
-// 	serverInstance = newServer(listen, app)
-
-// 	// if CLI invoked an API endpoint, execute it and
-// 	// return instead of starting server
-// 	handled, err := serverInstance.cliMux.Handle()
-// 	if err != nil {
-// 		serverInstance.log.Fatal(err.Error())
-// 	}
-// 	if handled {
-// 		return nil
-// 	}
-
-// 	ln, err := net.Listen("tcp", listen)
-// 	if err != nil {
-// 		return fmt.Errorf("opening listener: %v", err)
-// 	}
-// 	serverInstance.listener = ln
-
-// 	serverInstance.log.Info("started server", zap.String("listener", ln.Addr().String()))
-
-// 	err = http.Serve(ln, serverInstance.httpMux)
-// 	if err != nil {
-// 		if errors.Is(err, net.ErrClosed) {
-// 			// normal; the listener was closed
-// 			serverInstance.log.Info("stopped server", zap.String("listener", ln.Addr().String()))
-// 		} else {
-// 			return err
-// 		}
-// 	}
-
-// 	return nil
-// }
 
 type server struct {
 	app *App
@@ -126,6 +87,11 @@ func (s *server) fillAllowedOrigins(configuredOrigins []string, listenAddr strin
 	listenHost, listenPort, err := net.SplitHostPort(listenAddr)
 	if err != nil {
 		listenHost = listenAddr // assume no port (or a default port)
+	}
+	if configuredOrigins == nil {
+		if originEnv := os.Getenv("TLZ_ORIGIN"); originEnv != "" {
+			configuredOrigins = []string{originEnv}
+		}
 	}
 	uniqueOrigins := make(map[string]struct{})
 	for _, o := range configuredOrigins {
