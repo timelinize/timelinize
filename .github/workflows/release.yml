@@ -39,14 +39,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libvips-dev
 
-      # TODO: On April 22, 2025, we had to separately install glib -- doesn't work in the same install command. Fails to compile otherwise. Not sure why. Yes, annotations say it is already installed. Shrug.
+      # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
+      # In late May 2025, installing glib was no longer sufficient; and indeed a warning showed that it was already installed and up-to-date. But the linker couldn't find gio-2.0 (same error as in April).
+      # The fix for May's error involved setting CGO_LDFLAGS below using pkg-config (which is also already installed and up-to-date.)
       - name: Install libraries (macOS)
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-13' }}
         run: |
-          brew install glib pkg-config
-          which pkg-config
-          pkg-config --libs gio-2.0
-          pkg-config --cflags gio-2.0
           brew install vips
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
@@ -57,14 +55,17 @@ jobs:
         shell: bash
         run: echo "D:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
 
+      # As of May 2025, The CGO_LDFLAGS env var is necessary on macOS since it can't find gio-2.0 otherwise.
+      # LLMs also suggested adding:
+      # - export CGO_CFLAGS="$(pkg-config --cflags gio-2.0)"
+      # - export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/opt/homebrew/opt/glib/lib/pkgconfig:$PKG_CONFIG_PATH"
+      # but they don't seem to be necessary. Adding as a comment in case something breaks AGAIN in the future, maybe they'll help.
       - name: Compile application
         env:
           CGO_ENABLED: 1
         shell: bash
         run: |
-          #export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/opt/homebrew/opt/glib/lib/pkgconfig:$PKG_CONFIG_PATH"
-          #export CGO_CFLAGS="$(pkg-config --cflags gio-2.0)"
-          #export CGO_LDFLAGS="$(pkg-config --libs gio-2.0)"
+          export CGO_LDFLAGS="$(pkg-config --libs gio-2.0)"
           env
           go env
           echo "Building..."
