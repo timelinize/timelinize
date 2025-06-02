@@ -365,9 +365,10 @@ func (s *server) handleDeleteItems(w http.ResponseWriter, r *http.Request) error
 // }
 
 type payloadFileListing struct {
-	Path       string `json:"path"`
-	OnlyDirs   bool   `json:"only_dirs"`
-	ShowHidden bool   `json:"show_hidden"`
+	Path         string `json:"path"`
+	OnlyDirs     bool   `json:"only_dirs"`
+	ShowHidden   bool   `json:"show_hidden"`
+	Autocomplete bool   `json:"autocomplete"`
 }
 
 func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
@@ -375,6 +376,8 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 
 	if listingReq.Path == "" {
 		listingReq.Path = userHomeDir()
+	} else if strings.HasPrefix(listingReq.Path, "~/") {
+		listingReq.Path = userHomeDir() + listingReq.Path[1:] // keep the leading "/", just trim the "~"
 	}
 
 	// for some reason, on Windows, requesting the file listing of "C:" shows
@@ -382,6 +385,16 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 	// let's go ahead and fix that, shall we?
 	if runtime.GOOS == osWindows && len(listingReq.Path) == 2 && listingReq.Path[1] == ':' {
 		listingReq.Path += `\`
+	}
+
+	// always work with absolute paths
+	absolutePath, err := filepath.Abs(listingReq.Path)
+	if err != nil {
+		return Error{
+			Err:        err,
+			HTTPStatus: http.StatusBadRequest,
+			Log:        "Computing absolute path",
+		}
 	}
 
 	// give appropriate HTTP status code for the situation
@@ -404,25 +417,28 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
+	// if autocompleting, we'll set this with the remnant after the dir to help filter results
+	var filenamePrefix string
+
 	// get info about the path because we need to differentiate file from directory
 	info, err := os.Stat(listingReq.Path)
+	if errors.Is(err, fs.ErrNotExist) && listingReq.Autocomplete {
+		// with autocomplete enabled, this means the user is likely typing their path manually, so
+		// we can expect incomplete paths; try accessing the path's dir instead, and use whatever
+		// comes after the dir to filter the files in the dir, since that seems to be what the user
+		// is trying to get at
+		filenamePrefix = filepath.Base(listingReq.Path)
+		listingReq.Path = filepath.Dir(listingReq.Path)
+		info, err = os.Stat(listingReq.Path)
+	}
 	if err != nil {
 		return properError(err)
 	}
 
-	// prepare response; make absolute path, compute up-dir,
-	// and if a file was requested instead of a dir, list the
-	// dir but mark the file as selected
+	// prepare response: compute up-dir, and if a file was requested
+	// instead of a dir, list the dir but mark the file as selected
 	var result fileListing
-	absDir, err := filepath.Abs(listingReq.Path)
-	if err != nil {
-		return Error{
-			Err:        err,
-			HTTPStatus: http.StatusBadRequest,
-			Log:        "Computing absolute path",
-		}
-	}
-	if up := filepath.Join(absDir, ".."); up != absDir {
+	if up := filepath.Join(absolutePath, ".."); up != absolutePath {
 		result.Up = up
 	}
 	if info.IsDir() {
@@ -455,9 +471,11 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 	result.Files = make([]localFile, 0, len(fileInfos))
 	for _, info := range fileInfos {
 		name := info.Name()
-		fullName := filepath.Join(result.Dir, name)
 
 		// filter the listing
+		if filenamePrefix != "" && !strings.HasPrefix(name, filenamePrefix) {
+			continue
+		}
 		if listingReq.OnlyDirs && !info.IsDir() {
 			continue
 		}
@@ -465,6 +483,7 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 			continue
 		}
 
+		fullName := filepath.Join(result.Dir, name)
 		result.Files = append(result.Files, localFile{
 			FullName: fullName,
 			Name:     name,

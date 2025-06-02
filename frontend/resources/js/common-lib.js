@@ -735,6 +735,7 @@ async function newFilePicker(name, options) {
 	filePicker.options = options; // keeps track of its configuration
 	filePicker.filepaths = {}; // keeps track of which files are currently selected
 	filePicker.selected = function() { return Object.keys(filePicker.filepaths); };
+	filePicker.lastPathInput = ""; // the value of the path textbox, used to debounce the file listing updates
 
 	// restore the hidden files preference, if set
 	$('.file-picker-hidden-files', filePicker).checked = tlz.filePickers?.[name]?.show_hidden;
@@ -846,7 +847,9 @@ async function newFilePicker(name, options) {
 
 		// reset the filepath box, listing table, and selected path(s),
 		// then emit event (intentionally named uniquely from standard events)
-		$('.file-picker-path').value = listing.dir;
+		if (!options?.autocomplete) {
+			$('.file-picker-path').value = listing.dir;
+		}
 		$('.file-picker-table tbody', filePicker).innerHTML = '';
 		filePicker.filepaths = {};
 		filePicker.dispatchEvent(new CustomEvent("selection", { bubbles: true }));
@@ -963,8 +966,16 @@ on('click', '.file-picker-table .file-picker-item', event => {
 	fp.dispatchEvent(new CustomEvent("selection", { bubbles: true }));
 });
 
-on('change', '.file-picker-path', async event => {
-	// TODO: populate file listing, if valid path
+// as the user types or pastes a path, navigate to what they've typed, and filter results too
+on('keyup change paste', '.file-picker-path', async event => {
+	const fp = event.target.closest('.file-picker');
+	const pathInput = event.target.value;
+	if (pathInput == fp.lastPathInput) {
+		return;
+	}
+	fp.lastPathInput =  event.target.value;
+	console.log("EVENT:", event, pathInput);
+	fp.navigate(event.target.value, { autocomplete: true })
 });
 
 // navigate when double-clicking a folder
