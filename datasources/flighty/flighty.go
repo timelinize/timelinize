@@ -105,6 +105,11 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 			"Flight to IATA":   f.To.IATA,
 			"Flight to name":   f.To.Name,
 
+			"Flight Departure Terminal": f.DepartureTerminal,
+			"Flight Departure Gate":     f.DepartureGate,
+			"Flight Arrival Terminal":   f.ArrivalTerminal,
+			"Flight Arrival Gate":       f.ArrivalGate,
+
 			"Flight airline": f.Airline,
 			"Flight number":  f.Number,
 
@@ -183,6 +188,11 @@ func parseFlightDetails(row fieldLookup, airportDB map[string]airports.Info) (fl
 
 		Airline: row(flightyFields.Airline),
 		Number:  uint(flightNumber),
+
+		DepartureTerminal: row(flightyFields.DepartureTerminal),
+		DepartureGate:     row(flightyFields.DepartureGate),
+		ArrivalTerminal:   row(flightyFields.ArrivalTerminal),
+		ArrivalGate:       row(flightyFields.ArrivalGate),
 
 		Aircraft: Aircraft{
 			Type:       row(flightyFields.AircraftType),

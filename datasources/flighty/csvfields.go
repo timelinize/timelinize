@@ -40,7 +40,11 @@ type flightyNeededFields struct {
 	Airline            string
 	FlightNumber       string
 	FromIATA           string
+	DepartureTerminal  string
+	DepartureGate      string
 	ToIATA             string
+	ArrivalTerminal    string
+	ArrivalGate        string
 	DivertedToIATA     string
 	TakeOffScheduled   string
 	TakeOffActual      string
@@ -62,7 +66,11 @@ var flightyFields = flightyNeededFields{
 	Airline:            "Airline",
 	FlightNumber:       "Flight",
 	FromIATA:           "From",
+	DepartureTerminal:  "Dep Terminal",
+	DepartureGate:      "Dep Gate",
 	ToIATA:             "To",
+	ArrivalTerminal:    "Arr Terminal",
+	ArrivalGate:        "Arr Gate",
 	DivertedToIATA:     "Diverted To",
 	TakeOffScheduled:   "Take off (Scheduled)",
 	TakeOffActual:      "Take off (Actual)",
