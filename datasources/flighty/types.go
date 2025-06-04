@@ -17,6 +17,11 @@ type flight struct {
 	To         airports.Info
 	DivertedTo *airports.Info
 
+	DepartureTerminal string
+	DepartureGate     string
+	ArrivalTerminal   string
+	ArrivalGate       string
+
 	TakeOffTime time.Time
 	LandingTime time.Time
 
