@@ -263,18 +263,17 @@ func (FileImporter) processActivity(ctx context.Context, fsys fs.FS, filename st
 	var position int
 
 	for {
-		item, err := proc.NextGPXItem(ctx)
+		g, err := proc.NextGPXGraph(ctx)
 		if err != nil {
 			return err
 		}
-		if item == nil {
+		if g == nil {
 			break
 		}
 
-		ig := &timeline.Graph{Item: item}
-		ig.ToItemWithValue(timeline.RelInCollection, coll, position)
+		g.ToItemWithValue(timeline.RelInCollection, coll, position)
 
-		opt.Pipeline <- ig
+		opt.Pipeline <- g
 
 		position++
 	}

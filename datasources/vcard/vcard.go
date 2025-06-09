@@ -150,6 +150,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			}
 
 			for _, phone := range card.Values(vcard.FieldTelephone) {
+				// TODO: Don't let home phone numbers be identifying? See if card.Get(vcard.FieldTelephone) can help
 				p.Attributes = append(p.Attributes, timeline.Attribute{
 					Name:        timeline.AttributePhoneNumber,
 					Value:       phone,

@@ -253,7 +253,7 @@ async function renderDataSourceOptionsModal(ds) {
 		entitySelect.addItem(owner.id);
 
 		noUiSlider.create($('.google_location-simplification', dsOptElem), {
-			start: 2,
+			start: 3,
 			connect: [true, false],
 			step: 0.1,
 			range: {
@@ -269,7 +269,7 @@ async function renderDataSourceOptionsModal(ds) {
 		entitySelect.addItem(owner.id);
 
 		noUiSlider.create($('.gpx-simplification', dsOptElem), {
-			start: 2,
+			start: 3,
 			connect: [true, false],
 			step: 0.1,
 			range: {
@@ -372,6 +372,15 @@ on('click', '#start-import', async event => {
 	// collect item update preferences
 	if (page.itemUpdatePrefs?.length) {
 		importParams.job.processing_options.item_update_preferences = page.itemUpdatePrefs;
+	}
+
+	// set timeframe constraints
+	const timeframe = $('#timeframe .date-input').datepicker.selectedDates;
+	if (timeframe?.length > 1) {
+		importParams.job.processing_options.timeframe = {
+			since: timeframe[0],
+			until: timeframe[1]
+		};
 	}
 
 	// collect data source options - if there are any input validation errors, show an alert and redirect to that dsOpt modal after it

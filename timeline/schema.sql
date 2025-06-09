@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS "entities" (
 CREATE TABLE IF NOT EXISTS "attributes" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT NOT NULL,
-	"value" ANY NOT NULL COLLATE NOCASE,
+	"value" ANY COLLATE NOCASE,
 	"alt_value" TEXT, -- optional alternate value intended for display or as a description
 	-- the coordinate values below are useful if the attribute value is, in fact, a location or area
 	"longitude1" REAL, -- point, or top-left corner
@@ -159,7 +159,9 @@ CREATE TABLE IF NOT EXISTS "item_data" (
 	"content" BLOB NOT NULL UNIQUE
 ) STRICT;
 
--- An item is something imported from a specific data source.
+-- An item is something imported from a specific data source. They represent things that are
+-- originated, created, or recorded; as opposed to entities, which just exist and don't have
+-- specific temporal significance. Items typically exist as a result of entities existing.
 CREATE TABLE IF NOT EXISTS "items" (
 	"id" INTEGER PRIMARY KEY,
 	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model; TODO: we may need an item_embeddings table for multiple...

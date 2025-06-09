@@ -59,6 +59,7 @@ enable = [
   'tagalign',
   'unconvert',
   'unparam',
+  'unused',
   'usestdlibvars',
   'usetesting',
   'wastedassign',

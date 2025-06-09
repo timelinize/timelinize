@@ -20,7 +20,6 @@
 package tlzapp
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -170,16 +169,8 @@ func (s server) enforceHost(next handler) handler {
 // This prevents arbitrary sites from issuing requests to our listener.
 func (s server) enforceOriginAndMethod(method string, next handler) handler {
 	return handlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		if !s.isLoopback(r.RemoteAddr) {
-			origin := s.getOrigin(r)
-			if origin == nil {
-				return Error{
-					Err:        errors.New("missing or invalid origin"),
-					HTTPStatus: http.StatusForbidden,
-					Log:        "Origin missing",
-					Message:    "The request origin is missing or invalid",
-				}
-			}
+		origin := s.getOrigin(r)
+		if origin != nil {
 			if !s.originAllowed(origin) {
 				return Error{
 					Err:        fmt.Errorf("unrecognized origin '%s'", origin),
@@ -188,23 +179,26 @@ func (s server) enforceOriginAndMethod(method string, next handler) handler {
 					Message:    "You can only access this API from a recognized origin.",
 				}
 			}
-			w.Header().Set("Access-Control-Allow-Origin", origin.String())
-			w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, "+method)
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			if r.Method == http.MethodOptions {
-				return nil
+				w.Header().Set("Access-Control-Allow-Origin", origin.String())
+				w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, "+method)
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
-			// method must match, unless GET is expected, in which case HEAD is also allowed
-			if r.Method != method ||
-				(method == http.MethodGet &&
-					r.Method != method &&
-					r.Method != http.MethodHead) {
-				// "sir, this is an Arby's"
-				return Error{
-					Err:        fmt.Errorf("method '%s' not allowed", r.Method),
-					HTTPStatus: http.StatusMethodNotAllowed,
-				}
+			w.Header().Set("Access-Control-Allow-Origin", origin.String())
+		}
+		if r.Method == http.MethodOptions {
+			return nil
+		}
+		// method must match, unless GET is expected, in which case HEAD is also allowed
+		if r.Method != method ||
+			(method == http.MethodGet &&
+				r.Method != method &&
+				r.Method != http.MethodHead) {
+			// "sir, this is an Arby's"
+			return Error{
+				Err:        fmt.Errorf("method '%s' not allowed", r.Method),
+				HTTPStatus: http.StatusMethodNotAllowed,
 			}
 		}
 		return next.ServeHTTP(w, r)

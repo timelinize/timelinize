@@ -56,12 +56,11 @@ func NewLocationProcessor(source LocationSource, simplificationLevel float64) (L
 	}
 
 	locProc := &locationProcessor{source: source}
-
 	if simplificationLevel != 0 {
 		// To scale a number x into range [a,b]:
 		// x_scaled = (b-a) * ((x - x_min) / (x_max - x_min)) + a
-		const xMin, xMax = 1.0, 10.0
-		const epsMin, epsMax = 1000.0, 50000.0
+		const xMin, xMax = 0.0, 10.0
+		const epsMin, epsMax = 10.0, 1000.0
 		locProc.epsilon = (epsMax-epsMin)*((simplificationLevel-xMin)/(xMax-xMin)) + epsMin
 	}
 
@@ -79,7 +78,9 @@ type locationProcessor struct {
 	source LocationSource
 
 	// de-duplicating
-	previous *Location
+	previous           *Location
+	minTemporalSpacing time.Duration
+	minDistanceMeters  int
 
 	// denoising
 	denoiseWindow []*Location
@@ -149,6 +150,9 @@ func (lp *locationProcessor) clusteredNext(ctx context.Context) (*Location, erro
 		if next == nil {
 			break
 		}
+		if next.Significant {
+			return next, nil
+		}
 
 		lp.clusterWindow = append(lp.clusterWindow, next)
 
@@ -173,7 +177,7 @@ func (lp *locationProcessor) clusteredNext(ctx context.Context) (*Location, erro
 		// rolling, we compute the delta between the new value and the oldest value
 		// that is "going away" or being removed from our window (hence why we
 		// have to initialize the mean with the first value above; otherwise we'd
-		// be subtracting the ...)
+		// be subtracting the same point from itself)
 		oldest := lp.clusterWindow[0]
 		oldestLat, oldestLon := oldest.LatitudeE7, oldest.LongitudeE7
 		lp.latAvg += (next.LatitudeE7 - oldestLat) / clusterWindowSize
@@ -182,7 +186,7 @@ func (lp *locationProcessor) clusteredNext(ctx context.Context) (*Location, erro
 		next.changeInMean = haversineDistanceEarth(oldLatAvg, oldLonAvg, lp.latAvg, lp.lonAvg) * kmToMeters
 
 		lp.windowDistance += next.distanceFromPrev
-		lp.windowDistance -= oldest.distanceFromPrev
+		lp.windowDistance -= oldest.distanceFromPrev // NOTE: the span from the point before the oldest in the window to the oldest in the window isn't actually in the window, so use distance between oldest and second-oldest instead (index [1])?
 
 		// compute the new center (mean) of the points in the window, and also how much
 		// this point contributed to the new center; i.e. how much it moved the center; if
@@ -305,6 +309,10 @@ func (lp *locationProcessor) denoiseNext(ctx context.Context) (*Location, error)
 		}
 		if next == nil {
 			break
+		}
+		if next.Significant {
+			lp.previous = next
+			return next, nil
 		}
 
 		if lp.sameAsPrevious(next) {
@@ -485,6 +493,7 @@ type Location struct {
 	Altitude    float64   // meters
 	Uncertainty float64   // meters (must be > 0); higher values are less accurate
 	Timestamp   time.Time // old exports used to call this timestampMs, in milliseconds
+	Significant bool      // if true, this point will not be filtered out
 
 	// These fields are not read by the processor (you do not need to set them in your
 	// implementation of NextLocation), but they will be set on the output if this

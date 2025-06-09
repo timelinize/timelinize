@@ -369,30 +369,31 @@ async function renderMapData(newMapData) {
 				lineMetrics: true,
 				data: geojsonLines
 			});
+
+			tlz.map.tl_addLayer({
+				id: "route",
+				type: "line",
+				source: "journey",
+				paint: {
+					"line-width": 5,
+					'line-gradient': [
+						'interpolate',
+						['linear'],
+						['line-progress'],
+						...lineGradient()
+					]
+				},
+				layout: {
+					'line-cap': 'round',
+					'line-join': 'round'
+				}
+			});
 		};
 		if (tlz.map.isStyleLoaded()) {
 			addSource();
 		} else {
 			tlz.map.on('load', addSource);
 		}
-		tlz.map.tl_addLayer({
-			id: "route",
-			type: "line",
-			source: "journey",
-			paint: {
-				"line-width": 5,
-				'line-gradient': [
-					'interpolate',
-					['linear'],
-					['line-progress'],
-					...lineGradient()
-				]
-			},
-			layout: {
-				'line-cap': 'round',
-				'line-join': 'round'
-			}
-		});
 	}
 
 	// remove old markers, add new markers

@@ -186,13 +186,10 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 
 func saveAllStandardEntityTypes(ctx context.Context, db *sql.DB) error {
 	entityTypes := []string{
-		"person",
-		"creature", // animals, insects, fish, pets... etc.
-		"place",    // landmarks... etc.
-		"company",
-		"organization",
-		"office", // president, ceo, etc... person swaps out over time TODO: rename to "designation"?
-		"government",
+		EntityPerson,
+		EntityCreature, // pets, animals, insects, fish, etc...
+		EntityPlace,
+		// TODO: could also have company/organization, office/designation, government, etc.
 	}
 
 	query := `INSERT INTO entity_types ("name") VALUES`
