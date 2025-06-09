@@ -169,9 +169,9 @@ func getStandardSubcommand(app *tlzapp.App) (string, func() error) {
 // invoked as an API client and the flags are arbitrary and
 // "parsed" by the apicli package. This package intends to
 // catch errors like running the program as:
-// `relica daemon -config config_dev.toml`
+// `command subcommand -flag value`
 // where it actually needs to be run as:
-// `relica -config config_dev.toml daemon`
+// `command -flag value subcommand`
 // in order to set the config variable properly. Failing to
 // catch this error could result in a misconfiguration
 // and undesirable results. Only for use when a standard

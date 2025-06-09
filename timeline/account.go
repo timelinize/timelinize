@@ -195,7 +195,7 @@ func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account
 	}
 	for i, id := range ids {
 		if i > 0 {
-			q += " OR " //nolint:goconst
+			q += " OR "
 		}
 		q += "accounts.id=?"
 		args = append(args, id)

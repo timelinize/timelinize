@@ -1225,8 +1225,8 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 			case "latlon":
 				// skipping coordinate_system and coordinate_uncertainty for now
 				// use same decimal precision as loadItemRow does
-				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude)
-				lowLat, highLat, latDecimals := latLonBounds(it.Location.Latitude)
+				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude, itemCoordDecimalPrecision)
+				lowLat, highLat, latDecimals := latLonBounds(it.Location.Latitude, itemCoordDecimalPrecision)
 				allNil := dbItem.Longitude == nil && it.Location.Longitude == nil && dbItem.Latitude == nil && it.Location.Latitude == nil
 				valuesWithinBounds := (dbItem.Longitude != nil && it.Location.Longitude != nil && (*lowLon <= coordRound(*dbItem.Longitude, lonDecimals) && coordRound(*dbItem.Longitude, lonDecimals) <= *highLon)) &&
 					(dbItem.Latitude != nil && it.Location.Latitude != nil && (*lowLat <= coordRound(*dbItem.Latitude, latDecimals) && coordRound(*dbItem.Latitude, latDecimals) <= *highLat))
@@ -1737,8 +1737,8 @@ SELECT * FROM (
 				sb.WriteString("? OR (? <= round(latitude, ?) AND round(latitude, ?) <= ?)) \n\t\t\tAND coordinate_system")
 				sb.WriteString(eq(it.Location.CoordinateSystem))
 				sb.WriteString("?)")
-				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude)
-				lowLat, highLat, latDecimals := latLonBounds(it.Location.Latitude)
+				lowLon, highLon, lonDecimals := latLonBounds(it.Location.Longitude, itemCoordDecimalPrecision)
+				lowLat, highLat, latDecimals := latLonBounds(it.Location.Latitude, itemCoordDecimalPrecision)
 				args = append(args,
 					it.Location.Longitude, lowLon, lonDecimals, lonDecimals, highLon,
 					it.Location.Latitude, lowLat, latDecimals, latDecimals, highLat,
@@ -2086,13 +2086,16 @@ func coordRound(x float64, decimalPlaces int) float64 {
 // latLonBounds returns low and high bounds for an acceptable lat/lon value,
 // as well as the decimal precision used, which can be useful in SQL queries
 // for its round() function.
-func latLonBounds(latOrLon *float64) (lo, hi *float64, decimalPlaces int) {
+//
+// Pass in the max decimal places of precision:
+// 4 ~= 11.1 meters,
+// 5 ~= 1.11 meters,
+// 6 ~= .111 meters (11 centimeters)
+func latLonBounds(latOrLon *float64, maxDecimalPlaces int) (lo, hi *float64, decimalPlaces int) {
 	if latOrLon == nil {
 		return
 	}
 	x := *latOrLon
-	// how many decimal places of precision (4 ~= 11.1 meters, 5 ~= 1.1 meters, 6 ~= 11 centimeters)
-	const maxDecimalPlaces = 5
 	decimalPlaces = min(numDecimalPlaces(x), maxDecimalPlaces)
 	precision := math.Pow(10, float64(decimalPlaces)) //nolint:mnd
 	low, high := math.Floor(x*precision)/precision, math.Ceil(x*precision)/precision
@@ -2183,6 +2186,10 @@ var sizePeekBufPool = sync.Pool{
 		return &buf
 	},
 }
+
+// itemCoordDecimalPrecision is how many decimal places to
+// use for comparing item coordinates
+const itemCoordDecimalPrecision = 5
 
 // maxTextSizeForDB is the maximum size of text data we want
 // to store in the DB. Sqlite doesn't have a limit per-se, but

@@ -74,7 +74,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	defer file.Close()
 
 	buf := bufPool.Get().([]byte)
-	//nolint:gofmt,gosimple,staticcheck
+	//nolint:gofmt,staticcheck
 	defer bufPool.Put(buf[:len(buf)]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice) -- WOW the linters hate this one
 
 	// read the first few bytes to see if it looks like a legit vcard; ignore empty or short files
@@ -150,6 +150,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			}
 
 			for _, phone := range card.Values(vcard.FieldTelephone) {
+				// TODO: Don't let home phone numbers be identifying? See if card.Get(vcard.FieldTelephone) can help
 				p.Attributes = append(p.Attributes, timeline.Attribute{
 					Name:        timeline.AttributePhoneNumber,
 					Value:       phone,

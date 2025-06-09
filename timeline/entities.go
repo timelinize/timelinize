@@ -78,8 +78,8 @@ type Entity struct {
 }
 
 func (e Entity) String() string {
-	return fmt.Sprintf("[name=%s picture=%v metadata=%v attributes=%v]",
-		e.Name, e.Picture, e.Metadata, e.Attributes)
+	return fmt.Sprintf("[id=%d type=%s name=%s picture=%v metadata=%v attributes=%v]",
+		e.ID, e.Type, e.Name, e.Picture, e.Metadata, e.Attributes)
 }
 
 // IsEmpty returns true if the entity has no information.
@@ -165,7 +165,7 @@ func (tl *Timeline) normalizeEntity(e *Entity) error {
 
 	// oh, and ensure type is set (DB row requires entity type ID, not name)
 	if e.Type == "" && e.typeID == 0 {
-		e.Type = "person" // assume a person, I guess -- data sources don't often distinguish
+		e.Type = EntityPerson // assume a person, I guess -- data sources don't often distinguish
 	}
 	if e.typeID == 0 {
 		typeID, err := tl.entityTypeNameToID(e.Type)
@@ -191,6 +191,12 @@ func (e Entity) metadataString() (*string, error) {
 	metaString := string(metaBytes)
 	return &metaString, nil
 }
+
+const (
+	EntityPerson   = "person"
+	EntityCreature = "creature"
+	EntityPlace    = "place"
+)
 
 // Attribute describes an entity.
 type Attribute struct {
@@ -263,7 +269,7 @@ func (a Attribute) Empty() bool {
 	if strings.TrimSpace(a.Name) == "" {
 		return true
 	}
-	return strings.TrimSpace(a.valueString()) == ""
+	return strings.TrimSpace(a.valueString()) == "" && a.Latitude1 == nil && a.Longitude1 == nil
 }
 
 func (a Attribute) valueForDB() any {
@@ -531,11 +537,11 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 
 		atomic.AddInt64(p.ij.newEntityCount, 1)
 	} else if len(entities) == 1 {
-		// if the identity attribute(s) matched exactly 1 person, update their info in the DB
-		// (if it matched more than 1 person, we don't update multiple of them, because we only
-		// get 1 person at a time from data sources and we'd end up making the two look alike...
+		// if the identity attribute(s) matched exactly 1 entity, update its info in the DB
+		// (if it matched more than 1 entity, we don't update multiple of them, because we only
+		// get 1 entity at a time from data sources and we'd end up making the two look alike...
 		// I can't think of a single data source that explicitly maps one of their accounts to
-		// multiple persons and gives us that information... so we lose that granularity or
+		// multiple entities and gives us that information... so we lose that granularity or
 		// specificity from data sources, and we have to rely on the user to maintain that
 		// information because only they'd know)
 
@@ -583,7 +589,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 		}
 	}
 
-	// now store each attribute+value combo if we don't have it yet,
+	// now store each attribute+value/coords combo if we don't have it yet,
 	// and link it to the entity
 	var identityAttributeID uint64
 	for _, attr := range in.Attributes {
@@ -691,8 +697,33 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 		for _, attr := range in.Attributes {
 			// skip non-identifying attributes as those are not likely to be unique enough
 			if attr.Identifying || attr.Identity {
-				whereGroups = append(whereGroups, `(attributes.name=? AND attributes.value=?)`)
-				args = append(args, attr.Name, attr.Value)
+				const decPrecision = 3
+				lowLon, highLon, lonDec := latLonBounds(attr.Longitude1, decPrecision)
+				lowLat, highLat, latDec := latLonBounds(attr.Latitude1, decPrecision)
+
+				whereGroups = append(whereGroups,
+					`(attributes.name=? AND (
+						attributes.value=?
+						OR (
+							attributes.longitude2 IS NULL
+							AND attributes.latitude2 IS NULL
+							AND round(attributes.longitude1, ?) BETWEEN ? AND ?
+							AND round(attributes.latitude1, ?) BETWEEN ? AND ?
+						)
+						OR (
+							attributes.longitude2 IS NOT NULL
+							AND attributes.latitude2 IS NOT NULL
+							AND ? >= attributes.longitude1
+							AND ? >= attributes.latitude1
+							AND (? IS NULL OR ? <= attributes.longitude2)
+							AND (? IS NULL OR ? <= attributes.latitude2)
+						)
+					)
+				)`)
+				args = append(args, attr.Name, attr.valueForDB(),
+					lonDec, lowLon, highLon, latDec, lowLat, highLat,
+					attr.Longitude1, attr.Latitude1,
+					attr.Longitude2, attr.Longitude2, attr.Latitude2, attr.Latitude2)
 			}
 		}
 	}
@@ -754,24 +785,49 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (uint64, er
 		altValue = &attr.AltValue
 	}
 
-	// store the attribute+value if we don't have this combo yet (if we do, no ID is returned, sigh)
+	const decPrecision = 3
+	lowLon, highLon, lonDec := latLonBounds(attr.Longitude1, decPrecision)
+	lowLat, highLat, latDec := latLonBounds(attr.Latitude1, decPrecision)
+
 	var attrID uint64
-	err := tx.QueryRowContext(ctx,
-		`INSERT OR IGNORE INTO attributes (name, value, alt_value, metadata) VALUES (?, ?, ?, ?) RETURNING id`,
-		attr.Name, attr.valueForDB(), altValue, metadata).Scan(&attrID)
+	err := tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM attributes
+		WHERE name=? AND (
+			value=?
+			OR (
+				longitude2 IS NULL
+				AND latitude2 IS NULL
+				AND round(longitude1, ?) BETWEEN ? AND ?
+				AND round(latitude1, ?) BETWEEN ? AND ?
+			)
+			OR (
+				longitude2 IS NOT NULL
+				AND latitude2 IS NOT NULL
+				AND ? >= longitude1
+				AND ? >= latitude1
+				AND (? IS NULL OR ? <= longitude2)
+				AND (? IS NULL OR ? <= latitude2)
+			)
+		)
+		LIMIT 1`, attr.Name, attr.valueForDB(),
+		lonDec, lowLon, highLon, latDec, lowLat, highLat,
+		attr.Longitude1, attr.Latitude1,
+		attr.Longitude2, attr.Longitude2, attr.Latitude2, attr.Latitude2).Scan(&attrID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("storing attribute '%+v': %w", attr, err)
+		return 0, fmt.Errorf("looking up attribute '%+v': %w", attr, err)
 	}
 
 	if attrID == 0 {
-		// attribute already existed; query to get its ID so we can associate it with the person(s)
-		// TODO: if this tx is slow, there may be room for optimization here; if we can already know
-		// which persons are already associated with this attribute, we don't have to do this step?
-		err = tx.QueryRowContext(ctx,
-			`SELECT id FROM attributes WHERE name=? AND value=? LIMIT 1`,
-			attr.Name, attr.valueForDB()).Scan(&attrID)
+		// store the attribute+value/coords since we don't have this combo yet
+		err := tx.QueryRowContext(ctx, `INSERT INTO attributes
+			(name, value, alt_value, longitude1, latitude1, longitude2, latitude2, metadata)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			RETURNING id`,
+			attr.Name, attr.valueForDB(), altValue, attr.Longitude1, attr.Latitude1,
+			attr.Longitude2, attr.Latitude2, metadata).Scan(&attrID)
 		if err != nil {
-			return 0, fmt.Errorf("retrieving attribute ID for attribute %+v: %w", attr, err)
+			return 0, fmt.Errorf("storing attribute '%+v': %w", attr, err)
 		}
 	}
 

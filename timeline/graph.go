@@ -759,8 +759,8 @@ var (
 	RelReacted      = Relation{Label: "reacted", Directed: true}                         // "<from_entity>" reacted to <to_item> with <value>"
 	RelInCollection = Relation{Label: "in_collection", Directed: true}                   // "<from_item> is in collection <to_item> at position <value>"
 	RelEdit         = Relation{Label: "edit", Directed: true}                            // "<to_item> is edit of <from_item>"
-	RelIncludes     = Relation{Label: "includes", Directed: true}                        // "<from_item> includes <to_entity>" (has, depicts, portrays, contains... doesn't have to be item->entity either)
-	// RelAt           = Relation{Label: "at", Directed: true}                              // "<from_item> is at <to_entity>" (to indicate something at a particular place, for instance)
+	RelIncludes     = Relation{Label: "includes", Directed: true}                        // "<from_item> includes <to>" (has, depicts, portrays, contains... doesn't have to be item->entity either)
+	RelVisit        = Relation{Label: "visit", Directed: true}                           // "<from_item> is a visit to/with <to_entity>"
 	// RelTranscript = Relation{Label: "transcript", Directed: true, Subordinating: true} // "<from_item> is transcribed by <to_item>"
 )
 
