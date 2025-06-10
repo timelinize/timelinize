@@ -2088,6 +2088,7 @@ func coordRound(x float64, decimalPlaces int) float64 {
 // for its round() function.
 //
 // Pass in the max decimal places of precision:
+// 3 ~= 111 meters,
 // 4 ~= 11.1 meters,
 // 5 ~= 1.11 meters,
 // 6 ~= .111 meters (11 centimeters)

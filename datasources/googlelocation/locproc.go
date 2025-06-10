@@ -77,10 +77,10 @@ func NewLocationProcessor(source LocationSource, simplificationLevel float64) (L
 type locationProcessor struct {
 	source LocationSource
 
-	// de-duplicating
-	previous           *Location
-	minTemporalSpacing time.Duration
-	minDistanceMeters  int
+	// de-duplicating (TODO: Make more customizable?)
+	previous *Location
+	// minTemporalSpacing time.Duration
+	// minDistanceMeters  int
 
 	// denoising
 	denoiseWindow []*Location
