@@ -282,6 +282,8 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 			<type>cycling</type>
 		*/
 
+		const gpxRoot = "gpx"
+
 		switch elem := tkn.(type) {
 		case xml.StartElement:
 			switch {
@@ -289,7 +291,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 			// to avoid adding it to the stack, since by decoding it, we also decode
 			// the closing tag
 
-			case elem.Name.Local == "metadata" && d.stack.path() == "gpx":
+			case elem.Name.Local == "metadata" && d.stack.path() == gpxRoot:
 				var meta metadata
 				if err := d.DecodeElement(&meta, &elem); err != nil {
 					// TODO: maybe skip and go to next?
@@ -302,7 +304,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 				d.metadataTime = ts
 				continue
 
-			case elem.Name.Local == "wpt" && d.stack.path() == "gpx":
+			case elem.Name.Local == "wpt" && d.stack.path() == gpxRoot:
 				var waypoint wpt
 				if err := d.DecodeElement(&waypoint, &elem); err != nil {
 					// TODO: maybe skip and go to next?
@@ -317,7 +319,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 					Significant: waypoint.Name != "", // this becomes a place entity, so we don't want it to get filtered out
 				}, nil
 
-			case elem.Name.Local == "trk" && d.stack.path() == "gpx":
+			case elem.Name.Local == "trk" && d.stack.path() == gpxRoot:
 				// reset the track state, since it's a new track
 				d.trkType = ""
 				d.lastTrkPt = trkpt{}
