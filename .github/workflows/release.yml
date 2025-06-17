@@ -41,14 +41,15 @@ jobs:
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
       # In late May 2025, installing glib was no longer sufficient; and indeed a warning showed that it was already installed and up-to-date. But the linker couldn't find gio-2.0 (same error as in April).
-      # The fix for May's error involved setting CGO_LDFLAGS below using pkg-config (which is also already installed and up-to-date.)
+      # The fix for May's error involved setting CGO_LDFLAGS below using pkg-config (which is also already installed and up-to-date).
       - name: Install libraries (macOS)
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-13' }}
         run: |
           brew install vips
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
-      # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
+      # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a\_temp.
+      # (Update June 2025: they changed it to c:\a\_temp -- breaking CI AGAIN. Sigh.)
       # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
       - name: Update PATH (Windows)
         if: matrix.os == 'windows-latest'
