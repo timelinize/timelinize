@@ -46,7 +46,7 @@ jobs:
           #echo "/d/a/_temp/msys64/mingw64/include" >> $GITHUB_PATH
           #echo "/d/a/_temp/msys64/mingw64/lib" >> $GITHUB_PATH
           #export PKG_CONFIG_PATH="/d/a/_temp/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
-          
+
           echo "D:/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
           echo "D:/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
           export PATH="D:/a/_temp/msys64/mingw64/bin:$PATH"
@@ -61,13 +61,13 @@ jobs:
       #     echo "D:/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
       #     echo "D:/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
 
-      - name: Debug MSYS2 installation
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          which pkg-config
-          #pkg-config --list-all
-          ls /mingw64/include/sqlite3.h
+      # - name: Debug MSYS2 installation
+      #   if: matrix.os == 'windows-latest'
+      #   shell: bash
+      #   run: |
+      #     which pkg-config
+      #     #pkg-config --list-all
+      #     ls /mingw64/include/sqlite3.h
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
       # In late May 2025, installing glib was no longer sufficient; and indeed a warning showed that it was already installed and up-to-date. But the linker couldn't find gio-2.0 (same error as in April).
