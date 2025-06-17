@@ -66,8 +66,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          find /d -name sqlite3.h 2>/dev/null
-          find /d -name pkg-config 2>/dev/null
+          find / -name sqlite3.h 2>/dev/null
+          find / -name pkg-config* 2>/dev/null
           ls /d/a/_temp/msys64/mingw64/include/sqlite3.h || echo "sqlite3.h not found!"
           pkg-config --list-all || echo "pkg-config not functioning!"
 
