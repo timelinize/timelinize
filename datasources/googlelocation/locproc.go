@@ -196,7 +196,13 @@ func (lp *locationProcessor) clusterBatch(ctx context.Context, batch []*Location
 	// We slide a window across the batch and make clusters as we go, then repeat once
 	// we reach the end of the batch until this loop has an iteration where no new
 	// clusters have been created. In practice it tends to converge quite quickly.
-	for {
+	// However, I have found some cases where, even though it converges quickly, it
+	// creates clusters that are TOO big. So we limit the "recursion" (iterations of
+	// this loop). Otherwise, I've seen it create clusters of clusters of clusters,
+	// which end up being hundreds of points big, and spanning an entire week...
+	// that's not usually necessary/useful. In practice, I have found that two scans
+	// over the batch is sufficient to cluster effectively.
+	for j := 0; j < 2; j++ {
 		// We keep track of the centroid of the sliding window.
 		var latAvg, lonAvg int64
 
@@ -312,7 +318,7 @@ func (lp *locationProcessor) clusterBatch(ctx context.Context, batch []*Location
 			// it's important that we're at least a window-size into the buffer, because the oldest
 			// point in the window is appended to the cluster; if we did this before we were one full
 			// window into the buffer, the oldest point would repeat multiple times as the window grows!
-			if count >= clusterWindowSize && meanChangeToCentroid < coefficient*stdDev && !latest.Significant {
+			if count >= clusterWindowSize && meanChangeToCentroid < coefficient*stdDev && !oldest.Significant {
 				// we are in a cluster!
 
 				// if this is the start of a cluster, we need to mark where it started
