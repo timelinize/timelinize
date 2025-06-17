@@ -57,15 +57,15 @@ jobs:
         shell: bash
         run: |
           ls -la /c/a
-          echo "/c/a/msys64/mingw64/bin" >> $GITHUB_PATH
-          echo "/c/a/msys64/mingw64/include" >> $GITHUB_PATH
-          echo "/c/a/msys64/mingw64/lib" >> $GITHUB_PATH
-          export PKG_CONFIG_PATH="/c/a/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
+          echo "/c/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
+          echo "/c/a/_temp/msys64/mingw64/include" >> $GITHUB_PATH
+          echo "/c/a/_temp/msys64/mingw64/lib" >> $GITHUB_PATH
+          export PKG_CONFIG_PATH="/c/a/_temp/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
 
-          echo "/c/a/msys64/mingw64/bin" >> $GITHUB_PATH
-          echo "/c/a/msys64/usr/bin" >> $GITHUB_PATH
-          export PATH="/c/a/msys64/mingw64/bin:$PATH"
-          export PATH="/c/a/msys64/usr/bin:$PATH"
+          echo "/c/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
+          echo "/c/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
+          export PATH="/c/a/_temp/msys64/mingw64/bin:$PATH"
+          export PATH="/c/a/_temp/msys64/usr/bin:$PATH"
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
           echo "PATH=$PATH"
           which pkg-config
@@ -138,7 +138,7 @@ jobs:
         shell: bash
         run: |
           export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 vips sqlite3)"
-          #export CGO_LDFLAGS="-L/c/a/msys64/mingw64/lib -lsqlite3 -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
+          #export CGO_LDFLAGS="-L/c/a/_temp/msys64/mingw64/lib -lsqlite3 -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
           env
           go env
           echo "Building..."
