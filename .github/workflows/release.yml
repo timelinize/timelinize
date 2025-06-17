@@ -56,15 +56,15 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
-          echo "C:\msys64\mingw64\include" >> $GITHUB_PATH
-          echo "C:\msys64\mingw64\lib" >> $GITHUB_PATH
-          export PKG_CONFIG_PATH="C:\msys64\mingw64\lib\pkgconfig:$PKG_CONFIG_PATH"
+          echo "/c/msys64/mingw64/bin" >> $GITHUB_PATH
+          echo "/c/msys64/mingw64/include" >> $GITHUB_PATH
+          echo "/c/msys64/mingw64/lib" >> $GITHUB_PATH
+          export PKG_CONFIG_PATH="/c/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
 
-          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
-          echo "C:\msys64\usr\bin" >> $GITHUB_PATH
-          export PATH="C:\msys64\mingw64\bin:$PATH"
-          export PATH="C:\msys64\usr\bin:$PATH"
+          echo "/c/msys64/mingw64/bin" >> $GITHUB_PATH
+          echo "/c/msys64/usr/bin" >> $GITHUB_PATH
+          export PATH="/c/msys64/mingw64/bin:$PATH"
+          export PATH="/c/msys64/usr/bin:$PATH"
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
           echo "PATH=$PATH"
           which pkg-config
