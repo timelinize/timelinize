@@ -490,7 +490,7 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 	}
 	or := func(clause string, val any) {
 		if clauseCount > 0 {
-			q += " OR " //nolint:goconst
+			q += " OR "
 		}
 		q += clause
 		args = append(args, val)

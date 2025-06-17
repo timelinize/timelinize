@@ -29,7 +29,7 @@ enable = [
   #"forbidigo", TODO: enable to forbid accidental "fmt.Print*" statements
   'gocheckcompilerdirectives',
   'gochecksumtype',
-  'goconst',
+  # 'goconst', TODO: broken, it scans nondeterministically, so it sporadically breaks, fixing it is like whack-a-mole 
   'gocritic',
   #"goheader", TODO: this one is broken (https://github.com/denis-tingaikin/go-header/issues/41)
   'gomoddirectives',
