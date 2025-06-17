@@ -37,7 +37,7 @@ jobs:
 
       - name: Install sqlite (Windows)
         if: matrix.os == 'windows-latest'
-        uses: actions/setup-sqlite@v1
+        uses: ccorsi/setup-sqlite@v1
       
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
