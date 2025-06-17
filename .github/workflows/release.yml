@@ -42,10 +42,17 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          echo "D:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
-          echo "/d/a/_temp/msys64/mingw64/include" >> $GITHUB_PATH
-          echo "/d/a/_temp/msys64/mingw64/lib" >> $GITHUB_PATH
-          export PKG_CONFIG_PATH="/d/a/_temp/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
+          #echo "D:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
+          #echo "/d/a/_temp/msys64/mingw64/include" >> $GITHUB_PATH
+          #echo "/d/a/_temp/msys64/mingw64/lib" >> $GITHUB_PATH
+          #export PKG_CONFIG_PATH="/d/a/_temp/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
+          
+          echo "D:/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
+          echo "D:/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
+          export PATH="D:/a/_temp/msys64/mingw64/bin:$PATH"
+          export PATH="D:/a/_temp/msys64/usr/bin:$PATH"
+          echo "PATH=$PATH"
+          which pkg-config
 
       # - name: Update PATH (Windows)
       #   if: matrix.os == 'windows-latest'
