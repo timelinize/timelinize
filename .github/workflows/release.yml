@@ -63,28 +63,6 @@ jobs:
           #find / -name pkg-config* 2>/dev/null
           ls /c/a/_temp/msys64/mingw64/include/sqlite3.h || echo "sqlite3.h not found!"
           pkg-config --list-all || echo "pkg-config not functioning!"
-        
-      
-      - name: Debug MSYS2 paths
-        if: matrix.os == 'windows-latest'
-        shell: cmd
-        run: |
-          echo MSYS2 root directory:
-          if exist C:\msys64 (
-            echo C:\a|msys64 exists
-            dir C:\msys64
-          ) else (
-            echo C:\msys64 NOT FOUND
-          )
-
-          echo List sqlite3 header:
-          dir C:\msys64\mingw64\include\sqlite3.h
-
-          echo List clang compiler:
-          where clang
-
-          echo Go environment:
-          go env
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
       # In late May 2025, installing glib was no longer sufficient; and indeed a warning showed that it was already installed and up-to-date. But the linker couldn't find gio-2.0 (same error as in April).
