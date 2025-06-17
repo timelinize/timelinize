@@ -34,7 +34,6 @@ jobs:
              mingw-w64-x86_64-toolchain
              mingw-w64-x86_64-libvips
              mingw-w64-x86_64-sqlite3
-             mingw-w64-x86_64-sqlite3-static
 
       - name: Update PATH (Windows)
         if: matrix.os == 'windows-latest'
