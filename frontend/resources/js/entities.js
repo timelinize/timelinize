@@ -94,7 +94,11 @@ async function filterAndRenderEntitiesList() {
 				} else if (attr.name == "url") {
 					elem.href = attr.value;
 				}
-				elem.innerText = attr.value;
+				if (attr.latitude && attr.longitude) {
+					elem.innerText = `${attr.latitude}, ${attr.longitude}`;
+				} else if (attr.value) {
+					elem.innerText = attr.value;
+				} 
 				container.append(elem);
 				container.append(document.createElement("br"));
 			}

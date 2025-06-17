@@ -21,6 +21,7 @@ package timeline
 import (
 	"context"
 	"encoding/json"
+	"runtime/debug"
 	"sync/atomic"
 
 	"go.uber.org/zap"
@@ -57,7 +58,9 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 	// don't allow the importer, which is processing who-knows-what input, to completely bring down the app
 	defer func() {
 		if r := recover(); r != nil {
-			p.log.Error("panic", zap.Any("error", r))
+			p.log.Error("panic",
+				zap.Any("error", r),
+				zap.String("stack", string(debug.Stack())))
 		}
 	}()
 

@@ -191,6 +191,24 @@ func (p *Processor) NextGPXGraph(ctx context.Context) (*timeline.Graph, error) {
 
 		g := &timeline.Graph{Item: item}
 
+		makePlaceEntity := func(pt wpt) {
+			// store named waypoints as place entities
+			if pt.Name != "" {
+				g.ToEntity(timeline.RelVisit, &timeline.Entity{
+					Type: timeline.EntityPlace,
+					Name: pt.Name,
+					Attributes: []timeline.Attribute{
+						{
+							Name:      "coordinate",
+							Latitude:  item.Location.Latitude,
+							Longitude: item.Location.Longitude,
+							Identity:  true, // TODO: I feel like this should be just Identifying: true, but that creates _entity attributes...
+						},
+					},
+				})
+			}
+		}
+
 		switch pt := l.Original.(type) {
 		case trkpt:
 			if _, ok := item.Metadata["Velocity"]; !ok {
@@ -201,20 +219,15 @@ func (p *Processor) NextGPXGraph(ctx context.Context) (*timeline.Graph, error) {
 			}
 			item.Metadata = l.Metadata
 		case wpt:
-			if pt.Name != "" {
-				// store named waypoints as place entities
-				g.ToEntity(timeline.RelVisit, &timeline.Entity{
-					Type: timeline.EntityPlace,
-					Name: pt.Name,
-					Attributes: []timeline.Attribute{
-						{
-							Name:       "coordinate",
-							Latitude1:  item.Location.Latitude,
-							Longitude1: item.Location.Longitude,
-							Identity:   true, // TODO: I feel like this should be just Identifying: true, but that creates _entity attributes...
-						},
-					},
-				})
+			makePlaceEntity(pt)
+		}
+
+		// in case a waypoint was clustered with other points,
+		// iterate the points comprising it to see if there's any
+		// place entities we can extract, so we don't skip them
+		for _, cp := range l.ClusterPoints() {
+			if pt, ok := cp.Original.(wpt); ok {
+				makePlaceEntity(pt)
 			}
 		}
 
@@ -297,11 +310,13 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 					// TODO: maybe skip and go to next?
 					return nil, fmt.Errorf("decoding XML element as metadata: %w", err)
 				}
-				ts, err := time.Parse(time.RFC3339, meta.Time)
-				if err != nil {
-					return nil, fmt.Errorf("parsing timestamp in metadata->time element: %w", err)
+				if meta.Time != "" {
+					ts, err := time.Parse(time.RFC3339, meta.Time)
+					if err != nil {
+						return nil, fmt.Errorf("parsing timestamp in metadata->time element: %w", err)
+					}
+					d.metadataTime = ts
 				}
-				d.metadataTime = ts
 				continue
 
 			case elem.Name.Local == "wpt" && d.stack.path() == gpxRoot:
@@ -316,7 +331,6 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 					LongitudeE7: int64(waypoint.Lon * placesMult),
 					Altitude:    waypoint.Ele,
 					Timestamp:   waypoint.Time,
-					Significant: waypoint.Name != "", // this becomes a place entity, so we don't want it to get filtered out
 				}, nil
 
 			case elem.Name.Local == "trk" && d.stack.path() == gpxRoot:
@@ -357,7 +371,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 					Metadata: timeline.Metadata{
 						"Activity type": d.trkType,
 					},
-					ResetTrack: isFirstInTrack,
+					NewTrack: isFirstInTrack,
 				}, nil
 			}
 

@@ -961,12 +961,12 @@ func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID u
 	var p relatedEntity
 	if ir.AttributeID != nil {
 		err = tx.QueryRowContext(ctx, `
-		SELECT entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value
+		SELECT entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value, attributes.longitude, attributes.latitude, attributes.altitude
 		FROM attributes, entities
 		JOIN entity_attributes
 			ON entity_attributes.entity_id = entities.id
 			AND entity_attributes.attribute_id = attributes.id
-		WHERE attributes.id=?`, ir.AttributeID).Scan(&p.ID, &p.Name, &p.Picture, &p.Attribute.Name, &p.Attribute.Value, &p.Attribute.AltValue)
+		WHERE attributes.id=?`, ir.AttributeID).Scan(&p.ID, &p.Name, &p.Picture, &p.Attribute.Name, &p.Attribute.Value, &p.Attribute.AltValue, &p.Attribute.Longitude, &p.Attribute.Latitude, &p.Attribute.Altitude)
 		if err != nil {
 			return nil, fmt.Errorf("loading related entity: %w", err)
 		}
@@ -1010,10 +1010,13 @@ type relatedEntity struct {
 // nullableAttribute is like Attribute but with nullable fields
 // so that it can be I/O for the database
 type nullableAttribute struct {
-	ID       *int64  `json:"id,omitempty"`
-	Name     *string `json:"name,omitempty"`
-	Value    *string `json:"value,omitempty"`
-	AltValue *string `json:"alt_value,omitempty"`
+	ID        *int64   `json:"id,omitempty"`
+	Name      *string  `json:"name,omitempty"`
+	Value     *string  `json:"value,omitempty"`
+	AltValue  *string  `json:"alt_value,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Altitude  *float64 `json:"altitude,omitempty"`
 }
 
 func (na nullableAttribute) attribute() Attribute {
@@ -1030,6 +1033,9 @@ func (na nullableAttribute) attribute() Attribute {
 	if na.AltValue != nil {
 		a.AltValue = *na.AltValue
 	}
+	a.Longitude = na.Longitude
+	a.Latitude = na.Latitude
+	a.Altitude = na.Altitude
 	return a
 }
 
