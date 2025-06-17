@@ -34,6 +34,7 @@ jobs:
              mingw-w64-x86_64-toolchain
              mingw-w64-x86_64-libvips
              mingw-w64-x86_64-sqlite3
+             perl
       
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
