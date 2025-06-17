@@ -48,7 +48,7 @@ jobs:
           cp libsqlite3.a /mingw64/lib/
           ls /mingw64/include/sqlite3.h
           ls /mingw64/lib/libsqlite3.a
-      
+
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
       # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
