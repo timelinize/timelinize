@@ -21,7 +21,7 @@ jobs:
 
       # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
       # but I haven't looked into using it. We'd have to install the packages using
-      # its shell, but I'm not sure how to do that.
+      # its shell, but I'm not sure how to do that or if it's even a good idea.
       - name: Install MSYS2 (Windows)
         if: matrix.os == 'windows-latest'
         uses: msys2/setup-msys2@v2
@@ -56,15 +56,15 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          echo "/c/msys64/mingw64/bin" >> $GITHUB_PATH
-          echo "/c/msys64/mingw64/include" >> $GITHUB_PATH
-          echo "/c/msys64/mingw64/lib" >> $GITHUB_PATH
-          export PKG_CONFIG_PATH="/c/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
+          echo "/d/a/msys64/mingw64/bin" >> $GITHUB_PATH
+          echo "/d/a/msys64/mingw64/include" >> $GITHUB_PATH
+          echo "/d/a/msys64/mingw64/lib" >> $GITHUB_PATH
+          export PKG_CONFIG_PATH="/d/a/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
 
-          echo "/c/msys64/mingw64/bin" >> $GITHUB_PATH
-          echo "/c/msys64/usr/bin" >> $GITHUB_PATH
-          export PATH="/c/msys64/mingw64/bin:$PATH"
-          export PATH="/c/msys64/usr/bin:$PATH"
+          echo "/d/a/msys64/mingw64/bin" >> $GITHUB_PATH
+          echo "/d/a/msys64/usr/bin" >> $GITHUB_PATH
+          export PATH="/d/a/msys64/mingw64/bin:$PATH"
+          export PATH="/d/a/msys64/usr/bin:$PATH"
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
           echo "PATH=$PATH"
           which pkg-config
@@ -82,8 +82,29 @@ jobs:
         run: |
           #find / -name sqlite3.h 2>/dev/null
           #find / -name pkg-config* 2>/dev/null
-          ls C:\msys64\mingw64\include\sqlite3.h || echo "sqlite3.h not found!"
+          ls /c/msys64/mingw64/include/sqlite3.h || echo "sqlite3.h not found!"
           pkg-config --list-all || echo "pkg-config not functioning!"
+        
+      
+      - name: Debug MSYS2 paths
+        run: |
+          echo "MSYS2 root directory:"
+          echo "----------------------"
+          if exist C:\msys64 (
+            echo C:\msys64 exists
+            dir C:\msys64
+          ) else (
+            echo C:\msys64 NOT FOUND
+          )
+
+          echo "List sqlite3 header:"
+          dir C:\msys64\mingw64\include\sqlite3.h
+
+          echo "List clang compiler:"
+          where clang
+
+          echo "Go environment:"
+          go env
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
       # In late May 2025, installing glib was no longer sufficient; and indeed a warning showed that it was already installed and up-to-date. But the linker couldn't find gio-2.0 (same error as in April).
@@ -115,7 +136,7 @@ jobs:
         shell: bash
         run: |
           export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 vips sqlite3)"
-          export CGO_LDFLAGS="-L/d/a/_temp/msys64/mingw64/lib -lsqlite3 -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
+          #export CGO_LDFLAGS="-L/d/a/msys64/mingw64/lib -lsqlite3 -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
           env
           go env
           echo "Building..."
