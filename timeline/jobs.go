@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -424,7 +425,9 @@ func (tl *Timeline) runJob(row Job) error {
 		// input, to bring down the program
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("panic", zap.Any("error", r))
+				logger.Error("panic",
+					zap.Any("error", r),
+					zap.String("stack", string(debug.Stack())))
 			}
 		}()
 

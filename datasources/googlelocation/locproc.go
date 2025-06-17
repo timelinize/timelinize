@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/timelinize/timelinize/timeline"
@@ -55,7 +56,11 @@ func NewLocationProcessor(source LocationSource, simplificationLevel float64) (L
 		return nil, fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", simplificationLevel)
 	}
 
-	locProc := &locationProcessor{source: source}
+	locProc := &locationProcessor{
+		source:           source,
+		clusteringBuffer: make([]*Location, 0, clusterBufferSize),
+	}
+
 	if simplificationLevel != 0 {
 		// To scale a number x into range [a,b]:
 		// x_scaled = (b-a) * ((x - x_min) / (x_max - x_min)) + a
@@ -75,7 +80,8 @@ func NewLocationProcessor(source LocationSource, simplificationLevel float64) (L
 //
 // Assign one locationProcessor per goroutine.
 type locationProcessor struct {
-	source LocationSource
+	source        LocationSource
+	sourceDrained bool // if true, no more input points remain from the source
 
 	// de-duplicating (TODO: Make more customizable?)
 	previous *Location
@@ -86,11 +92,8 @@ type locationProcessor struct {
 	denoiseWindow []*Location
 
 	// clustering
-	clusterWindow, cluster []*Location
-	windowDistance         float64
-	avgChangeInMean        float64
-	changeInMeanVar        float64
-	latAvg, lonAvg         int64
+	clusteringBuffer []*Location
+	startOfNextTrack *Location
 
 	// simplifiying
 	epsilon float64 // enables RDP path simplification (https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm)
@@ -136,132 +139,271 @@ func (lp *locationProcessor) simplifiedNext(ctx context.Context) (*Location, err
 	return nil, nil
 }
 
-// clusteredNext runs the clustering phase of the algorithm and returns the
-// next data point, which might be an aggregate that represents a cluster.
 func (lp *locationProcessor) clusteredNext(ctx context.Context) (*Location, error) {
-	// any point we return must first pass through the cluster window,
-	// so first fill up the cluster buffer and compute updated stats
-	// every time we add an element and effectively "shift" the window
-	for len(lp.clusterWindow) < clusterWindowSize {
-		next, err := lp.denoiseNext(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if next == nil {
-			break
-		}
-		if next.Significant {
-			return next, nil
-		}
-
-		lp.clusterWindow = append(lp.clusterWindow, next)
-
-		// for our slightly modified Welford's algorithm to compute the mean as we go,
-		// we need to initialize the means with the first values
-		if len(lp.clusterWindow) == 1 {
-			lp.latAvg = next.LatitudeE7
-			lp.lonAvg = next.LongitudeE7
-			continue
-		}
-
-		prev := lp.clusterWindow[len(lp.clusterWindow)-2]
-		next.distanceFromPrev = haversineDistanceEarth(prev.LatitudeE7, prev.LongitudeE7, next.LatitudeE7, next.LongitudeE7) * kmToMeters
-
-		oldLatAvg, oldLonAvg := lp.latAvg, lp.lonAvg
-
-		// TODO: I might be totally wrong on this; verify this!
-		// our online average calculation is rolling over a moving window; i.e.
-		// values that contribute to the mean will be removed, so this is a slightly
-		// modified Welford's algorithm; in Welford's, the delta would be computed
-		// between the new value and the current mean; but in ours, since it is
-		// rolling, we compute the delta between the new value and the oldest value
-		// that is "going away" or being removed from our window (hence why we
-		// have to initialize the mean with the first value above; otherwise we'd
-		// be subtracting the same point from itself)
-		oldest := lp.clusterWindow[0]
-		oldestLat, oldestLon := oldest.LatitudeE7, oldest.LongitudeE7
-		lp.latAvg += (next.LatitudeE7 - oldestLat) / clusterWindowSize
-		lp.lonAvg += (next.LongitudeE7 - oldestLon) / clusterWindowSize
-
-		next.changeInMean = haversineDistanceEarth(oldLatAvg, oldLonAvg, lp.latAvg, lp.lonAvg) * kmToMeters
-
-		lp.windowDistance += next.distanceFromPrev
-		lp.windowDistance -= oldest.distanceFromPrev // NOTE: the span from the point before the oldest in the window to the oldest in the window isn't actually in the window, so use distance between oldest and second-oldest instead (index [1])?
-
-		// compute the new center (mean) of the points in the window, and also how much
-		// this point contributed to the new center; i.e. how much it moved the center; if
-		// the center is, on average, not moving very much in this window, the start of the
-		// window is likely the start of a cluster (slightly modified Welford's algorithm)
-		oldAvgChangeInMean := lp.avgChangeInMean
-		goingAway := oldest.changeInMean
-		lp.avgChangeInMean += (next.changeInMean - goingAway) / float64(clusterWindowSize)
-
-		// TODO: the next line computes a sample variance, not population variance. to compute population variance, change clusterWindowSize-1 to just clusterWindowSize
-		lp.changeInMeanVar += (next.changeInMean - goingAway) * ((next.changeInMean - lp.avgChangeInMean) + (goingAway - oldAvgChangeInMean)) / (clusterWindowSize - 1)
-		// TODO: maybe need more conditions to define a cluster? like temporal constraints or threshold for change in mean relative to distance traveled in window?
-		// changeInMeanStdDev := math.Sqrt(lp.changeInMeanVar)
-
-		// if l.changeInMean < lp.windowDistance/windowSize {
-		// TODO: instead of requiring cluster window to be full, make threshold relative to window length?
-		if len(lp.clusterWindow) >= clusterWindowSize && lp.avgChangeInMean < 20 { // TODO: && lp.windowDistance > lp.avgChangeInMean*float64(windowSize) ?
-			// we are in a cluster! could be the start or a continuation; doesn't matter
-			lp.cluster = append(lp.cluster, oldest)
-
-			// since we added the oldest (first) point to the cluster, we need
-			// to pop it from the window, otherwise we'll also doubly treat it
-			// as its own point; oops
-			lp.clusterWindow = lp.clusterWindow[1:]
-
-			// while in a cluster, we need to continue looping until we find the end
-			// of the cluster, as the point we will return represents the cluster
-			continue
-		} else if len(lp.cluster) > 0 { // TODO: && l.changeInMean > changeInMeanStdDev ?
-			// the average change in mean is high enough, and the cluster
-			// has non-zero length, so we have found the end of the cluster
-			return lp.endClusterFunc(), nil
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
-	// TODO: what if there is an active cluster at the end; should that even happen?
-
-	// pop the oldest point that has passed through the clustering filter as the newest point for the next phase
-	if len(lp.clusterWindow) > 0 {
-		next := lp.clusterWindow[0]
-		lp.clusterWindow = lp.clusterWindow[1:]
+	// if we have processed points left in the buffer, pop off the next one and return it
+	// (leave at least clusterWindowSize points in the buffer to roll-over to the next
+	// batch, so that we don't break clusters across arbitrary batch boundaries - but if
+	// there are no more points, or if there is a new track, then we must completely drain
+	// the buffer)
+	if len(lp.clusteringBuffer) > clusterWindowSize ||
+		((lp.sourceDrained || lp.startOfNextTrack != nil) && len(lp.clusteringBuffer) > 0) {
+		next := lp.clusteringBuffer[0]
+		lp.clusteringBuffer = lp.clusteringBuffer[1:]
 		return next, nil
 	}
 
-	return nil, nil
+	// no more points here or there, no more points anywhere!
+	if lp.sourceDrained && lp.startOfNextTrack == nil {
+		return nil, nil
+	}
+
+	// refill buffer and process new batch
+	// (start with the first point of new/next track, if any)
+	if lp.startOfNextTrack != nil {
+		lp.clusteringBuffer = append(lp.clusteringBuffer, lp.startOfNextTrack)
+		lp.startOfNextTrack = nil
+	}
+	for len(lp.clusteringBuffer) < clusterBufferSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		nextPoint, err := lp.denoiseNext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if nextPoint == nil {
+			break
+		}
+		if nextPoint.NewTrack {
+			// we just read a point that must not be clustered with any of the previous ones,
+			// so instead of appending it to the buffer to be processed along with them, we
+			// hold onto it and it will be the first point in the next buffer that we process
+			lp.startOfNextTrack = nextPoint
+			break
+		}
+		lp.clusteringBuffer = append(lp.clusteringBuffer, nextPoint)
+	}
+	lp.clusteringBuffer = lp.clusterBatch(ctx, lp.clusteringBuffer)
+
+	// buffer has been refilled and processed, so pop its first point off
+	return lp.clusteredNext(ctx)
+}
+
+// clusterBatch processes the points in the batch into clusters. It returns the processed batch.
+func (lp *locationProcessor) clusterBatch(ctx context.Context, batch []*Location) []*Location {
+	if len(batch) == 0 {
+		return batch
+	}
+
+	// Our clustering algorithm is "recursive" in that it can add clusters to clusters.
+	// We slide a window across the batch and make clusters as we go, then repeat once
+	// we reach the end of the batch until this loop has an iteration where no new
+	// clusters have been created. In practice it tends to converge quite quickly.
+	// However, I have found some cases where, even though it converges quickly, it
+	// creates clusters that are TOO big. So we limit the "recursion" (iterations of
+	// this loop). Otherwise, I've seen it create clusters of clusters of clusters,
+	// which end up being hundreds of points big, and spanning an entire week...
+	// that's not usually necessary/useful. In practice, I have found that two scans
+	// over the batch is sufficient to cluster effectively.
+	for range 2 {
+		// We keep track of the centroid of the sliding window.
+		var latAvg, lonAvg int64
+
+		// As we slide along, if we are in a cluster, we move points into this list.
+		// We keep track of where the cluster started because the resulting cluster
+		// point will replace all the points in the batch starting at that same spot
+		// the cluster started. The cluster must consist of consecutive points.
+		var cluster []*Location
+		var clusterStart int
+		var hadCluster bool
+
+		// finalizeCluster just creates the cluster point, resets the cluster, and
+		// inserts the cluster point into the batch.
+		finalizeCluster := func() {
+			clusterPoint := lp.endClusterFunc(cluster)
+			cluster = nil
+			batch = slices.Insert(batch, clusterStart, clusterPoint)
+		}
+
+		// slide the window over the batch;  the current index is the "latest" point,
+		// which is the end of the clustering window (the beginning is i-clusterWindowSize
+		// or 0, whichever is greater).
+		for i := 0; i < len(batch); i++ {
+			if ctx.Err() != nil {
+				return batch
+			}
+
+			latest := batch[i] // end of the sliding window
+
+			// for the first point in a batch, we need to initialize our mean for
+			// the statistical analysis
+			if i == 0 {
+				latAvg = latest.LatitudeE7
+				lonAvg = latest.LongitudeE7
+				continue // this prevents NaNs at the beginning due to not having a starting lat/lon
+			}
+
+			// compute the centroid of the current window, and compare to centroid of previous window
+
+			oldLatAvg, oldLonAvg := latAvg, lonAvg
+
+			oldestIdx := max(i-clusterWindowSize, 0) // beginning of the clustering window (i is the end of it)
+			oldest := batch[oldestIdx]
+			oldestLat, oldestLon := oldest.LatitudeE7, oldest.LongitudeE7
+			latAvg += (latest.LatitudeE7 - oldestLat) / clusterWindowSize
+			lonAvg += (latest.LongitudeE7 - oldestLon) / clusterWindowSize
+
+			// convert to meters to reduce sensitivity to floating point imprecision
+			latest.changeToCentroid = haversineDistanceEarth(oldLatAvg, oldLonAvg, latAvg, lonAvg) * kmToMeters
+
+			// size of the window may be smaller at the beginning
+			count := min(clusterWindowSize, i+1)
+
+			// we don't actually use Welford's online algorithm here, because
+			// it is not numerically stable when applied to a sliding window
+			// (thankfully, our window size is usually small that these
+			// inner loops aren't that expensive in practice)
+
+			window := batch[oldestIdx : i+1]
+
+			var windowDistance float64
+
+			// First pass: compute mean (and distance traveled within the window)
+			// (Note that our mean is not the centroid itself but the average DELTA/CHANGE of the centroid in the window.)
+			var meanChangeToCentroid float64
+			for i, point := range window {
+				if i > 0 { // skip first point in window since the distance between it and its previous is not in the window
+					windowDistance += point.distanceFromPrev
+				}
+				meanChangeToCentroid += point.changeToCentroid
+			}
+			meanChangeToCentroid /= float64(count)
+
+			// Second pass: compute sum of squared differences
+			var M2 float64
+			for _, point := range window {
+				diff := point.changeToCentroid - meanChangeToCentroid
+				M2 += diff * diff
+			}
+
+			// sample variance (population variance just doesn't have the -1)
+			variance := M2 / (float64(count) - 1)
+
+			// compute distance from the previous point to this one
+			prev := batch[i-1]
+			latest.distanceFromPrev = haversineDistanceEarth(prev.LatitudeE7, prev.LongitudeE7, latest.LatitudeE7, latest.LongitudeE7) * kmToMeters
+
+			// standard deviation is in same units as the data
+			stdDev := math.Sqrt(variance)
+
+			// We need to decide a coefficient at which a point is part of a cluster, based on what we observe
+			// in the window. A simple way to do this is if the mean change of the centroid is less than a
+			// certain amount (i.e. there isn't much overall movement within the window), then it's part of
+			// a cluster. The question is, what amount should that be? Well this used to be a hard-coded value
+			// of 20 meters, but that doesn't work well with different kinds of data (e.g. walking data, too
+			// many of the points get eaten up into clusters because walking has higher data density than driving).
+			// So we make it relative to the data set by computing its standard deviation and then seeing if
+			// that mean centroid delta is less than some multiple of the standard deviation. (Remember that
+			// std dev is in the same units as the data.) This works better, but the coefficient now becomes a
+			// parameter to tune. Because again, we may want to express dense data differently than sparse data.
+			// After some fiddling I've landed on setting the coefficient based on the distance traveled in the
+			// window. Based on some sample data, it FEELS LIKE the more distance that is traveled, the tighter
+			// the threshold should be for a cluster (i.e. more distance traveled == centroid needs to move less).
+			// I don't have a smooth formula for this coefficient yet, so I chose some discrete points at which
+			// we determine the coefficient. It's kind of a sensitive parameter. This approach could probably be
+			// improved.
+			var coefficient float64
+			switch {
+			case windowDistance < 75:
+				coefficient = 2.5 // seems to work well when points are close together
+			case windowDistance < 300:
+				coefficient = 1.9 // 1.9 seemed good on sample Arc tracks from urban walks
+			default:
+				coefficient = 1.15 // 1.15 seems good for most driving+destination data
+			}
+
+			// it's important that we're at least a window-size into the buffer, because the oldest
+			// point in the window is appended to the cluster; if we did this before we were one full
+			// window into the buffer, the oldest point would repeat multiple times as the window grows!
+			if count >= clusterWindowSize && meanChangeToCentroid < coefficient*stdDev && !oldest.Significant {
+				// we are in a cluster!
+
+				// if this is the start of a cluster, we need to mark where it started
+				// so we know where to put the cluster point
+				if len(cluster) == 0 {
+					clusterStart = oldestIdx
+				} else {
+					// a cluster of size 1 ends up just going back into the buffer as itself,
+					// not actually as a cluster, so don't count cluster sizes of 1, otherwise
+					// it would loop infinitely
+					hadCluster = true
+				}
+
+				// add this point to the cluster, remove it from the batch,
+				// and decrement the index since we deleted it from the batch
+				cluster = append(cluster, oldest)
+				batch = slices.Delete(batch, oldestIdx, oldestIdx+1)
+				i--
+
+				// while in a cluster, we need to continue looping until we find
+				// the end of the cluster
+				//
+				// "what about if we're at the end of the batch and we're still
+				// in the cluster -- i.e. the cluster goes into the next batch?"
+				// you may ask -- well, the simplest thing, which seems to work,
+				// is to just end the cluster like normal after the loop finishes,
+				// and since we roll-over 1 window size of overlap between batches,
+				// that cluster point will be considered at the start of the next
+				// batch, so it can be appended to then
+				continue
+			} else if clusterSize := len(cluster); clusterSize > 0 {
+				// not in cluster, but cluster points have accumulated, so must be end of cluster
+				finalizeCluster()
+				i++ // since we added a cluster point to the batch, increment i to skip over it
+				continue
+			}
+		}
+
+		// if we finished the batch in a cluster, make sure to create the cluster point
+		if len(cluster) > 0 {
+			finalizeCluster()
+		}
+
+		// if this scan of the batch had no new clusters, we're done!
+		if !hadCluster {
+			break
+		}
+	}
+
+	return batch
 }
 
 // endClusterFunc ends the cluster by combining all the clustered
 // points into a single location and returns it.
-func (lp *locationProcessor) endClusterFunc() *Location {
-	defer func() {
-		lp.cluster = nil
-	}()
-
-	if len(lp.cluster) == 1 {
-		return lp.cluster[0]
+func (lp *locationProcessor) endClusterFunc(cluster []*Location) *Location {
+	if len(cluster) == 1 {
+		return cluster[0]
 	}
 
-	clusterSize := float64(len(lp.cluster))
+	// expand cluster points (points that are already clusters themselves)
+	for i := 0; i < len(cluster); i++ {
+		clusterPoints := cluster[i].clusterPoints
+		cluster = slices.Insert(cluster, i, clusterPoints...)
+		i += len(clusterPoints)
+	}
+
+	clusterSize := float64(len(cluster))
 
 	// combine all the points in the cluster into a single point;
 	// to do this, aggregate some statistics and other values
 	// as part of the reduction
 	var uncertaintySum, centerLat, centerLon, m2lat, m2lon float64
-	// var deviceTag int64
 
-	for i, l := range lp.cluster {
-		// // there's no great way to do this; hopefully at least one item
-		// // in the cluster accurately represents the correct device,
-		// // and that there aren't multiple devices in this cluster, but
-		// // I'm pretty sure this is the best we can do
-		// if deviceTag == 0 {
-		// 	deviceTag = l.DeviceTag
-		// }
-
+	for i, l := range cluster {
 		uncertaintySum += float64(l.Uncertainty)
 
 		deltaLat := float64(l.LatitudeE7) - centerLat
@@ -279,22 +421,25 @@ func (lp *locationProcessor) endClusterFunc() *Location {
 	latVariance := m2lat / clusterSize
 	lonVariance := m2lon / clusterSize
 
-	first, last := lp.cluster[0], lp.cluster[len(lp.cluster)-1]
+	first, last := cluster[0], cluster[len(cluster)-1]
 
-	return &Location{
-		Original:    first.Original, // not sure if this makes sense, but
+	clusterPoint := &Location{
+		Original:    first.Original, // not sure if this makes sense, but anyway...
 		LatitudeE7:  int64(centerLat),
 		LongitudeE7: int64(centerLon),
 		Timestamp:   first.Timestamp,
 		Timespan:    last.Timestamp,
 		Uncertainty: meanUncertainty,
 		Metadata: timeline.Metadata{
-			"Cluster size": len(lp.cluster),
+			"Cluster size": len(cluster),
 			// convert to actual lat/lon units; I don't think we need to stay at 1e7 integers
 			"Standard deviation (latitude)":  math.Sqrt(latVariance) / placesMult,
 			"Standard deviation (longitude)": math.Sqrt(lonVariance) / placesMult,
 		},
+		clusterPoints: cluster,
 	}
+
+	return clusterPoint
 }
 
 // denoiseNext runs the denoising phase of the algorithm.
@@ -308,6 +453,7 @@ func (lp *locationProcessor) denoiseNext(ctx context.Context) (*Location, error)
 			return nil, err
 		}
 		if next == nil {
+			lp.sourceDrained = true
 			break
 		}
 		if next.Significant {
@@ -394,14 +540,14 @@ func (lp *locationProcessor) denoiseNext(ctx context.Context) (*Location, error)
 // or very similar to the previously-decoded point. Should be called just after
 // being read from the source input.
 func (lp locationProcessor) sameAsPrevious(l *Location) bool {
-	if l.ResetTrack {
+	if l.NewTrack {
 		lp.previous = nil
 	}
 	if lp.previous == nil {
 		return false
 	}
 
-	if l.Timestamp.Sub(lp.previous.Timestamp) < 15*time.Second {
+	if l.Timestamp.Sub(lp.previous.Timestamp) < 5*time.Second {
 		return true
 	}
 
@@ -419,6 +565,7 @@ func (lp locationProcessor) sameAsPrevious(l *Location) bool {
 const (
 	denoiseWindowSize = 5
 	clusterWindowSize = 4
+	clusterBufferSize = 1000 // size of each batch of points when clustering
 )
 
 //nolint:dupword
@@ -446,13 +593,14 @@ const (
 			if count < 2:
 				return float("nan")
 			else:
-				(mean, variance, sampleVariance) = (mean, M2 / count, M2 / (count - 1))
+				(mean, variance, sampleVariance) = (mean, M2 / count, M2 / (count-1))
 				return (mean, variance, sampleVariance)
 
 	^ This assumes a calculation over the whole data set.
 	If computing only over a sliding window, replace count
 	with the windowSize, and delta is newValue-oldestValue
-	instead of newValue-mean.
+	instead of newValue-mean. However, this is numerically
+	unstable. Negative variances will likely appear.
 
 	Here's a simple Go implementation, though slightly contrived
 	as the entire data set is passed in as a slice, but the idea
@@ -493,7 +641,7 @@ type Location struct {
 	Altitude    float64   // meters
 	Uncertainty float64   // meters (must be > 0); higher values are less accurate
 	Timestamp   time.Time // old exports used to call this timestampMs, in milliseconds
-	Significant bool      // if true, this point will not be filtered out
+	Significant bool      // if true, this point will not be filtered out or clustered (TODO: Useful?)
 
 	// These fields are not read by the processor (you do not need to set them in your
 	// implementation of NextLocation), but they will be set on the output if this
@@ -502,14 +650,17 @@ type Location struct {
 	Metadata timeline.Metadata
 
 	// Typically, locations must be processed in chronological order in order to filter
-	// noise, duplicates, etc. But if the stream of data has multiple time series and
+	// noise, duplicates, etc. And locations may be clustered into a single point if
+	// they look like a cluster. But if the stream of data has multiple time series or
 	// "starts over" one or more times, set this to true when the stream has gone back
-	// in time. As long as subsequent data points after this are still in ascending
-	// chronological order, it's as if starting a new stream.
-	ResetTrack bool
+	// in time or when a new track has begun. As long as subsequent data points after
+	// this are still in ascending chronological order, it's as if starting a new stream.
+	// Points will not be clustered across different tracks.
+	NewTrack bool
 
 	distanceFromPrev float64 // distance from the location before this one in meters
-	changeInMean     float64 // how much this point changed the mean
+	changeToCentroid float64 // how much this point changed the mean
+	clusterPoints    []*Location
 }
 
 // Location converts the coordinates into a item-processable Location value.
@@ -532,6 +683,15 @@ func (lc Location) Location() timeline.Location {
 		l.CoordinateUncertainty = &unc
 	}
 	return l
+}
+
+// ClusterPoints returns a slice of the original/input points that were
+// aggregated to make the cluster, if this point is a cluster. A nil
+// value is returned if this point is not a cluster. The slice should
+// not be modified if you want to call this to get the same values again
+// later.
+func (lc Location) ClusterPoints() []*Location {
+	return lc.clusterPoints
 }
 
 const (

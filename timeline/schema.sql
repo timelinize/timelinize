@@ -113,11 +113,10 @@ CREATE TABLE IF NOT EXISTS "attributes" (
 	"name" TEXT NOT NULL,
 	"value" ANY COLLATE NOCASE,
 	"alt_value" TEXT, -- optional alternate value intended for display or as a description
-	-- the coordinate values below are useful if the attribute value is, in fact, a location or area
-	"longitude1" REAL, -- point, or top-left corner
-	"latitude1" REAL,  -- point, or top-left corner
-	"longitude2" REAL, -- bottom-right corner, if box
-	"latitude2" REAL,  -- bottom-right corner, if box
+	-- the coordinate values below are useful if the attribute value is, in fact, a location
+	"longitude" REAL,
+	"latitude" REAL,
+	"altitude" REAL,
 	"metadata" TEXT,  -- optional extra info encoded as JSON
 	UNIQUE ("name", "value")
 ) STRICT;

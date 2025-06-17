@@ -243,13 +243,10 @@ type Attribute struct {
 	Identity bool `json:"identity"`
 
 	// If the attribute represents a place, put its location here.
-	// For a point, use Latitude1 and Longitude1. For a rectangle,
-	// use Lat1/Lon1 as the top-left corner and Lat2/Lon2 as the
-	// bottom-right corner.
-	Latitude1  *float64 `json:"latitude1,omitempty"`
-	Longitude1 *float64 `json:"longitude1,omitempty"`
-	Latitude2  *float64 `json:"latitude2,omitempty"`
-	Longitude2 *float64 `json:"longitude2,omitempty"`
+	// At least lat/lon are required (for earth coordinates).
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Altitude  *float64 `json:"altitude,omitempty"`
 
 	// Optional metadata associated with this attribute.
 	Metadata Metadata `json:"metadata,omitempty"`
@@ -269,7 +266,7 @@ func (a Attribute) Empty() bool {
 	if strings.TrimSpace(a.Name) == "" {
 		return true
 	}
-	return strings.TrimSpace(a.valueString()) == "" && a.Latitude1 == nil && a.Longitude1 == nil
+	return strings.TrimSpace(a.valueString()) == "" && a.Latitude == nil && a.Longitude == nil
 }
 
 func (a Attribute) valueForDB() any {
@@ -679,15 +676,20 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 	// a row but no attributes, especially if it's the timeline owner (ID 1) because
 	// they may not have filled out a profile)
 	q := `SELECT
-			entities.id, entities.name, entities.picture_file,
-			ea.attribute_id
+			entities.id, entities.name, entities.picture_file, ea.attribute_id
 		FROM entities
+		JOIN entity_types ON entity_types.id = entities.type_id
 		LEFT JOIN entity_attributes AS ea ON ea.entity_id = entities.id
 		LEFT JOIN attributes ON attributes.id = ea.attribute_id
-		WHERE `
+		WHERE
+		-- place entities have globally-unique names (attributes can be used to distinguish instances of entity)
+		(
+			entity_types.name=?
+			AND entities.name=?
+		) OR `
 
 	var whereGroups []string
-	var args []any
+	args := []any{EntityPlace, in.Name}
 
 	// in some cases, the entity ID may be specified manually; load that entity directly by ID instead of trying to find it
 	if in.ID > 0 {
@@ -697,33 +699,36 @@ func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([
 		for _, attr := range in.Attributes {
 			// skip non-identifying attributes as those are not likely to be unique enough
 			if attr.Identifying || attr.Identity {
-				const decPrecision = 3
-				lowLon, highLon, lonDec := latLonBounds(attr.Longitude1, decPrecision)
-				lowLat, highLat, latDec := latLonBounds(attr.Latitude1, decPrecision)
+				const decPrecisionAt, decPrecisionNear = 4, 3
+				lowLonAt, highLonAt, lonDecAt := latLonBounds(attr.Longitude, decPrecisionAt)
+				lowLatAt, highLatAt, latDecAt := latLonBounds(attr.Latitude, decPrecisionAt)
+				lowLonNear, highLonNear, lonDecNear := latLonBounds(attr.Longitude, decPrecisionNear)
+				lowLatNear, highLatNear, latDecNear := latLonBounds(attr.Latitude, decPrecisionNear)
 
 				whereGroups = append(whereGroups,
 					`(attributes.name=? AND (
 						attributes.value=?
+						-- entity name is different, but coordinate is really close to same spot as an existing attribute
 						OR (
-							attributes.longitude2 IS NULL
-							AND attributes.latitude2 IS NULL
-							AND round(attributes.longitude1, ?) BETWEEN ? AND ?
-							AND round(attributes.latitude1, ?) BETWEEN ? AND ?
+							entities.name!=?
+							AND round(attributes.longitude, ?) BETWEEN ? AND ?
+							AND round(attributes.latitude, ?) BETWEEN ? AND ?
 						)
+						-- entity name is the same, and coordinate is somewhat close to same spot as an existing attribute
 						OR (
-							attributes.longitude2 IS NOT NULL
-							AND attributes.latitude2 IS NOT NULL
-							AND ? >= attributes.longitude1
-							AND ? >= attributes.latitude1
-							AND (? IS NULL OR ? <= attributes.longitude2)
-							AND (? IS NULL OR ? <= attributes.latitude2)
+							entities.name=?
+							AND round(attributes.longitude, ?) BETWEEN ? AND ?
+							AND round(attributes.latitude, ?) BETWEEN ? AND ?
 						)
 					)
 				)`)
 				args = append(args, attr.Name, attr.valueForDB(),
-					lonDec, lowLon, highLon, latDec, lowLat, highLat,
-					attr.Longitude1, attr.Latitude1,
-					attr.Longitude2, attr.Longitude2, attr.Latitude2, attr.Latitude2)
+					in.Name,
+					lonDecAt, lowLonAt, highLonAt,
+					latDecAt, lowLatAt, highLatAt,
+					in.Name,
+					lonDecNear, lowLonNear, highLonNear,
+					latDecNear, lowLatNear, highLatNear)
 			}
 		}
 	}
@@ -786,8 +791,8 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (uint64, er
 	}
 
 	const decPrecision = 3
-	lowLon, highLon, lonDec := latLonBounds(attr.Longitude1, decPrecision)
-	lowLat, highLat, latDec := latLonBounds(attr.Latitude1, decPrecision)
+	lowLon, highLon, lonDec := latLonBounds(attr.Longitude, decPrecision)
+	lowLat, highLat, latDec := latLonBounds(attr.Latitude, decPrecision)
 
 	var attrID uint64
 	err := tx.QueryRowContext(ctx, `
@@ -796,24 +801,13 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (uint64, er
 		WHERE name=? AND (
 			value=?
 			OR (
-				longitude2 IS NULL
-				AND latitude2 IS NULL
-				AND round(longitude1, ?) BETWEEN ? AND ?
-				AND round(latitude1, ?) BETWEEN ? AND ?
-			)
-			OR (
-				longitude2 IS NOT NULL
-				AND latitude2 IS NOT NULL
-				AND ? >= longitude1
-				AND ? >= latitude1
-				AND (? IS NULL OR ? <= longitude2)
-				AND (? IS NULL OR ? <= latitude2)
+				round(longitude, ?) BETWEEN ? AND ?
+				AND round(latitude, ?) BETWEEN ? AND ?
 			)
 		)
 		LIMIT 1`, attr.Name, attr.valueForDB(),
-		lonDec, lowLon, highLon, latDec, lowLat, highLat,
-		attr.Longitude1, attr.Latitude1,
-		attr.Longitude2, attr.Longitude2, attr.Latitude2, attr.Latitude2).Scan(&attrID)
+		lonDec, lowLon, highLon,
+		latDec, lowLat, highLat).Scan(&attrID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("looking up attribute '%+v': %w", attr, err)
 	}
@@ -821,11 +815,11 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (uint64, er
 	if attrID == 0 {
 		// store the attribute+value/coords since we don't have this combo yet
 		err := tx.QueryRowContext(ctx, `INSERT INTO attributes
-			(name, value, alt_value, longitude1, latitude1, longitude2, latitude2, metadata)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			(name, value, alt_value, longitude, latitude, altitude, metadata)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
 			RETURNING id`,
-			attr.Name, attr.valueForDB(), altValue, attr.Longitude1, attr.Latitude1,
-			attr.Longitude2, attr.Latitude2, metadata).Scan(&attrID)
+			attr.Name, attr.valueForDB(), altValue,
+			attr.Longitude, attr.Latitude, attr.Altitude, metadata).Scan(&attrID)
 		if err != nil {
 			return 0, fmt.Errorf("storing attribute '%+v': %w", attr, err)
 		}

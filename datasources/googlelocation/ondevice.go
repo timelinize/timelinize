@@ -75,7 +75,7 @@ func (dec *onDeviceiOS2024Decoder) NextLocation(_ context.Context) (*Location, e
 		// of the stream that goes forward in time again
 		if !dec.doingPaths {
 			dec.doingPaths = true // this sentinel ensures we only reset once
-			loc.ResetTrack = true
+			loc.NewTrack = true
 		}
 
 		// pop off the point we just retrieved
