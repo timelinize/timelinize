@@ -21,7 +21,7 @@ jobs:
 
       # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
       # but I haven't looked into using it. We'd have to install the packages using
-      # its shell, but I'm not sure how to do that or if it's even a good idea.
+      # its shell, but I'm not sure how to do that.
       - name: Install MSYS2 (Windows)
         if: matrix.os == 'windows-latest'
         uses: msys2/setup-msys2@v2
@@ -30,39 +30,15 @@ jobs:
           # update: true
           install: >-
              base-devel
-             pkg-config
              mingw-w64-x86_64-toolchain
              mingw-w64-x86_64-libvips
              mingw-w64-x86_64-sqlite3
 
-      # It is crucial to use our gcc compiler instead of the preinstalled gcc,
-      # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
-      # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
-      - name: Update PATH (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: bash
+      - name: Install libraries (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          ls -la /c/a/_temp
-          echo "/c/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
-          echo "/c/a/_temp/msys64/mingw64/include" >> $GITHUB_PATH
-          echo "/c/a/_temp/msys64/mingw64/lib" >> $GITHUB_PATH
-          echo "C:\msys64\usr\bin" >> $GITHUB_PATH
-          echo "/c/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
-          export PATH="/c/a/_temp/msys64/mingw64/bin:$PATH"
-          export PATH="/c/a/_temp/msys64/usr/bin:$PATH"
-          echo "PATH=$PATH"
-          export PKG_CONFIG_PATH="/c/a/_temp/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
-          which pkg-config
-
-      - name: Debug MSYS2 installation
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          #find / -name sqlite3.h 2>/dev/null
-          #find / -name pkg-config* 2>/dev/null
-          ls /c/a/_temp/msys64/mingw64/include/sqlite3.h || echo "sqlite3.h not found!"
-          pkg-config --list-all || echo "pkg-config not functioning!"
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
       # In late May 2025, installing glib was no longer sufficient; and indeed a warning showed that it was already installed and up-to-date. But the linker couldn't find gio-2.0 (same error as in April).
@@ -72,16 +48,13 @@ jobs:
         run: |
           brew install vips
 
-      # - name: Set PKG_CONFIG_PATH (Linux)
-      #   if: ${{ matrix.os == 'ubuntu-latest' }}
-      #   shell: bash
-      #   run: |
-      #     export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/lib/pkgconfig:$PKG_CONFIG_PATH"
-
-
-      - name: Install libraries (Linux)
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        run: sudo apt-get install -y libvips-dev
+      # It is crucial to use our gcc compiler instead of the preinstalled gcc,
+      # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
+      # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
+      - name: Update PATH (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: echo "C:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
 
       # As of May 2025, The CGO_LDFLAGS env var is necessary on macOS since it can't find gio-2.0 otherwise.
       # LLMs also suggested adding:
@@ -93,8 +66,7 @@ jobs:
           CGO_ENABLED: 1
         shell: bash
         run: |
-          export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 vips sqlite3)"
-          #export CGO_LDFLAGS="-L/c/a/_temp/msys64/mingw64/lib -lsqlite3 -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
+          export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 sqlite3)"
           env
           go env
           echo "Building..."
