@@ -35,19 +35,19 @@ jobs:
              mingw-w64-x86_64-libvips
              mingw-w64-x86_64-sqlite3
 
-      - name: Manually build and install sqlite3
-        if: matrix.os == 'windows-latest'
-        shell: msys2 {0}
-        run: |
-          curl -LO https://www.sqlite.org/2025/sqlite-amalgamation-3450200.zip
-          unzip sqlite-amalgamation-3450200.zip
-          cd sqlite-amalgamation-3450200
-          gcc -c sqlite3.c -O2 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_JSON1
-          ar rcs libsqlite3.a sqlite3.o
-          cp sqlite3.h /mingw64/include/
-          cp libsqlite3.a /mingw64/lib/
-          ls /mingw64/include/sqlite3.h
-          ls /mingw64/lib/libsqlite3.a
+      # - name: Manually build and install sqlite3
+      #   if: matrix.os == 'windows-latest'
+      #   shell: msys2 {0}
+      #   run: |
+      #     curl -LO https://www.sqlite.org/2025/sqlite-dll-win-x64-3500100.zip
+      #     unzip sqlite-dll-win-x64-3500100.zip
+      #     cd sqlite-dll-win-x64-3500100
+      #     gcc -c sqlite3.c -O2 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_JSON1
+      #     ar rcs libsqlite3.a sqlite3.o
+      #     cp sqlite3.h /mingw64/include/
+      #     cp libsqlite3.a /mingw64/lib/
+      #     ls /mingw64/include/sqlite3.h
+      #     ls /mingw64/lib/libsqlite3.a
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
@@ -56,15 +56,15 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          echo "D:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
-          echo "/d/a/_temp/msys64/mingw64/include" >> $GITHUB_PATH
-          echo "/d/a/_temp/msys64/mingw64/lib" >> $GITHUB_PATH
-          export PKG_CONFIG_PATH="/d/a/_temp/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
+          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
+          echo "C:\msys64\mingw64\include" >> $GITHUB_PATH
+          echo "C:\msys64\mingw64\lib" >> $GITHUB_PATH
+          export PKG_CONFIG_PATH="C:\msys64\mingw64\lib\pkgconfig:$PKG_CONFIG_PATH"
 
-          echo "D:/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
-          echo "D:/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
-          export PATH="D:/a/_temp/msys64/mingw64/bin:$PATH"
-          export PATH="D:/a/_temp/msys64/usr/bin:$PATH"
+          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
+          echo "C:\msys64\usr\bin" >> $GITHUB_PATH
+          export PATH="C:\msys64\mingw64\bin:$PATH"
+          export PATH="C:\msys64\usr\bin:$PATH"
           echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
           echo "PATH=$PATH"
           which pkg-config
@@ -82,7 +82,7 @@ jobs:
         run: |
           #find / -name sqlite3.h 2>/dev/null
           #find / -name pkg-config* 2>/dev/null
-          ls /d/a/_temp/msys64/mingw64/include/sqlite3.h || echo "sqlite3.h not found!"
+          ls C:\msys64\mingw64\include\sqlite3.h || echo "sqlite3.h not found!"
           pkg-config --list-all || echo "pkg-config not functioning!"
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
