@@ -66,11 +66,16 @@ jobs:
         shell: bash
         run: echo "D:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
 
-      - name: Set PKG_CONFIG_PATH (Linux)
+      # - name: Set PKG_CONFIG_PATH (Linux)
+      #   if: ${{ matrix.os == 'ubuntu-latest' }}
+      #   shell: bash
+      #   run: |
+      #     export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/lib/pkgconfig:$PKG_CONFIG_PATH"
+
+
+      - name: Install vips (Linux)
         if: ${{ matrix.os == 'ubuntu-latest' }}
-        shell: bash
-        run: |
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/lib/pkgconfig:$PKG_CONFIG_PATH"
+        run: sudo apt-get install -y libvips-dev
 
       # As of May 2025, The CGO_LDFLAGS env var is necessary on macOS since it can't find gio-2.0 otherwise.
       # LLMs also suggested adding:
