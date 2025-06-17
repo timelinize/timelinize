@@ -56,6 +56,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
+          ls -la /d/a
           echo "/d/a/msys64/mingw64/bin" >> $GITHUB_PATH
           echo "/d/a/msys64/mingw64/include" >> $GITHUB_PATH
           echo "/d/a/msys64/mingw64/lib" >> $GITHUB_PATH
@@ -87,9 +88,10 @@ jobs:
         
       
       - name: Debug MSYS2 paths
+        if: matrix.os == 'windows-latest'
+        shell: cmd
         run: |
-          echo "MSYS2 root directory:"
-          echo "----------------------"
+          echo MSYS2 root directory:
           if exist C:\msys64 (
             echo C:\msys64 exists
             dir C:\msys64
@@ -97,13 +99,13 @@ jobs:
             echo C:\msys64 NOT FOUND
           )
 
-          echo "List sqlite3 header:"
+          echo List sqlite3 header:
           dir C:\msys64\mingw64\include\sqlite3.h
 
-          echo "List clang compiler:"
+          echo List clang compiler:
           where clang
 
-          echo "Go environment:"
+          echo Go environment:
           go env
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
