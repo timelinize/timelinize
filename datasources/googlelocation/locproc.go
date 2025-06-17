@@ -140,6 +140,10 @@ func (lp *locationProcessor) simplifiedNext(ctx context.Context) (*Location, err
 }
 
 func (lp *locationProcessor) clusteredNext(ctx context.Context) (*Location, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	// if we have processed points left in the buffer, pop off the next one and return it
 	// (leave at least clusterWindowSize points in the buffer to roll-over to the next
 	// batch, so that we don't break clusters across arbitrary batch boundaries - but if
@@ -164,6 +168,9 @@ func (lp *locationProcessor) clusteredNext(ctx context.Context) (*Location, erro
 		lp.startOfNextTrack = nil
 	}
 	for len(lp.clusteringBuffer) < clusterBufferSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		nextPoint, err := lp.denoiseNext(ctx)
 		if err != nil {
 			return nil, err
@@ -202,7 +209,7 @@ func (lp *locationProcessor) clusterBatch(ctx context.Context, batch []*Location
 	// which end up being hundreds of points big, and spanning an entire week...
 	// that's not usually necessary/useful. In practice, I have found that two scans
 	// over the batch is sufficient to cluster effectively.
-	for j := 0; j < 2; j++ {
+	for range 2 {
 		// We keep track of the centroid of the sliding window.
 		var latAvg, lonAvg int64
 
@@ -226,6 +233,10 @@ func (lp *locationProcessor) clusterBatch(ctx context.Context, batch []*Location
 		// which is the end of the clustering window (the beginning is i-clusterWindowSize
 		// or 0, whichever is greater).
 		for i := 0; i < len(batch); i++ {
+			if ctx.Err() != nil {
+				return batch
+			}
+
 			latest := batch[i] // end of the sliding window
 
 			// for the first point in a batch, we need to initialize our mean for
