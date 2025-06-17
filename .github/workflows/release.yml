@@ -32,7 +32,6 @@ jobs:
              base-devel
              mingw-w64-x86_64-toolchain
              mingw-w64-x86_64-libvips
-             mingw-w64-x86_64-sqlite3
 
       - name: Install libraries (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -66,7 +65,7 @@ jobs:
           CGO_ENABLED: 1
         shell: bash
         run: |
-          export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 sqlite3)"
+          export CGO_LDFLAGS="$(pkg-config --libs gio-2.0)"
           env
           go env
           echo "Building..."
