@@ -34,12 +34,22 @@ jobs:
              mingw-w64-x86_64-toolchain
              mingw-w64-x86_64-libvips
              mingw-w64-x86_64-sqlite3
+             mingw-w64-x86_64-sqlite3-static
 
-      - name: Install libraries (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Update PATH (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libvips-dev
+          echo "D:/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
+          echo "D:/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
+
+      - name: Debug MSYS2 installation
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          ls /mingw64/include/sqlite3.h
+          which pkg-config
+          pkg-config --list-all
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
       # In late May 2025, installing glib was no longer sufficient; and indeed a warning showed that it was already installed and up-to-date. But the linker couldn't find gio-2.0 (same error as in April).
