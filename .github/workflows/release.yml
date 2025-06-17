@@ -34,8 +34,6 @@ jobs:
              mingw-w64-x86_64-toolchain
              mingw-w64-x86_64-libvips
              mingw-w64-x86_64-sqlite3
-             perl
-             perl-Pod-Usage
       
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
@@ -57,7 +55,7 @@ jobs:
         shell: bash
         run: |
           which pkg-config
-          pkg-config --list-all
+          #pkg-config --list-all
           ls /mingw64/include/sqlite3.h
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
