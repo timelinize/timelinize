@@ -64,8 +64,15 @@ func NewLocationProcessor(source LocationSource, simplificationLevel float64) (L
 	if simplificationLevel != 0 {
 		// To scale a number x into range [a,b]:
 		// x_scaled = (b-a) * ((x - x_min) / (x_max - x_min)) + a
+		//
+		// 10,000 is quite a high epsilon and, indeed, it does thin out the path quite significantly,
+		// but the algorithm is quite amazing in that it does preserve the essence of the path.
+		// I recommend no higher than ~1000 for a default epsilon, for most data sets. That'd be
+		// an input simplificationLevel of ~1.0. Users can set this lower if they want more points
+		// or higher if they want less. The high range is somewhat necessary to accommodate
+		// different spreads of data.
 		const xMin, xMax = 0.0, 10.0
-		const epsMin, epsMax = 10.0, 1000.0
+		const epsMin, epsMax = 10.0, 10000.0
 		locProc.epsilon = (epsMax-epsMin)*((simplificationLevel-xMin)/(xMax-xMin)) + epsMin
 	}
 

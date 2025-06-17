@@ -224,6 +224,8 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 });
 
 async function renderDataSourceOptionsModal(ds) {
+	const defaultPathSimplificationLevel = 1.0; // this gets scaled to epsilon used by the RDP algorithm
+
 	// start with creating (or getting?) the modal and setting it up with the DS info
 	let dsOptModal = $(`#modal-import-dsopt-${ds.name}`);
 	if (!dsOptModal) {
@@ -253,7 +255,7 @@ async function renderDataSourceOptionsModal(ds) {
 		entitySelect.addItem(owner.id);
 
 		noUiSlider.create($('.google_location-simplification', dsOptElem), {
-			start: 3,
+			start: defaultPathSimplificationLevel,
 			connect: [true, false],
 			step: 0.1,
 			range: {
@@ -269,7 +271,7 @@ async function renderDataSourceOptionsModal(ds) {
 		entitySelect.addItem(owner.id);
 
 		noUiSlider.create($('.gpx-simplification', dsOptElem), {
-			start: 3,
+			start: defaultPathSimplificationLevel,
 			connect: [true, false],
 			step: 0.1,
 			range: {
