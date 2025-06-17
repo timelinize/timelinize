@@ -33,7 +33,11 @@ jobs:
              pkg-config
              mingw-w64-x86_64-toolchain
              mingw-w64-x86_64-libvips
-             mingw-w64-x86_64-sqlite3
+             #mingw-w64-x86_64-sqlite3
+
+      - name: Install sqlite (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/setup-sqlite@v1
       
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
@@ -87,7 +91,7 @@ jobs:
           CGO_ENABLED: 1
         shell: bash
         run: |
-          export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 vips)"
+          export CGO_LDFLAGS="$(pkg-config --libs gio-2.0)"
           env
           go env
           echo "Building..."
