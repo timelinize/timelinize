@@ -35,20 +35,6 @@ jobs:
              mingw-w64-x86_64-libvips
              mingw-w64-x86_64-sqlite3
 
-      # - name: Manually build and install sqlite3
-      #   if: matrix.os == 'windows-latest'
-      #   shell: msys2 {0}
-      #   run: |
-      #     curl -LO https://www.sqlite.org/2025/sqlite-dll-win-x64-3500100.zip
-      #     unzip sqlite-dll-win-x64-3500100.zip
-      #     cd sqlite-dll-win-x64-3500100
-      #     gcc -c sqlite3.c -O2 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_JSON1
-      #     ar rcs libsqlite3.a sqlite3.o
-      #     cp sqlite3.h /mingw64/include/
-      #     cp libsqlite3.a /mingw64/lib/
-      #     ls /mingw64/include/sqlite3.h
-      #     ls /mingw64/lib/libsqlite3.a
-
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is at d:\a.
       # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
@@ -56,26 +42,18 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
-          ls -la /c/a
+          ls -la /c/a/_temp
           echo "/c/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
           echo "/c/a/_temp/msys64/mingw64/include" >> $GITHUB_PATH
           echo "/c/a/_temp/msys64/mingw64/lib" >> $GITHUB_PATH
-          export PKG_CONFIG_PATH="/c/a/_temp/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
-
-          echo "/c/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
+          echo "C:\msys64\usr\bin" >> $GITHUB_PATH
           echo "/c/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
           export PATH="/c/a/_temp/msys64/mingw64/bin:$PATH"
           export PATH="/c/a/_temp/msys64/usr/bin:$PATH"
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
           echo "PATH=$PATH"
+          export PKG_CONFIG_PATH="/c/a/_temp/msys64/mingw64/lib/pkgconfig:$PKG_CONFIG_PATH"
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
           which pkg-config
-
-      # - name: Update PATH (Windows)
-      #   if: matrix.os == 'windows-latest'
-      #   shell: bash
-      #   run: |
-      #     echo "D:/a/_temp/msys64/usr/bin" >> $GITHUB_PATH
-      #     echo "D:/a/_temp/msys64/mingw64/bin" >> $GITHUB_PATH
 
       - name: Debug MSYS2 installation
         if: matrix.os == 'windows-latest'
@@ -83,7 +61,7 @@ jobs:
         run: |
           #find / -name sqlite3.h 2>/dev/null
           #find / -name pkg-config* 2>/dev/null
-          ls /c/msys64/mingw64/include/sqlite3.h || echo "sqlite3.h not found!"
+          ls /c/a/_temp/msys64/mingw64/include/sqlite3.h || echo "sqlite3.h not found!"
           pkg-config --list-all || echo "pkg-config not functioning!"
         
       
@@ -93,7 +71,7 @@ jobs:
         run: |
           echo MSYS2 root directory:
           if exist C:\msys64 (
-            echo C:\msys64 exists
+            echo C:\a|msys64 exists
             dir C:\msys64
           ) else (
             echo C:\msys64 NOT FOUND
