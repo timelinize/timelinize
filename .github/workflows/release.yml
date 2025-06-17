@@ -66,6 +66,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: |
+          find / -name sqlite3.h 2>/dev/null
+          find / -name pkg-config.exe 2>/dev/null
           ls /d/a/_temp/msys64/mingw64/include/sqlite3.h || echo "sqlite3.h not found!"
           pkg-config --list-all || echo "pkg-config not functioning!"
 
@@ -99,6 +101,7 @@ jobs:
         shell: bash
         run: |
           export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 vips sqlite3)"
+          export CGO_LDFLAGS="-L/d/a/_temp/msys64/mingw64/lib -lsqlite3 -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
           env
           go env
           echo "Building..."
