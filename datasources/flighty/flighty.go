@@ -154,25 +154,67 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 			journey.ToItem(timeline.RelAttachment, note)
 		}
 
-		takeoff := &timeline.Item{
+		takeOff := &timeline.Item{
 			Classification: timeline.ClassLocation,
 			Location:       f.From.Location,
 			Timestamp:      f.TakeOffTime,
 			Owner:          owner,
 		}
-		journey.ToItemWithValue(timeline.RelInCollection, takeoff, "takeoff")
+		visitTakeOff := &timeline.Entity{
+			Type: timeline.EntityPlace,
+			Name: f.From.Name,
+			Attributes: []timeline.Attribute{
+				{
+					Name:      "coordinate",
+					Latitude:  f.From.Location.Latitude,
+					Longitude: f.From.Location.Longitude,
+					Altitude:  f.From.Location.Altitude,
+					Identity:  true,
+					Metadata: timeline.Metadata{
+						"URL": f.From.URL,
+						"Exact name": exactPlaceName(f.From.Name, f.DepartureTerminal, f.DepartureGate),
+					},
+				},
+			},
+		}
+		visitTakeOff.Attributes[0].Metadata.Clean()
+		journey.ToItemWithValue(timeline.RelInCollection, takeOff, "takeoff")
+		journey.ToEntity(timeline.RelVisit, visitTakeOff)
 
+
+		var destination airports.Info
+		if f.WasDiverted() {
+			destination = *f.DivertedTo
+		} else {
+			destination = f.To
+		}
+		
 		landing := &timeline.Item{
 			Classification: timeline.ClassLocation,
+			Location:       destination.Location,
 			Timestamp:      f.LandingTime,
 			Owner:          owner,
 		}
-		if f.WasDiverted() {
-			landing.Location = f.DivertedTo.Location
-		} else {
-			landing.Location = f.To.Location
+		visitLanding := &timeline.Entity{
+			Type: timeline.EntityPlace,
+			Name: destination.Name,
+			Attributes: []timeline.Attribute{
+				{
+					Name:      "coordinate",
+					Latitude:  destination.Location.Latitude,
+					Longitude: destination.Location.Longitude,
+					Altitude:  destination.Location.Altitude,
+					Identity:  true,
+					Metadata: timeline.Metadata{
+						"URL": destination.URL,
+						"Exact name": exactPlaceName(destination.Name, f.ArrivalTerminal, f.ArrivalGate),
+					},
+				},
+			},
 		}
+		visitLanding.Attributes[0].Metadata.Clean()
 		journey.ToItemWithValue(timeline.RelInCollection, landing, "landing")
+		journey.ToEntity(timeline.RelVisit, visitLanding)
 
 		params.Pipeline <- journey
 	}
@@ -270,4 +312,25 @@ func parseAirportTime(actual, scheduled string, airport airports.Info) (time.Tim
 	}
 
 	return time.Time{}, errors.New("unable to extract an actual or scheduled time")
+}
+
+func exactPlaceName(airportName, arrivalTerminal, arrivalGate string) string {
+	if arrivalTerminal == "" && arrivalGate == "" {
+		return airportName
+	}
+
+	out := airportName + " ("
+	addSep := false
+	if arrivalTerminal != "" {
+		out += "Terminal "+arrivalTerminal
+		addSep = true
+	}
+	if arrivalGate != "" {
+		if addSep {
+			out += ", "
+		}
+		out += "Gate "+arrivalGate
+	}
+
+	return out + ")"
 }

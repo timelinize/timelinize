@@ -21,6 +21,13 @@ type expectedDetails struct {
 	landingLocation   timeline.Location
 	landingTime       time.Time
 	noteContent       string
+	visits            []*timeline.Entity
+}
+
+type neededParts struct {
+	note bool
+	takeOffItem bool
+	landingItem bool
 }
 
 func TestFileImport(t *testing.T) {
@@ -65,6 +72,20 @@ func TestFileImport(t *testing.T) {
 			landingLocation: newLocation(13.196697, 77.70758655918868, 2962.0),
 			takeOffTime:     parseExampleTime(t, "2011-07-09 15:19:00 +0100 BST"),
 			landingTime:     parseExampleTime(t, "2011-07-10 04:56:00 +0530 IST"),
+			visits: []*timeline.Entity{
+				newPlace(
+					"London Heathrow Airport",
+					"London Heathrow Airport (Terminal 5, Gate 17)",
+					51.46773895, -0.4587800741571181, 83.0,
+					"http://www.heathrowairport.com/",
+				),
+				newPlace(
+					"Kempegowda International Airport",
+					"Kempegowda International Airport (Terminal N, Gate A12)",
+					13.196697, 77.70758655918868, 2962.0,
+					"http://www.bengaluruairport.com/home/home.jspx",
+				),
+			},
 		},
 		{
 			collectionContent: "Flight from _Cancun International Airport_ to _London Gatwick Airport_ (diverted to _London Heathrow Airport_)",
@@ -90,6 +111,20 @@ func TestFileImport(t *testing.T) {
 			takeOffTime:     parseExampleTime(t, "2014-04-25 12:19:00 -0500 CDT"),
 			landingTime:     parseExampleTime(t, "2014-04-25 13:46:00 +0100 BST"),
 			noteContent:     "This is a note",
+			visits: []*timeline.Entity{
+				newPlace(
+					"Cancun International Airport",
+					"Cancun International Airport (Terminal N)",
+					21.0407394, -86.8818149087711, 72.0,
+					"http://www.asur.com.mx/asur/ingles/aeropuertos/cancun/cancun.asp",
+				),
+				newPlace(
+					"London Heathrow Airport",
+					"London Heathrow Airport",
+					51.46773895, -0.4587800741571181, 83.0,
+					"http://www.heathrowairport.com/",
+				),
+			},
 		},
 	}
 
@@ -104,62 +139,38 @@ func TestFileImport(t *testing.T) {
 
 		checkCollection(t, ex, message)
 
-		needsNote := ex.noteContent != ""
-		needsTakeOff := true
-		needsLanding := true
+		needs := neededParts{
+			note: ex.noteContent != "",
+			takeOffItem: true,
+			landingItem: true,
+		}
+
+		var actualVisits []*timeline.Entity
+		
 		for _, edge := range message.Edges {
 			switch edge.Relation {
 			case timeline.RelAttachment: // Should be a note
-				actualNote, err := itemContentString(edge.To.Item)
-				if err != nil {
-					t.Errorf("unable to parse content of flight %d's note: %v", i, err)
-				}
-
-				if needsNote {
-					if actualNote != ex.noteContent {
-						t.Fatalf("flight %d's note has content '%s', but should have been '%s'", i, actualNote, ex.noteContent)
-					}
-					if secsDiff := edge.To.Item.Timestamp.Sub(ex.landingTime).Abs().Seconds(); secsDiff >= 1 {
-						t.Fatalf("flight %d's note should be at the landing time, but isn't", i)
-					}
-					needsNote = false
-				} else {
-					t.Fatalf("flight %d has a note, but shouldn't have one (%s)", i, actualNote)
-				}
+				checkAttachment(t, edge, ex, &needs)
 			case timeline.RelInCollection: // Should be the take off/landing locations
-				switch edge.Value {
-				case "takeoff":
-					if !reflect.DeepEqual(edge.To.Item.Location, ex.takeOffLocation) {
-						t.Fatalf("flight %d's take off location is incorrect", i)
-					}
-
-					if secsDiff := edge.To.Item.Timestamp.Sub(ex.takeOffTime).Abs().Seconds(); secsDiff >= 1 {
-						t.Fatalf("flight %d's take off time is incorrect, want %v got %v (%.2fs diff)", i, ex.takeOffTime, edge.To.Item.Timestamp, secsDiff)
-					}
-					needsTakeOff = false
-				case "landing":
-					if !reflect.DeepEqual(edge.To.Item.Location, ex.landingLocation) {
-						t.Fatalf("flight %d's landing location is incorrect", i)
-					}
-
-					if secsDiff := edge.To.Item.Timestamp.Sub(ex.landingTime).Abs().Seconds(); secsDiff >= 1 {
-						t.Fatalf("flight %d's landing time is incorrect, want %v got %v (%.2fs diff)", i, ex.landingTime, edge.To.Item.Timestamp, secsDiff)
-					}
-					needsLanding = false
-				default:
-					t.Fatalf("unknown item in flight %d's collection (%+v)", i, edge.To.Item)
-				}
+				checkInCollection(t, edge, ex, &needs)
+			case timeline.RelVisit: // Should be a place
+				actualVisits = append(actualVisits, edge.To.Entity)
 			default:
 				t.Fatalf("unknown related item to flight %d (%s)", i, edge.Label)
 			}
 		}
-		if needsNote {
+
+		if !reflect.DeepEqual(actualVisits, ex.visits) {
+			t.Fatalf("flight %d had incorrect visits attached, want %+v items, got: %+v", i, ex.visits, actualVisits)
+		}
+
+		if needs.note {
 			t.Fatalf("flight %d should have had a note, but didn't", i)
 		}
-		if needsTakeOff {
+		if needs.takeOffItem {
 			t.Fatalf("flight %d should have had a take off location item in its collection, but didn't", i)
 		}
-		if needsLanding {
+		if needs.landingItem {
 			t.Fatalf("flight %d should have had a landing location item in its collection, but didn't", i)
 		}
 
@@ -221,5 +232,69 @@ func newLocation(lat, lng, alt float64) timeline.Location {
 		Latitude:  &lat,
 		Longitude: &lng,
 		Altitude:  &alt,
+	}
+}
+
+func newPlace(airportName, exactName string, latitude, longitude, altitude float64, url string) *timeline.Entity {
+	return &timeline.Entity{
+		Type: timeline.EntityPlace,
+		Name: airportName,
+		Attributes: []timeline.Attribute{
+			{
+					Name:      "coordinate",
+					Latitude:  &latitude,
+					Longitude: &longitude,
+					Altitude:  &altitude,
+					Identity:  true,
+					Metadata: timeline.Metadata{
+						"URL": url,
+						"Exact name": exactName,
+					},
+				},
+		},
+	}
+}
+
+func checkAttachment(t *testing.T, edge timeline.Relationship, ex expectedDetails, needs *neededParts) {
+	actualNote, err := itemContentString(edge.To.Item)
+	if err != nil {
+		t.Errorf("unable to parse content of note: %v", err)
+	}
+
+	if needs.note {
+		if actualNote != ex.noteContent {
+			t.Fatalf("flight's note has content '%s', but should have been '%s'", actualNote, ex.noteContent)
+		}
+		if secsDiff := edge.To.Item.Timestamp.Sub(ex.landingTime).Abs().Seconds(); secsDiff >= 1 {
+			t.Fatalf("flight's note should be at the landing time, but isn't")
+		}
+		needs.note = false
+	} else {
+		t.Fatalf("flight has a note, but shouldn't have one (%s)", actualNote)
+	}
+}
+
+func checkInCollection(t *testing.T, edge timeline.Relationship, ex expectedDetails, needs *neededParts) {
+	switch edge.Value {
+	case "takeoff":
+		if !reflect.DeepEqual(edge.To.Item.Location, ex.takeOffLocation) {
+			t.Fatalf("flight's take off location is incorrect")
+		}
+
+		if secsDiff := edge.To.Item.Timestamp.Sub(ex.takeOffTime).Abs().Seconds(); secsDiff >= 1 {
+			t.Fatalf("flight's take off time is incorrect, want %v got %v (%.2fs diff)", ex.takeOffTime, edge.To.Item.Timestamp, secsDiff)
+		}
+		needs.takeOffItem = false
+	case "landing":
+		if !reflect.DeepEqual(edge.To.Item.Location, ex.landingLocation) {
+			t.Fatalf("flight's landing location is incorrect")
+		}
+
+		if secsDiff := edge.To.Item.Timestamp.Sub(ex.landingTime).Abs().Seconds(); secsDiff >= 1 {
+			t.Fatalf("flight's landing time is incorrect, want %v got %v (%.2fs diff)", ex.landingTime, edge.To.Item.Timestamp, secsDiff)
+		}
+		needs.landingItem = false
+	default:
+		t.Fatalf("unknown edge item '%s' in flight's collection (%+v)", edge.Value, edge.To.Item)
 	}
 }
