@@ -337,6 +337,8 @@ func normalizeAttribute(attr Attribute) Attribute {
 		}
 	}
 
+	attr.Metadata.Clean()
+
 	return attr
 }
 

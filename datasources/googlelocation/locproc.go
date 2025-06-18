@@ -336,7 +336,7 @@ func (lp *locationProcessor) clusterBatch(ctx context.Context, batch []*Location
 			// it's important that we're at least a window-size into the buffer, because the oldest
 			// point in the window is appended to the cluster; if we did this before we were one full
 			// window into the buffer, the oldest point would repeat multiple times as the window grows!
-			if count >= clusterWindowSize && meanChangeToCentroid < coefficient*stdDev && !oldest.Significant {
+			if count >= clusterWindowSize && meanChangeToCentroid < coefficient*stdDev {
 				// we are in a cluster!
 
 				// if this is the start of a cluster, we need to mark where it started
@@ -648,7 +648,7 @@ type Location struct {
 	Altitude    float64   // meters
 	Uncertainty float64   // meters (must be > 0); higher values are less accurate
 	Timestamp   time.Time // old exports used to call this timestampMs, in milliseconds
-	Significant bool      // if true, this point will not be filtered out or clustered (TODO: Useful?)
+	Significant bool      // if true, this point will not be filtered out (may still be clustered, so if you need it, call ClusterPoints() to get it)
 
 	// These fields are not read by the processor (you do not need to set them in your
 	// implementation of NextLocation), but they will be set on the output if this

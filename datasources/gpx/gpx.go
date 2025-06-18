@@ -202,7 +202,10 @@ func (p *Processor) NextGPXGraph(ctx context.Context) (*timeline.Graph, error) {
 							Name:      "coordinate",
 							Latitude:  item.Location.Latitude,
 							Longitude: item.Location.Longitude,
-							Identity:  true, // TODO: I feel like this should be just Identifying: true, but that creates _entity attributes...
+							Identity:  true, // TODO: I feel like this should be just `Identifying: true`, but that creates "_entity" attributes...
+							Metadata: timeline.Metadata{
+								"URL": pt.Link.Href,
+							},
 						},
 					},
 				})
@@ -331,6 +334,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 					LongitudeE7: int64(waypoint.Lon * placesMult),
 					Altitude:    waypoint.Ele,
 					Timestamp:   waypoint.Time,
+					Significant: true,
 				}, nil
 
 			case elem.Name.Local == "trk" && d.stack.path() == gpxRoot:
@@ -418,6 +422,10 @@ type wpt struct {
 	Time    time.Time `xml:"time"`
 	Ele     float64   `xml:"ele"`  // elevation
 	Name    string    `xml:"name"` // place name!
+	Link    struct {
+		Text string `xml:",chardata"`
+		Href string `xml:"href,attr"` // usually a foursquare link
+	} `xml:"link"`
 }
 
 // track point
