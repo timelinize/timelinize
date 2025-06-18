@@ -23,6 +23,7 @@ type Info struct {
 	Name     string
 	Location timeline.Location
 	Timezone string
+	URL      string
 }
 
 type DB map[string]Info
@@ -73,6 +74,7 @@ func BuildDB() (DB, error) {
 			Name:     record[headerMap[nameHeader]],
 			Location: loc,
 			Timezone: record[headerMap[tzHeader]],
+			URL: record[headerMap[urlHeader]],
 		}
 	}
 
@@ -92,4 +94,5 @@ const (
 	lngHeader  = "longitude"
 	altHeader  = "elevation"
 	tzHeader   = "time_zone"
+	urlHeader  = "url"
 )

@@ -19,13 +19,16 @@ func Test_buildAirportDatabase(t *testing.T) {
 		Longitude float64
 		Altitude  float64
 		Timezone  string
+		URL       string
 	}{
 		// First in list
-		{"AAA", "Anaa", -17.3506654, -145.51111994065877, 36, "Pacific/Tahiti"},
+		{"AAA", "Anaa", -17.3506654, -145.51111994065877, 36, "Pacific/Tahiti", ""},
 		// Last in list
-		{"ZZV", "Zanesville", 39.933334, -82.01667, 900, "America/New_York"},
+		{"ZZV", "Zanesville", 39.933334, -82.01667, 900, "America/New_York", ""},
 		// Accented characters in name
-		{"AEH", "Abéché", 13.8465726, 20.849645040165157, 1778, "Africa/Ndjamena"},
+		{"AEH", "Abéché", 13.8465726, 20.849645040165157, 1778, "Africa/Ndjamena", ""},
+		// Has URL
+		{"LHR", "London Heathrow Airport", 51.46773895, -0.4587800741571181, 83, "Europe/London", "http://www.heathrowairport.com/"},
 	}
 
 	for _, tc := range cases {
@@ -52,6 +55,10 @@ func Test_buildAirportDatabase(t *testing.T) {
 
 		if ai.Timezone != tc.Timezone {
 			t.Fatalf("airport %s should have timezone %s, but had %s", tc.IATA, tc.Timezone, ai.Timezone)
+		}
+
+		if ai.URL != tc.URL {
+			t.Fatalf("airport %s should have url [%s], but had [%s]", tc.IATA, tc.URL, ai.URL)
 		}
 	}
 }
