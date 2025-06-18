@@ -171,7 +171,7 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 					Altitude:  f.From.Location.Altitude,
 					Identity:  true,
 					Metadata: timeline.Metadata{
-						"URL": f.From.URL,
+						"URL":        f.From.URL,
 						"Exact name": exactPlaceName(f.From.Name, f.DepartureTerminal, f.DepartureGate),
 					},
 				},
@@ -181,14 +181,13 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 		journey.ToItemWithValue(timeline.RelInCollection, takeOff, "takeoff")
 		journey.ToEntity(timeline.RelVisit, visitTakeOff)
 
-
 		var destination airports.Info
 		if f.WasDiverted() {
 			destination = *f.DivertedTo
 		} else {
 			destination = f.To
 		}
-		
+
 		landing := &timeline.Item{
 			Classification: timeline.ClassLocation,
 			Location:       destination.Location,
@@ -206,7 +205,7 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 					Altitude:  destination.Location.Altitude,
 					Identity:  true,
 					Metadata: timeline.Metadata{
-						"URL": destination.URL,
+						"URL":        destination.URL,
 						"Exact name": exactPlaceName(destination.Name, f.ArrivalTerminal, f.ArrivalGate),
 					},
 				},
@@ -322,14 +321,14 @@ func exactPlaceName(airportName, arrivalTerminal, arrivalGate string) string {
 	out := airportName + " ("
 	addSep := false
 	if arrivalTerminal != "" {
-		out += "Terminal "+arrivalTerminal
+		out += "Terminal " + arrivalTerminal
 		addSep = true
 	}
 	if arrivalGate != "" {
 		if addSep {
 			out += ", "
 		}
-		out += "Gate "+arrivalGate
+		out += "Gate " + arrivalGate
 	}
 
 	return out + ")"

@@ -74,7 +74,7 @@ func BuildDB() (DB, error) {
 			Name:     record[headerMap[nameHeader]],
 			Location: loc,
 			Timezone: record[headerMap[tzHeader]],
-			URL: record[headerMap[urlHeader]],
+			URL:      record[headerMap[urlHeader]],
 		}
 	}
 

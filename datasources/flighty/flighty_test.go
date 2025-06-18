@@ -25,7 +25,7 @@ type expectedDetails struct {
 }
 
 type neededParts struct {
-	note bool
+	note        bool
 	takeOffItem bool
 	landingItem bool
 }
@@ -140,13 +140,13 @@ func TestFileImport(t *testing.T) {
 		checkCollection(t, ex, message)
 
 		needs := neededParts{
-			note: ex.noteContent != "",
+			note:        ex.noteContent != "",
 			takeOffItem: true,
 			landingItem: true,
 		}
 
 		var actualVisits []*timeline.Entity
-		
+
 		for _, edge := range message.Edges {
 			switch edge.Relation {
 			case timeline.RelAttachment: // Should be a note
@@ -241,16 +241,16 @@ func newPlace(airportName, exactName string, latitude, longitude, altitude float
 		Name: airportName,
 		Attributes: []timeline.Attribute{
 			{
-					Name:      "coordinate",
-					Latitude:  &latitude,
-					Longitude: &longitude,
-					Altitude:  &altitude,
-					Identity:  true,
-					Metadata: timeline.Metadata{
-						"URL": url,
-						"Exact name": exactName,
-					},
+				Name:      "coordinate",
+				Latitude:  &latitude,
+				Longitude: &longitude,
+				Altitude:  &altitude,
+				Identity:  true,
+				Metadata: timeline.Metadata{
+					"URL":        url,
+					"Exact name": exactName,
 				},
+			},
 		},
 	}
 }
