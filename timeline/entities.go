@@ -29,9 +29,11 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1016,6 +1018,7 @@ func (l *latentID) identifyingAttributeID(ctx context.Context, tx *sql.Tx) (uint
 
 // getSystemLocale returns the language, region, and encoding, if available.
 func getSystemLocale() (language, region, encoding string, err error) {
+	// Example of LANG: en_US.UTF-8
 	if lang := os.Getenv("LANG"); lang != "" {
 		underscorePos := strings.Index(lang, "_")
 		if underscorePos < 0 {
@@ -1031,7 +1034,21 @@ func getSystemLocale() (language, region, encoding string, err error) {
 		encoding = lang[dotPos+1:]
 		return
 	}
-	err = errors.New("unable to determine locale because LANG var is unset")
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("powershell", "Get-Culture | select -exp Name")
+		var output []byte
+		output, err = cmd.Output() // e.g. "en-US"
+		if err != nil {
+			return
+		}
+		parts := strings.Split(strings.TrimSpace(string(output)), "-")
+		if len(parts) == 2 { //nolint:mnd
+			language = parts[0]
+			region = parts[1]
+		}
+		return
+	}
+	err = errors.New("unable to determine locale because LANG var is unset and/or platform unrecognized")
 	return
 }
 
