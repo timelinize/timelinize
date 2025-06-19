@@ -143,6 +143,13 @@ CREATE TABLE IF NOT EXISTS "entity_attributes" (
 	FOREIGN KEY ("autolink_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
 
+-- These indexes make loading entities by attributes faster, especially during import jobs, when it's in the hot path.
+-- (If the query plan still shows "SCAN entities" then it might be due to the analyzer
+-- determining that's faster than using the index; can test the index by adding "INDEXED BY...")
+CREATE INDEX IF NOT EXISTS "idx_entities_type_name" ON "entities"("type_id", "name");
+CREATE INDEX IF NOT EXISTS "idx_attributes_name_value" ON "attributes"("name", "value");
+CREATE INDEX IF NOT EXISTS "idx_ea_entity_attr" ON "entity_attributes"("attribute_id", "entity_id");
+
 -- A classification describes what kind of thing an item is, for example a text message, tweet, email, or location.
 CREATE TABLE IF NOT EXISTS "classifications" (
 	"id" INTEGER PRIMARY KEY,

@@ -674,77 +674,94 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 }
 
 func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([]Entity, map[uint64]uint64, error) {
-	// iterate all the attributes to find all the entities we can identify who
-	// we already have in the database if they're not already
-	// (notice that we left join attributes; this is because an entity may only have
-	// a row but no attributes, especially if it's the timeline owner (ID 1) because
-	// they may not have filled out a profile)
-	q := `SELECT
-			entities.id, entities.name, entities.picture_file, ea.attribute_id
-		FROM entities
-		JOIN entity_types ON entity_types.id = entities.type_id
-		LEFT JOIN entity_attributes AS ea ON ea.entity_id = entities.id
-		LEFT JOIN attributes ON attributes.id = ea.attribute_id
-		WHERE
-		-- place entities have globally-unique names (attributes can be used to distinguish instances of entity)
-		(
-			entity_types.name=?
-			AND entities.name=?
-		) OR `
+	var sb strings.Builder
+	var args []any
 
-	var whereGroups []string
-	args := []any{EntityPlace, in.Name}
+	sb.WriteString(`
+SELECT
+	entities.id,
+	entities.name,
+	entities.picture_file,
+	ea.attribute_id
+FROM entities
+JOIN entity_types ON entity_types.id = entities.type_id
+LEFT JOIN entity_attributes AS ea ON ea.entity_id = entities.id
+`)
 
-	// in some cases, the entity ID may be specified manually; load that entity directly by ID instead of trying to find it
 	if in.ID > 0 {
-		whereGroups = append(whereGroups, "entities.id=?")
+		// in some cases, the entity ID may be specified manually; load that entity directly by ID instead of trying to find it
+		sb.WriteString("WHERE entities.id=?")
 		args = append(args, in.ID)
 	} else {
+		sb.WriteString("WHERE entity_types.name=? AND entities.name=?")
+		args = append(args, EntityPlace, in.Name)
+
 		for _, attr := range in.Attributes {
 			// skip non-identifying attributes as those are not likely to be unique enough
 			if attr.Identifying || attr.Identity {
+				sb.WriteString("\n\nUNION\n\n-- match by attribute ")
+				sb.WriteString(attr.Name)
+				sb.WriteString(`
+SELECT
+	entities.id,
+	entities.name,
+	entities.picture_file,
+	ea.attribute_id
+FROM entities
+JOIN entity_attributes AS ea ON ea.entity_id = entities.id
+JOIN attributes ON attributes.id = ea.attribute_id
+WHERE attributes.name=? AND (`)
+				args = append(args, attr.Name)
+
 				const decPrecisionAt, decPrecisionNear = 4, 3
 				lowLonAt, highLonAt, lonDecAt := latLonBounds(attr.Longitude, decPrecisionAt)
 				lowLatAt, highLatAt, latDecAt := latLonBounds(attr.Latitude, decPrecisionAt)
 				lowLonNear, highLonNear, lonDecNear := latLonBounds(attr.Longitude, decPrecisionNear)
 				lowLatNear, highLatNear, latDecNear := latLonBounds(attr.Latitude, decPrecisionNear)
 
-				whereGroups = append(whereGroups,
-					`(attributes.name=? AND (
-						attributes.value=?
-						-- entity name is different, but coordinate is really close to same spot as an existing attribute
-						OR (
-							entities.name!=?
-							AND round(attributes.longitude, ?) BETWEEN ? AND ?
-							AND round(attributes.latitude, ?) BETWEEN ? AND ?
-						)
-						-- entity name is the same, and coordinate is somewhat close to same spot as an existing attribute
-						OR (
-							entities.name=?
-							AND round(attributes.longitude, ?) BETWEEN ? AND ?
-							AND round(attributes.latitude, ?) BETWEEN ? AND ?
-						)
-					)
-				)`)
-				args = append(args, attr.Name, attr.valueForDB(),
-					in.Name,
-					lonDecAt, lowLonAt, highLonAt,
-					latDecAt, lowLatAt, highLatAt,
-					in.Name,
-					lonDecNear, lowLonNear, highLonNear,
-					latDecNear, lowLatNear, highLatNear)
+				if attr.Value != nil {
+					sb.WriteString("attributes.value=?")
+					args = append(args, attr.valueForDB())
+				}
+				if attr.Latitude != nil && attr.Longitude != nil {
+					if attr.Value != nil {
+						sb.WriteString(" OR ")
+					}
+					sb.WriteString(`
+(
+	-- entity name is different, but coordinate is really close to same spot as an existing attribute
+	entities.name!=?
+	AND round(attributes.longitude, ?) BETWEEN ? AND ?
+	AND round(attributes.latitude, ?) BETWEEN ? AND ?
+)
+OR (
+	-- entity name is the same, and coordinate is somewhat close to same spot as an existing attribute
+	entities.name=?
+	AND round(attributes.longitude, ?) BETWEEN ? AND ?
+	AND round(attributes.latitude, ?) BETWEEN ? AND ?
+)`)
+					args = append(args,
+						in.Name,
+						lonDecAt, lowLonAt, highLonAt,
+						latDecAt, lowLatAt, highLatAt,
+						in.Name,
+						lonDecNear, lowLonNear, highLonNear,
+						latDecNear, lowLatNear, highLatNear)
+				}
+				sb.WriteString(")")
 			}
 		}
 	}
 
+	var entities []Entity
+	entityAutolinkAttrs := make(map[uint64]uint64) // map of entity ID to attribute ID that linked it
+
 	// only perform query if there are any qualifiers; otherwise this query returns
 	// all rows which is obviously wrong; if there's no ID or identifying attributes,
 	// there's no way for us to know who this entity is anyway
-	var entities []Entity
-	entityAutolinkAttrs := make(map[uint64]uint64) // map of entity ID to attribute ID that linked it
-	if len(whereGroups) > 0 {
-		q += strings.Join(whereGroups, " OR ")
-		q += " GROUP BY entities.id"
+	if len(args) > 0 {
+		sb.WriteString("\n\nGROUP BY entities.id")
+		q := sb.String()
 
 		// run the query to get the entity/entities (note there may be multiple; e.g. if multiple people
 		// share an account or the account has attributes spanning nultiple positively-ID'ed people)
