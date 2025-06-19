@@ -55,7 +55,7 @@ jobs:
       - name: Update PATH (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
-        run: echo "C:\a\_temp\msys64\mingw64\bin" >> $GITHUB_PATH
+        run: echo "C:\\a\\_temp\\msys64\\mingw64\\bin" >> $GITHUB_PATH
 
       # As of May 2025, The CGO_LDFLAGS env var is necessary on macOS since it can't find gio-2.0 otherwise.
       # LLMs also suggested adding:
