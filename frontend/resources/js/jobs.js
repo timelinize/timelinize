@@ -50,7 +50,7 @@ function updateActiveJobStats() {
 		const chartContainer = $(`#throughput-chart-container.job-id-${jobID}`);
 		if (chartContainer) {
 			// this element shows the mean throughput over the entire chart data
-			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, elem) => sum+elem.value[1], 0) / chartData.length).toFixed(1).replace(".0", "");
+			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, elem) => sum+elem.value[1], 0) / chartData.length).toLocaleString({minimumFractionDigits: 1, maximumFractionDigits: 1});
 			$('#chart-active-job-throughput', chartContainer).chart?.setOption({
 				series: stats.chartSeries,
 				xAxis: {

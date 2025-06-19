@@ -1819,6 +1819,12 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 	fieldUpdatePolicies map[string]FieldUpdatePolicy) (uint64, itemStoreResult, error) {
 	// new item? insert it
 	if ir.ID == 0 {
+		var metadata *string
+		if len(ir.Metadata) > 0 {
+			metaStr := string(ir.Metadata)
+			metadata = &metaStr
+		}
+
 		var rowID uint64
 
 		err := tx.QueryRowContext(ctx,
@@ -1834,7 +1840,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			ir.DataSourceID, ir.JobID, ir.AttributeID, ir.ClassificationID,
 			ir.OriginalID, ir.OriginalLocation, ir.IntermediateLocation, ir.Filename,
 			ir.timestampUnix(), ir.timespanUnix(), ir.timeframeUnix(), ir.TimeOffset, ir.TimeUncertainty,
-			ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, string(ir.Metadata),
+			ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, metadata,
 			ir.Location.Longitude, ir.Location.Latitude, ir.Location.Altitude,
 			ir.Location.CoordinateSystem, ir.Location.CoordinateUncertainty,
 			ir.Note, ir.Starred, ir.OriginalIDHash, ir.InitialContentHash, ir.RetrievalKey,
@@ -1956,7 +1962,12 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		case "data_type", "data_text", "data_file", "data_hash":
 			return errors.New("data components cannot be individually configured for updates; use 'data' as field name instead")
 		case "metadata":
-			args = append(args, string(ir.Metadata))
+			var metadata *string
+			if len(ir.Metadata) > 0 {
+				metaStr := string(ir.Metadata)
+				metadata = &metaStr
+			}
+			args = append(args, metadata)
 		case "latlon":
 			args = append(args, ir.Longitude)
 			args = append(args, ir.Latitude)
