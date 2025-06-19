@@ -87,6 +87,8 @@ func Main(embeddedWebsite fs.FS) {
 		if err := openWebBrowser("http://127.0.0.1:12002"); err != nil {
 			timeline.Log.Error("could not open web browser", zap.Error(err))
 		}
+	} else {
+		timeline.Log.Warn("desktop not available, so not opening web browser")
 	}
 
 	if startedServer {
@@ -96,11 +98,7 @@ func Main(embeddedWebsite fs.FS) {
 
 func isDesktopAvailable() bool {
 	if runtime.GOOS == "linux" {
-		available := os.Getenv("DISPLAY") != ""
-		if !available {
-			timeline.Log.Warn("DISPLAY environment variable not set, not opening web browser")
-		}
-		return available
+		return os.Getenv("DISPLAY") != ""
 	}
 	return true
 }
