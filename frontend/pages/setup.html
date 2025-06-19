@@ -45,34 +45,13 @@
 			</div>
 			<div class="hr-text hr-text-center hr-text-spaceless">About you</div>
 			<div class="card-body">
-
-
-<!-- 
-TODO: profile picture... not sure if this is the best way to do it; would be nice if it looked nice though too (will need supporting css and js files)
-<form class="dropzone" id="dropzone-custom" action="../" autocomplete="off" novalidate>
-<div class="fallback">
-	<input name="file" type="file"  />
-</div>
-<div class="dz-message">
-	<h3 class="dropzone-msg-title">Your text here</h3>
-	<span class="dropzone-msg-desc">Your custom description here</span>
-</div>
-</form>
-<script>
-document.addEventListener("DOMContentLoaded", function() {
-	new Dropzone("#dropzone-custom")
-})
-</script>
--->
-
-
 				<div class="mb-3">
-					<label class="form-label required">Your name</label>
+					<div class="form-label required">Your name</div>
 					<input type="text" class="form-control" name="name" placeholder="Mary Paxton" required>
-					<div class="form-hint">Full name is recommended to avoid ambiguity later on.</div>
+					<div class="form-hint">Full name is recommended to avoid ambiguity.</div>
 				</div>
 				<div class="mb-3">
-					<label class="form-label">Date of birth</label>
+					<div class="form-label">Date of birth</div>
 					<div class="row g-2">
 						<div class="col-5">
 							<select name="dob-month" class="form-select">
@@ -135,16 +114,26 @@ document.addEventListener("DOMContentLoaded", function() {
 					</div>
 				</div>
 				<div class="mb-3">
-					<label class="form-label">Birth place</label>
+					<div class="form-label">Birth place</div>
 					<input type="text" class="form-control" name="birth_place" placeholder="City, State/Country">
 				</div>
 				<div class="mb-3">
-					<label class="form-label">Email addresses</label>
+					<div class="form-label">Email addresses</div>
 					<input type="text" class="form-control" name="email" placeholder="you@yours.com">
 				</div>
-				<div class="mb-3">
-					<label class="form-label">Phone numbers</label>
+				<div>
+					<div class="form-label">Phone numbers</div>
 					<input type="text" class="form-control" name="phone" placeholder="123-456-7890">
+				</div>
+			</div>
+			<div class="hr-text hr-text-center hr-text-spaceless">Timeline settings</div>
+			<div class="card-body">
+				<div>
+					<label class="form-check">
+						<input class="form-check-input" type="checkbox" checked>
+						<span class="form-check-label">Semantic features</span>
+						<div class="form-hint">Enables similarity or "smart" search, but uses more system resources</div>
+					</label>
 				</div>
 			</div>
 		</div>
