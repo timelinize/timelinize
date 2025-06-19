@@ -52,7 +52,7 @@ func (Importer) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timel
 }
 
 // FileImport imports data from the file or folder.
-func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+func (i *Importer) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	dsOpt := params.DataSourceOptions.(*Options)
 
 	airportDB, err := airports.BuildDB()
@@ -78,6 +78,10 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		rec, err := r.Read()
 		if errors.Is(err, io.EOF) {
 			break
