@@ -82,14 +82,25 @@ func Main(embeddedWebsite fs.FS) {
 		timeline.Log.Fatal("could not start server", zap.Error(err))
 	}
 
-	// once the server is running, open GUI in web browser
-	if err := openWebBrowser("http://127.0.0.1:12002"); err != nil {
-		timeline.Log.Error("could not open web browser", zap.Error(err))
+	if isDesktopAvailable() {
+		// once the server is running, open GUI in web browser
+		if err := openWebBrowser("http://127.0.0.1:12002"); err != nil {
+			timeline.Log.Error("could not open web browser", zap.Error(err))
+		}
+	} else {
+		timeline.Log.Warn("desktop not available, so not opening web browser")
 	}
 
 	if startedServer {
 		select {}
 	}
+}
+
+func isDesktopAvailable() bool {
+	if runtime.GOOS == "linux" {
+		return os.Getenv("DISPLAY") != ""
+	}
+	return true
 }
 
 // openWebBrowser opens the web browser to loc, which must be a
