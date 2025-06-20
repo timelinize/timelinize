@@ -236,7 +236,7 @@ type Item struct {
 	// The person who owns, created, or originated the item. At
 	// least one attribute is required: an identifying attribute
 	// like a user ID of the person on this data source.
-	Owner Entity `json:"owne,omitempty"`
+	Owner Entity `json:"owner,omitempty"`
 
 	// If applicable, path to the item on the original data
 	// source, including the filename. Note that this can take
