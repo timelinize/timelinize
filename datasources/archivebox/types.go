@@ -10,14 +10,14 @@ import (
 // These are the parts of ArchiveBox's index.json that we're interested in
 // Reference: https://github.com/ArchiveBox/ArchiveBox#archive-layout
 type metadata struct {
-	Timestamp  unixtimestamp `json:"timestamp"`
-	Canonical  canonical
-	Hash       string `json:"hash"`
-	History    map[string][]history
-	IsArchived bool   `json:"is_archived"`
-	Title      string `json:"title"`
-	Domain     string `json:"domain"`
-	URL        string `json:"url"`
+	Timestamp  unixtimestamp        `json:"timestamp"`
+	Canonical  canonical            `json:"canonical"`
+	Hash       string               `json:"hash"`
+	History    map[string][]history `json:"history"`
+	IsArchived bool                 `json:"is_archived"`
+	Title      string               `json:"title"`
+	Domain     string               `json:"domain"`
+	URL        string               `json:"url"`
 }
 
 type canonical struct {
@@ -41,6 +41,8 @@ type unixtimestamp struct {
 	time.Time
 }
 
+const microsecondsInSecond int64 = 1_000_000
+
 func (t *unixtimestamp) UnmarshalJSON(b []byte) error {
 	var str string
 	if err := json.Unmarshal(b, &str); err != nil {
@@ -52,7 +54,7 @@ func (t *unixtimestamp) UnmarshalJSON(b []byte) error {
 		return ErrInvalidTimestamp
 	}
 
-	t.Time = time.UnixMicro(int64(secs * 1_000_000))
+	t.Time = time.UnixMicro(int64(secs) * microsecondsInSecond)
 	return nil
 }
 
