@@ -1096,11 +1096,11 @@ var classifications = []Classification{
 		Labels:      []string{"Media", "Photo", "Video", "Audio"},
 		Description: "Photo, video, or audio files",
 	},
-	// {
-	// 	Name:        "screen",
-	// 	Labels:      []string{"Screenshot", "Screen capture", "Screencap", "Screen recording"},
-	// 	Description: "Screenshot or screen recording",
-	// },
+	{
+		Name:        "screen",
+		Labels:      []string{"Screenshot", "Screen capture", "Screencap", "Screen recording"},
+		Description: "Screenshot or screen recording",
+	},
 	{
 		Name:        "collection",
 		Labels:      []string{"Collection", "Album", "Playlist"},
@@ -1126,22 +1126,28 @@ var classifications = []Classification{
 		Labels:      []string{"Web", "URL"},
 		Description: "A visit to a web page",
 	},
+	{
+		Name:        "snapshot",
+		Labels:      []string{"Archive", "Snapshot"},
+		Description: "A point-in-time snapshot of something that can change over time, like a website",
+	},
 }
 
 // Item classifications!
 var (
-	ClassMessage  = getClassification("message")
-	ClassEmail    = getClassification("email")
-	ClassSocial   = getClassification("social")
-	ClassLocation = getClassification("location")
-	ClassMedia    = getClassification("media")
-	// ClassScreen = getClassification("screen") // TODO: call it screenshot maybe...? but screen recordings...
+	ClassMessage    = getClassification("message")
+	ClassEmail      = getClassification("email")
+	ClassSocial     = getClassification("social")
+	ClassLocation   = getClassification("location")
+	ClassMedia      = getClassification("media")
+	ClassScreen     = getClassification("screen") // TODO: call it screenshot maybe...? but screen recordings...
 	ClassCollection = getClassification("collection")
 	ClassNote       = getClassification("note")
 	ClassDocument   = getClassification("document")
 	ClassBookmark   = getClassification("bookmark")
 	ClassEvent      = getClassification("event") // TODO: call it "schedule" instead?
 	ClassPageView   = getClassification("page_view")
+	ClassSnapshot   = getClassification("snapshot")
 )
 
 func getClassification(name string) Classification {
