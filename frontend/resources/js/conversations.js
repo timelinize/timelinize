@@ -423,3 +423,62 @@ on('click', '#conversations-reset', event => {
 	$('#selected-entities-only').disabled = true;
 	trigger($('#selected-entities-only'), 'change');
 });
+
+// Handle the search button click
+on('click', '#apply-filter', event => {
+	event.preventDefault();
+	
+	// Trigger the filter change event to update results
+	$('.filter').dispatchEvent(new Event('change', { bubbles: true }));
+	
+	// Update the button to show feedback
+	const btn = event.target.closest('button');
+	const originalContent = btn.innerHTML;
+	btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Searching...';
+	btn.disabled = true;
+	
+	// Reset button after a short delay
+	setTimeout(() => {
+		btn.innerHTML = originalContent;
+		btn.disabled = false;
+	}, 500);
+});
+
+// Handle the clear filters button
+on('click', '#clear-filter', event => {
+	event.preventDefault();
+	
+	// Clear all filter inputs
+	const ts = $('.entity-input').tomselect;
+	ts.clear();
+	ts.clearOptions();
+	
+	$('#selected-entities-only').checked = false;
+	$('#selected-entities-only').disabled = true;
+	
+	$('#message-substring').value = '';
+	
+	// Clear date picker
+	if ($('.date-input').datepicker) {
+		$('.date-input').datepicker.clear();
+	}
+	
+	// Clear data source selector
+	if ($('.tl-data-source').tomselect) {
+		$('.tl-data-source').tomselect.clear();
+	}
+	
+	// Reset item type checkboxes to checked
+	$$('.tl-item-class-dropdown input[type="checkbox"]').forEach(cb => cb.checked = true);
+	
+	// Trigger the filter change to update results
+	$('.filter').dispatchEvent(new Event('change', { bubbles: true }));
+});
+
+// Allow Enter key to trigger search from text input
+on('keypress', '#message-substring', event => {
+	if (event.key === 'Enter') {
+		event.preventDefault();
+		$('#apply-filter').click();
+	}
+});
