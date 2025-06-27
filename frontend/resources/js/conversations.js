@@ -424,26 +424,6 @@ on('click', '#conversations-reset', event => {
 	trigger($('#selected-entities-only'), 'change');
 });
 
-// Handle the search button click
-on('click', '#apply-filter', event => {
-	event.preventDefault();
-	
-	// Trigger the filter change event to update results
-	$('.filter').dispatchEvent(new Event('change', { bubbles: true }));
-	
-	// Update the button to show feedback
-	const btn = event.target.closest('button');
-	const originalContent = btn.innerHTML;
-	btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Searching...';
-	btn.disabled = true;
-	
-	// Reset button after a short delay
-	setTimeout(() => {
-		btn.innerHTML = originalContent;
-		btn.disabled = false;
-	}, 500);
-});
-
 // Handle the clear filters button
 on('click', '#clear-filter', event => {
 	event.preventDefault();
@@ -473,12 +453,4 @@ on('click', '#clear-filter', event => {
 	
 	// Trigger the filter change to update results
 	$('.filter').dispatchEvent(new Event('change', { bubbles: true }));
-});
-
-// Allow Enter key to trigger search from text input
-on('keypress', '#message-substring', event => {
-	if (event.key === 'Enter') {
-		event.preventDefault();
-		$('#apply-filter').click();
-	}
 });
