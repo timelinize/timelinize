@@ -2495,6 +2495,14 @@ function filterToQueryString() {
 			qs.delete('semantic_text');
 	}
 
+	// text search for conversations
+	if ($('#message-substring')) {
+		if ($('#message-substring').value)
+			qs.set('text', $('#message-substring').value);
+		else
+			qs.delete('text');
+	}
+
 	return qs;
 }
 
@@ -2578,6 +2586,11 @@ async function queryStringToFilter() {
 	// semantic search
 	if ($('.semantic-text-search')) {
 		$('.semantic-text-search').value = qs.get('semantic_text');
+	}
+
+	// text search for conversations
+	if ($('#message-substring')) {
+		$('#message-substring').value = qs.get('text') || '';
 	}
 }
 
