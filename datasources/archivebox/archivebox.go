@@ -69,10 +69,6 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 	if err := json.NewDecoder(info).Decode(&meta); err != nil {
 		return err
 	}
-	if !meta.IsArchived {
-		// Ignore "unarchived" archives (they're still being processed)
-		return nil
-	}
 
 	// TODO: Localisation
 	description := fmt.Sprintf("Archive of web page: [%s](%s) (from %s)", meta.Title, meta.URL, meta.Domain)
@@ -82,6 +78,7 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 
 	g := &timeline.Graph{
 		Item: &timeline.Item{
+			ID:             meta.Hash,
 			Classification: timeline.ClassSnapshot,
 			Timestamp:      meta.Timestamp.Time,
 			Metadata: timeline.Metadata{

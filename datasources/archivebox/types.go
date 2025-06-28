@@ -10,14 +10,13 @@ import (
 // These are the parts of ArchiveBox's index.json that we're interested in
 // Reference: https://github.com/ArchiveBox/ArchiveBox#archive-layout
 type metadata struct {
-	Timestamp  unixtimestamp        `json:"timestamp"`
-	Canonical  canonical            `json:"canonical"`
-	Hash       string               `json:"hash"`
-	History    map[string][]history `json:"history"`
-	IsArchived bool                 `json:"is_archived"`
-	Title      string               `json:"title"`
-	Domain     string               `json:"domain"`
-	URL        string               `json:"url"`
+	Timestamp unixtimestamp        `json:"timestamp"`
+	Canonical canonical            `json:"canonical"`
+	Hash      string               `json:"hash"`
+	History   map[string][]history `json:"history"`
+	Title     string               `json:"title"`
+	Domain    string               `json:"domain"`
+	URL       string               `json:"url"`
 }
 
 type canonical struct {
