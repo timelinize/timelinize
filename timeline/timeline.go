@@ -561,7 +561,7 @@ func (tl *Timeline) Close() error {
 func (tl *Timeline) Empty() bool {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
-	err := tl.db.QueryRow("SELECT id FROM entities LIMIT 1").Scan()
+	err := tl.db.QueryRowContext(tl.ctx, "SELECT id FROM entities LIMIT 1").Scan()
 	return err == sql.ErrNoRows
 }
 
@@ -678,7 +678,7 @@ func (tl *Timeline) entityTypeNameToID(name string) (uint64, error) {
 
 	// might be new or one we haven't seen yet
 	tl.dbMu.RLock()
-	err := tl.db.QueryRow(`SELECT id FROM entity_types WHERE name=? LIMIT 1`, name).Scan(&id)
+	err := tl.db.QueryRowContext(tl.ctx, `SELECT id FROM entity_types WHERE name=? LIMIT 1`, name).Scan(&id)
 	tl.dbMu.RUnlock()
 	if err != nil {
 		return 0, err
@@ -701,7 +701,7 @@ func (tl *Timeline) classificationNameToID(name string) (uint64, error) {
 
 	// might be new or one we haven't seen yet
 	tl.dbMu.RLock()
-	err := tl.db.QueryRow(`SELECT id FROM classifications WHERE name=? LIMIT 1`, name).Scan(&id)
+	err := tl.db.QueryRowContext(tl.ctx, `SELECT id FROM classifications WHERE name=? LIMIT 1`, name).Scan(&id)
 	tl.dbMu.RUnlock()
 	if err != nil {
 		return 0, err
@@ -718,7 +718,7 @@ func (tl *Timeline) ItemClassifications() ([]Classification, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
-	rows, err := tl.db.Query("SELECT id, standard, name, labels, description FROM classifications")
+	rows, err := tl.db.QueryContext(tl.ctx, "SELECT id, standard, name, labels, description FROM classifications")
 	if err != nil {
 		return nil, fmt.Errorf("querying classifications: %w", err)
 	}
@@ -755,13 +755,13 @@ func (tl *Timeline) StoreEntity(ctx context.Context, entity Entity) error {
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	err = tx.QueryRow(`INSERT INTO entities (type_id, name, metadata) VALUES (?, ?, ?) RETURNING id`,
+	err = tx.QueryRowContext(ctx, `INSERT INTO entities (type_id, name, metadata) VALUES (?, ?, ?) RETURNING id`,
 		entity.typeID, entity.Name, metaStr).Scan(&entity.ID)
 	if err != nil {
 		return fmt.Errorf("inserting entity: %w", err)
@@ -792,14 +792,14 @@ func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, en
 	// multiple data sources, like their email address for example) - so we have to
 	// check a count ourselves before inserting
 	var count int
-	err = tx.QueryRow(`SELECT count() FROM entity_attributes WHERE entity_id=? AND attribute_id=? LIMIT 1`,
+	err = tx.QueryRowContext(ctx, `SELECT count() FROM entity_attributes WHERE entity_id=? AND attribute_id=? LIMIT 1`,
 		entityID, attrID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("querying to see if entity_attribute row already exists: %w", err)
 	}
 
 	if count == 0 {
-		_, err = tx.Exec(`INSERT INTO entity_attributes (entity_id, attribute_id) VALUES (?, ?)`,
+		_, err = tx.ExecContext(ctx, `INSERT INTO entity_attributes (entity_id, attribute_id) VALUES (?, ?)`,
 			entityID, attrID)
 		if err != nil {
 			return attrID, fmt.Errorf("linking attribute %d to entity %d: %w", entityID, attrID, err)
@@ -815,13 +815,13 @@ func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(tl.ctx, nil)
 	if err != nil {
 		return p, err
 	}
 	defer tx.Rollback()
 
-	err = tx.QueryRow(`SELECT entity_types.name, entities.type_id, entities.name, entities.picture_file
+	err = tx.QueryRowContext(tl.ctx, `SELECT entity_types.name, entities.type_id, entities.name, entities.picture_file
 		FROM entities, entity_types
 		WHERE entities.id=? AND entity_types.id = entities.type_id
 		LIMIT 1`, id).Scan(&p.Type, &p.typeID, &p.name, &p.Picture)
@@ -833,7 +833,7 @@ func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 		p.Name = *p.name
 	}
 
-	rows, err := tx.Query(`SELECT attributes.name, attributes.value, attributes.alt_value, attributes.metadata, entity_attributes.data_source_id
+	rows, err := tx.QueryContext(tl.ctx, `SELECT attributes.name, attributes.value, attributes.alt_value, attributes.metadata, entity_attributes.data_source_id
 		FROM attributes, entity_attributes
 		WHERE entity_attributes.entity_id=?
 			AND attributes.id = entity_attributes.attribute_id`, id)
@@ -974,7 +974,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, option
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -1013,7 +1013,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, option
 			// see if any other items not being deleted now refer to the same data file; if not, we can delete the data file
 			if retention == 0 && ir.DataFile != nil && *ir.DataFile != "" {
 				var count int
-				err := tx.QueryRow(`SELECT count() FROM items WHERE id NOT IN `+rowIDArray+` AND data_file=? LIMIT 1`,
+				err := tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE id NOT IN `+rowIDArray+` AND data_file=? LIMIT 1`,
 					append(rowIDArgs, *ir.DataFile)...).Scan(&count)
 				if err != nil {
 					return fmt.Errorf("counting rows that share data file: %w", err)
@@ -1098,7 +1098,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -1110,7 +1110,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 		// has a data file and is the only one referencing it
 		var count int
 		var dataFile *string
-		err = tx.QueryRow(`SELECT count(), data_file FROM items
+		err = tx.QueryRowContext(ctx, `SELECT count(), data_file FROM items
 		WHERE data_file = (SELECT data_file FROM items
 							WHERE id=? AND data_file IS NOT NULL
 							AND data_file != "" LIMIT 1)`,
@@ -1119,7 +1119,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 			return fmt.Errorf("querying count of rows sharing data file: %w", err)
 		}
 
-		_, err = tx.Exec(`DELETE FROM items WHERE id=?`, rowID) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
+		_, err = tx.ExecContext(ctx, `DELETE FROM items WHERE id=?`, rowID) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
 		if err != nil {
 			return fmt.Errorf("deleting item %d from DB: %w", rowID, err)
 		}

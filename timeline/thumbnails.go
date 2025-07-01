@@ -269,7 +269,7 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 		if !tj.RegenerateAll {
 			// read-only tx, but should be faster than individual queries as we iterate items
 			job.tl.thumbsMu.RLock()
-			thumbsTx, err := job.tl.thumbs.Begin()
+			thumbsTx, err := job.tl.thumbs.BeginTx(job.ctx, nil)
 			if err != nil {
 				return 0, fmt.Errorf("starting tx for checking for existing thumbnails: %w", err)
 			}

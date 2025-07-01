@@ -191,7 +191,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 
 	// open DB transaction to hopefully make it more efficient
 	// (TODO: we don't currently commit this tx, because we didn't make changes - that's OK, right?)
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return SearchResults{}, err
 	}

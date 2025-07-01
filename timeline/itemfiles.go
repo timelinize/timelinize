@@ -168,35 +168,35 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		// logging it at debug level, and then when we delete the item row the FK constraints
 		// should kick in and delete the row we were trying to update or remove
 		// (SQL has an "ON CONFLICT REPLACE" but it's a SQLite extension I guess)
-		if _, err := tx.Exec(`UPDATE relationships SET from_item_id=? WHERE from_item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE relationships SET from_item_id=? WHERE from_item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant relationships (from->to)", zap.Error(
 				fmt.Errorf("updating relationships referencing from_item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
-		if _, err := tx.Exec(`UPDATE relationships SET to_item_id=? WHERE to_item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE relationships SET to_item_id=? WHERE to_item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant relationships (to->from)",
 				zap.Error(fmt.Errorf("updating relationships referencing to_item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
-		if _, err := tx.Exec(`UPDATE story_elements SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE story_elements SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant curation elements",
 				zap.Error(fmt.Errorf("updating story_elements referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
-		if _, err := tx.Exec(`UPDATE tagged SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE tagged SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant tags",
 				zap.Error(fmt.Errorf("updating tagged referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
-		if _, err := tx.Exec(`UPDATE notes SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE notes SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant notes",
 				zap.Error(fmt.Errorf("updating notes referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
-		if _, err := tx.Exec(`UPDATE logs SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE logs SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant logs",
 				zap.Error(fmt.Errorf("updating notes referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
-		if _, err := tx.Exec(`UPDATE settings SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE settings SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not update relevant settings",
 				zap.Error(fmt.Errorf("updating settings referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
 		}
-		if _, err = tx.Exec(`DELETE FROM items WHERE id=?`, it.row.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM items WHERE id=?`, it.row.ID); err != nil {
 			p.log.Debug("after detecting duplicate item file, could not delete item row",
 				zap.Error(fmt.Errorf("deleting duplicate item row %d: %w", it.row.ID, err)))
 		}
@@ -217,7 +217,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 		// delete col value from DB first, because then it's easy to sweep for stray/dangling data
 		// files if we can know the DB is the ultimate source of truth, because nothing points to them
 		// TODO: LIMIT 1... (see https://github.com/mattn/go-sqlite3/pull/802)
-		if _, err := tx.Exec(`UPDATE items SET data_file=NULL, data_hash=NULL WHERE id=?`, it.row.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE items SET data_file=NULL, data_hash=NULL WHERE id=?`, it.row.ID); err != nil {
 			return fmt.Errorf("unlinking data file from item row: %w", err)
 		}
 
@@ -235,7 +235,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	// which is kind of pointless IMO
 	// (this is where it's important that it.row.DataFile is not a pointer to it.dataFileName,
 	// because we end up changing the value of it.dataFileName in this method)
-	_, err := p.replaceWithExisting(tx, &it.dataFileName, it.dataFileHash, it.row.ID)
+	_, err := p.replaceWithExisting(ctx, tx, &it.dataFileName, it.dataFileHash, it.row.ID)
 	if err != nil {
 		return fmt.Errorf("replacing data file with identical existing file: %w", err)
 	}
@@ -310,7 +310,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	// we updated it.dataFileName's value to the existing file, but that would also change it.row.DataFile
 	// to be the same because they point to the same value in memory!! yet we expect it.row.DataFile to
 	// keep the duplicate filename so we can select the row(s) to update...)
-	_, err = tx.Exec(`UPDATE items SET data_file=?, data_hash=? WHERE data_file=?`,
+	_, err = tx.ExecContext(ctx, `UPDATE items SET data_file=?, data_hash=? WHERE data_file=?`,
 		it.dataFileName, it.dataFileHash, it.row.DataFile)
 	if err != nil {
 		p.log.Error("updating item's data file hash in DB failed; hash info will be incorrect or missing",
@@ -321,7 +321,7 @@ func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it
 	}
 
 	// update content hash to be correct, now that we have the data file hash
-	_, err = tx.Exec(`UPDATE items SET initial_content_hash=? WHERE id=?`, it.contentHash, it.row.ID)
+	_, err = tx.ExecContext(ctx, `UPDATE items SET initial_content_hash=? WHERE id=?`, it.contentHash, it.row.ID)
 	if err != nil {
 		p.log.Error("updating item's initial content hash failed; duplicate detection for this item will not function",
 			zap.Error(err),
@@ -406,7 +406,7 @@ func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error
 // a collision to occur, as the DB is the source of truth, and this function creates a file
 // but does not update the DB, so it is expected that the filename is "claimed" in the DB in
 // the transaction tx before tx is committed.
-func (tl *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logger, it *Item, dataSourceID string) (*os.File, string, error) {
+func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, tx *sql.Tx, logger *zap.Logger, it *Item, dataSourceID string) (*os.File, string, error) {
 	if dataSourceID == "" {
 		return nil, "", errors.New("missing data source ID")
 	}
@@ -453,7 +453,7 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(tx *sql.Tx, logger *zap.Logg
 		// is either still processing or was lost and needs to be reconstituted, but for now we should
 		// not collide with it
 		var count int
-		err = tx.QueryRow(`SELECT count() FROM items WHERE data_file=? LIMIT 1`, tryPath).Scan(&count)
+		err = tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? LIMIT 1`, tryPath).Scan(&count)
 		if err != nil {
 			return nil, "", fmt.Errorf("checking DB for file uniqueness: %w", err)
 		}
@@ -566,13 +566,13 @@ func (tl *Timeline) ensureDataFileNameShortEnough(filename string) string {
 // file that is not the file with the given canonical path or row ID. It returns true if the file
 // already exists and a replacement occurred; false otherwise (i.e. the file was unique).
 // TODO:/NOTE: If changing a file name, all items with same data_hash must also be updated to use same file name
-func (p *processor) replaceWithExisting(tx *sql.Tx, canonical *string, checksum []byte, itemRowID uint64) (bool, error) {
+func (p *processor) replaceWithExisting(ctx context.Context, tx *sql.Tx, canonical *string, checksum []byte, itemRowID uint64) (bool, error) {
 	if canonical == nil || *canonical == "" || len(checksum) == 0 {
 		return false, errors.New("missing data filename and/or hash of contents")
 	}
 
 	var existingDatafile *string
-	err := tx.QueryRow(`SELECT data_file FROM items WHERE data_hash = ? AND id != ? AND data_file != ? LIMIT 1`,
+	err := tx.QueryRowContext(ctx, `SELECT data_file FROM items WHERE data_hash = ? AND id != ? AND data_file != ? LIMIT 1`,
 		checksum, itemRowID, *canonical).Scan(&existingDatafile)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // file is unique; carry on

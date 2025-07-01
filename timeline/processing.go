@@ -336,7 +336,7 @@ func (p *processor) phase1(ctx context.Context, batch []*Graph) error {
 	p.tl.dbMu.Lock()
 	defer p.tl.dbMu.Unlock()
 
-	tx, err := p.tl.db.Begin()
+	tx, err := p.tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction for batch: %w", err)
 	}
@@ -382,7 +382,7 @@ func (p *processor) phase3(ctx context.Context, batch []*Graph) error {
 	p.tl.dbMu.Lock()
 	defer p.tl.dbMu.Unlock()
 
-	tx, err := p.tl.db.Begin()
+	tx, err := p.tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction for batch phase 3: %w", err)
 	}
@@ -783,7 +783,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 
 	// get the filename for the data file if we are processing it
 	if processDataFile {
-		it.dataFileOut, it.dataFileName, err = p.tl.openUniqueCanonicalItemDataFile(tx, p.log, it, p.ds.Name)
+		it.dataFileOut, it.dataFileName, err = p.tl.openUniqueCanonicalItemDataFile(ctx, tx, p.log, it, p.ds.Name)
 		if err != nil {
 			return 0, fmt.Errorf("opening output data file: %w", err)
 		}
@@ -833,7 +833,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 				if err != nil {
 					return 0, fmt.Errorf("could not count how many items refer to data file: %w (data_file=%s)", err, it.dataFileName)
 				} else if count == 1 {
-					newFile, newPath, err := p.tl.openUniqueCanonicalItemDataFile(tx, p.log, it, p.ds.Name)
+					newFile, newPath, err := p.tl.openUniqueCanonicalItemDataFile(ctx, tx, p.log, it, p.ds.Name)
 					if err != nil {
 						return 0, fmt.Errorf("could not open file to relocate data file with updated timestamp: %w (data_file=%s)", err, it.dataFileName)
 					}

@@ -525,7 +525,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 				zap.Uint64("entity_id", in.ID),
 				zap.Error(err))
 		} else if pictureFile != "" {
-			_, err = tx.Exec(`UPDATE entities SET picture_file=? WHERE id=?`, pictureFile, in.ID) // TODO: LIMIT 1, if ever implemented
+			_, err = tx.ExecContext(ctx, `UPDATE entities SET picture_file=? WHERE id=?`, pictureFile, in.ID) // TODO: LIMIT 1, if ever implemented
 			if err != nil {
 				p.log.Error("updating new entity's profile picture in DB",
 					zap.Uint64("entity_id", in.ID),
@@ -889,7 +889,7 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

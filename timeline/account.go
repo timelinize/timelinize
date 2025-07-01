@@ -114,7 +114,7 @@ func (tl *Timeline) AddAccount(ctx context.Context, dataSourceID string, _ json.
 	// store the account
 	var accountID int64
 	tl.dbMu.Lock()
-	err := tl.db.QueryRow(`INSERT INTO accounts (data_source_id) VALUES (?) RETURNING id`,
+	err := tl.db.QueryRowContext(ctx, `INSERT INTO accounts (data_source_id) VALUES (?) RETURNING id`,
 		dataSourceID).Scan(&accountID)
 	tl.dbMu.Unlock()
 	if err != nil {

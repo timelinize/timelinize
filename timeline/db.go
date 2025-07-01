@@ -97,7 +97,7 @@ func provisionDB(ctx context.Context, db *sql.DB) error {
 	// assign this repo a persistent UUID for the UI, links, etc; and
 	// store version so readers can know how to work with this DB/timeline repo
 	repoID := uuid.New()
-	_, err = db.Exec(`INSERT OR IGNORE INTO repo (key, value) VALUES (?, ?), (?, ?)`,
+	_, err = db.ExecContext(ctx, `INSERT OR IGNORE INTO repo (key, value) VALUES (?, ?), (?, ?)`,
 		"id", repoID.String(),
 		"version", 1,
 	)

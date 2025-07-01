@@ -93,7 +93,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(tl.ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -324,7 +324,7 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID uint64) erro
 
 				logger := Log.Named("job")
 
-				tx, err := tl.db.Begin()
+				tx, err := tl.db.BeginTx(ctx, nil)
 				if err != nil {
 					logger.Error("could not start transaction to start job", zap.Error(err))
 					return
@@ -495,7 +495,7 @@ func (tl *Timeline) runJob(row Job) error {
 		tl.dbMu.Lock()
 		defer tl.dbMu.Unlock()
 
-		tx, err := tl.db.Begin()
+		tx, err := tl.db.BeginTx(ctx, nil)
 		if err != nil {
 			logger.Error("beginning transaction", zap.Error(err))
 			return
@@ -885,7 +885,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID uint64) error {
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1041,7 +1041,7 @@ func (tl *Timeline) StartJob(ctx context.Context, jobID uint64, startOver bool) 
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

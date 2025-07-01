@@ -281,7 +281,7 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 	job.tl.dbMu.Lock()
 	defer job.tl.dbMu.Unlock()
 
-	tx, err := job.tl.db.Begin()
+	tx, err := job.tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("opening transaction: %w", err)
 	}
@@ -299,7 +299,7 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 		return fmt.Errorf("getting last-stored embedding ID for item %d: %w", itemID, err)
 	}
 
-	_, err = tx.Exec(`UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, itemID) // TODO: LIMIT 1
+	_, err = tx.ExecContext(ctx, `UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, itemID) // TODO: LIMIT 1
 	if err != nil {
 		return fmt.Errorf("linking item %d to embedding: %w", itemID, err)
 	}
