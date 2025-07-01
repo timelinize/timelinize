@@ -218,7 +218,7 @@ func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account
 	defer tl.dbMu.RUnlock()
 
 	accounts := []Account{}
-	rows, err := tl.db.Query(q, args...)
+	rows, err := tl.db.QueryContext(tl.ctx, q, args...)
 	if err != nil {
 		return accounts, fmt.Errorf("querying accounts from DB: %w", err)
 	}

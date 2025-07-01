@@ -476,7 +476,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 	// (bookmark items are also a special case: they may be empty, to later be populated
 	// by a snapshot, as long as they have metadata)
 	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.Query(`SELECT id FROM extended_items
+	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx, `SELECT id FROM extended_items
 		WHERE job_id=?
 		AND (data_text IS NULL OR data_text='')
 			AND (classification_name != ? OR metadata IS NULL)
@@ -518,7 +518,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 	ij.job.Logger().Info("deleting empty items from this import", zap.Int("count", len(emptyItems)))
 
 	retention := time.Duration(0)
-	return ij.job.tl.deleteItemRows(ij.job.tl.ctx, emptyItems, false, &retention)
+	return ij.job.tl.deleteItemRows(ij.job.ctx, emptyItems, false, &retention)
 }
 
 // generateThumbnailsForImportedItems generates thumbnails for qualifying items
