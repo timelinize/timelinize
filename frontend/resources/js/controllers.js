@@ -250,6 +250,7 @@ tlz.pageControllers = {
 		},
 		unload() {
 			$('body').classList.remove('layout-fluid');
+			mapData = {};
 		}
 	},
 

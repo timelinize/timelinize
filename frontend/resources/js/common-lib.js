@@ -377,18 +377,23 @@ function initMapSingleton() {
 	tlz.map.tl_isLoaded = false;
 	tlz.map.on('load', () => tlz.map.tl_isLoaded = true);
 
-	tlz.map.on('style.load', async () => {
+	tlz.map.once('style.load', () => {
 		// update the lighting every minute to match the current time of day
-		updateMapLighting();
 		setInterval(updateMapLighting, 60000);
+	});
+
+	tlz.map.on('style.load', () => {
+		updateMapLighting();
 
 		// add terrain source, but don't set it on the map unless enabled
-		tlz.map.tl_addSource('mapbox-dem', {
-			type: 'raster-dem',
-			// TODO: what's the difference between these?
-			url: 'mapbox://mapbox.terrain-rgb'
-			// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
-		});
+		if (!tlz.map.getSource('mapbox-dem')) {
+			tlz.map.tl_addSource('mapbox-dem', {
+				type: 'raster-dem',
+				// TODO: what's the difference between these?
+				url: 'mapbox://mapbox.terrain-rgb'
+				// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
+			});
+		}
 
 		applyTerrain();
 

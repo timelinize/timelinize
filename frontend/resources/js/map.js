@@ -45,7 +45,9 @@ async function loadAndRenderMapData() {
 	// like a synchronous forEach (waits for all async funcs to finish), see: https://stackoverflow.com/a/37576787/1048862
 	await Promise.all(tlz.openRepos.map(async repo => {
 		// asynchronously load and render the heatmap (query could be slow)
-		loadAndRenderHeatmap(repo);
+		if (!mapData.heatmap) {
+			loadAndRenderHeatmap(repo);
+		}
 
 		const params = mapPageFilterParams(repo);
 		if ($('.date-input').datepicker.selectedDates.length == 0) {
@@ -100,8 +102,11 @@ async function loadAndRenderMapData() {
 				item,
 				coords: [item.longitude, item.latitude],
 				coordsStr: coordsStr,
-				ts: DateTime.fromISO(item.timestamp)
+				timestamp: DateTime.fromISO(item.timestamp)
 			};
+			if (item.timespan) {
+				mapItem.timespan = DateTime.fromISO(item.timespan);
+			}
 
 			if (newMapData.items.length > 0) {
 				const prev = newMapData.items[newMapData.items.length-1];
@@ -118,8 +123,8 @@ async function loadAndRenderMapData() {
 		// compute actual time range (time between first and last item)
 		let actualTimeframeSeconds = 0, firstItemTimestamp, lastItemTimestamp;
 		if (newMapData.items.length > 0) {
-			firstItemTimestamp = newMapData.items[0].ts;
-			lastItemTimestamp = newMapData.items[newMapData.items.length - 1].ts;
+			firstItemTimestamp = newMapData.items[0].timestamp;
+			lastItemTimestamp = newMapData.items[newMapData.items.length - 1].timestamp;
 			actualTimeframeSeconds = Math.abs(firstItemTimestamp.diff(lastItemTimestamp).toFormat('s'));
 		}
 
@@ -128,7 +133,7 @@ async function loadAndRenderMapData() {
 
 			// we compute the number of seconds into the actual timeframe of the map
 			// so that we can get the color scaled correctly
-			const itemSecondsIntoActualTimeframe = Number(mapItem.ts.diff(firstItemTimestamp).toFormat('s'));
+			const itemSecondsIntoActualTimeframe = Number(mapItem.timestamp.diff(firstItemTimestamp).toFormat('s'));
 
 			// Hue calculation is based on simple linear y = mx+b formula,
 			// where y is the hue, m is the step size (hue change rate; this is
@@ -201,8 +206,8 @@ function makeMarker(repo, mapItem) {
 		const markerElem = document.createElement('div');
 		markerElem.innerHTML = `<svg
 			class="location-dot"
-			width="12"
-			height="12"
+			width="13"
+			height="13"
 			viewBox="0 0 100 100"
 			version="1.1"
 			xmlns="http://www.w3.org/2000/svg">
@@ -214,7 +219,7 @@ function makeMarker(repo, mapItem) {
 		// show timestamp on hover
 		markerElem.addEventListener('mouseenter', e => {
 			popup.setLngLat(mapItem.coords)
-				.setHTML(`${mapItem.ts.toLocaleString(DateTime.DATETIME_FULL)}`)
+				.setHTML(`${mapItem.timestamp.toLocaleString(DateTime.DATETIME_FULL)}`)
 				.setOffset(0)
 				.addTo(tlz.map);
 		});
@@ -266,8 +271,8 @@ function makeMarker(repo, mapItem) {
 		markerElem.classList.add('active');
 		
 		// fill in the preview box
-		$('#infocard .date').innerText = mapItem.ts.toLocaleString(DateTime.DATE_HUGE);
-		$('#infocard .time').innerText = mapItem.ts.toLocaleString(DateTime.TIME_WITH_SECONDS);
+		$('#infocard .date').innerText = mapItem.timestamp.toLocaleString(DateTime.DATE_HUGE);
+		$('#infocard .time').innerText = mapItem.timestamp.toLocaleString(DateTime.TIME_WITH_SECONDS);
 
 		// display items in a timeline, careful to not use a map :)
 		$('#infocard .map-preview-content').replaceChildren(itemsAsTimeline(coordsToItems[mapItem.coordsStr], { noMap: true, autoplay: true }));
@@ -292,7 +297,13 @@ function makeMarker(repo, mapItem) {
 		const containerEl = cloneTemplate('#tpl-map-popup');
 		const markerCoords = coordsToItems[mapItem.coordsStr].balloonMarker.getLngLat();
 		$('.map-preview-coordinates', containerEl).innerText = `${markerCoords.lat.toFixed(coordPrecision)}, ${markerCoords.lng.toFixed(coordPrecision)}`;
-		$('.map-preview-timestamp', containerEl).innerText = `${mapItem.ts.toLocaleString(DateTime.DATETIME_FULL)}`;
+		$('.map-preview-timestamp', containerEl).innerText = `${mapItem.timestamp.toLocaleString(DateTime.DATETIME_FULL)}`;
+		if (mapItem.timespan) {
+			$('.map-preview-timestamp', containerEl).innerText += `–${mapItem.timespan.toLocaleString(DateTime.DATETIME_FULL)} (${betterToHuman(mapItem.timespan.diff(mapItem.timestamp))})`;
+		}
+		if (mapItem.item?.metadata?.['Cluster size']) {
+			$('.map-preview-meta', containerEl).innerHTML = `<b>Cluster size:</b> ${mapItem.item?.metadata?.['Cluster size']}`;
+		}
 		containerEl.append(previewEl);
 
 		popup.setLngLat(mapItem.coords)
@@ -327,30 +338,52 @@ async function renderMapData(newMapData) {
 	}
 
 	// remove previous layers/sources
-	// if (tlz.map.getLayer('route')) {
-		tlz.map.tl_removeLayer('route');
-	// }
-	// if (tlz.map.getSource('journey')) {
-		tlz.map.tl_removeSource('journey');
-	// };
-
+	tlz.map.tl_removeLayer('route');
+	tlz.map.tl_removeLayer('symbols');
+	tlz.map.tl_removeSource('journey');
+	tlz.map.tl_removeSource('symbols-route');
+	
 	// only draw connecting lines if it makes sense to
 	if (temporallyConsistent(dataToRender.params) && dataToRender.items.length) {
 		// connect markers with lines
 		// EXAMPLE: https://docs.mapbox.com/mapbox-gl-js/example/line-gradient/
 		const geojsonLines = {
-			'type': 'FeatureCollection',
-			'features': [
+			type: 'FeatureCollection',
+			features: [
 				{
-					'type': 'Feature',
-					'properties': {},
-					'geometry': {
-						'coordinates': dataToRender.items.map(item => item.coords),
-						'type': 'LineString'
+					type: 'Feature',
+					properties: {},
+					geometry: {
+						coordinates: dataToRender.items.map(item => item.coords),
+						type: 'LineString'
 					}
 				}
 			]
 		};
+		const geojsonSymbolLines = {
+			type: 'FeatureCollection',
+			features: []
+		};
+		
+		for (let i = 0; i < dataToRender.items.length; i++) {
+			const coords = [dataToRender.items[i].coords];
+			let duration;
+			if (i < dataToRender.items.length-1) {
+				coords.push(dataToRender.items[i+1].coords);
+				duration = betterToHuman(dataToRender.items[i+1].timestamp.diff(dataToRender.items[i].timestamp), { unitDisplay: 'narrow' }).replaceAll(',', '');
+			}
+			geojsonSymbolLines.features.push({
+				type: 'Feature',
+				properties: {
+					'label': duration
+				},
+				geometry: {
+					coordinates: coords,
+					type: 'LineString'
+				}
+			});
+		}
+
 		const lineGradient = function () {
 			let arr = []; // (gradient stop, color) pairs
 			for (let i = 0; i < dataToRender.items.length; i++) {
@@ -362,20 +395,21 @@ async function renderMapData(newMapData) {
 			}
 			return arr;
 		}
-
-		const addSource = function() {
+		
+		const addSourceAndLayer = function() {
+			tlz.map.once('style.load', addSourceAndLayer);
 			tlz.map.tl_addSource('journey', {
 				type: 'geojson',
 				lineMetrics: true,
 				data: geojsonLines
 			});
-
 			tlz.map.tl_addLayer({
 				id: "route",
 				type: "line",
 				source: "journey",
 				paint: {
-					"line-width": 5,
+					"line-width": 9,
+					'line-blur': 3,
 					'line-gradient': [
 						'interpolate',
 						['linear'],
@@ -388,18 +422,39 @@ async function renderMapData(newMapData) {
 					'line-join': 'round'
 				}
 			});
+			// add text between points that label how much time between the points
+			tlz.map.tl_addSource('symbols-route', {
+				type: 'geojson',
+				data: geojsonSymbolLines
+			});
+			tlz.map.tl_addLayer({
+				"id": "symbols",
+				"type": "symbol",
+				"source": "symbols-route",
+				"layout": {
+					"symbol-placement": "line",
+					// "text-font": ["Open Sans Regular"],
+					// "text-field": 'this is a test',
+					"text-field": ['get', 'label'],
+					// "text-size": 32
+				},
+				"paint": {
+					"text-halo-color": "rgba(255, 255, 255, 1)",
+					"text-halo-width": 3
+				}
+			});
 		};
-		if (tlz.map.isStyleLoaded()) {
-			addSource();
+		if (tlz.map.isMoving()) {
+			tlz.map.once('idle', addSourceAndLayer);
 		} else {
-			tlz.map.on('load', addSource);
+			addSourceAndLayer();
 		}
 	}
 
 	// remove old markers, add new markers
 	tlz.map.tl_clearMarkers();
 	dataToRender.items.forEach(mapItem => mapItem.markers.forEach(marker => tlz.map.tl_addMarker(marker)));
-
+	
 	// fly to bounding box of data if requisite
 	if (newMapData && dataToRender.items.length) {
 		let bounds = new mapboxgl.LngLatBounds();
@@ -957,20 +1012,13 @@ function loadAndRenderHeatmap(repo) {
 function renderHeatmap() {
 	tlz.map.tl_removeLayer('items-sample');
 	tlz.map.tl_removeSource('all-items');
-	const addSource = function() { // source can't be added until style loads, apparently: https://stackoverflow.com/q/40557070
+	const addSourceAndLayer = function() { // source can't be added until style loads, apparently: https://stackoverflow.com/q/40557070 (and layer depends on source)
 		tlz.map.tl_addSource('all-items', {
 			type: 'geojson',
 			data: mapData.heatmap
 		});
-	};
-	if (tlz.map.isStyleLoaded()) {
-		addSource();
-	} else {
-		tlz.map.on('load', addSource);
-	}
-	// Docs: https://docs.mapbox.com/mapbox-gl-js/style-spec/layers/#heatmap
-	tlz.map.tl_addLayer(
-		{
+		// Docs: https://docs.mapbox.com/mapbox-gl-js/style-spec/layers/#heatmap
+		tlz.map.tl_addLayer({
 			'id': 'items-sample',
 			'type': 'heatmap',
 			'source': 'all-items',
@@ -1016,8 +1064,13 @@ function renderHeatmap() {
 					18, 0
 				]
 			}
-		}, 'route'
-	);
+		}, 'route');
+	};
+	if (tlz.map.isStyleLoaded()) {
+		addSourceAndLayer();
+	} else {
+		tlz.map.once('style.load', addSourceAndLayer);
+	}
 }
 
 

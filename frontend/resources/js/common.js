@@ -578,10 +578,10 @@ function moveMapInto(mapContainerElem) {
 			};
 
 			// render new data
-			if (tlz.map.tl_isLoaded) {
+			if (tlz.map.isStyleLoaded()) {
 				renderMapData();
 			} else {
-				tlz.map.on('load', async () => {
+				tlz.map.once('style.load', async () => {
 					// // Custom atmosphere styling
 					// map.setFog({
 					// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
@@ -593,8 +593,8 @@ function moveMapInto(mapContainerElem) {
 			}
 		}
 
-		if (resizeCount >= 3) {
-			// we're done, so no need to observe anymore
+		if (resizeCount >= 10) {
+			// hopefully no need to observe anymore
 			observer.disconnect();
 		}
 	});
