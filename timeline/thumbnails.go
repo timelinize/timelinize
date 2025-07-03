@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -595,6 +596,12 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 			return nil, "", fmt.Errorf("resizing image: %w", err)
 		}
 
+		// 10-bit is HDR, but the underlying lib (libvips, and then libheif) doesn't support "10-bit colour depth" on Windows
+		bitDepth := 10
+		if runtime.GOOS == "windows" {
+			bitDepth = 8
+		}
+
 		// encode the resized image as the proper output format
 		switch task.ThumbType {
 		case ImageJPEG:
@@ -612,7 +619,7 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 			ep := vips.NewAvifExportParams()
 			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
 			ep.Quality = 45
-			ep.Bitdepth = 10
+			ep.Bitdepth = bitDepth
 			ep.Effort = 1
 			thumbnail, _, err = inputImage.ExportAvif(ep)
 		case ImageWebP:
@@ -909,6 +916,11 @@ func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension 
 		}
 	}
 
+	bitDepth := 10
+	if runtime.GOOS == "windows" {
+		bitDepth = 8
+	}
+
 	var imageBytes []byte
 	switch desiredExtension {
 	case extJpg, extJpeg:
@@ -936,7 +948,7 @@ func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension 
 		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
 		ep.Quality = 65
 		ep.Effort = 1
-		ep.Bitdepth = 10
+		ep.Bitdepth = bitDepth
 		imageBytes, _, err = inputImage.ExportAvif(ep)
 	}
 	if err != nil {
