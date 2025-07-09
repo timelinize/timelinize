@@ -284,7 +284,7 @@ func (sr *SearchResults) Anonymize(opts ObfuscationOptions) {
 }
 
 // Anonymize obfuscates the entity.
-func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
+func (re *relatedEntity) Anonymize(opts ObfuscationOptions) {
 	if re == nil || re.ID == nil {
 		return
 	}
@@ -298,7 +298,7 @@ func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
 		re.Name = &name
 	}
 
-	if re.Attribute.Name != nil {
+	if re.Attribute.Name != nil && re.Attribute.Value != nil {
 		switch *re.Attribute.Name {
 		case AttributeEmail:
 			val := faker.Email()
@@ -311,6 +311,17 @@ func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
 			re.Attribute.Value = &val
 		}
 		re.Attribute.AltValue = nil
+
+		if re.Attribute.Latitude != nil && re.Attribute.Longitude != nil {
+			for _, locob := range opts.Locations {
+				if locob.Contains(*re.Attribute.Latitude, *re.Attribute.Longitude) {
+					lat, lon := locob.Obfuscate(*re.Attribute.Latitude, *re.Attribute.Longitude, *re.Attribute.ID)
+					re.Attribute.Latitude = &lat
+					re.Attribute.Longitude = &lon
+					break
+				}
+			}
+		}
 	}
 }
 
@@ -332,7 +343,7 @@ func (sr *SearchResult) Anonymize(opts ObfuscationOptions) {
 }
 
 // Anonymize obfuscates the entity.
-func (e *Entity) Anonymize() {
+func (e *Entity) Anonymize(opts ObfuscationOptions) {
 	if e == nil {
 		return
 	}
@@ -354,17 +365,30 @@ func (e *Entity) Anonymize() {
 	e.Name = consistentFakeEntityName(e.Name)
 
 	for i := range e.Attributes {
-		switch e.Attributes[i].Name {
-		case AttributeEmail:
-			e.Attributes[i].Value = faker.Email()
-		case AttributePhoneNumber:
-			e.Attributes[i].Value = faker.PhoneFormatted()
-		case "birth_date":
-			e.Attributes[i].Value = gofakeit.Date()
-		case "birth_place":
-			e.Attributes[i].Value = gofakeit.City() + ", " + gofakeit.StateAbr()
-		default:
-			e.Attributes[i].Value = safeRandomString(len(e.Attributes[i].valueString()), false, src)
+		if e.Attributes[i].Value != nil {
+			switch e.Attributes[i].Name {
+			case AttributeEmail:
+				e.Attributes[i].Value = faker.Email()
+			case AttributePhoneNumber:
+				e.Attributes[i].Value = faker.PhoneFormatted()
+			case "birth_date":
+				e.Attributes[i].Value = gofakeit.Date()
+			case "birth_place":
+				e.Attributes[i].Value = gofakeit.City() + ", " + gofakeit.StateAbr()
+			default:
+				e.Attributes[i].Value = safeRandomString(len(e.Attributes[i].valueString()), false, src)
+			}
+		}
+
+		if e.Attributes[i].Latitude != nil && e.Attributes[i].Longitude != nil {
+			for _, locob := range opts.Locations {
+				if locob.Contains(*e.Attributes[i].Latitude, *e.Attributes[i].Longitude) {
+					lat, lon := locob.Obfuscate(*e.Attributes[i].Latitude, *e.Attributes[i].Longitude, e.Attributes[i].ID)
+					e.Attributes[i].Latitude = &lat
+					e.Attributes[i].Longitude = &lon
+					break
+				}
+			}
 		}
 	}
 
@@ -508,6 +532,10 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 			ir.Metadata = nil
 		} else {
 			for key, val := range meta {
+				// confusing and not particularly useful to obfuscate the size of a location cluster
+				if key == "Cluster size" {
+					continue
+				}
 				// TODO: some field-aware replacement might be cool, for now just switch on type
 				switch v := val.(type) {
 				case int:
@@ -596,7 +624,7 @@ func (l ObfuscatedLocation) Contains(lat, lon float64) bool {
 func (l ObfuscatedLocation) Obfuscate(lat, lon float64, rowID uint64) (float64, float64) {
 	faker := gofakeit.New(rowID)
 
-	// translate all points within the circle a fixed vector; necessary to prevent
+	// translate all points within the circle a fixed vector; necessary to preven`t
 	// averaging the smattering of points to find the original center(s)
 	circleFaker := gofakeit.New(uint64((l.Lat + l.Lon) * 1e7))
 

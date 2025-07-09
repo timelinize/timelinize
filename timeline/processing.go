@@ -496,7 +496,7 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 						anonItem.Owner.Attributes[i].Metadata = make(Metadata)
 						maps.Copy(anonItem.Owner.Attributes[i].Metadata, item.Owner.Attributes[i].Metadata)
 					}
-					anonItem.Owner.Anonymize()
+					anonItem.Owner.Anonymize(options)
 					item = &anonItem
 				}
 				if entity != nil {
@@ -510,7 +510,7 @@ func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g
 						maps.Copy(anonEntity.Attributes[i].Metadata, entity.Attributes[i].Metadata)
 					}
 					anonEntity.ID = g.rowID.id()
-					anonEntity.Anonymize()
+					anonEntity.Anonymize(options)
 					entity = &anonEntity
 				}
 			}

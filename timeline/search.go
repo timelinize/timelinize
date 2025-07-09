@@ -1010,7 +1010,7 @@ type relatedEntity struct {
 // nullableAttribute is like Attribute but with nullable fields
 // so that it can be I/O for the database
 type nullableAttribute struct {
-	ID        *int64   `json:"id,omitempty"`
+	ID        *uint64  `json:"id,omitempty"`
 	Name      *string  `json:"name,omitempty"`
 	Value     *string  `json:"value,omitempty"`
 	AltValue  *string  `json:"alt_value,omitempty"`

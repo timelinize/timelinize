@@ -257,7 +257,7 @@ type Attribute struct {
 	// The fields below are NOT intended for use by data sources (importers).
 
 	// NOT FOR USE BY DATA SOURCES.
-	ID int64 `json:"id,omitempty"`
+	ID uint64 `json:"id,omitempty"`
 
 	// NOT FOR USE BY DATA SOURCES. For search results only.
 	ItemCount int64 `json:"item_count,omitempty"`

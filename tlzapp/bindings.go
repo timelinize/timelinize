@@ -210,8 +210,8 @@ func (a App) GetEntity(repoID string, entityID uint64) (timeline.Entity, error) 
 	if err != nil {
 		return timeline.Entity{}, err
 	}
-	if _, obfuscate := a.ObfuscationMode(tl.Timeline); obfuscate {
-		ent.Anonymize()
+	if options, obfuscate := a.ObfuscationMode(tl.Timeline); obfuscate {
+		ent.Anonymize(options)
 	}
 	return ent, nil
 }
@@ -750,9 +750,9 @@ func (a *App) SearchEntities(params timeline.EntitySearchParams) ([]timeline.Ent
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := a.ObfuscationMode(tl.Timeline); ok {
+	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
 		for i := range results {
-			results[i].Anonymize()
+			results[i].Anonymize(options)
 		}
 	}
 	return results, nil
@@ -890,7 +890,7 @@ func (a *App) LoadRecentConversations(ctx context.Context, params timeline.ItemS
 	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
 		for _, convo := range convos {
 			for i := range convo.Entities {
-				convo.Entities[i].Anonymize()
+				convo.Entities[i].Anonymize(options)
 			}
 			for i := range convo.RecentMessages {
 				convo.RecentMessages[i].Anonymize(options)
