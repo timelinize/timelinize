@@ -410,6 +410,17 @@ type ImportParams struct {
 	// The logger to use.
 	Log *zap.Logger `json:"-"`
 
+	// Typically, job pauses are honored by the processor whenever
+	// a graph is sent down the pipeline. However, if data sources
+	// do a nontrivial amount of work between sending graphs, this
+	// can result in a long delay before pausing. So we expose the
+	// pause function here for the data source to call at each unit
+	// of work. This could be, for example, an iteration of a loop,
+	// which may be looking for the next item within the designated
+	// timeframe, that calls Continue(), which blocks until the job
+	// gets unpaused (and does nothing if the job is not paused).
+	Continue func() error `json:"-"`
+
 	// Time bounds on which data to retrieve.
 	// The respective time and item ID fields
 	// which are set must never conflict if

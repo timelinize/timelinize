@@ -384,7 +384,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	}
 
 	// only used for development
-	// if err := wipeDB(ctx, db, thumbsDB); err != nil {
+	// if err := wipeRepo(ctx, repoDir, db, thumbsDB, true); err != nil {
 	// 	return nil, err
 	// }
 
@@ -454,11 +454,11 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	return tl, nil
 }
 
-// wipeDB is used only for development purposes.
+// wipeRepo is used only for development purposes.
 //
 //nolint:unused
-func wipeDB(ctx context.Context, db, thumbsDB *sql.DB) error {
-	Log.Warn("WIPING DB...")
+func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB *sql.DB, deleteDataFilesAndAssets bool) error {
+	Log.Warn("WIPING REPO...", zap.String("dir", repoDir), zap.Bool("data_files", deleteDataFilesAndAssets))
 	_, err := db.ExecContext(ctx, `DELETE FROM items`)
 	if err != nil {
 		return fmt.Errorf("resetting items: %w", err)
@@ -499,7 +499,18 @@ func wipeDB(ctx context.Context, db, thumbsDB *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("resetting thumbnails: %w", err)
 	}
-	Log.Warn("DB WIPE COMPLETED.")
+	if deleteDataFilesAndAssets {
+		dataPath := filepath.Join(repoDir, DataFolderName)
+		assetsPath := filepath.Join(repoDir, AssetsFolderName)
+		Log.Warn("NOW WIPING DATA FILES AND ASSETS...", zap.String("data_dir", dataPath), zap.String("assets_path", assetsPath))
+		if err := os.RemoveAll(dataPath); err != nil {
+			return fmt.Errorf("deleting data files: %w", err)
+		}
+		if err := os.RemoveAll(assetsPath); err != nil {
+			return fmt.Errorf("deleting assets: %w", err)
+		}
+	}
+	Log.Warn("REPO WIPE COMPLETED.", zap.String("dir", repoDir))
 	return nil
 }
 

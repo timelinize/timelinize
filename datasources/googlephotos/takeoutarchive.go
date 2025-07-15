@@ -80,7 +80,15 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 
 		albumMeta, err := fimp.readAlbumMetadata(dirEntry, thisAlbumFolderPath)
 		if err != nil {
-			opt.Log.Error("could not open album metadata (maybe it is in another archive?)", zap.Error(err))
+			if errors.Is(err, fs.ErrNotExist) {
+				opt.Log.Warn("album metadata not found; maybe it is in another archive or this folder is not an album",
+					zap.String("folder_path", thisAlbumFolderPath),
+					zap.Error(err))
+			} else {
+				opt.Log.Error("could not open album metadata",
+					zap.String("folder_path", thisAlbumFolderPath),
+					zap.Error(err))
+			}
 		}
 
 		// read album folder contents, then sort in what I think is the same way
@@ -102,6 +110,11 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		})
 
 		for _, d := range albumItems {
+			// make pauses more responsive
+			if err := opt.Continue(); err != nil {
+				return err
+			}
+
 			fpath := path.Join(thisAlbumFolderPath, dirEntry.Name())
 			if checkpoint != "" {
 				if fpath != checkpoint {
@@ -174,12 +187,6 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			return fmt.Errorf("parsing timestamp from item %s: %w", fpath, err)
 		}
 
-		// ensure item is within configured timeframe before continuing
-		if !opt.Timeframe.Contains(itemMeta.parsedPhotoTakenTime) {
-			opt.Log.Debug("item is outside timeframe", zap.String("filename", fpath))
-			return nil
-		}
-
 		mediaFilePath = fimp.determineMediaFilenameInArchive(fpath, itemMeta)
 		opt.Log.Debug("mapped sidecar to target media file",
 			zap.String("sidecar_file", fpath),
@@ -189,6 +196,12 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	}
 
 	ig := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
+
+	// ensure item is within configured timeframe before continuing
+	if !opt.Timeframe.Contains(ig.Item.Timestamp) {
+		opt.Log.Debug("item is outside timeframe", zap.String("filename", fpath))
+		return nil
+	}
 
 	// Between the JSON file and the actual media file, we typically prefer the
 	// filename in the JSON file and everything else that overlaps in the media
@@ -315,7 +328,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 	// the retrieval key is crucial so that we can store what data we have from an item
 	// as we get it, without getting the whole item, even across different imports; it
 	// consists of the data source name to avoid conflicts with other DSes, the name of
-	// the archive (with the index part remove, of course, since a metadata file in
+	// the archive (with the index part removed, of course, since a metadata file in
 	// -001.zip might have its media file in -002.zip, but they should have the same
 	// retrieval key; this does rely on them not being renamed), and the expected path
 	// of the media file within the archive (if we're on the media file, it's just that
@@ -463,6 +476,9 @@ type mediaArchiveMetadata struct {
 			} `json:"deviceFolder"`
 			DeviceType string `json:"deviceType"`
 		} `json:"mobileUpload"`
+		Composition struct {
+			Type string `json:"type"`
+		} `json:"composition"`
 	} `json:"googlePhotosOrigin"`
 	PhotoLastModifiedTime struct {
 		Timestamp string `json:"timestamp"`
@@ -506,6 +522,7 @@ var errNoTimestamp = errors.New("no timestamp available")
 func (m mediaArchiveMetadata) timestamp() (time.Time, error) {
 	ts := m.PhotoTakenTime.Timestamp
 	if ts == "" {
+		// if a photo is in multiple albums/folders, this can be different between the two
 		ts = m.CreationTime.Timestamp
 	}
 	if ts == "" {

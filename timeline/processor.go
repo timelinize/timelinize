@@ -73,6 +73,7 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 
 	params := ImportParams{
 		Log:               p.log.With(zap.String("filename", dirEntry.FullPath())),
+		Continue:          p.ij.job.Continue,
 		Timeframe:         p.ij.ProcessingOptions.Timeframe,
 		Checkpoint:        dsCheckpoint,
 		DataSourceOptions: p.dsOpt,
