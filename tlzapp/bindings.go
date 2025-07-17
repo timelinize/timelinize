@@ -101,9 +101,9 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 
 	var tl *timeline.Timeline
 	if create {
-		tl, err = timeline.Create(ctx, absRepo, DefaultCacheDir())
+		tl, err = timeline.Create(ctx, assessment.TimelinePath, DefaultCacheDir())
 	} else {
-		tl, err = timeline.Open(ctx, absRepo, DefaultCacheDir())
+		tl, err = timeline.Open(ctx, assessment.TimelinePath, DefaultCacheDir())
 	}
 	if err != nil {
 		return openedTimeline{}, err
@@ -127,7 +127,7 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 			if err != nil {
 				a.log.Error("closing redundantly-opened timeline",
 					zap.Error(err),
-					zap.String("timeline", absRepo))
+					zap.String("timeline", assessment.TimelinePath))
 			}
 			return openedTimeline{}, fmt.Errorf("timeline with ID %s is already open", otl.InstanceID)
 		}
@@ -135,11 +135,11 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 
 	// for serving static data files from the timeline
 	fileServerPrefix := "/" + path.Join("repo", tlID)
-	fileRoot := absRepo
+	fileRoot := assessment.TimelinePath
 	fileServer := http.FileServer(http.Dir(fileRoot))
 
 	otl := openedTimeline{
-		RepoDir:    absRepo,
+		RepoDir:    assessment.TimelinePath,
 		InstanceID: tl.ID(),
 		Timeline:   tl,
 		fileServer: http.StripPrefix(fileServerPrefix, fileServer),
@@ -153,15 +153,13 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 		action = "created"
 	}
 	a.log.Info(action+" timeline",
-		zap.String("repo", absRepo),
+		zap.String("repo", assessment.TimelinePath),
 		zap.String("id", tlID))
 
 	// persist newly opened repo so it can be resumed on restart
 	if err := a.cfg.syncOpenRepos(); err != nil {
 		a.log.Error("unable to persist config", zap.Error(err))
 	}
-
-	// TODO: start jobs in queued or aborted (interrupted) states (maybe, at most... 3 jobs?)
 
 	return otl, nil
 }

@@ -171,8 +171,9 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 	}
 
 	pointlessFiles := map[string]struct{}{
-		".DS_Store": {},
-		"Thumbs.db": {},
+		".DS_Store":       {},
+		".Spotlight-V100": {},
+		"Thumbs.db":       {},
 	}
 
 	for _, f := range fileList {
@@ -194,26 +195,34 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 
 // FolderAssessment returns the analysis of a folder related to
 // the existence or possibility of a timeline repository.
+// Regardless of the input path, the answers relate to the
+// TimelinePath. It may be different if the assessment determines
+// a subfolder should be used for the timeline instead.
 //
 //nolint:errname
 type FolderAssessment struct {
-	HasTimeline          bool   `json:"has_timeline"`
-	TimelineCanBeCreated bool   `json:"timeline_can_be_created"`
-	TimelinePath         string `json:"timeline_path,omitempty"`
-	Reason               string `json:"reason,omitempty"`
+	TimelinePath string `json:"timeline_path,omitempty"`
+
+	// If either of these are true, expect TimelinePath to be set also.
+	HasTimeline          bool `json:"has_timeline"`
+	TimelineCanBeCreated bool `json:"timeline_can_be_created"`
+
+	Reason string `json:"reason,omitempty"`
 }
 
 func (fa FolderAssessment) Error() string {
-	return fmt.Sprintf("Has timeline: %t - Timeline can be created: %t - Path: %s - Reason: '%s'",
+	return fmt.Sprintf("Has timeline: %t - Timeline can be created? %t - Path: %s - Reason: '%s'",
 		fa.HasTimeline, fa.TimelineCanBeCreated, fa.TimelinePath, fa.Reason)
 }
 
 func AssessFolder(fpath string) FolderAssessment {
+	fpath = filepath.Clean(fpath)
+
 	info, err := os.Stat(fpath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return FolderAssessment{
 			TimelineCanBeCreated: true,
-			TimelinePath:         filepath.Clean(fpath),
+			TimelinePath:         fpath,
 			Reason:               "folder does not exist yet",
 		}
 	}
@@ -284,7 +293,7 @@ func AssessFolder(fpath string) FolderAssessment {
 	repoDBFile = filepath.Join(proposedPath, DBFilename)
 	if FileExists(repoDBFile) {
 		return FolderAssessment{
-			HasTimeline:  true,
+			HasTimeline:  true, // the timeline is in the subfolder though, not in the input directory
 			TimelinePath: proposedPath,
 			Reason:       fmt.Sprintf("selected folder is not empty (has file <code>%s</code>), and timeline database already exists within at <code>%s</code>", problematicFile, repoDBFile),
 		}
