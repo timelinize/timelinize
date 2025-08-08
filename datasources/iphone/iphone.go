@@ -133,8 +133,16 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	if err = fimp.messages(ctx); err != nil {
 		return fmt.Errorf("importing iPhone messages: %w", err)
 	}
-	if err = fimp.cameraRoll(ctx); err != nil {
-		return fmt.Errorf("importing iPhone camera roll: %w", err)
+	// importing the camera roll directly just iterates the DCIM folder in the file system for photos and videos,
+	// whereas importing the photo library _almost_ (?) does the same thing but with more structure and metadata
+	if fimp.dsOpt.CameraRoll {
+		if err = fimp.cameraRoll(ctx); err != nil {
+			return fmt.Errorf("importing iPhone camera roll: %w", err)
+		}
+	} else {
+		if err = fimp.photosLibrary(ctx, dirEntry); err != nil {
+			return fmt.Errorf("importing iPhone Photos app library: %w", err)
+		}
 	}
 
 	return nil

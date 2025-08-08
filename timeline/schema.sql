@@ -44,14 +44,14 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	"hash" BLOB, -- for preventing duplicate jobs; opaque to everything except the code creating the job
 	"state" TEXT NOT NULL DEFAULT 'queued', -- queued, started, paused, aborted, succeeded, failed
 	"hostname" TEXT, -- hostname of the machine the job was created and configured on
-	"created" INTEGER NOT NULL DEFAULT (unixepoch()), -- timestamp job was stored/enqueued in unix milliseconds UTC
+	"created" INTEGER NOT NULL DEFAULT (cast(round(unixepoch('subsec')*1000) AS INTEGER)), -- timestamp job was stored/enqueued in unix milliseconds UTC
 	"updated" INTEGER, -- timestamp of last DB sync (in unix milliseconds UTC)
 	"start" INTEGER, -- timestamp job was actually started in unix milliseconds UTC *could be future, so not called "started")
-	"ended" INTEGER, -- timestamp in unix milliseconds UTC (TODO: only when finalized, or paused too?)
+	"ended" INTEGER, -- timestamp in unix milliseconds UTC when job ended (not paused)
 	"message" TEXT, -- brief message describing current status to be shown to the user, changes less frequently than log emissions
 	"total" INTEGER, -- total number of units to complete
 	"progress" INTEGER, -- number of units completed towards the total count
-	"checkpoint" BLOB, -- required state for resuming an incomplete job
+	"checkpoint" TEXT, -- required state for resuming an incomplete job, as a JSON serialization
 	-- if job is scheduled to run automatically at a certain interval, the following fields track that state
 	"repeat" INTEGER, -- when this job is started, next job should be scheduled (inserted for future start) this many seconds from start time (not to be started if previous still running)
 	"parent_job_id" INTEGER, -- the job before this one that scheduled or created this one, forming a chain or linked list
@@ -111,13 +111,12 @@ CREATE TABLE IF NOT EXISTS "entities" (
 CREATE TABLE IF NOT EXISTS "attributes" (
 	"id" INTEGER PRIMARY KEY,
 	"name" TEXT NOT NULL,
-	"value" ANY NOT NULL COLLATE NOCASE,
+	"value" ANY COLLATE NOCASE,
 	"alt_value" TEXT, -- optional alternate value intended for display or as a description
-	-- the coordinate values below are useful if the attribute value is, in fact, a location or area
-	"longitude1" REAL, -- point, or top-left corner
-	"latitude1" REAL,  -- point, or top-left corner
-	"longitude2" REAL, -- bottom-right corner, if box
-	"latitude2" REAL,  -- bottom-right corner, if box
+	-- the coordinate values below are useful if the attribute value is, in fact, a location
+	"longitude" REAL,
+	"latitude" REAL,
+	"altitude" REAL,
 	"metadata" TEXT,  -- optional extra info encoded as JSON
 	UNIQUE ("name", "value")
 ) STRICT;
@@ -144,6 +143,13 @@ CREATE TABLE IF NOT EXISTS "entity_attributes" (
 	FOREIGN KEY ("autolink_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
 
+-- These indexes make loading entities by attributes faster, especially during import jobs, when it's in the hot path.
+-- (If the query plan still shows "SCAN entities" then it might be due to the analyzer
+-- determining that's faster than using the index; can test the index by adding "INDEXED BY...")
+CREATE INDEX IF NOT EXISTS "idx_entities_type_name" ON "entities"("type_id", "name");
+CREATE INDEX IF NOT EXISTS "idx_attributes_name_value" ON "attributes"("name", "value");
+CREATE INDEX IF NOT EXISTS "idx_ea_entity_attr" ON "entity_attributes"("attribute_id", "entity_id");
+
 -- A classification describes what kind of thing an item is, for example a text message, tweet, email, or location.
 CREATE TABLE IF NOT EXISTS "classifications" (
 	"id" INTEGER PRIMARY KEY,
@@ -159,7 +165,9 @@ CREATE TABLE IF NOT EXISTS "item_data" (
 	"content" BLOB NOT NULL UNIQUE
 ) STRICT;
 
--- An item is something imported from a specific data source.
+-- An item is something imported from a specific data source. They represent things that are
+-- originated, created, or recorded; as opposed to entities, which just exist and don't have
+-- specific temporal significance. Items typically exist as a result of entities existing.
 CREATE TABLE IF NOT EXISTS "items" (
 	"id" INTEGER PRIMARY KEY,
 	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model; TODO: we may need an item_embeddings table for multiple...
@@ -169,7 +177,6 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"attribute_id" INTEGER, -- owner, creator, or originator attributed to this item
 	"classification_id" INTEGER,
 	"original_id" TEXT, -- ID provided by the data source
-	-- "embedding" BLOB, -- TODO: experimental, inline embedding
 	"original_location" TEXT,     -- path or location of the file/data on the original data source; should include filename if applicable
 	"intermediate_location" TEXT, -- path or location of the file/data from the import dataset (e.g. after exporting from the data source); should include filename if application
 	"filename" TEXT, -- name of the original file as named by the owner, if known
@@ -210,6 +217,16 @@ CREATE TABLE IF NOT EXISTS "items" (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
+
+-- These next two partial indexes greatly speed up processing when importing items, or any queries that
+-- check for existing rows that may have been deleted or modified from their original content. Because
+-- they are partial indexes, I have found that they do not greatly impact insert performance since most
+-- new items are not deleted or modified going in.
+CREATE INDEX IF NOT EXISTS "idx_items_deleted_original_id_hash" ON "items"("deleted", "original_id_hash") WHERE deleted IS NOT NULL OR original_id_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "idx_items_initial_content_hash" ON "items"("initial_content_hash") WHERE modified IS NOT NULL OR deleted IS NOT NULL;
+
+-- This partial index speeds up processing for items that have IDs assigned by their data source.
+CREATE INDEX IF NOT EXISTS "idx_items_original_id" ON "items"("original_id") WHERE original_ID IS NOT NULL;
 
 -- Relationships may exist between and across items and entities. A row
 -- in this table is an actual connection between items and/or entities.

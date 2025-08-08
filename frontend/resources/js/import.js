@@ -123,9 +123,13 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 			$('.accordion-button', dsGroupElem).dataset.bsTarget = "#"+collapseID;
 			tlz.collapseCounter++;
 
-			// render the DS group and its options modal
+			// render the DS group and, if it has options, its options modal (otherwise remove the Options button)
 			$('#file-imports-container').append(dsGroupElem);
-			renderDataSourceOptionsModal(dsGroupElem, ds);
+			if ($(`#tpl-dsopt-${ds.name}`)) {
+				renderDataSourceOptionsModal(ds);
+			} else {
+				$('.import-dsgroup-opt-button', dsGroupElem).remove();
+			}
 		}
 
 		// don't add duplicate filenames
@@ -219,7 +223,9 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 	updateExpandCollapseAll();
 });
 
-async function renderDataSourceOptionsModal(dsgroupElem, ds) {
+async function renderDataSourceOptionsModal(ds) {
+	const defaultPathSimplificationLevel = 1.0; // this gets scaled to epsilon used by the RDP algorithm
+
 	// start with creating (or getting?) the modal and setting it up with the DS info
 	let dsOptModal = $(`#modal-import-dsopt-${ds.name}`);
 	if (!dsOptModal) {
@@ -230,16 +236,6 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 	$('.modal-title', dsOptModal).append(document.createTextNode(ds.title));
 
 	const dsOptElem = cloneTemplate(`#tpl-dsopt-${ds.name}`);
-
-	if (!dsOptElem) {
-		$('.import-dsgroup-opt-button', dsgroupElem).remove();
-		return;
-	}
-
-	if (ds.name == "smsbackuprestore") {
-		const owner = await getOwner(tlz.openRepos[0]);
-		$('.smsbackuprestore-owner-phone', dsOptElem).value = entityAttribute(owner, "phone_number");
-	}
 	
 	// render the data source options template, then the modal to the DOM
 	$('.modal-body', dsOptModal).replaceChildren(dsOptElem);
@@ -259,7 +255,7 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 		entitySelect.addItem(owner.id);
 
 		noUiSlider.create($('.google_location-simplification', dsOptElem), {
-			start: 2,
+			start: defaultPathSimplificationLevel,
 			connect: [true, false],
 			step: 0.1,
 			range: {
@@ -275,7 +271,7 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 		entitySelect.addItem(owner.id);
 
 		noUiSlider.create($('.gpx-simplification', dsOptElem), {
-			start: 2,
+			start: defaultPathSimplificationLevel,
 			connect: [true, false],
 			step: 0.1,
 			range: {
@@ -309,9 +305,9 @@ async function renderDataSourceOptionsModal(dsgroupElem, ds) {
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 	}
-	if (ds.name == "applephotos") {
+	if (ds.name == "apple_photos") {
 		// This data source can sometimes detect its owner, so it's not required for us to assume!
-		newEntitySelect($('.applephotos-owner', dsOptElem), 1);
+		newEntitySelect($('.apple_photos-owner', dsOptElem), 1);
 	}
 }
 
@@ -367,55 +363,53 @@ on('click', '#start-import', async event => {
 			},
 			processing_options: {
 				integrity: $('#integrity-checks').checked,
-				overwrite_modifications: $('#overwrite-modifications').checked,
-				item_unique_constraints: {
-					// TODO: it occurred to me that an item need not be from the same
-					// data source to be the exact same thing; like if I copy a photo
-					// from my iPhone and import it with Media data source, but later
-					// from the iPhone data source, it should be considered the same, right?
-					// "data_source_name": true,
-					"classification_name": true,
-					// "original_location": true,
-					// "intermediate_location": true,
-					"filename": true, // TODO: <-- this one might only apply to some data sources, like photo libraries...
-					"timestamp": true,
-					"timespan": true,
-					"timeframe": true,
-					"data": true,
-					"location": true
-				},
-				// item_field_updates: {
-				// 	"attribute_id": 2,
-				// 	"classification_id": 2,
-				// 	"original_location": 2,
-				// 	"intermediate_location": 2,
-				// 	"timestamp": 2,
-				// 	"timespan": 2,
-				// 	"timeframe": 2,
-				// 	"time_offset": 2,
-				// 	"time_uncertainty": 2,
-				// 	"data": 2,
-				// 	"metadata": 2,
-				// 	"location": 2
-				// }
+				overwrite_local_changes: $('#overwrite-local-changes').checked,
+				item_unique_constraints: page.itemUniqueConstraints,
 				interactive: $('#interactive').checked ? {} : null
 			},
 			estimate_total: $('#estimate-total').checked
 		}
 	};
 
+	// collect item update preferences
+	if (page.itemUpdatePrefs?.length) {
+		importParams.job.processing_options.item_update_preferences = page.itemUpdatePrefs;
+	}
+
+	// set timeframe constraints
+	const timeframe = $('#timeframe .date-input').datepicker.selectedDates;
+	if (timeframe?.length > 1) {
+		importParams.job.processing_options.timeframe = {
+			since: timeframe[0],
+			until: timeframe[1]
+		};
+	}
+
+	// collect data source options - if there are any input validation errors, show an alert and redirect to that dsOpt modal after it
 	for (const dsgroup of $$('.file-import-plan-dsgroup')) {
-		importParams.job.plan.files.push({
-			data_source_name: dsgroup.ds.name,
-			data_source_options: dataSourceOptions(dsgroup.ds),
-			filenames: dsgroup.filenames
-		});
+		try {
+			importParams.job.plan.files.push({
+				data_source_name: dsgroup.ds.name,
+				data_source_options: await dataSourceOptions(dsgroup.ds),
+				filenames: dsgroup.filenames
+			});
+		} catch (err) {
+			// TODO: It might be good to show the data source name and icon in the modal?
+			console.log("Data source options error:", err)
+			$('#modal-error .modal-error-dismiss').dataset.bsTarget = `#modal-import-dsopt-${dsgroup.ds.name}`;
+			$('#modal-error .modal-error-dismiss').dataset.bsToggle = 'modal';
+			$('#modal-error .modal-error-title').innerText = err.title;
+			$('#modal-error .modal-error-message').innerText = err.message;
+			const errorModal = new bootstrap.Modal('#modal-error');
+			errorModal.show();
+			return;
+		}
 	}
 
 	console.log("IMPORT PARAMS:", importParams)
 
 	const result = await app.Import(importParams);
-	console.log("JOB STARTED:", result);
+	console.log("JOB STARTED:", result)
 
 	notify({
 		type: "success",
@@ -425,17 +419,15 @@ on('click', '#start-import', async event => {
 
 	if (importParams.job.processing_options.interactive) {
 		// take user to page where they can begin their interactive import
-		navigateSPA(`/input?repo_id=${repoID}&job_id=${result.job_id}`);
+		navigateSPA(`/input?repo_id=${repoID}&job_id=${result.job_id}`, true);
 	} else {
 		// otherwise, redirect to job status, I guess
-		navigateSPA(`/jobs/${repoID}/${result.job_id}`);
+		navigateSPA(`/jobs/${repoID}/${result.job_id}`, true);
 	}
-
 });
 
-function dataSourceOptions(ds) {
+async function dataSourceOptions(ds) {
 	dsoptContainer = $(`#modal-import-dsopt-${ds.name}`);
-	console.log(dsoptContainer);
 	if (!dsoptContainer) {
 		return;
 	}
@@ -449,18 +441,27 @@ function dataSourceOptions(ds) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
 	}
-	if (ds.name == "smsbackuprestore") {
-		const ownerPhoneInput = $('.smsbackuprestore-owner-phone', dsoptContainer);
-		console.log("INPUT:", ownerPhoneInput)
-		if (!ownerPhoneInput.value) {
-			// TODO: generalize field validation (see also the focusout event above)
-			ownerPhoneInput.classList.add('is-invalid');
-			ownerPhoneInput.classList.remove('is-valid');
+	if (ds.name == "sms_backup_restore") {
+		const ownerPhoneInput = $('.sms_backup_restore-owner-phone', dsoptContainer);
+		if (ownerPhoneInput.value) {
+			dsOpt = {
+				owner_phone_number: ownerPhoneInput.value
+			};
+		} else {
+			// this DS requires we input the phone number of the phone that created the data,
+			// so if the input field was left empty, ensure the repo owner has a phone number
+			const owner = await getOwner(tlz.openRepos[0]);
+			if (getEntityAttribute(owner, 'phone_number').length == 0) {
+				ownerPhoneInput.classList.add('is-invalid');
+				ownerPhoneInput.classList.remove('is-valid');
+				throw {
+					elem: ownerPhoneInput,
+					title: "Phone number required",
+					message: "The data source doesn't provide a phone number by itself. When no phone number is entered here as part of the data source options, we use the phone number of the timeline owner, but no phone number is known for the timeline owner. Please enter a phone number."
+				}
+			}
 			return;
 		}
-		dsOpt = {
-			owner_phone_number: ownerPhoneInput.value
-		};
 	}
 	if (ds.name == "google_location") {
 		dsOpt = {};
@@ -525,11 +526,11 @@ function dataSourceOptions(ds) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
 	}
-	if (ds.name == "applephotos") {
+	if (ds.name == "apple_photos") {
 		dsOpt = {
-			include_trashed: $('.applephotos-trashed', dsoptContainer).checked
+			include_trashed: $('.apple_photos-trashed', dsoptContainer).checked
 		};
-		const owner = $('.applephotos-owner', dsoptContainer).tomselect.getValue();
+		const owner = $('.apple_photos-owner', dsoptContainer).tomselect.getValue();
 		if (owner.length) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
@@ -539,8 +540,282 @@ function dataSourceOptions(ds) {
 }
 
 
+
+// ITEM UPDATE PREFERENCES
+
+// load stored settings when modal is opened, or reset to default UI if no settings are saved
+on('show.bs.modal', '#modal-advanced-settings', () => {
+	if (page.itemUniqueConstraints) {
+		$('#unique-data-source').checked = page.itemUniqueConstraints.data_source_name;
+		$('#unique-original-location').checked = page.itemUniqueConstraints.original_location;
+		$('#unique-filename').checked = page.itemUniqueConstraints.filename;
+		$('#unique-timestamp').checked = page.itemUniqueConstraints.timestamp;
+		$('#unique-latlon').checked = page.itemUniqueConstraints.latlon;
+		$('#unique-altitude').checked = page.itemUniqueConstraints.altitude;
+		$('#unique-classification').checked = page.itemUniqueConstraints.classification_name;
+		$('#unique-data').checked = page.itemUniqueConstraints.data;
+	}
+	if (page.itemUpdatePrefs) {
+		// reset previous UI
+		$('#update-prefs-table tbody').replaceChildren();
+		$('#no-rules').classList.remove('d-none');
+
+		for (const pref of page.itemUpdatePrefs) {
+			// add new rule row
+			$('#add-update-prefs-row').click();
+			const newRowEl = $('#update-prefs-table tbody tr:last-child');
+
+			// fill out field and delete options
+			$('.field-name', newRowEl).value = pref.field;
+			$('.field-update-deletes', newRowEl).checked = pref.nulls;
+
+			// fill out each priority
+			if (!pref.priorities) {
+				continue;
+			}
+			pref.priorities.forEach((priority, i) => {
+				// add new priority if it's not the first one, since adding a rule row adds one priority
+				if (i > 0) {
+					$('.add-priority', newRowEl).click();
+				}
+				const priorityEl = $('.field-update-pref-priority:last-child', newRowEl);
+				for (const key in priority) {
+					if (key == "keep") {
+						$('.priority-property', priorityEl).value = priority[key];
+					} else if (key == "data_source") {
+						$('.priority-property', priorityEl).value = key;
+						trigger($('.priority-property', priorityEl), 'change', { tsVal: priority[key] });
+					} else if (key == "media_type") {
+						$('.priority-property', priorityEl).value = key;
+						trigger($('.priority-property', priorityEl), 'change');
+						$('.priority-media-type', priorityEl).value = priority[key];
+					} else if (key == "size") {
+						$('.priority-property', priorityEl).value = priority[key] == "bigger" ? "size_larger" : "size_smaller";
+					} else if (key == "timestamp") {
+						$('.priority-property', priorityEl).value = priority[key] == "earlier" ? "ts_earlier" : "ts_later";
+					}
+				}
+			});
+		}
+	}
+});
+
+// save settings when button is clicked (only saved for duration of page load; that's probably best tbh)
+on('click', '#save-settings', () => {
+	saveAdvancedSettings();
+});
+
+function saveAdvancedSettings() {
+	page.itemUniqueConstraints = {};
+	// The API actually uses the presence of any key as "yes" to being a unique
+	// constraint; the value is whether to strictly enforce NULLs. Our UI doesn't
+	// yet offer toggling strict nulls for unique constraints, so for now we only
+	// treat the checkboxes as cues to add them to the unique constraints at all,
+	// and we assume strict nulls (i.e. if incoming is NULL, db row must also have NULL)
+	if ($('#unique-data-source').checked) {
+		page.itemUniqueConstraints["data_source_name"] = true;
+	}
+	if ($('#unique-original-location').checked) {
+		page.itemUniqueConstraints["original_location"] = true;
+	}
+	if ($('#unique-filename').checked) {
+		page.itemUniqueConstraints["filename"] = true;
+	}
+	if ($('#unique-timestamp').checked) {
+		page.itemUniqueConstraints["timestamp"] = true;
+	}
+	if ($('#unique-latlon').checked) {
+		page.itemUniqueConstraints["latlon"] = true;
+	}
+	if ($('#unique-altitude').checked && !$('#unique-altitude').getAttribute('disabled')) {
+		page.itemUniqueConstraints["altitude"] = true;
+	}
+	if ($('#unique-classification').checked) {
+		page.itemUniqueConstraints["classification_name"] = true;
+	}
+	if ($('#unique-data').checked) {
+		page.itemUniqueConstraints["data"] = true;
+	}
+	saveItemUpdatePreferences();
+}
+
+function saveItemUpdatePreferences() {
+	page.itemUpdatePrefs = [];
+	$$('#update-prefs-table tbody tr').forEach(rowEl => {
+		const fieldName = $('.field-name', rowEl).value;
+		if (!fieldName) {
+			return;
+		}
+		const priorities = [];
+		$$('.field-update-pref-priority', rowEl).forEach(priorityEl => {
+			const prop = $('.priority-property', priorityEl).value;
+			if (prop == "incoming") {
+				priorities.push({ "keep": "incoming" });
+			} else if (prop == "existing") {
+				priorities.push({ "keep": "existing" });
+			} else if (prop == "data_source") {
+				const dataSourceEl = $('select.priority-data-source', priorityEl);
+				if (dataSourceEl) {
+					priorities.push({ "data_source": dataSourceEl.value });
+				}
+			} else if (prop == "media_type") {
+				const mediaTypeEl = $('.priority-media-type', priorityEl);
+				if (mediaTypeEl) {
+					priorities.push({ "media_type": mediaTypeEl.value });
+				}
+			} else if (prop == "size_larger") {
+				priorities.push({ "size": "bigger" });
+			} else if (prop == "size_smaller") {
+				priorities.push({ "size": "smaller" });
+			} else if (prop == "ts_earlier") {
+				priorities.push({ "timestamp": "ealier" });
+			} else if (prop == "ts_later") {
+				priorities.push({ "timestamp": "later" });
+			}
+		});
+		if (!priorities.length) {
+			return;
+		}
+		const rule = {
+			field: $('.field-name', rowEl).value,
+			priorities: priorities,
+			nulls: $('.field-update-deletes', rowEl).checked
+		};
+		page.itemUpdatePrefs.push(rule);
+	});
+}
+
+// add rule/preference row
+on('click', '#add-update-prefs-row', e => {
+	$('#no-rules').classList.add('d-none');
+
+	// no technical limitation, just an arbitrary one to keep the UI sane
+	if ($$('#update-prefs-table tbody tr').length >= 15) {
+		return;
+	}
+
+	// make new row, and get last row so we can copy values from it
+	const rowEl = cloneTemplate('#tpl-item-update-prefs-row');
+	const lastRowEl = $('#update-prefs-table tbody tr:last-child');
+
+	// make new priority for the new row
+	const priorityEl = cloneTemplate('#tpl-field-update-pref-priority');
+	$('.add-priority', priorityEl).classList.remove('d-none');
+	$('.field-update-priorities', rowEl).append(priorityEl);
+	
+	// add the row element early so we can trigger events within it as we copy things into it
+	$('#update-prefs-table tbody').append(rowEl);
+
+	// copy the priorities from the last rule row into the new one
+	const lastPriorities = $('.field-update-priorities', lastRowEl);
+	if (lastRowEl) {
+		$$('.field-update-pref-priority', lastPriorities).forEach((lastPriorityEl, i) => {
+			// either this is the first priority element, which we already made above for the new row,
+			// or we need to make another new priority element if the last row has more than one
+			let newPriorityEl = $(`.field-update-pref-priority:nth-child(${i+1})`, rowEl);
+			if (!newPriorityEl) {
+				$('.add-priority', rowEl).click();
+				newPriorityEl = $(`.field-update-pref-priority:nth-child(${i+1})`, rowEl);
+			}
+			// copy the property, and trigger the change event so it can set up a possible value input
+			// (we attach the data source value if it's a data source priority because the change event
+			// will create a data source tomselect, which is an async operation, and we need to set it
+			// to the same value after that completes, which only the event handler can do)
+			$('.priority-property', newPriorityEl).value = $(`.priority-property`, lastPriorityEl).value;
+			trigger($('.priority-property', newPriorityEl), 'change', { tsVal: $(`select.priority-data-source`, lastPriorityEl)?.value });
+			// media source priority needs its value copied over too, but that's much simpler than the async data source selector
+			if ($('.priority-media-type', newPriorityEl)) {
+				$('.priority-media-type', newPriorityEl).value = $(`.priority-media-type`, lastPriorityEl).value;
+			}
+		});
+	}
+});
+
+// delete rule row
+on('click', '#update-prefs-table .delete-rule', e => {
+	e.target.closest('tr').remove();
+
+	if ($$('#update-prefs-table tbody tr').length == 0) {
+		$('#no-rules').classList.remove('d-none');
+	}
+});
+
+// when a priority property is changed in a rule, set up a value input if necessary
+on('change', '#update-prefs-table .priority-property', async e => {
+	const containerEl = e.target.closest('.field-update-pref-priority');
+	$('.priority-value-input-container', containerEl).innerHTML = '';
+
+	if (e.target.value == 'data_source') {
+		$('.priority-value-input-container', containerEl).innerHTML = '<select class="priority-data-source form-select mt-1" placeholder="Data source" autocomplete="off"></select>';
+		const dsSel = await newDataSourceSelect($('.priority-data-source', containerEl), {
+			maxItems: 1
+		});
+		if (e.detail?.tsVal) {
+			dsSel.setValue(e.detail.tsVal);
+		}
+	} else if (e.target.value == "media_type") {
+		$('.priority-value-input-container', containerEl).innerHTML = '<input class="priority-media-type form-control mt-1" placeholder="Media type">';
+	}
+});
+
+// delete priority from rule row
+on('click', '#update-prefs-table .delete-priority', e => {
+	const tr = e.target.closest('tr');
+
+	e.target.closest('.field-update-pref-priority').remove();
+
+	// make sure "+" (add priority) is only shown on the last one,
+	// and that "-" (delete priority) is only shown if there is more than one
+	const priorities = $$('.field-update-pref-priority', tr);
+	if (priorities.length == 1) {
+		priorities.forEach(el => {
+			$('.delete-priority', el).classList.add('d-none');
+		});
+	}
+	$$('.field-update-pref-priority:not(:last-child)', tr).forEach(el => {
+		$('.add-priority', el).classList.add('d-none');
+	});
+	$('.field-update-pref-priority:last-child .add-priority', tr).classList.remove('d-none');
+});
+
+// add priority to rule row
+on('click', '#update-prefs-table .add-priority', e => {
+	const priorityEl = cloneTemplate('#tpl-field-update-pref-priority');
+
+	const containerEl = e.target.closest('.field-update-priorities');
+	containerEl.append(priorityEl);
+	
+	// only allow up to a few priorities -- no technical reason per-se,
+	// but I think more than a few gets a bit ridiculous
+	const tr = e.target.closest('tr');
+	if ($$('.field-update-pref-priority', tr).length < 3) {
+		$('.add-priority', priorityEl).classList.remove('d-none');
+	}
+
+	// make sure that "-" (delete priority) is shown if there is more than one,
+	// and hide "+" (add priority) on all but the new one we just appended
+	$$('.field-update-pref-priority', tr).forEach(el => {
+		$('.delete-priority', el).classList.remove('d-none');
+	});
+
+	$$('.field-update-pref-priority:not(:last-child)', tr).forEach(el => {
+		$('.add-priority', el).classList.add('d-none');
+	});
+});
+
+// altitude is only usable as a unique constraint if lat/lon also is
+on('change', '#unique-latlon', e => {
+	if (e.target.checked) {
+		$('#unique-altitude').removeAttribute('disabled', true);
+	} else {
+		$('#unique-altitude').setAttribute('disabled', true);
+	}
+});
+
+
+
 // // TODO: generalize input validation
-// on('focusout', '.smsbackuprestore-owner-phone', async event => {
+// on('focusout', '.sms_backup_restore-owner-phone', async event => {
 // 	if (event.target.value) {
 // 		event.target.classList.remove('is-invalid');
 // 		event.target.classList.add('is-valid');

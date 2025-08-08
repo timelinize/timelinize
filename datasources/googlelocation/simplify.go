@@ -80,7 +80,7 @@ func seekMostDistantPoint(l line, points []*Location) (idx int, maxDist float64)
 	// instead of starting at 0 and not having the -1)
 	for i := 1; i < len(points)-1; i++ {
 		// don't drop clusters; too important
-		if !points[i].Timespan.IsZero() {
+		if !points[i].Timespan.IsZero() || points[i].Significant {
 			return i, -1
 		}
 		if d := l.distanceToPoint(points[i]); d > maxDist {

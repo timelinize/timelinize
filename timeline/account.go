@@ -114,7 +114,7 @@ func (tl *Timeline) AddAccount(ctx context.Context, dataSourceID string, _ json.
 	// store the account
 	var accountID int64
 	tl.dbMu.Lock()
-	err := tl.db.QueryRow(`INSERT INTO accounts (data_source_id) VALUES (?) RETURNING id`,
+	err := tl.db.QueryRowContext(ctx, `INSERT INTO accounts (data_source_id) VALUES (?) RETURNING id`,
 		dataSourceID).Scan(&accountID)
 	tl.dbMu.Unlock()
 	if err != nil {
@@ -191,11 +191,11 @@ func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account
 	WHERE data_sources.id = accounts.data_source_id`
 	args := make([]any, 0, len(ids)+len(dataSourceIDs))
 	if len(ids) > 0 || len(dataSourceIDs) > 0 {
-		q += " AND (" //nolint:goconst
+		q += " AND ("
 	}
 	for i, id := range ids {
 		if i > 0 {
-			q += " OR " //nolint:goconst
+			q += " OR "
 		}
 		q += "accounts.id=?"
 		args = append(args, id)
@@ -218,7 +218,7 @@ func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account
 	defer tl.dbMu.RUnlock()
 
 	accounts := []Account{}
-	rows, err := tl.db.Query(q, args...)
+	rows, err := tl.db.QueryContext(tl.ctx, q, args...)
 	if err != nil {
 		return accounts, fmt.Errorf("querying accounts from DB: %w", err)
 	}

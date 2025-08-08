@@ -133,7 +133,7 @@ func (c *Client) prepareTweet(_ context.Context, t *tweet, source string, opt Op
 	return false, nil
 }
 
-func (c *Client) makeItemGraphFromTweet(_ context.Context, t tweet, fsys fs.FS, _ Options) (*timeline.Graph, error) {
+func (c *Client) makeItemGraphFromTweet(_ context.Context, params timeline.ImportParams, t tweet, fsys fs.FS, _ Options) (*timeline.Graph, error) {
 	// oneMediaItem := t.hasExactlyOneMediaItem()
 
 	item := &timeline.Item{
@@ -179,11 +179,11 @@ func (c *Client) makeItemGraphFromTweet(_ context.Context, t tweet, fsys fs.FS, 
 				targetFileInArchive := path.Join("data", "tweets_media", dataFileName)
 
 				file, err := fsys.Open(targetFileInArchive)
-				if err != nil {
-					return nil, fmt.Errorf("opening data file in archive: %s: %w", targetFileInArchive, err)
+				if err == nil {
+					m.readCloser = file
+				} else {
+					params.Log.Error("could not open data file in archive", zap.String("filename", targetFileInArchive), zap.Error(err))
 				}
-				m.readCloser = file
-
 			// case "api":
 			// 	mediaURL := m.getURL()
 			// 	if m.Type == "photo" {

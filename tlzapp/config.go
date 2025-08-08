@@ -41,6 +41,12 @@ type Config struct {
 	// The listen address to bind the socket to.
 	Listen string `json:"listen,omitempty"`
 
+	// Which HTTP origins are allowed to access the API
+	// in addition to the default loopback origins.
+	// Keep in mind this is currently unauthenticated,
+	// so ensure your socket and transport are secure.
+	AllowedOrigins []string `json:"allowed_origins,omitempty"`
+
 	// Serves the website from this folder on disk instead of
 	// the embedded file system. This can make local, rapid
 	// development easier so you don't have to recompile for

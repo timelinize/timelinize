@@ -175,6 +175,12 @@ tlz.pageControllers = {
 
 	"/pages/import.html": {
 		load() {
+			// TODO: maybe this could be a more standard pattern for "global" vars on a specific page load only (see also the delete in the unload below)
+			window.page = {};
+
+			// populate default settings so even if the settings modal isn't opened, essential defaults will be set
+			saveAdvancedSettings();
+
 			$('#timeframe').append(newDatePicker({
 				passthru: {
 					range: true
@@ -183,6 +189,9 @@ tlz.pageControllers = {
 				timeToggle: true,
 				noApply: true
 			}));
+		},
+		unload() {
+			delete window.page;
 		}
 	},
 
@@ -241,6 +250,7 @@ tlz.pageControllers = {
 		},
 		unload() {
 			$('body').classList.remove('layout-fluid');
+			mapData = {};
 		}
 	},
 

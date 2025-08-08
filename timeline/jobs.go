@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -92,13 +93,13 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(tl.ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
-	jobID, err := tl.storeJob(tx, job)
+	jobID, created, err := tl.storeJob(tx, job)
 	if err != nil {
 		return 0, err
 	}
@@ -111,7 +112,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 		zap.String("repo_id", tl.ID().String()),
 		zap.Uint64("id", jobID),
 		zap.String("type", string(job.Type)),
-		zap.Time("created", time.Now()),
+		zap.Time("created", created),
 		zap.Timep("start", job.Start),
 		zap.Uint64p("parent_job_id", parentJobIDPtr),
 		zap.Intp("size", totalPtr))
@@ -130,7 +131,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 
 // storeJob adds the job to the database. It does not start it.
 // TODO: Job configs could be compressed to save space in the DB...
-func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, error) {
+func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, time.Time, error) {
 	job.Hash = job.hash()
 
 	hostname, err := os.Hostname()
@@ -146,10 +147,10 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, error) {
 		`SELECT count() FROM jobs WHERE hash=? AND state=? LIMIT 1`,
 		job.Hash, JobQueued).Scan(&count)
 	if err != nil {
-		return 0, fmt.Errorf("checking for duplicate job: %w", err)
+		return 0, time.Time{}, fmt.Errorf("checking for duplicate job: %w", err)
 	}
 	if count > 0 {
-		return 0, nil
+		return 0, time.Time{}, nil
 	}
 
 	var start *int64
@@ -159,16 +160,19 @@ func (tl *Timeline) storeJob(tx *sql.Tx, job Job) (uint64, error) {
 	}
 
 	var id uint64
+	var createdUnix int64
 	err = tx.QueryRowContext(tl.ctx, `
 		INSERT INTO jobs (type, configuration, hash, hostname, start, total, repeat, parent_job_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		RETURNING id`,
-		job.Type, job.Config, job.Hash, job.Hostname, start, job.Total, job.Repeat, job.ParentJobID).Scan(&id)
+		RETURNING id, created`,
+		job.Type, job.Config, job.Hash, job.Hostname, start, job.Total, job.Repeat, job.ParentJobID).Scan(&id, &createdUnix)
 	if err != nil {
-		return 0, fmt.Errorf("inserting new job row: %w", err)
+		return 0, time.Time{}, fmt.Errorf("inserting new job row: %w", err)
 	}
 
-	return id, nil
+	created := time.UnixMilli(createdUnix)
+
+	return id, created, nil
 }
 
 // loadJob loads a job from the database, using tx if set. A lock MUST be obtained on the
@@ -320,12 +324,20 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID uint64) erro
 
 				logger := Log.Named("job")
 
-				tx, err := tl.db.Begin()
+				tx, err := tl.db.BeginTx(ctx, nil)
 				if err != nil {
 					logger.Error("could not start transaction to start job", zap.Error(err))
 					return
 				}
 				defer tx.Rollback()
+
+				// ensure job was not aborted while we were waiting for it to start
+				var unabortedJobCount int
+				err = tx.QueryRowContext(ctx, `SELECT count() FROM jobs WHERE id=? AND state!=? LIMIT 1`, jobID, JobAborted).Scan(&unabortedJobCount)
+				if errors.Is(err, sql.ErrNoRows) || unabortedJobCount == 0 {
+					logger.Error("job was aborted before it started")
+					return
+				}
 
 				if err = start(tx); err != nil {
 					logger.Error("could not start scheduled job", zap.Error(err))
@@ -409,6 +421,16 @@ func (tl *Timeline) runJob(row Job) error {
 
 	// run the job asynchronously -- never block the calling goroutine!
 	go func(job *ActiveJob, logger, statusLog *zap.Logger, row Job, action JobAction) {
+		// don't allow a job, which is doing who-knows-what and processing who-knows-what
+		// input, to bring down the program
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("panic",
+					zap.Any("error", r),
+					zap.String("stack", string(debug.Stack())))
+			}
+		}()
+
 		// when we're done here, clean up our map of active jobs
 		defer func() {
 			tl.activeJobsMu.Lock()
@@ -427,8 +449,15 @@ func (tl *Timeline) runJob(row Job) error {
 		// or at least record the errors even if it gets marked as "succeeded"
 		// (maybe "succeeded" is too specific/optimistic a term, maybe "completed" or "done" or "finished" instead?)
 
+		// type conversion for checkpoint; it's easier for actions to use []byte, but we like using *string
+		// for database since most DB viewers make it easier to read TEXT columns than BLOB columns
+		var chkpt []byte
+		if row.Checkpoint != nil {
+			chkpt = []byte(*row.Checkpoint)
+		}
+
 		// run the job; we'll handle the error by logging the result and updating the state
-		actionErr := action.Run(job, row.Checkpoint)
+		actionErr := action.Run(job, chkpt)
 
 		var newState JobState
 		switch {
@@ -466,7 +495,7 @@ func (tl *Timeline) runJob(row Job) error {
 		tl.dbMu.Lock()
 		defer tl.dbMu.Unlock()
 
-		tx, err := tl.db.Begin()
+		tx, err := tl.db.BeginTx(ctx, nil)
 		if err != nil {
 			logger.Error("beginning transaction", zap.Error(err))
 			return
@@ -688,7 +717,7 @@ func (j *ActiveJob) Message(message string) {
 // loop. For example, if a job started at unit of work ("task"?) index 0 and
 // finished up through 3, the progress value would have been updated to be 4
 // and the checkpoint would contain index 4. The job would then resume with
-// starting at index 4, which had not been completed yet.
+// starting at index 4, which had not been started yet.
 //
 // Checkpoint values are opaque and MUST be JSON-marshallable. They will be
 // returned to the job action in the form of JSON bytes.
@@ -716,6 +745,8 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	j.currentCheckpoint = checkpoint
+
 	// no-op if last sync was too recent and the job isn't done yet (job done <==> tx!=nil)
 	if time.Since(j.lastSync) < jobSyncInterval && tx == nil {
 		return nil
@@ -733,7 +764,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 	}
 
 	q := `UPDATE jobs SET progress=?, total=?, message=?, checkpoint=?, updated=? WHERE id=?` // TODO: LIMIT 1
-	vals := []any{j.currentProgress, j.currentTotal, j.currentMessage, chkpt, time.Now().UnixMilli(), j.id}
+	vals := []any{j.currentProgress, j.currentTotal, j.currentMessage, string(chkpt), time.Now().UnixMilli(), j.id}
 
 	var err error
 	if tx == nil {
@@ -854,7 +885,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID uint64) error {
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -974,8 +1005,8 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 		if err != nil {
 			return err
 		}
-		if state != JobStarted && state != JobPaused {
-			return fmt.Errorf("job %d is in %s state and cannot be unpaused", jobID, state)
+		if state != JobStarted && state != JobPaused && state != JobFailed {
+			return fmt.Errorf("job %d is in %s state and cannot be resumed", jobID, state)
 		}
 		return tl.StartJob(ctx, jobID, false)
 	}
@@ -985,7 +1016,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
 	tl.dbMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("job unpaused, but error updating job state in DB: %w", err)
+		return fmt.Errorf("job resumed, but error updating job state in DB: %w", err)
 	}
 
 	// unpause by closing the pause channel, delete the pause channel,
@@ -1010,7 +1041,7 @@ func (tl *Timeline) StartJob(ctx context.Context, jobID uint64, startOver bool) 
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1085,7 +1116,7 @@ type Job struct {
 	Message     *string        `json:"message,omitempty"`
 	Total       *int           `json:"total,omitempty"`
 	Progress    *int           `json:"progress,omitempty"`
-	Checkpoint  []byte         `json:"checkpoint,omitempty"`
+	Checkpoint  *string        `json:"checkpoint,omitempty"`
 	Repeat      *time.Duration `json:"repeat,omitempty"`
 	ParentJobID *uint64        `json:"parent_job_id,omitempty"`
 

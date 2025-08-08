@@ -57,11 +57,11 @@ func init() {
 type Firefox struct{}
 
 // Recognize returns whether the input file is recognized.
-func (Firefox) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+func (Firefox) Recognize(ctx context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	if filepath.Base(dirEntry.Name()) == "places.sqlite" {
 		var ok bool
 		var err error
-		if ok, err = checkTables(dirEntry.FullPath()); err != nil {
+		if ok, err = checkTables(ctx, dirEntry.FullPath()); err != nil {
 			return timeline.Recognition{}, fmt.Errorf("checking table existence: %w", err)
 		}
 
@@ -94,7 +94,7 @@ func (f *Firefox) process(ctx context.Context, path string, itemChan chan<- *tim
 	defer db.Close()
 
 	// Verify that we can read from the database
-	err = db.Ping()
+	err = db.PingContext(ctx)
 	if err != nil {
 		return fmt.Errorf("verifying database connection: %w", err)
 	}
@@ -155,7 +155,7 @@ func (f *Firefox) process(ctx context.Context, path string, itemChan chan<- *tim
 	return nil
 }
 
-func checkTables(src string) (bool, error) {
+func checkTables(ctx context.Context, src string) (bool, error) {
 	tempDir, err := os.MkdirTemp("", "firefox_import_*")
 	if err != nil {
 		return false, fmt.Errorf("creating temp directory: %w", err)
@@ -169,7 +169,7 @@ func checkTables(src string) (bool, error) {
 	defer db.Close()
 
 	var exists bool
-	err = db.QueryRow("SELECT 1 FROM sqlite_master WHERE type='table' AND name='moz_places'").Scan(&exists)
+	err = db.QueryRowContext(ctx, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='moz_places'").Scan(&exists)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("checking table existence: %w", err)
 	}

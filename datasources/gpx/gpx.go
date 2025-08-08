@@ -121,14 +121,14 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		}
 
 		for {
-			item, err := proc.NextGPXItem(ctx)
+			g, err := proc.NextGPXGraph(ctx)
 			if err != nil {
 				return err
 			}
-			if item == nil {
+			if g == nil {
 				break
 			}
-			params.Pipeline <- &timeline.Graph{Item: item}
+			params.Pipeline <- g
 		}
 
 		return nil
@@ -162,8 +162,8 @@ func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportPara
 	}, nil
 }
 
-// NextGPXItem returns the next GPX item.
-func (p *Processor) NextGPXItem(ctx context.Context) (*timeline.Item, error) {
+// NextGPXGraph returns the next GPX graph (item or entity)
+func (p *Processor) NextGPXGraph(ctx context.Context) (*timeline.Graph, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -176,14 +176,9 @@ func (p *Processor) NextGPXItem(ctx context.Context) (*timeline.Item, error) {
 		if l == nil {
 			break
 		}
-
-		point := l.Original.(trkpt)
-
-		meta := timeline.Metadata{
-			"Velocity":   point.Speed, // same key as with Google Location History
-			"Satellites": point.Sat,
+		if l.Metadata == nil {
+			l.Metadata = make(timeline.Metadata)
 		}
-		meta.Merge(l.Metadata, timeline.MetaMergeReplace)
 
 		item := &timeline.Item{
 			Classification: timeline.ClassLocation,
@@ -191,11 +186,56 @@ func (p *Processor) NextGPXItem(ctx context.Context) (*timeline.Item, error) {
 			Timespan:       l.Timespan,
 			Location:       l.Location(),
 			Owner:          p.owner,
-			Metadata:       meta,
+			Metadata:       l.Metadata,
+		}
+
+		g := &timeline.Graph{Item: item}
+
+		makePlaceEntity := func(pt wpt) {
+			// store named waypoints as place entities
+			if pt.Name != "" {
+				g.ToEntity(timeline.RelVisit, &timeline.Entity{
+					Type: timeline.EntityPlace,
+					Name: pt.Name,
+					Attributes: []timeline.Attribute{
+						{
+							Name:      "coordinate",
+							Latitude:  item.Location.Latitude,
+							Longitude: item.Location.Longitude,
+							Identity:  true, // TODO: I feel like this should be just `Identifying: true`, but that creates "_entity" attributes...
+							Metadata: timeline.Metadata{
+								"URL": pt.Link.Href,
+							},
+						},
+					},
+				})
+			}
+		}
+
+		switch pt := l.Original.(type) {
+		case trkpt:
+			if _, ok := item.Metadata["Velocity"]; !ok {
+				item.Metadata["Velocity"] = pt.Speed // use same key as with Google Location History
+			}
+			if _, ok := item.Metadata["Satellites"]; !ok {
+				item.Metadata["Satellites"] = pt.Sat
+			}
+			item.Metadata = l.Metadata
+		case wpt:
+			makePlaceEntity(pt)
+		}
+
+		// in case a waypoint was clustered with other points,
+		// iterate the points comprising it to see if there's any
+		// place entities we can extract, so we don't skip them
+		for _, cp := range l.ClusterPoints() {
+			if pt, ok := cp.Original.(wpt); ok {
+				makePlaceEntity(pt)
+			}
 		}
 
 		if p.opt.Timeframe.ContainsItem(item, false) {
-			return item, nil
+			return g, nil
 		}
 	}
 
@@ -208,6 +248,8 @@ type decoder struct {
 	*xml.Decoder
 	stack        nesting
 	metadataTime time.Time
+	trkType      string
+	lastTrkPt    trkpt
 }
 
 // NextLocation returns the next available point from the XML document.
@@ -256,22 +298,59 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 			<type>cycling</type>
 		*/
 
+		const gpxRoot = "gpx"
+
 		switch elem := tkn.(type) {
 		case xml.StartElement:
-			if elem.Name.Local == "metadata" && d.stack.path() == "gpx" {
+			switch {
+			// any case where we decode the element, we need to return or continue,
+			// to avoid adding it to the stack, since by decoding it, we also decode
+			// the closing tag
+
+			case elem.Name.Local == "metadata" && d.stack.path() == gpxRoot:
 				var meta metadata
 				if err := d.DecodeElement(&meta, &elem); err != nil {
 					// TODO: maybe skip and go to next?
 					return nil, fmt.Errorf("decoding XML element as metadata: %w", err)
 				}
-				ts, err := time.Parse(time.RFC3339, meta.Time)
-				if err != nil {
-					return nil, fmt.Errorf("parsing timestamp in metadata->time element: %w", err)
+				if meta.Time != "" {
+					ts, err := time.Parse(time.RFC3339, meta.Time)
+					if err != nil {
+						return nil, fmt.Errorf("parsing timestamp in metadata->time element: %w", err)
+					}
+					d.metadataTime = ts
 				}
-				d.metadataTime = ts
 				continue
-			}
-			if elem.Name.Local == "trkpt" && d.stack.path() == "gpx/trk/trkseg" {
+
+			case elem.Name.Local == "wpt" && d.stack.path() == gpxRoot:
+				var waypoint wpt
+				if err := d.DecodeElement(&waypoint, &elem); err != nil {
+					// TODO: maybe skip and go to next?
+					return nil, fmt.Errorf("decoding XML element as waypoint: %w", err)
+				}
+				return &googlelocation.Location{
+					Original:    waypoint,
+					LatitudeE7:  int64(waypoint.Lat * placesMult),
+					LongitudeE7: int64(waypoint.Lon * placesMult),
+					Altitude:    waypoint.Ele,
+					Timestamp:   waypoint.Time,
+					Significant: true,
+				}, nil
+
+			case elem.Name.Local == "trk" && d.stack.path() == gpxRoot:
+				// reset the track state, since it's a new track
+				d.trkType = ""
+				d.lastTrkPt = trkpt{}
+
+			case elem.Name.Local == "type" && d.stack.path() == "gpx/trk":
+				var trkType string
+				if err := d.DecodeElement(&trkType, &elem); err != nil {
+					return nil, fmt.Errorf("decoding XML element as track type: %w", err)
+				}
+				d.trkType = trkType
+				continue
+
+			case elem.Name.Local == "trkpt" && d.stack.path() == "gpx/trk/trkseg":
 				var point trkpt
 				if err := d.DecodeElement(&point, &elem); err != nil {
 					// TODO: maybe skip and go to next?
@@ -283,12 +362,20 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 					timestamp = d.metadataTime
 				}
 
+				// tell the location processor to reset track state
+				isFirstInTrack := d.lastTrkPt.Lat == 0 && d.lastTrkPt.Lon == 0
+				d.lastTrkPt = point
+
 				return &googlelocation.Location{
 					Original:    point,
 					LatitudeE7:  int64(point.Lat * placesMult),
 					LongitudeE7: int64(point.Lon * placesMult),
 					Altitude:    point.Ele,
 					Timestamp:   timestamp,
+					Metadata: timeline.Metadata{
+						"Activity type": d.trkType,
+					},
+					NewTrack: isFirstInTrack,
 				}, nil
 			}
 
@@ -296,7 +383,7 @@ func (d *decoder) NextLocation(ctx context.Context) (*googlelocation.Location, e
 
 		case xml.EndElement:
 			if len(d.stack) == 0 {
-				return nil, fmt.Errorf("encountered end tag without opening: %s", elem.Name.Local)
+				return nil, fmt.Errorf("encountered unmatched closing tag: %s", elem.Name.Local)
 			}
 			d.stack = d.stack[:len(d.stack)-1]
 		}
@@ -326,6 +413,22 @@ type metadata struct {
 	Time string `xml:"time"`
 }
 
+// waypoint
+type wpt struct {
+	XMLName xml.Name  `xml:"wpt"`
+	Text    string    `xml:",chardata"`
+	Lat     float64   `xml:"lat,attr"`
+	Lon     float64   `xml:"lon,attr"`
+	Time    time.Time `xml:"time"`
+	Ele     float64   `xml:"ele"`  // elevation
+	Name    string    `xml:"name"` // place name!
+	Link    struct {
+		Text string `xml:",chardata"`
+		Href string `xml:"href,attr"` // usually a foursquare link
+	} `xml:"link"`
+}
+
+// track point
 type trkpt struct {
 	XMLName xml.Name  `xml:"trkpt"`
 	Text    string    `xml:",chardata"`

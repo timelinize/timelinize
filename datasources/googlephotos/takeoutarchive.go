@@ -43,6 +43,14 @@ const googlePhotosPath = "Takeout/Google Photos"
 func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeline.ImportParams, dirEntry timeline.DirEntry) error {
 	fimp.truncatedNames = make(map[string]int)
 
+	var checkpoint string
+	if opt.Checkpoint != nil {
+		err := json.Unmarshal(opt.Checkpoint, &checkpoint)
+		if err != nil {
+			return fmt.Errorf("decoding checkpoint: %w", err)
+		}
+	}
+
 	albumFolders, err := fs.ReadDir(dirEntry.FS, dirEntry.Filename)
 	if err != nil {
 		return fmt.Errorf("getting album list from %s: %w", googlePhotosPath, err)
@@ -72,11 +80,20 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 
 		albumMeta, err := fimp.readAlbumMetadata(dirEntry, thisAlbumFolderPath)
 		if err != nil {
-			opt.Log.Error("could not open album metadata (maybe it is in another archive?)", zap.Error(err))
+			if errors.Is(err, fs.ErrNotExist) {
+				opt.Log.Warn("album metadata not found; maybe it is in another archive or this folder is not an album",
+					zap.String("folder_path", thisAlbumFolderPath),
+					zap.Error(err))
+			} else {
+				opt.Log.Error("could not open album metadata",
+					zap.String("folder_path", thisAlbumFolderPath),
+					zap.Error(err))
+			}
 		}
 
 		// read album folder contents, then sort in what I think is the same way
-		// Google does before truncating long filenames
+		// Google does before truncating long filenames -- this is crucial to
+		// matching up filenames correctly (metadata + media files)
 		albumItems, err := fs.ReadDir(dirEntry.FS, thisAlbumFolderPath)
 		if err != nil {
 			return err
@@ -93,8 +110,20 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		})
 
 		for _, d := range albumItems {
+			// make pauses more responsive
+			if err := opt.Continue(); err != nil {
+				return err
+			}
+
+			fpath := path.Join(thisAlbumFolderPath, dirEntry.Name())
+			if checkpoint != "" {
+				if fpath != checkpoint {
+					continue // keep going until we find the checkpoint position
+				}
+				checkpoint = "" // at the checkpoint; clear it so we process all further items
+			}
 			if err := fimp.processAlbumItem(ctx, albumMeta, thisAlbumFolderPath, d, opt, dirEntry); err != nil {
-				return fmt.Errorf("processing album item '%s': %w", path.Join(thisAlbumFolderPath, dirEntry.Name()), err)
+				return fmt.Errorf("processing album item '%s': %w", fpath, err)
 			}
 		}
 	}
@@ -118,6 +147,13 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	}
 
 	fpath := path.Join(folderPath, d.Name())
+
+	// skip sidecar movie files ("live photos") because we'll connect them when
+	// we process the actual photograph (hopefully they're in the same archive!)
+	if media.IsSidecarVideo(dirEntry.FS, fpath) {
+		return nil
+	}
+
 	f, err := dirEntry.FS.Open(fpath)
 	if err != nil {
 		return err
@@ -151,12 +187,6 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			return fmt.Errorf("parsing timestamp from item %s: %w", fpath, err)
 		}
 
-		// ensure item is within configured timeframe before continuing
-		if !opt.Timeframe.Contains(itemMeta.parsedPhotoTakenTime) {
-			opt.Log.Debug("item is outside timeframe", zap.String("filename", fpath))
-			return nil
-		}
-
 		mediaFilePath = fimp.determineMediaFilenameInArchive(fpath, itemMeta)
 		opt.Log.Debug("mapped sidecar to target media file",
 			zap.String("sidecar_file", fpath),
@@ -167,14 +197,68 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 
 	ig := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 
-	// tell the processor we prefer embedded metadata rather than sidecar info, by
-	// only preferring the filename read from the sidecar file (because it should
-	// contain the full/original name of the file which may have been truncated
-	// in the export archive)
+	// ensure item is within configured timeframe before continuing
+	if !opt.Timeframe.Contains(ig.Item.Timestamp) {
+		opt.Log.Debug("item is outside timeframe", zap.String("filename", fpath))
+		return nil
+	}
+
+	// Between the JSON file and the actual media file, we typically prefer the
+	// filename in the JSON file and everything else that overlaps in the media
+	// file, since Google's metadata is known to be wrong sometimes (!?). However,
+	// in a rare singular case of corrupted input, I have found non-nil timestamp
+	// data that was completely wrong in the mvhd box of an MP4 file, captured on
+	// an Android phone, with several other videos even that same hour that were
+	// correct / not corrupted. The corrupted timestamp was 4165689599 (confirmed
+	// via ffprobe), which apparently equates to 2036-01-01, but should have been
+	// 2016-11-27. (The time was also truncated.) I can't explain the corruption.
+	// I think in general, photos and videos from Google Takeout aren't from the
+	// future, and probably aren't RIGHT at midnight on New Years (okay to be fair,
+	// that's not so unlikely) -- maybe we can prefer the metadata timestamp in
+	// those cases; though I'm not sure if this heuristic is reliable.
 	if path.Ext(fpath) == ".json" {
-		ig.Item.Retrieval.PreferFields = []string{"filename"}
+		// metadata file should have good filename and metadata, but we prefer
+		// the embedded timestamp if possible
+		ig.Item.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+			"filename":         timeline.UpdatePolicyOverwriteExisting,
+			"metadata":         timeline.UpdatePolicyPreferIncoming, // applied per-key, so keys unique to this file will be kept
+			"timestamp":        timeline.UpdatePolicyPreferExisting,
+			"timespan":         timeline.UpdatePolicyPreferExisting,
+			"timeframe":        timeline.UpdatePolicyPreferExisting,
+			"time_offset":      timeline.UpdatePolicyPreferExisting,
+			"time_uncertainty": timeline.UpdatePolicyPreferExisting,
+			"latlon":           timeline.UpdatePolicyPreferExisting,
+			"altitude":         timeline.UpdatePolicyPreferExisting,
+		}
 	} else {
-		ig.Item.Retrieval.PreferFields = []string{"data", "original_location", "intermediate_location", "timestamp", "timespan", "timeframe", "time_offset", "time_uncertainty", "location"}
+		// always use the embedded timestamp, unless it looks like it is bad (I've encountered
+		// several corrupt or very wrong embedded timestamps that actually cause UI bugs b/c
+		// they're so wrong they can't be serialized to JSON) -- the processor will also try to
+		// clear them, but in our case there are timestamps that generically "look valid", yet
+		// we can know are invalid, and in those cases we can likely lean on the timestamp in
+		// the JSON file, so we just need to adjust the update policy for timestamps based on
+		// what we can infer about the timestamp
+		tsUpdatePolicy := timeline.UpdatePolicyOverwriteExisting
+		if isBadTimestamp(ig.Item.Timestamp) {
+			tsUpdatePolicy = timeline.UpdatePolicyKeepExisting
+			ig.Item.Timestamp = time.Time{}
+		}
+		ig.Item.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+			"data":                  timeline.UpdatePolicyOverwriteExisting,
+			"original_location":     timeline.UpdatePolicyOverwriteExisting,
+			"intermediate_location": timeline.UpdatePolicyOverwriteExisting,
+			"filename":              timeline.UpdatePolicyPreferExisting,
+			"metadata":              timeline.UpdatePolicyPreferIncoming,
+			"timestamp":             tsUpdatePolicy,
+			"timespan":              tsUpdatePolicy,
+			"timeframe":             tsUpdatePolicy,
+			"time_offset":           tsUpdatePolicy,
+			"time_uncertainty":      tsUpdatePolicy,
+			"latlon":                timeline.UpdatePolicyPreferIncoming,
+			"altitude":              timeline.UpdatePolicyPreferIncoming,
+		}
+
+		media.ConnectMotionPhoto(opt.Log, dirEntry, mediaFilePath, ig)
 	}
 
 	// if item has an "-edited" variant, relate it
@@ -185,6 +269,8 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 		edited := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
 		ig.ToItem(timeline.RelEdit, edited.Item)
 	}
+
+	ig.Checkpoint = fpath
 
 	opt.Pipeline <- ig
 
@@ -234,10 +320,15 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 		}
 	}
 
+	// set a timestamp if we only have the metadata file
+	if item.Timestamp.IsZero() {
+		item.Timestamp = itemMeta.parsedPhotoTakenTime
+	}
+
 	// the retrieval key is crucial so that we can store what data we have from an item
 	// as we get it, without getting the whole item, even across different imports; it
 	// consists of the data source name to avoid conflicts with other DSes, the name of
-	// the archive (with the index part remove, of course, since a metadata file in
+	// the archive (with the index part removed, of course, since a metadata file in
 	// -001.zip might have its media file in -002.zip, but they should have the same
 	// retrieval key; this does rely on them not being renamed), and the expected path
 	// of the media file within the archive (if we're on the media file, it's just that
@@ -385,6 +476,9 @@ type mediaArchiveMetadata struct {
 			} `json:"deviceFolder"`
 			DeviceType string `json:"deviceType"`
 		} `json:"mobileUpload"`
+		Composition struct {
+			Type string `json:"type"`
+		} `json:"composition"`
 	} `json:"googlePhotosOrigin"`
 	PhotoLastModifiedTime struct {
 		Timestamp string `json:"timestamp"`
@@ -428,6 +522,7 @@ var errNoTimestamp = errors.New("no timestamp available")
 func (m mediaArchiveMetadata) timestamp() (time.Time, error) {
 	ts := m.PhotoTakenTime.Timestamp
 	if ts == "" {
+		// if a photo is in multiple albums/folders, this can be different between the two
 		ts = m.CreationTime.Timestamp
 	}
 	if ts == "" {
@@ -496,4 +591,26 @@ func (fimp *FileImporter) determineMediaFilenameInArchive(jsonFilePath string, i
 
 	// short filenames are great... so simple (I think)
 	return path.Join(dir, itemMeta.Title)
+}
+
+// isBadTimestamp tries to detect timestamps that are bad/corrupted, which would generally come from
+// embedded metadata like EXIF or XMP, where either there is a parser bug or actual corruption. I have
+// encountered both on my data sets, and I've encountered these specific situations.
+// The processor will actually strip timestamps that are invalid (like, year is super out-of-range and
+// can't be serialized by JSON), but in the case of a corrupt offset (TZ), it will only strip the offset;
+// but in our case we can do better than that probably, since the sidecar json file usually has a valid
+// and correct timestamp in the rare case the EXIF/XMP data is wrong. So we want to prefer the timestamp
+// from the JSON when we detect a timestamp that the processor may still consider valid, but which we
+// assume is probably wrong. For example: future year, exactly midnight on new years, or corrupted
+// offset. In these cases, the timestamp from JSON should be preferred. In order to prefer the JSON
+// timestamp, we need to clear any bad, embedded timestamp, since otherwise it will be preferred.
+func isBadTimestamp(t time.Time) bool {
+	futureYear := t.Year() > time.Now().Year()
+	exactlyMidnightOnNewYears := t.Month() == time.January && t.Day() == 1 && t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+
+	const maxTimezoneOffsetSecFromUTC = 50400 // most distant time zone from UTC is apparently +-14 hours
+	_, offsetSec := t.Zone()
+	offsetCorrupted := offsetSec > maxTimezoneOffsetSecFromUTC || offsetSec < -maxTimezoneOffsetSecFromUTC
+
+	return t.IsZero() || futureYear || exactlyMidnightOnNewYears || offsetCorrupted
 }

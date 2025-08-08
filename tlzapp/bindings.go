@@ -30,6 +30,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -100,9 +101,9 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 
 	var tl *timeline.Timeline
 	if create {
-		tl, err = timeline.Create(ctx, absRepo, DefaultCacheDir())
+		tl, err = timeline.Create(ctx, assessment.TimelinePath, DefaultCacheDir())
 	} else {
-		tl, err = timeline.Open(ctx, absRepo, DefaultCacheDir())
+		tl, err = timeline.Open(ctx, assessment.TimelinePath, DefaultCacheDir())
 	}
 	if err != nil {
 		return openedTimeline{}, err
@@ -126,7 +127,7 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 			if err != nil {
 				a.log.Error("closing redundantly-opened timeline",
 					zap.Error(err),
-					zap.String("timeline", absRepo))
+					zap.String("timeline", assessment.TimelinePath))
 			}
 			return openedTimeline{}, fmt.Errorf("timeline with ID %s is already open", otl.InstanceID)
 		}
@@ -134,11 +135,11 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 
 	// for serving static data files from the timeline
 	fileServerPrefix := "/" + path.Join("repo", tlID)
-	fileRoot := absRepo
+	fileRoot := assessment.TimelinePath
 	fileServer := http.FileServer(http.Dir(fileRoot))
 
 	otl := openedTimeline{
-		RepoDir:    absRepo,
+		RepoDir:    assessment.TimelinePath,
 		InstanceID: tl.ID(),
 		Timeline:   tl,
 		fileServer: http.StripPrefix(fileServerPrefix, fileServer),
@@ -152,15 +153,13 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 		action = "created"
 	}
 	a.log.Info(action+" timeline",
-		zap.String("repo", absRepo),
+		zap.String("repo", assessment.TimelinePath),
 		zap.String("id", tlID))
 
 	// persist newly opened repo so it can be resumed on restart
 	if err := a.cfg.syncOpenRepos(); err != nil {
 		a.log.Error("unable to persist config", zap.Error(err))
 	}
-
-	// TODO: start jobs in queued or aborted (interrupted) states (maybe, at most... 3 jobs?)
 
 	return otl, nil
 }
@@ -209,8 +208,8 @@ func (a App) GetEntity(repoID string, entityID uint64) (timeline.Entity, error) 
 	if err != nil {
 		return timeline.Entity{}, err
 	}
-	if _, obfuscate := a.ObfuscationMode(tl.Timeline); obfuscate {
-		ent.Anonymize()
+	if options, obfuscate := a.ObfuscationMode(tl.Timeline); obfuscate {
+		ent.Anonymize(options)
 	}
 	return ent, nil
 }
@@ -590,6 +589,53 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		plan.Files = append(plan.Files, p...)
 	}
 
+	// improve import speed by putting large, DB-bound data sources first, to take advantage of when the DB is the fastest (when it is small)
+	dsPriorities := []string{
+		// contact lists are an excellent first import since they can give names to entities right off the bat
+		"vcard",
+		"contact_list",
+		"apple_contacts",
+
+		// then we prioritize data sources with large amounts of items in a single file; when the DB
+		// is small, imports are fastest, so putting data sources with the most smallest items up
+		// first makes imports faster
+		"google_location",
+		"sms_backup_restore",
+
+		// these next ones are a blend of lots of items and I/O heavy
+		"imessage",
+		"iphone",
+
+		// the remaining ones are mostly I/O heavy but can still have lots of items
+		"apple_photos",
+		"google_photos",
+		"icloud",
+		"media",
+		"whatsapp",
+		"facebook",
+		"instagram",
+		"twitter",
+	}
+	slices.SortStableFunc(plan.Files, func(a, b timeline.ProposedFileImport) int {
+		if len(a.DataSources) == 0 || len(b.DataSources) == 0 {
+			return 0
+		}
+		aDS, bDS := a.DataSources[0].DataSource.Name, b.DataSources[0].DataSource.Name
+		aIdx, bIdx := slices.Index(dsPriorities, aDS), slices.Index(dsPriorities, bDS)
+		if aIdx < 0 && bIdx >= 0 {
+			return 1
+		}
+		if aIdx >= 0 && bIdx < 0 {
+			return -1
+		}
+		if aIdx < bIdx {
+			return -1
+		} else if aIdx > bIdx {
+			return 1
+		}
+		return 0
+	})
+
 	return plan, nil
 }
 
@@ -702,9 +748,9 @@ func (a *App) SearchEntities(params timeline.EntitySearchParams) ([]timeline.Ent
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := a.ObfuscationMode(tl.Timeline); ok {
+	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
 		for i := range results {
-			results[i].Anonymize()
+			results[i].Anonymize(options)
 		}
 	}
 	return results, nil
@@ -842,7 +888,7 @@ func (a *App) LoadRecentConversations(ctx context.Context, params timeline.ItemS
 	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
 		for _, convo := range convos {
 			for i := range convo.Entities {
-				convo.Entities[i].Anonymize()
+				convo.Entities[i].Anonymize(options)
 			}
 			for i := range convo.RecentMessages {
 				convo.RecentMessages[i].Anonymize(options)

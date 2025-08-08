@@ -35,7 +35,7 @@ func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
 		Name:            dataSourceName,
 		Title:           "Google Photos",
-		Icon:            "googlephotos.svg",
+		Icon:            "google_photos.svg",
 		NewOptions:      func() any { return Options{} },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})

@@ -24,51 +24,16 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
+	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
 )
-
-// // Run runs the HTTP server backed by the given application instance.
-// // It blocks until it is stopped.
-// func Run(listen string, app *application.App) error {
-// 	if serverInstance != nil {
-// 		return fmt.Errorf("server already running")
-// 	}
-
-// 	serverInstance = newServer(listen, app)
-
-// 	// if CLI invoked an API endpoint, execute it and
-// 	// return instead of starting server
-// 	handled, err := serverInstance.cliMux.Handle()
-// 	if err != nil {
-// 		serverInstance.log.Fatal(err.Error())
-// 	}
-// 	if handled {
-// 		return nil
-// 	}
-
-// 	ln, err := net.Listen("tcp", listen)
-// 	if err != nil {
-// 		return fmt.Errorf("opening listener: %v", err)
-// 	}
-// 	serverInstance.listener = ln
-
-// 	serverInstance.log.Info("started server", zap.String("listener", ln.Addr().String()))
-
-// 	err = http.Serve(ln, serverInstance.httpMux)
-// 	if err != nil {
-// 		if errors.Is(err, net.ErrClosed) {
-// 			// normal; the listener was closed
-// 			serverInstance.log.Info("stopped server", zap.String("listener", ln.Addr().String()))
-// 		} else {
-// 			return err
-// 		}
-// 	}
-
-// 	return nil
-// }
 
 type server struct {
 	app *App
@@ -79,8 +44,7 @@ type server struct {
 	httpServer *http.Server
 
 	// enforce CORS and prevent DNS rebinding for the unauthenticated admin listener
-	allowedHosts   []string
-	allowedOrigins []string
+	allowedOrigins []*url.URL
 
 	mux         *http.ServeMux
 	staticFiles http.Handler
@@ -114,62 +78,69 @@ func (s server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		)
 	}()
 
-	// if endpointName, ok := strings.CutPrefix(r.URL.Path, apiBasePath); ok {
-	// 	endpoint, ok := s.app.commands[endpointName]
-	// 	if !ok {
-	// 		err = Error{
-	// 			Err:        fmt.Errorf("endpoint '%s' not registered", endpointName),
-	// 			HTTPStatus: http.StatusNotFound,
-	// 			Log:        "looking up API endpoint by name",
-	// 			Message:    "Unknown API endpoint",
-	// 		}
-	// 		handleError(w, r, err)
-	// 		return
-	// 	}
-	// 	if err = endpoint.ServeHTTP(w, r); err != nil {
-	// 		handleError(w, r, err)
-	// 		return
-	// 	}
-	// }
-
 	// ok, we're all set up, so actual handling can happen now
 	s.mux.ServeHTTP(rec, r)
 }
 
-func (s *server) fillAllowedHosts(listenAddr string) {
-	loopbacks := []string{
-		"localhost",
-		"127.0.0.1",
-		"::1",
+func (s *server) fillAllowedOrigins(configuredOrigins []string, listenAddr string) {
+	listenHost, listenPort, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		listenHost = listenAddr // assume no port (or a default port)
 	}
-	allowed := make([]string, 0, len(loopbacks))
-	_, port, _ := net.SplitHostPort(listenAddr)
-	for _, host := range loopbacks {
-		// clients generally omit port if standard, so only expect port if non-standard
-		if port != "80" && port != "443" {
-			host = net.JoinHostPort(host, port)
+	if configuredOrigins == nil {
+		if originEnv := os.Getenv("TLZ_ORIGIN"); originEnv != "" {
+			configuredOrigins = []string{originEnv}
 		}
-		allowed = append(allowed, host)
 	}
-	s.allowedHosts = allowed
+	uniqueOrigins := make(map[string]struct{})
+	for _, o := range configuredOrigins {
+		uniqueOrigins[o] = struct{}{}
+	}
+	if !strings.HasPrefix(listenAddr, "/") {
+		uniqueOrigins[net.JoinHostPort("localhost", listenPort)] = struct{}{}
+		uniqueOrigins[net.JoinHostPort("::1", listenPort)] = struct{}{}
+		uniqueOrigins[net.JoinHostPort("127.0.0.1", listenPort)] = struct{}{}
+		if listenHost != "" && !s.isLoopback(listenAddr) {
+			uniqueOrigins[listenAddr] = struct{}{}
+		}
+	}
+	s.allowedOrigins = make([]*url.URL, 0, len(uniqueOrigins))
+	for originStr := range uniqueOrigins {
+		var origin *url.URL
+		if strings.Contains(originStr, "://") {
+			var err error
+			origin, err = url.Parse(originStr)
+			if err != nil {
+				continue
+			}
+			origin.Path = ""
+			origin.RawPath = ""
+			origin.Fragment = ""
+			origin.RawFragment = ""
+			origin.RawQuery = ""
+		} else {
+			origin = &url.URL{Host: originStr}
+		}
+		s.allowedOrigins = append(s.allowedOrigins, origin)
+	}
 }
 
-func (s *server) fillAllowedOrigins(listenAddr string) {
-	loopbacks := []string{
-		"http://localhost",
-		"http://127.0.0.1",
-		"http://[::1]",
+func (server) isLoopback(addr string) bool {
+	// unix socket
+	if strings.HasPrefix(addr, "/") {
+		return true
 	}
-	allowed := make([]string, 0, len(loopbacks))
-	_, port, _ := net.SplitHostPort(listenAddr)
-	for _, origin := range loopbacks {
-		// clients generally omit port if standard, so only expect port if non-standard
-		if port != "80" && port != "443" {
-			origin += ":" + port
-		}
-		allowed = append(allowed, origin)
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr // assume no port
 	}
-	s.allowedOrigins = allowed
+	if host == "localhost" {
+		return true
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // enforceHost returns a handler that wraps next such that
@@ -178,13 +149,9 @@ func (s *server) fillAllowedOrigins(listenAddr string) {
 // rebinding attacks.
 func (s server) enforceHost(next handler) handler {
 	return handlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		var allowed bool
-		for _, allowedHost := range s.allowedHosts {
-			if r.Host == allowedHost {
-				allowed = true
-				break
-			}
-		}
+		allowed := slices.ContainsFunc(s.allowedOrigins, func(u *url.URL) bool {
+			return r.Host == u.Host
+		})
 		if !allowed {
 			return Error{
 				Err:        fmt.Errorf("unrecognized Host header value '%s'", r.Host),
@@ -202,24 +169,9 @@ func (s server) enforceHost(next handler) handler {
 // This prevents arbitrary sites from issuing requests to our listener.
 func (s server) enforceOriginAndMethod(method string, next handler) handler {
 	return handlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		origin := r.Header.Get("Origin")
-
-		// TODO: Arggh, Firefox has a bug (Jan. 2022) where it doesn't set the Origin header in
-		// HTTPS-Only mode, breaking CORS requests. https://bugzilla.mozilla.org/show_bug.cgi?id=1751105
-		// (Yes, I found and reported the bug after much chin-scratching and head-banging).
-		// (Was verified on Twitter by Eric Lawrence, one of the Edge engineers: https://twitter.com/ericlaw/status/1483972139241857027)
-		// Anyway, for now, disable HTTPS-Only mode in Firefox OR add an exception for "http://localhost"
-
-		// only enforce CORS on cross-origin requests (Origin header would be set)
-		if origin != "" {
-			var allowed bool
-			for _, allowedOrigin := range s.allowedOrigins {
-				if origin == allowedOrigin {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
+		origin := s.getOrigin(r)
+		if origin != nil {
+			if !s.originAllowed(origin) {
 				return Error{
 					Err:        fmt.Errorf("unrecognized origin '%s'", origin),
 					HTTPStatus: http.StatusForbidden,
@@ -227,27 +179,68 @@ func (s server) enforceOriginAndMethod(method string, next handler) handler {
 					Message:    "You can only access this API from a recognized origin.",
 				}
 			}
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, "+method)
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			if r.Method == http.MethodOptions {
-				return nil
+				w.Header().Set("Access-Control-Allow-Origin", origin.String())
+				w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, "+method)
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
-			// method must match, unless GET is expected, in which case HEAD is also allowed
-			if r.Method != method ||
-				(method == http.MethodGet &&
-					r.Method != method &&
-					r.Method != http.MethodHead) {
-				// "sir, this is an Arby's"
-				return Error{
-					Err:        fmt.Errorf("method '%s' not allowed", r.Method),
-					HTTPStatus: http.StatusMethodNotAllowed,
-				}
+			w.Header().Set("Access-Control-Allow-Origin", origin.String())
+		}
+		if r.Method == http.MethodOptions {
+			return nil
+		}
+		// method must match, unless GET is expected, in which case HEAD is also allowed
+		if r.Method != method ||
+			(method == http.MethodGet &&
+				r.Method != method &&
+				r.Method != http.MethodHead) {
+			// "sir, this is an Arby's"
+			return Error{
+				Err:        fmt.Errorf("method '%s' not allowed", r.Method),
+				HTTPStatus: http.StatusMethodNotAllowed,
 			}
 		}
 		return next.ServeHTTP(w, r)
 	})
+}
+
+func (s server) getOrigin(r *http.Request) *url.URL {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// Arggh, Firefox has a bug (Jan. 2022) where it doesn't set the Origin header in
+		// HTTPS-Only mode, breaking CORS requests. https://bugzilla.mozilla.org/show_bug.cgi?id=1751105
+		// (Yes, I found and reported the bug after much chin-scratching and head-banging).
+		// (Was verified on Twitter by Eric Lawrence, one of the Edge engineers: https://twitter.com/ericlaw/status/1483972139241857027)
+		// Anyway, for now, disable HTTPS-Only mode in Firefox OR add an exception for "http://localhost"
+		// ... or use the Referer header, I guess.
+		origin = r.Header.Get("Referer")
+	}
+	if origin == "" {
+		return nil
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return nil
+	}
+	originURL.Path = ""
+	originURL.RawPath = ""
+	originURL.Fragment = ""
+	originURL.RawFragment = ""
+	originURL.RawQuery = ""
+	return originURL
+}
+
+func (s server) originAllowed(origin *url.URL) bool {
+	for _, allowedOrigin := range s.allowedOrigins {
+		if allowedOrigin.Scheme != "" && origin.Scheme != allowedOrigin.Scheme {
+			continue
+		}
+		if origin.Host == allowedOrigin.Host {
+			return true
+		}
+	}
+	return false
 }
 
 // TODO: not sure if we'll need this with this program...

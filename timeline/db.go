@@ -22,6 +22,7 @@ import (
 	"context"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -30,6 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
@@ -95,7 +97,7 @@ func provisionDB(ctx context.Context, db *sql.DB) error {
 	// assign this repo a persistent UUID for the UI, links, etc; and
 	// store version so readers can know how to work with this DB/timeline repo
 	repoID := uuid.New()
-	_, err = db.Exec(`INSERT OR IGNORE INTO repo (key, value) VALUES (?, ?), (?, ?)`,
+	_, err = db.ExecContext(ctx, `INSERT OR IGNORE INTO repo (key, value) VALUES (?, ?), (?, ?)`,
 		"id", repoID.String(),
 		"version", 1,
 	)
@@ -184,13 +186,10 @@ func saveAllDataSources(ctx context.Context, db *sql.DB) error {
 
 func saveAllStandardEntityTypes(ctx context.Context, db *sql.DB) error {
 	entityTypes := []string{
-		"person",
-		"creature", // animals, insects, fish, pets... etc.
-		"place",    // landmarks... etc.
-		"company",
-		"organization",
-		"office", // president, ceo, etc... person swaps out over time TODO: rename to "designation"?
-		"government",
+		EntityPerson,
+		EntityCreature, // pets, animals, insects, fish, etc...
+		EntityPlace,
+		// TODO: could also have company/organization, office/designation, government, etc.
 	}
 
 	query := `INSERT INTO entity_types ("name") VALUES`
@@ -311,11 +310,48 @@ func provisionThumbsDB(ctx context.Context, thumbsDB *sql.DB, repoID uuid.UUID) 
 func (tl *Timeline) explainQueryPlan(ctx context.Context, tx *sql.Tx, q string, args ...any) {
 	logger := Log.Named("query_planner")
 
+	// convert some common pointer types to values as that's how they are used in the DB
+	argsToDisplay := make([]any, len(args))
+	for i, arg := range args {
+		switch v := arg.(type) {
+		case *string:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *time.Time:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *int:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *int64:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *uint64:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case *float64:
+			if v != nil {
+				argsToDisplay[i] = *v
+			}
+		case []byte:
+			if v != nil {
+				argsToDisplay[i] = hex.EncodeToString(v)
+			}
+		default:
+			argsToDisplay[i] = v
+		}
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
 	fmt.Fprintln(w, "\nQUERY PLAN FOR:\n============================================================================================")
 	fmt.Fprintln(w, q)
 	fmt.Fprintln(w, "============================================================================================")
-	fmt.Fprintln(w, args...)
+	fmt.Fprintln(w, argsToDisplay...)
 	fmt.Fprintln(w, "============================================================================================")
 
 	explainQ := "EXPLAIN QUERY PLAN " + q

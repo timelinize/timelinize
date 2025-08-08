@@ -20,7 +20,9 @@
 package vcard
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"io/fs"
@@ -72,7 +74,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	defer file.Close()
 
 	buf := bufPool.Get().([]byte)
-	//nolint:gofmt,gosimple,staticcheck
+	//nolint:gofmt,staticcheck
 	defer bufPool.Put(buf[:len(buf)]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice) -- WOW the linters hate this one
 
 	// read the first few bytes to see if it looks like a legit vcard; ignore empty or short files
@@ -124,7 +126,8 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			}
 
 			p := &timeline.Entity{
-				Name: strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
+				Name:     strings.Trim(card.PreferredValue(vcard.FieldFormattedName), nameCutset),
+				Metadata: make(timeline.Metadata),
 			}
 			if p.Name == "" {
 				if name := card.Name(); name != nil {
@@ -147,6 +150,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			}
 
 			for _, phone := range card.Values(vcard.FieldTelephone) {
+				// TODO: Don't let home phone numbers be identifying? See if card.Get(vcard.FieldTelephone) can help
 				p.Attributes = append(p.Attributes, timeline.Attribute{
 					Name:        timeline.AttributePhoneNumber,
 					Value:       phone,
@@ -181,14 +185,21 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 					}
 				}
 			}
-			// otherwise, try downloading the picture from a URL in the vcard, although the link is often dead
+			// otherwise, try downloading the picture from the vCard; I have seen URLs and base64,
+			// but URLs are often dead, and the vcard package loses some base64 values, for some reason
 			if p.NewPicture == nil {
-				photoURL := card.PreferredValue(vcard.FieldPhoto)
-				if photoURL == "" {
-					photoURL = card.PreferredValue(vcard.FieldLogo)
+				photo := card.PreferredValue(vcard.FieldPhoto)
+				if photo == "" {
+					photo = card.PreferredValue(vcard.FieldLogo)
 				}
-				if photoURL != "" {
-					p.NewPicture = timeline.DownloadData(photoURL)
+				if strings.HasPrefix(strings.ToLower(photo), "http") {
+					p.NewPicture = timeline.DownloadData(photo)
+				} else if photo != "" {
+					// assume base64 encoding I guess; the parser kind of loses the "tail" information... but we have seen base64 photos
+					p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+						photoBytes, err := base64.StdEncoding.DecodeString(photo)
+						return io.NopCloser(bytes.NewReader(photoBytes)), err
+					}
 				}
 			}
 

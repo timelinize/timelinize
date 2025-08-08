@@ -23,7 +23,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"io/fs"
 	"path"
 	"path/filepath"
 	"strings"
@@ -36,9 +35,9 @@ import (
 
 func init() {
 	err := timeline.RegisterDataSource(timeline.DataSource{
-		Name:            "applephotos",
+		Name:            "apple_photos",
 		Title:           "Apple Photos",
-		Icon:            "applephotos.svg",
+		Icon:            "apple_photos.svg",
 		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(FileImporter) },
 	})
@@ -56,8 +55,15 @@ type Options struct {
 	IncludeTrashed bool `json:"include_trashed"`
 }
 
-// FileImporter can import from the Apple Contacts database.
-type FileImporter struct{}
+// FileImporter can import from the Apple Photos database, whether from Mac or iPhone.
+type FileImporter struct {
+	// These callback functions allow for reuse in multiple settings: importing directly
+	// from a Photos library on a Mac, or from a Photos library on an iPhone backup. Both have
+	// different file systems, so these pluggable functions make it possible for us to figure
+	// out relevant file paths.
+	MediaFileExists func(dir, filename string) (originalLoc, intermediateLoc string, exists bool)
+	SidecarFilename func(mainFilename string) string
+}
 
 // Recognize returns whether this file or folder is supported.
 func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
@@ -65,10 +71,10 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	if dirEntry.IsDir() && path.Ext(dirEntry.Name()) == ".photoslibrary" {
 		confidence += .2
 	}
-	if info, err := fs.Stat(dirEntry.FS, "database/Photos.sqlite"); err == nil && !info.IsDir() {
+	if info, err := dirEntry.Stat("database/Photos.sqlite"); err == nil && !info.IsDir() {
 		confidence += .6
 	}
-	if info, err := fs.Stat(dirEntry.FS, "originals"); err == nil && info.IsDir() {
+	if info, err := dirEntry.Stat(mediaFilesDir); err == nil && info.IsDir() {
 		confidence += .2
 	}
 	return timeline.Recognition{Confidence: confidence}, nil
@@ -78,6 +84,30 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	dsOpt := params.DataSourceOptions.(*Options)
 
+	// set up the file importer for a straight import from a Mac
+	fimp.MediaFileExists = func(dir, filename string) (string, string, bool) {
+		// to check for the existence of the actual media file, both a directory and a filename
+		// are passed in separately because that's what information we have at the time; then
+		// later when checking for a sidecar file,
+		mediaRelPath := filename
+		if dir != "" {
+			mediaRelPath = path.Join(mediaFilesDir, dir, filename)
+		}
+		// we don't really know the "original" location of the photo, since the photos app is
+		// typically just doing cloud sync -- it's unlikely that this Mac took the original
+		// picture... anyway, hard to say which is which in this case, but at least by choosing
+		// intermediate, we're not crowding out any possible original location of the file
+		return "", mediaRelPath, timeline.FileExistsFS(dirEntry.FS, mediaRelPath)
+	}
+	fimp.SidecarFilename = func(mainFilename string) string {
+		// on Mac, the sidecar files have the same filename as the actual picture, but with a "_3"
+		// appended before the extension, which is typically ".mov".
+		// (there is probably a more proper way to get them using the DB, but I'm not sure how)
+		fileExt := path.Ext(mainFilename)
+		filenameNoExt := strings.TrimSuffix(mainFilename, fileExt)
+		return filenameNoExt + "_3.mov"
+	}
+
 	// open photos database
 	photosDBPath := filepath.Join(dirEntry.FullPath(), "database", "Photos.sqlite")
 	db, err := sql.Open("sqlite3", photosDBPath+"?mode=ro")
@@ -86,23 +116,28 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	}
 	defer db.Close()
 
-	var owner timeline.Entity
-	if dsOpt.OwnerEntityID > 0 {
-		// use preset owner entity configured by user
-		owner = timeline.Entity{ID: dsOpt.OwnerEntityID}
-	} else {
-		// ZPERSON.ZISMECONFIDENCE seems to be a value of 1.0 for the owner of the library! Maybe we can use it to infer the owner entity if not preset.
-		var personDetectionType, personGenderType *int
-		var personDisplayName, personFullName, personUUID, personURI *string
-		err := db.QueryRowContext(ctx, `
+	return fimp.ProcessPhotosDB(ctx, timeline.Entity{}, dsOpt, db, dirEntry, params)
+}
+
+func (fimp *FileImporter) ProcessPhotosDB(ctx context.Context, owner timeline.Entity, dsOpt *Options, photosDB *sql.DB, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+	if owner.IsEmpty() {
+		if dsOpt.OwnerEntityID > 0 {
+			// use preset owner entity configured by user
+			owner = timeline.Entity{ID: dsOpt.OwnerEntityID}
+		} else {
+			// ZPERSON.ZISMECONFIDENCE seems to be a value of 1.0 for the owner of the library! Maybe we can use it to infer the owner entity if not preset.
+			var personDetectionType, personGenderType *int
+			var personDisplayName, personFullName, personUUID, personURI *string
+			err := photosDB.QueryRowContext(ctx, `
 			SELECT ZDETECTIONTYPE, ZGENDERTYPE, ZDISPLAYNAME, ZFULLNAME, ZPERSONUUID, ZPERSONURI
 			FROM ZPERSON
 			WHERE ZISMECONFIDENCE=1.0 AND (ZDISPLAYNAME IS NOT NULL OR ZFULLNAME IS NOT NULL)
 			LIMIT 1`).Scan(&personDetectionType, &personGenderType, &personDisplayName, &personFullName, &personUUID, &personURI)
-		if err != nil {
-			params.Log.Error("could not infer owner entity from DB", zap.Error(err))
-		} else {
-			owner = makeEntity(personDetectionType, personGenderType, personFullName, personDisplayName, personUUID, personURI)
+			if err != nil {
+				params.Log.Error("could not infer owner entity from DB", zap.Error(err))
+			} else {
+				owner = makeEntity(personDetectionType, personGenderType, personFullName, personDisplayName, personUUID, personURI)
+			}
 		}
 	}
 
@@ -115,7 +150,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	// (it's unclear whether it's better to use ZASSET.Z_PK or ZASSET.ZUUID for this; Z_PK is the
 	// row ID, ZUUID is a UUID assigned to the image; both are nullable, but have no null rows)
 	// (there are a lot more columns we can get interesting data from, I just chose a few of my favorites)
-	rows, err := db.QueryContext(ctx, `
+	rows, err := photosDB.QueryContext(ctx, `
 		SELECT
 			ZASSET.Z_PK, ZASSET.ZDATECREATED, ZASSET.ZLATITUDE, ZASSET.ZLONGITUDE, ZASSET.ZMODIFICATIONDATE, ZASSET.ZOVERALLAESTHETICSCORE,
 			ZASSET.ZDIRECTORY, ZASSET.ZFILENAME, ZASSET.ZORIGINALCOLORSPACE, ZASSET.ZUNIFORMTYPEIDENTIFIER, ZASSET.ZUUID,
@@ -167,7 +202,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 
 		// see if the file actually exists in the library; if not, the Photos app probably didn't have it downloaded,
 		// usually because the "Download Originals to Mac" setting was disabled ("Optimize Mac Storage" is more common)
-		if filename == nil || len(*filename) == 0 {
+		if filename == nil || dir == nil {
 			continue
 		}
 
@@ -184,13 +219,9 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 
 			// populate new graph with this asset; we can get most of the item filled out from just this row
 
-			if dir == nil {
-				dirTmp := string((*filename)[0])
-				dir = &dirTmp
-			}
-			mediaRelPath := path.Join("originals", *dir, *filename)
-			if !timeline.FileExistsFS(dirEntry.FS, mediaRelPath) {
-				params.Log.Warn("media file not found in library; ensure 'Download Originals to Mac' option is selected in Photos settings",
+			mediaOriginalPath, mediaRelPath, exists := fimp.MediaFileExists(*dir, *filename)
+			if !exists {
+				params.Log.Warn("media file not found in library; ensure Photos app is configured to 'Download and Keep Originals' (iPhone) or 'Download Originals to Mac' (Mac) and then try import again",
 					zap.Stringp("asset_uuid", uuid),
 					zap.String("asset_path", mediaRelPath))
 				continue
@@ -203,14 +234,15 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 			}
 			var mediaType string
 			if uniformTypeIdentifier != nil {
-				// I probably haven't enumerated *every* possible value, but that's okay since the
-				// processor will fill in any missing media types (it's just a little extra work to peek)
+				// I probably haven't enumerated *every* possible value, but that's okay since the processor
+				// will fill in any missing media types (this just saves a little extra peeking work)
 				mediaType = uniformTypeIdentifierToMIME[*uniformTypeIdentifier]
 			}
 
 			// put most of the item together
 			item := &timeline.Item{
 				Classification:       timeline.ClassMedia,
+				OriginalLocation:     mediaOriginalPath,
 				IntermediateLocation: mediaRelPath,
 				Owner:                owner,
 				Content: timeline.ItemData{
@@ -253,41 +285,36 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 			}
 
 			// if the file didn't contain location data, the database might have
-			if item.Location.IsEmpty() {
-				// for some reason, the zero-value of lat/lon is stored as "-180.0" in their DB
-				if lat != nil && *lat > -180.0 {
-					item.Location.Latitude = lat
-				}
-				if lon != nil && *lon > -180.0 {
-					item.Location.Longitude = lon
-				}
+			// (for some reason, the zero-value of lat/lon is stored as "-180.0" in their DB)
+			if item.Location.Latitude == nil && lat != nil && *lat > -180.0 {
+				item.Location.Latitude = lat
+			}
+			if item.Location.Longitude == nil && lon != nil && *lon > -180.0 {
+				item.Location.Longitude = lon
 			}
 
 			currentGraph = &timeline.Graph{Item: item}
 
-			// Live photo sidecar file. They have the same filename in the same folder as the
-			// actual picture, but with a "_3" appended before the extension, which is typically .mov.
-			// (there is probably a more proper way to get them using the DB, but I'm not sure how)
-			fileExt := path.Ext(mediaRelPath)
-			filenameNoExt := strings.TrimSuffix(mediaRelPath, fileExt)
-			sidecarPath := filenameNoExt + "_3.mov"
-			if timeline.FileExistsFS(dirEntry.FS, sidecarPath) {
+			// Live photo sidecar file. They exist with a similar filename in the same folder as the actual picture.
+			sidecarFilename := fimp.SidecarFilename(*filename)
+			if origLoc, intermediateLoc, exists := fimp.MediaFileExists(*dir, sidecarFilename); exists {
 				sidecarItem := &timeline.Item{
 					Classification:       timeline.ClassMedia,
 					Owner:                item.Owner,
-					IntermediateLocation: sidecarPath,
+					OriginalLocation:     origLoc,
+					IntermediateLocation: intermediateLoc,
 					Content: timeline.ItemData{
-						Filename: strings.TrimSuffix(itemFilename, strings.ToUpper(fileExt)) + ".MOV",
+						Filename: sidecarFilename,
 						Data: func(_ context.Context) (io.ReadCloser, error) {
-							return dirEntry.FS.Open(sidecarPath)
+							return dirEntry.Open(intermediateLoc)
 						},
 					},
 				}
 
-				_, err = media.ExtractAllMetadata(params.Log, dirEntry.FS, sidecarPath, sidecarItem, timeline.MetaMergeAppend)
+				_, err = media.ExtractAllMetadata(params.Log, dirEntry.FS, intermediateLoc, item, timeline.MetaMergeAppend)
 				if err != nil {
 					params.Log.Debug("extracting sidecar metadata",
-						zap.String("asset_sidecar_path", sidecarPath),
+						zap.String("asset_sidecar_path", intermediateLoc),
 						zap.Error(err))
 				}
 
@@ -385,7 +412,7 @@ func makeEntity(personDetectionType, personGenderType *int, personFullName, pers
 		},
 		Attributes: []timeline.Attribute{
 			{
-				Name:     "applephotos_zperson",
+				Name:     "apple_photos_zperson",
 				Value:    personUUID,
 				Identity: true,
 			},
@@ -403,3 +430,6 @@ var uniformTypeIdentifierToMIME = map[string]string{
 	"public.png":                "image/png",
 	"com.apple.quicktime-movie": "video/quicktime",
 }
+
+// the name of the directory in the photos library that contains the full-size media files
+const mediaFilesDir = "originals"

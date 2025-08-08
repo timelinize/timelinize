@@ -1,7 +1,7 @@
 <a href="https://timelinize.com">
 	<picture>
-		<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-dark.svg">
-		<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-light.svg">
+		<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/logo-dark.svg">
+		<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/logo-light.svg">
 		<img src="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-light.svg" alt="Timelinize" width="400">
 	</picture>
 </a>
@@ -107,6 +107,23 @@ Or, if cross-compiling:
 ```
 
 </details> -->
+
+## Setup Development Environment
+Dev Container setup is provided for easy development using GitHub Codespaces or Visual Studio Code with the DevContainers extension.
+
+### Getting started with VSCode
+1. Make sure you have the following installed:
+
+	- [Docker](https://www.docker.com/)
+	- [DevContainers for VSCode](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+
+2. Open this project in VSCode
+3. Go to the __Remote Explorer__ on Activity Bar
+4. Click on __New Dev Container (+)__
+5. Click on __Open Current Folder in Container__
+
+This sets up a docker container with all the dependencies required for building this project. You can get started with contributing quickly.
+
 
 ## Motivation and vision
 

@@ -4,6 +4,7 @@ on:
     branches:
       - main
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
   contents: read
@@ -11,6 +12,7 @@ permissions:
 
 jobs:
   golangci:
+    if: github.event.pull_request.draft == false
     name: lint
     runs-on: ubuntu-latest
     steps:
@@ -28,4 +30,4 @@ jobs:
           sudo ldconfig
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8

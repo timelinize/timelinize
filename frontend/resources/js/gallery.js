@@ -130,6 +130,17 @@ on('click', '.filter-results [data-bs-toggle=modal]', async e => {
 function galleryFilterParams(peekPrevOrNext, peekFromItem) {
 	const params = {
 		related: 1,
+		relations: [
+			// don't show motion pictures / live photos, since they are not
+			// considered their own item in a gallery sense, and perhaps
+			// more importantly, we don't want to have to generate a thumbnail
+			// for them (literally no need for a thumbnail of those, just
+			// wasted CPU time and storage space)
+			{
+				"not": true,
+				"relation_label": "motion"
+			}
+		],
 		flat: $('#include-attachments').checked,
 		offset: galleryLimit * (currentPageNum()-1),
 		limit: galleryLimit+1, // add one to know if there's a next page

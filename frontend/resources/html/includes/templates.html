@@ -85,8 +85,8 @@
 
 <template id="tpl-filter-dropdown">
 	<div class="dropdown">
-		<button class="btn dropdown-toggle" data-bs-toggle="dropdown"
-			data-bs-auto-close="outside"></button>
+		<button class="btn dropdown-toggle" type="button"
+			data-bs-toggle="dropdown" data-bs-auto-close="outside"></button>
 		<div class="dropdown-menu">
 			
 		</div>
@@ -232,9 +232,9 @@
 				<div class="chat-bubble">
 					<div class="chat-bubble-title">
 						<div class="row">
-							<div class="col chat-bubble-author message-sender">
+							<a class="col chat-bubble-author message-sender view-entity-link" >
 								<!-- name -->
-							</div>
+							</a>
 							<div class="col-auto chat-bubble-date message-timestamp">
 								<!-- timestamp -->
 							</div>
@@ -289,6 +289,7 @@
 	<div class="map-preview-popup">
 		<div class="map-preview-coordinates"></div>
 		<div class="map-preview-timestamp"></div>
+		<div class="map-preview-meta"></div>
 	</div>
 </template>
 

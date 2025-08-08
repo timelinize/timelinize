@@ -99,9 +99,9 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) {
 		errVal.Message = errVal.Err.Error()
 	}
 
-	// append standard recommendations (TODO: bug reporting doesn't help much because we don't have their logs...)
-	reportRec := "If it still doesn't work, we can help! Please report this bug "
-	reportRecEnd := "to support@dyanim.com and we'll take care of it."
+	// append standard recommendations
+	reportRec := "If it still doesn't work, your server administrator or application host (whoever set up the app for you to use) can help! Please report this bug "
+	reportRecEnd := "to them and they'll take care of it."
 	if errVal.ID == "" {
 		reportRec += reportRecEnd
 	} else {

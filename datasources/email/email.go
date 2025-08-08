@@ -58,9 +58,11 @@ func (fi FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, 
 	rec := timeline.Recognition{DirThreshold: 0.9}
 
 	// TODO: proper detection, not just filename
-	ext := strings.ToLower(path.Ext(dirEntry.Filename))
-	if ext == extMbox || ext == extEml {
-		rec.Confidence = 1
+	if !dirEntry.IsDir() {
+		ext := strings.ToLower(path.Ext(dirEntry.Name()))
+		if ext == extMbox || ext == extEml {
+			rec.Confidence = 1
+		}
 	}
 
 	return rec, nil

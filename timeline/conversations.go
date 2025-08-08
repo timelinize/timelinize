@@ -57,7 +57,7 @@ func (tl *Timeline) RecentConversations(ctx context.Context, params ItemSearchPa
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (tl *Timeline) LoadConversation(ctx context.Context, params ItemSearchParam
 	tl.dbMu.RLock()
 	defer tl.dbMu.RUnlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return SearchResults{}, err
 	}

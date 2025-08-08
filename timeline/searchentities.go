@@ -93,7 +93,7 @@ func (tl *Timeline) SearchEntities(ctx context.Context, params EntitySearchParam
 			&ent.ID, &ent.typeID, &ent.Type, &ent.JobID, &stored, &ent.name,
 			&ent.Picture, &identDS, &autolinkImportID, &autolinkAttributeID,
 			&nattr.ID, &nattr.Name, &nattr.Value,
-		}
+			&nattr.Longitude, &nattr.Latitude, &nattr.Altitude}
 
 		err := rows.Scan(dests...)
 		if err != nil {
@@ -164,7 +164,10 @@ func (tl *Timeline) prepareEntitySearchQuery(params EntitySearchParams) (string,
 		all_entity_attributes.autolink_attribute_id,
 		attributes.id,
 		attributes.name,
-		attributes.value
+		attributes.value,
+		attributes.longitude,
+		attributes.latitude,
+		attributes.altitude
 	FROM entities
 	JOIN entity_types ON entity_types.id = entities.type_id
 	LEFT JOIN entity_attributes AS all_entity_attributes ON all_entity_attributes.entity_id = entities.id

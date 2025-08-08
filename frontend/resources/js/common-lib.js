@@ -377,18 +377,23 @@ function initMapSingleton() {
 	tlz.map.tl_isLoaded = false;
 	tlz.map.on('load', () => tlz.map.tl_isLoaded = true);
 
-	tlz.map.on('style.load', async () => {
+	tlz.map.once('style.load', () => {
 		// update the lighting every minute to match the current time of day
-		updateMapLighting();
 		setInterval(updateMapLighting, 60000);
+	});
+
+	tlz.map.on('style.load', () => {
+		updateMapLighting();
 
 		// add terrain source, but don't set it on the map unless enabled
-		tlz.map.tl_addSource('mapbox-dem', {
-			type: 'raster-dem',
-			// TODO: what's the difference between these?
-			url: 'mapbox://mapbox.terrain-rgb'
-			// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
-		});
+		if (!tlz.map.getSource('mapbox-dem')) {
+			tlz.map.tl_addSource('mapbox-dem', {
+				type: 'raster-dem',
+				// TODO: what's the difference between these?
+				url: 'mapbox://mapbox.terrain-rgb'
+				// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
+			});
+		}
 
 		applyTerrain();
 
@@ -498,7 +503,7 @@ function renderFilterDropdown(containerEl, title, loadKey) {
 }
 
 
-async function newDataSourceSelect(selectEl) {
+async function newDataSourceSelect(selectEl, options) {
 	if ($(selectEl).tomselect) {
 		return $(selectEl).tomselect;
 	}
@@ -520,13 +525,19 @@ async function newDataSourceSelect(selectEl) {
 		return `<div>${escape(data.text)}</div>`;
 	}
 
-	const ts  = await new TomSelect($(selectEl), {
-		maxItems: null,
+	const ts = new TomSelect($(selectEl), {
+		maxItems: options?.maxItems,
 		render: {
 			item: renderTomSelectItemAndOption,
 			option: renderTomSelectItemAndOption
 		}
 	});
+
+	// for a single-select control, it usually makes sense to
+	// initialize empty rather than the first option
+	if (options?.maxItems == 1) {
+		ts.clear(true);
+	}
 
 	// Clear input after selecting matching option from list
 	// (I have no idea why this isn't the default behavior)
@@ -729,6 +740,7 @@ async function newFilePicker(name, options) {
 	filePicker.options = options; // keeps track of its configuration
 	filePicker.filepaths = {}; // keeps track of which files are currently selected
 	filePicker.selected = function() { return Object.keys(filePicker.filepaths); };
+	filePicker.lastPathInput = ""; // the value of the path textbox, used to debounce the file listing updates
 
 	// restore the hidden files preference, if set
 	$('.file-picker-hidden-files', filePicker).checked = tlz.filePickers?.[name]?.show_hidden;
@@ -840,7 +852,9 @@ async function newFilePicker(name, options) {
 
 		// reset the filepath box, listing table, and selected path(s),
 		// then emit event (intentionally named uniquely from standard events)
-		$('.file-picker-path').value = listing.dir;
+		if (!options?.autocomplete) {
+			$('.file-picker-path').value = listing.dir;
+		}
 		$('.file-picker-table tbody', filePicker).innerHTML = '';
 		filePicker.filepaths = {};
 		filePicker.dispatchEvent(new CustomEvent("selection", { bubbles: true }));
@@ -957,8 +971,16 @@ on('click', '.file-picker-table .file-picker-item', event => {
 	fp.dispatchEvent(new CustomEvent("selection", { bubbles: true }));
 });
 
-on('change', '.file-picker-path', async event => {
-	// TODO: populate file listing, if valid path
+// as the user types or pastes a path, navigate to what they've typed, and filter results too
+on('keyup change paste', '.file-picker-path', async event => {
+	const fp = event.target.closest('.file-picker');
+	const pathInput = event.target.value;
+	if (pathInput == fp.lastPathInput) {
+		return;
+	}
+	fp.lastPathInput =  event.target.value;
+	console.log("EVENT:", event, pathInput);
+	fp.navigate(event.target.value, { autocomplete: true })
 });
 
 // navigate when double-clicking a folder
@@ -1019,7 +1041,11 @@ function entityPicture(entity) {
 	if (entity.picture.startsWith("http://") || entity.picture.startsWith("https://")) {
 		return entity.picture;
 	}
-	return `/repo/${tlz.openRepos[0].instance_id}/${entity.picture}`;
+	let entityPicture = `/repo/${tlz.openRepos[0].instance_id}/${entity.picture}`;
+	if (entity.forceUpdate) {
+		entityPicture += `?nocache=${new Date().getTime()}`; // classic cachebuster trick
+	}
+	return entityPicture;
 }
 
 // TODO: consider changing second param to preview=false, so that by default
@@ -1169,7 +1195,7 @@ function itemTimestampDisplay(item, endItem) {
 				dateTime: `${dt.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)} ${dt.toLocaleString(DateTime.TIME_WITH_SECONDS)}`,
 				weekdayDate: `${dt.weekdayLong}, ${dt.toLocaleString(DateTime.DATE_MED)}`,
 				dateWithWeekday: `${dt.toLocaleString(DateTime.DATE_MED)} (${dt.weekdayLong})`,
-				time: `${dt.hour() % 12} o'clock` // TODO: have it be like "1pm" instead of "13 o'clock"
+				time: `${dt.hour % 12} o'clock` // TODO: have it be like "1pm" instead of "13 o'clock"
 			};
 		} else {
 			if (itvl.hasSame('day')) {
@@ -1851,6 +1877,7 @@ function renderMessageItem(item, options) {
 	$('.data-source-icon', elem).title = item.data_source_title;
 	$('.data-source-icon', elem).dataset.bsToggle = "tooltip";
 	$('.view-item-link', elem).href = `/items/${item.repo_id}/${item.id}`;
+	$('.view-entity-link', elem).href = `/entities/${item.repo_id}/${item.entity.id}`;
 
 	if (options?.withToRelations && item.related) {
 		const toContainer = document.createElement('div');
@@ -2185,6 +2212,8 @@ const PreviewModal = (function() {
 				$$('#modal-preview .btn-next').forEach(elem => elem.classList.add('disabled'));
 			}
 
+			$('#modal-preview .btn-primary').href = `/items/${item.repo_id}/${item.id}`;
+
 			// TODO: is this used/needed?
 			private.currentItem = item;
 		}
@@ -2471,6 +2500,14 @@ function filterToQueryString() {
 			qs.delete('semantic_text');
 	}
 
+	// text search for conversations
+	if ($('#message-substring')) {
+		if ($('#message-substring').value)
+			qs.set('text', $('#message-substring').value);
+		else
+			qs.delete('text');
+	}
+
 	return qs;
 }
 
@@ -2554,6 +2591,11 @@ async function queryStringToFilter() {
 	// semantic search
 	if ($('.semantic-text-search')) {
 		$('.semantic-text-search').value = qs.get('semantic_text');
+	}
+
+	// text search for conversations
+	if ($('#message-substring')) {
+		$('#message-substring').value = qs.get('text') || '';
 	}
 }
 

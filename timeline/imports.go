@@ -152,7 +152,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 		estimating = chkpt.EstimatedSize != nil
 	}
 
-	// two iterations: first to estimate size if enabled, then to actually import items
+	// two iterations of the phase loop: first to estimate size if enabled, then to actually import items
 	for {
 		// this should be cumulative across all the files
 		var totalSizeEstimate *int64
@@ -167,6 +167,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 			job.Message("Estimating total import size")
 		}
 
+		// outer loop: iterate the datasource+filename combos
 		for i := chkpt.OuterIndex; i < len(ij.Plan.Files); i++ {
 			if err := job.Context().Err(); err != nil {
 				return err
@@ -190,7 +191,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 			logger := job.Logger().With(zap.String("data_source_name", ds.Name))
 
-			// process each filename one at a time
+			// inner loop: iterate the filenames assigned to this data source configuration
 			for j := chkpt.InnerIndex; j < len(fileImport.Filenames); j++ {
 				if err := job.Context().Err(); err != nil {
 					return err
@@ -292,6 +293,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 				// during import is (probably?) not desired, so use a "regular" file system
 				var fsys fs.FS
 				if archives.PathContainsArchive(filepath.ToSlash(fsRoot)) {
+					// TODO: I'd love to know what the archive file is named, for troubleshooting multi-archive Google Takeouts
 					fsys = &archives.DeepFS{Root: fsRoot, Context: job.Context()}
 				} else {
 					fsys, err = archives.FileSystem(job.ctx, fsRoot, nil)
@@ -350,6 +352,11 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 				// the data source checkpoint is only applicable to the starting point (the filename we resumed from)
 				chkpt.DataSourceCheckpoint = nil
+
+				// reset the checkpoint's inner index back to 0, since when we advance the outer loop
+				// we should always start its file list at 0 (otherwise we skip import tasks completely
+				// if it's > 0!)
+				chkpt.InnerIndex = 0
 			}
 		}
 
@@ -360,8 +367,12 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 			job.FlushProgress()
 			job.Logger().Info("done with size estimation", zap.Int64("estimated_size", total))
 
-			// loop once more to import items (don't estimate again)
+			// loop once more to import items (don't estimate again); and make sure we start the
+			// next phase from the beginning of the outer list (even if we resumed a checkpoint
+			// and the starting outer index is > 0), because the starting index only applies to
+			// that phase; we don't want to skip tasks for our import job!
 			estimating = false
+			chkpt.OuterIndex = 0
 			continue
 		}
 
@@ -398,6 +409,17 @@ type ImportParams struct {
 
 	// The logger to use.
 	Log *zap.Logger `json:"-"`
+
+	// Typically, job pauses are honored by the processor whenever
+	// a graph is sent down the pipeline. However, if data sources
+	// do a nontrivial amount of work between sending graphs, this
+	// can result in a long delay before pausing. So we expose the
+	// pause function here for the data source to call at each unit
+	// of work. This could be, for example, an iteration of a loop,
+	// which may be looking for the next item within the designated
+	// timeframe, that calls Continue(), which blocks until the job
+	// gets unpaused (and does nothing if the job is not paused).
+	Continue func() error `json:"-"`
 
 	// Time bounds on which data to retrieve.
 	// The respective time and item ID fields
@@ -465,7 +487,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 	// (bookmark items are also a special case: they may be empty, to later be populated
 	// by a snapshot, as long as they have metadata)
 	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.Query(`SELECT id FROM extended_items
+	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx, `SELECT id FROM extended_items
 		WHERE job_id=?
 		AND (data_text IS NULL OR data_text='')
 			AND (classification_name != ? OR metadata IS NULL)
@@ -507,7 +529,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 	ij.job.Logger().Info("deleting empty items from this import", zap.Int("count", len(emptyItems)))
 
 	retention := time.Duration(0)
-	return ij.job.tl.deleteItemRows(ij.job.tl.ctx, emptyItems, false, &retention)
+	return ij.job.tl.deleteItemRows(ij.job.ctx, emptyItems, false, &retention)
 }
 
 // generateThumbnailsForImportedItems generates thumbnails for qualifying items
@@ -517,6 +539,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 func (ij ImportJob) generateThumbnailsForImportedItems() {
 	thumbnailCount := atomic.LoadInt64(ij.thumbnailCount)
 	if thumbnailCount == 0 {
+		ij.job.Logger().Info("no items qualify for thumbnail, so skipping thumbnail generation job")
 		return
 	}
 

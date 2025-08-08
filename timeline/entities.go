@@ -29,9 +29,11 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -78,8 +80,8 @@ type Entity struct {
 }
 
 func (e Entity) String() string {
-	return fmt.Sprintf("[name=%s picture=%v metadata=%v attributes=%v]",
-		e.Name, e.Picture, e.Metadata, e.Attributes)
+	return fmt.Sprintf("[id=%d type=%s name=%s picture=%v metadata=%v attributes=%v]",
+		e.ID, e.Type, e.Name, e.Picture, e.Metadata, e.Attributes)
 }
 
 // IsEmpty returns true if the entity has no information.
@@ -165,7 +167,7 @@ func (tl *Timeline) normalizeEntity(e *Entity) error {
 
 	// oh, and ensure type is set (DB row requires entity type ID, not name)
 	if e.Type == "" && e.typeID == 0 {
-		e.Type = "person" // assume a person, I guess -- data sources don't often distinguish
+		e.Type = EntityPerson // assume a person, I guess -- data sources don't often distinguish
 	}
 	if e.typeID == 0 {
 		typeID, err := tl.entityTypeNameToID(e.Type)
@@ -191,6 +193,12 @@ func (e Entity) metadataString() (*string, error) {
 	metaString := string(metaBytes)
 	return &metaString, nil
 }
+
+const (
+	EntityPerson   = "person"
+	EntityCreature = "creature"
+	EntityPlace    = "place"
+)
 
 // Attribute describes an entity.
 type Attribute struct {
@@ -237,13 +245,10 @@ type Attribute struct {
 	Identity bool `json:"identity"`
 
 	// If the attribute represents a place, put its location here.
-	// For a point, use Latitude1 and Longitude1. For a rectangle,
-	// use Lat1/Lon1 as the top-left corner and Lat2/Lon2 as the
-	// bottom-right corner.
-	Latitude1  *float64 `json:"latitude1,omitempty"`
-	Longitude1 *float64 `json:"longitude1,omitempty"`
-	Latitude2  *float64 `json:"latitude2,omitempty"`
-	Longitude2 *float64 `json:"longitude2,omitempty"`
+	// At least lat/lon are required (for earth coordinates).
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Altitude  *float64 `json:"altitude,omitempty"`
 
 	// Optional metadata associated with this attribute.
 	Metadata Metadata `json:"metadata,omitempty"`
@@ -252,7 +257,7 @@ type Attribute struct {
 	// The fields below are NOT intended for use by data sources (importers).
 
 	// NOT FOR USE BY DATA SOURCES.
-	ID int64 `json:"id,omitempty"`
+	ID uint64 `json:"id,omitempty"`
 
 	// NOT FOR USE BY DATA SOURCES. For search results only.
 	ItemCount int64 `json:"item_count,omitempty"`
@@ -263,7 +268,7 @@ func (a Attribute) Empty() bool {
 	if strings.TrimSpace(a.Name) == "" {
 		return true
 	}
-	return strings.TrimSpace(a.valueString()) == ""
+	return strings.TrimSpace(a.valueString()) == "" && a.Latitude == nil && a.Longitude == nil
 }
 
 func (a Attribute) valueForDB() any {
@@ -334,6 +339,8 @@ func normalizeAttribute(attr Attribute) Attribute {
 		}
 	}
 
+	attr.Metadata.Clean()
+
 	return attr
 }
 
@@ -401,6 +408,8 @@ func (p *processor) processEntityPicture(ctx context.Context, e Entity) (string,
 		pictureFile += ".webp"
 	case imageGif:
 		pictureFile += ".gif"
+	case ImageAVIF:
+		pictureFile += ".avif"
 	case ImageJPEG, "":
 		fallthrough
 	default:
@@ -516,7 +525,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 				zap.Uint64("entity_id", in.ID),
 				zap.Error(err))
 		} else if pictureFile != "" {
-			_, err = tx.Exec(`UPDATE entities SET picture_file=? WHERE id=?`, pictureFile, in.ID) // TODO: LIMIT 1, if ever implemented
+			_, err = tx.ExecContext(ctx, `UPDATE entities SET picture_file=? WHERE id=?`, pictureFile, in.ID) // TODO: LIMIT 1, if ever implemented
 			if err != nil {
 				p.log.Error("updating new entity's profile picture in DB",
 					zap.Uint64("entity_id", in.ID),
@@ -529,11 +538,11 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 
 		atomic.AddInt64(p.ij.newEntityCount, 1)
 	} else if len(entities) == 1 {
-		// if the identity attribute(s) matched exactly 1 person, update their info in the DB
-		// (if it matched more than 1 person, we don't update multiple of them, because we only
-		// get 1 person at a time from data sources and we'd end up making the two look alike...
+		// if the identity attribute(s) matched exactly 1 entity, update its info in the DB
+		// (if it matched more than 1 entity, we don't update multiple of them, because we only
+		// get 1 entity at a time from data sources and we'd end up making the two look alike...
 		// I can't think of a single data source that explicitly maps one of their accounts to
-		// multiple persons and gives us that information... so we lose that granularity or
+		// multiple entities and gives us that information... so we lose that granularity or
 		// specificity from data sources, and we have to rely on the user to maintain that
 		// information because only they'd know)
 
@@ -564,6 +573,10 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 				}
 				setClause += "picture_file=?"
 				args = append(args, pictureFile)
+				// notify the UI that a new profile picture can be displayed
+				if entity.ID == ownerEntityID {
+					p.log.Info("new owner picture", zap.String("picture_file", pictureFile))
+				}
 			}
 		}
 		setClause = strings.TrimSuffix(setClause, ", ")
@@ -577,7 +590,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 		}
 	}
 
-	// now store each attribute+value combo if we don't have it yet,
+	// now store each attribute+value/coords combo if we don't have it yet,
 	// and link it to the entity
 	var identityAttributeID uint64
 	for _, attr := range in.Attributes {
@@ -661,44 +674,94 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 }
 
 func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([]Entity, map[uint64]uint64, error) {
-	// iterate all the attributes to find all the entities we can identify who
-	// we already have in the database if they're not already
-	// (notice that we left join attributes; this is because an entity may only have
-	// a row but no attributes, especially if it's the timeline owner (ID 1) because
-	// they may not have filled out a profile)
-	q := `SELECT
-			entities.id, entities.name, entities.picture_file,
-			ea.attribute_id
-		FROM entities
-		LEFT JOIN entity_attributes AS ea ON ea.entity_id = entities.id
-		LEFT JOIN attributes ON attributes.id = ea.attribute_id
-		WHERE `
-
-	var whereGroups []string
+	var sb strings.Builder
 	var args []any
 
-	// in some cases, the entity ID may be specified manually; load that entity directly by ID instead of trying to find it
+	sb.WriteString(`
+SELECT
+	entities.id,
+	entities.name,
+	entities.picture_file,
+	ea.attribute_id
+FROM entities
+JOIN entity_types ON entity_types.id = entities.type_id
+LEFT JOIN entity_attributes AS ea ON ea.entity_id = entities.id
+`)
+
 	if in.ID > 0 {
-		whereGroups = append(whereGroups, "entities.id=?")
+		// in some cases, the entity ID may be specified manually; load that entity directly by ID instead of trying to find it
+		sb.WriteString("WHERE entities.id=?")
 		args = append(args, in.ID)
 	} else {
+		sb.WriteString("WHERE entity_types.name=? AND entities.name=?")
+		args = append(args, EntityPlace, in.Name)
+
 		for _, attr := range in.Attributes {
 			// skip non-identifying attributes as those are not likely to be unique enough
 			if attr.Identifying || attr.Identity {
-				whereGroups = append(whereGroups, `(attributes.name=? AND attributes.value=?)`)
-				args = append(args, attr.Name, attr.Value)
+				sb.WriteString("\n\nUNION\n\n-- match by attribute ")
+				sb.WriteString(attr.Name)
+				sb.WriteString(`
+SELECT
+	entities.id,
+	entities.name,
+	entities.picture_file,
+	ea.attribute_id
+FROM entities
+JOIN entity_attributes AS ea ON ea.entity_id = entities.id
+JOIN attributes ON attributes.id = ea.attribute_id
+WHERE attributes.name=? AND (`)
+				args = append(args, attr.Name)
+
+				const decPrecisionAt, decPrecisionNear = 4, 3
+				lowLonAt, highLonAt, lonDecAt := latLonBounds(attr.Longitude, decPrecisionAt)
+				lowLatAt, highLatAt, latDecAt := latLonBounds(attr.Latitude, decPrecisionAt)
+				lowLonNear, highLonNear, lonDecNear := latLonBounds(attr.Longitude, decPrecisionNear)
+				lowLatNear, highLatNear, latDecNear := latLonBounds(attr.Latitude, decPrecisionNear)
+
+				if attr.Value != nil {
+					sb.WriteString("attributes.value=?")
+					args = append(args, attr.valueForDB())
+				}
+				if attr.Latitude != nil && attr.Longitude != nil {
+					if attr.Value != nil {
+						sb.WriteString(" OR ")
+					}
+					sb.WriteString(`
+(
+	-- entity name is different, but coordinate is really close to same spot as an existing attribute
+	entities.name!=?
+	AND round(attributes.longitude, ?) BETWEEN ? AND ?
+	AND round(attributes.latitude, ?) BETWEEN ? AND ?
+)
+OR (
+	-- entity name is the same, and coordinate is somewhat close to same spot as an existing attribute
+	entities.name=?
+	AND round(attributes.longitude, ?) BETWEEN ? AND ?
+	AND round(attributes.latitude, ?) BETWEEN ? AND ?
+)`)
+					args = append(args,
+						in.Name,
+						lonDecAt, lowLonAt, highLonAt,
+						latDecAt, lowLatAt, highLatAt,
+						in.Name,
+						lonDecNear, lowLonNear, highLonNear,
+						latDecNear, lowLatNear, highLatNear)
+				}
+				sb.WriteString(")")
 			}
 		}
 	}
 
+	var entities []Entity
+	entityAutolinkAttrs := make(map[uint64]uint64) // map of entity ID to attribute ID that linked it
+
 	// only perform query if there are any qualifiers; otherwise this query returns
 	// all rows which is obviously wrong; if there's no ID or identifying attributes,
 	// there's no way for us to know who this entity is anyway
-	var entities []Entity
-	entityAutolinkAttrs := make(map[uint64]uint64) // map of entity ID to attribute ID that linked it
-	if len(whereGroups) > 0 {
-		q += strings.Join(whereGroups, " OR ")
-		q += " GROUP BY entities.id"
+	if len(args) > 0 {
+		sb.WriteString("\n\nGROUP BY entities.id")
+		q := sb.String()
 
 		// run the query to get the entity/entities (note there may be multiple; e.g. if multiple people
 		// share an account or the account has attributes spanning nultiple positively-ID'ed people)
@@ -748,24 +811,38 @@ func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (uint64, er
 		altValue = &attr.AltValue
 	}
 
-	// store the attribute+value if we don't have this combo yet (if we do, no ID is returned, sigh)
+	const decPrecision = 3
+	lowLon, highLon, lonDec := latLonBounds(attr.Longitude, decPrecision)
+	lowLat, highLat, latDec := latLonBounds(attr.Latitude, decPrecision)
+
 	var attrID uint64
-	err := tx.QueryRowContext(ctx,
-		`INSERT OR IGNORE INTO attributes (name, value, alt_value, metadata) VALUES (?, ?, ?, ?) RETURNING id`,
-		attr.Name, attr.valueForDB(), altValue, metadata).Scan(&attrID)
+	err := tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM attributes
+		WHERE name=? AND (
+			value=?
+			OR (
+				round(longitude, ?) BETWEEN ? AND ?
+				AND round(latitude, ?) BETWEEN ? AND ?
+			)
+		)
+		LIMIT 1`, attr.Name, attr.valueForDB(),
+		lonDec, lowLon, highLon,
+		latDec, lowLat, highLat).Scan(&attrID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("storing attribute '%+v': %w", attr, err)
+		return 0, fmt.Errorf("looking up attribute '%+v': %w", attr, err)
 	}
 
 	if attrID == 0 {
-		// attribute already existed; query to get its ID so we can associate it with the person(s)
-		// TODO: if this tx is slow, there may be room for optimization here; if we can already know
-		// which persons are already associated with this attribute, we don't have to do this step?
-		err = tx.QueryRowContext(ctx,
-			`SELECT id FROM attributes WHERE name=? AND value=? LIMIT 1`,
-			attr.Name, attr.valueForDB()).Scan(&attrID)
+		// store the attribute+value/coords since we don't have this combo yet
+		err := tx.QueryRowContext(ctx, `INSERT INTO attributes
+			(name, value, alt_value, longitude, latitude, altitude, metadata)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			RETURNING id`,
+			attr.Name, attr.valueForDB(), altValue,
+			attr.Longitude, attr.Latitude, attr.Altitude, metadata).Scan(&attrID)
 		if err != nil {
-			return 0, fmt.Errorf("retrieving attribute ID for attribute %+v: %w", attr, err)
+			return 0, fmt.Errorf("storing attribute '%+v': %w", attr, err)
 		}
 	}
 
@@ -791,7 +868,7 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 			return fmt.Errorf("entity to merge specified more than once (%d)", id)
 		}
 		seen[id] = struct{}{}
-		if id == 1 {
+		if id == ownerEntityID {
 			// TODO: always keep entity 1 for now, since that's the repo owner... until we figure out a better solution
 			entityIDToKeep, entityIDsToMerge[i], id = id, entityIDToKeep, entityIDToKeep
 		}
@@ -812,7 +889,7 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 	tl.dbMu.Lock()
 	defer tl.dbMu.Unlock()
 
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -958,6 +1035,7 @@ func (l *latentID) identifyingAttributeID(ctx context.Context, tx *sql.Tx) (uint
 
 // getSystemLocale returns the language, region, and encoding, if available.
 func getSystemLocale() (language, region, encoding string, err error) {
+	// Example of LANG: en_US.UTF-8
 	if lang := os.Getenv("LANG"); lang != "" {
 		underscorePos := strings.Index(lang, "_")
 		if underscorePos < 0 {
@@ -973,7 +1051,21 @@ func getSystemLocale() (language, region, encoding string, err error) {
 		encoding = lang[dotPos+1:]
 		return
 	}
-	err = errors.New("unable to determine locale because LANG var is unset")
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("powershell", "Get-Culture | select -exp Name")
+		var output []byte
+		output, err = cmd.Output() // e.g. "en-US"
+		if err != nil {
+			return
+		}
+		parts := strings.Split(strings.TrimSpace(string(output)), "-")
+		if len(parts) == 2 { //nolint:mnd
+			language = parts[0]
+			region = parts[1]
+		}
+		return
+	}
+	err = errors.New("unable to determine locale because LANG var is unset and/or platform unrecognized")
 	return
 }
 

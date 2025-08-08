@@ -66,18 +66,9 @@ type ItemSearchParams struct {
 	ToAttributeID []int64 `json:"to_attribute_id,omitempty"`
 	ToEntityID    []int64 `json:"to_entity_id,omitempty"`
 
-	// TODO: make this work: the idea is that you should be able to query like: "return only items
-	// that relate in a certain way to or from the item described by the search parameters"
-	// for example, getting the item that has the sidecar motion photo for a specific data file:
-	// 	SELECT items.*
-	// 	FROM items
-	// 	JOIN items AS itemsFrom ON itemsFrom.id = relationships.from_item_id
-	// 	JOIN relationships ON relationships.to_item_id = items.id
-	// 	JOIN relations ON relations.id = relationships.relation_id
-	// 	WHERE itemsFrom.data_file='data/2022/04/media/IMG_4796.jpg' AND relations.label='motion';
-	//
-	// // filter by relationship to other items
-	// Relations RelationParams `json:"relations,omitempty"`
+	// filter by relationship to other items
+	// TODO: We can probably wrap ToAttributeID, ToEntityID, and maybe Astructured into this?
+	Relations []RelationParams `json:"relations,omitempty"`
 
 	// bounding box searches
 	StartTimestamp       *time.Time `json:"start_timestamp,omitempty"`
@@ -200,7 +191,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 
 	// open DB transaction to hopefully make it more efficient
 	// (TODO: we don't currently commit this tx, because we didn't make changes - that's OK, right?)
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return SearchResults{}, err
 	}
@@ -463,10 +454,11 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 		LEFT JOIN entity_attributes ON attributes.id = entity_attributes.attribute_id
 		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`
 
+	// TODO: It's possible that we could move all these (ToAttributeID, ToEntityID, rootItemsOnly) into RelationParams
 	if len(params.ToAttributeID) > 0 || len(params.ToEntityID) > 0 {
 		q += `
 		JOIN relationships ON relationships.from_item_id = items.id`
-	} else if rootItemsOnly {
+	} else if rootItemsOnly || len(params.Relations) > 0 {
 		q += `
 		LEFT JOIN relationships ON relationships.to_item_id = items.id
 		LEFT JOIN relations ON relations.id = relationships.relation_id`
@@ -688,6 +680,19 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 			or("relations.directed != ?", 1)
 			or("relations.subordinating = ?", 0)
 			or("relationships.to_item_id IS ?", nil)
+		})
+	}
+
+	// factor in relationships
+	for _, relParam := range params.Relations {
+		op := "IS"
+		if relParam.Not {
+			op = "IS NOT"
+		}
+		and(func() {
+			if relParam.RelationLabel != "" {
+				or("relations.label "+op+" ?", relParam.RelationLabel)
+			}
 		})
 	}
 
@@ -956,12 +961,12 @@ func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID u
 	var p relatedEntity
 	if ir.AttributeID != nil {
 		err = tx.QueryRowContext(ctx, `
-		SELECT entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value
+		SELECT entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value, attributes.longitude, attributes.latitude, attributes.altitude
 		FROM attributes, entities
 		JOIN entity_attributes
 			ON entity_attributes.entity_id = entities.id
 			AND entity_attributes.attribute_id = attributes.id
-		WHERE attributes.id=?`, ir.AttributeID).Scan(&p.ID, &p.Name, &p.Picture, &p.Attribute.Name, &p.Attribute.Value, &p.Attribute.AltValue)
+		WHERE attributes.id=?`, ir.AttributeID).Scan(&p.ID, &p.Name, &p.Picture, &p.Attribute.Name, &p.Attribute.Value, &p.Attribute.AltValue, &p.Attribute.Longitude, &p.Attribute.Latitude, &p.Attribute.Altitude)
 		if err != nil {
 			return nil, fmt.Errorf("loading related entity: %w", err)
 		}
@@ -985,12 +990,11 @@ type SearchResult struct {
 	Score    float64 `json:"score,omitempty"`
 }
 
-// TODO: Finish making this work
-// type RelationParams struct {
-// 	FromItem      bool   `json:"from_item,omitempty"`
-// 	ToItem        bool   `json:"to_item,omitempty"`
-// 	RelationLabel string `json:"relation_label,omitempty"`
-// }
+// RelationParams describes a search using item relations.
+type RelationParams struct {
+	Not           bool   `json:"not,omitempty"` // if true, only match items that do NOT have this relation
+	RelationLabel string `json:"relation_label,omitempty"`
+}
 
 // relatedEntity is a subset of Entity (so we need to make sure
 // the JSON field names are the same), but with pointer field
@@ -1006,10 +1010,13 @@ type relatedEntity struct {
 // nullableAttribute is like Attribute but with nullable fields
 // so that it can be I/O for the database
 type nullableAttribute struct {
-	ID       *int64  `json:"id,omitempty"`
-	Name     *string `json:"name,omitempty"`
-	Value    *string `json:"value,omitempty"`
-	AltValue *string `json:"alt_value,omitempty"`
+	ID        *uint64  `json:"id,omitempty"`
+	Name      *string  `json:"name,omitempty"`
+	Value     *string  `json:"value,omitempty"`
+	AltValue  *string  `json:"alt_value,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Altitude  *float64 `json:"altitude,omitempty"`
 }
 
 func (na nullableAttribute) attribute() Attribute {
@@ -1026,6 +1033,9 @@ func (na nullableAttribute) attribute() Attribute {
 	if na.AltValue != nil {
 		a.AltValue = *na.AltValue
 	}
+	a.Longitude = na.Longitude
+	a.Latitude = na.Latitude
+	a.Altitude = na.Altitude
 	return a
 }
 

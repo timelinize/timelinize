@@ -244,14 +244,17 @@ async function dataSourceHourStats() {
 		// TODO: show empty dashboard -- tell user to import some data
 		return;
 	}
+
+	// find max across all data so we can scale the bubble size (yeah this is a mouthful)
+	const dataMax = Math.max(...series.map(ds => Math.max(...ds.data.map(point => point[2]))));
 	
-	// add some chart formatting to the returned data
-	const minSymbolSize = 4, maxSymbolSize = 25;
+	// add some chart formatting to the returned data, and scale the bubble size based on the 3rd dimension of the data point
+	const minSymbolSize = 2, maxSymbolSize = 50;
 	for (let i = 0; i < series.length; i++) {
 		series[i] = {
 			...series[i], // includes name and data
 			type: 'scatter',
-			symbolSize: point => Math.max(Math.min(point[2]/3, maxSymbolSize), minSymbolSize),
+			symbolSize: point => ((point[2]+minSymbolSize)/dataMax * (maxSymbolSize-minSymbolSize)) + minSymbolSize,
 			emphasis: {
 				focus: 'series'
 			}

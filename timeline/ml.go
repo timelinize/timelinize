@@ -82,18 +82,22 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 	logger.Info("counting total size of job")
 
 	const mostOfQuery = `FROM items
-			LEFT JOIN embeddings ON items.embedding_id = embeddings.id
-			WHERE items.job_id=?
+			LEFT JOIN embeddings ON embeddings.id = items.embedding_id
+			LEFT JOIN jobs ON jobs.id = items.modified_job_id
+			WHERE (items.job_id=? OR items.modified_job_id=?)
 				AND (items.data_type LIKE 'image/%' OR items.data_type LIKE 'text/%')
 				AND (items.data_id IS NOT NULL OR items.data_text IS NOT NULL OR items.data_file IS NOT NULL)
-				AND (items.embedding_id IS NULL OR embeddings.generated < items.stored OR embeddings.generated < items.modified)`
+				AND (items.embedding_id IS NULL
+					OR embeddings.generated < items.stored
+					OR (embeddings.generated < items.modified
+						AND embeddings.generated < jobs.ended))`
 
 	job.tl.dbMu.RLock()
 	var jobSize int
 	err := job.tl.db.QueryRowContext(job.ctx, `
 		SELECT count()
 			`+mostOfQuery,
-		ej.ItemsFromImportJob).Scan(&jobSize)
+		ej.ItemsFromImportJob, ej.ItemsFromImportJob).Scan(&jobSize)
 	job.tl.dbMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed counting size of job: %w", err)
@@ -133,7 +137,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 				AND items.id > ?
 			ORDER BY items.id
 			LIMIT ?
-			`, ej.ItemsFromImportJob, lastItemID, pageSize)
+			`, ej.ItemsFromImportJob, ej.ItemsFromImportJob, lastItemID, pageSize)
 		if err != nil {
 			job.tl.dbMu.RUnlock()
 			return fmt.Errorf("failed querying page of database table: %w", err)
@@ -277,7 +281,7 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 	job.tl.dbMu.Lock()
 	defer job.tl.dbMu.Unlock()
 
-	tx, err := job.tl.db.Begin()
+	tx, err := job.tl.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("opening transaction: %w", err)
 	}
@@ -295,7 +299,7 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 		return fmt.Errorf("getting last-stored embedding ID for item %d: %w", itemID, err)
 	}
 
-	_, err = tx.Exec(`UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, itemID) // TODO: LIMIT 1
+	_, err = tx.ExecContext(ctx, `UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, itemID) // TODO: LIMIT 1
 	if err != nil {
 		return fmt.Errorf("linking item %d to embedding: %w", itemID, err)
 	}
