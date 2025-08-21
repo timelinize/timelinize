@@ -136,7 +136,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 	}
 
 	// standardize phone number, and ensure it is marked as identity
-	standardizedPhoneNum, err := timeline.NormalizePhoneNumber(dsOpt.OwnerPhoneNumber, dsOpt.DefaultRegion)
+	standardizedPhoneNum, err := timeline.NormalizePhoneNumber(ctx, dsOpt.OwnerPhoneNumber, dsOpt.DefaultRegion)
 	if err != nil {
 		return fmt.Errorf("standardizing owner's phone number '%s': %w", dsOpt.OwnerPhoneNumber, err)
 	}
@@ -205,7 +205,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				if err := dec.DecodeElement(&mms, &startElem); err != nil {
 					return fmt.Errorf("decoding XML element as MMS: %w", err)
 				}
-				imp.processMMS(line, mms, params, dsOpt)
+				imp.processMMS(ctx, line, mms, params, dsOpt)
 			}
 
 			line++
@@ -240,12 +240,12 @@ func (imp *FileImporter) processSMS(line int, sms SMS, opt timeline.ImportParams
 	opt.Pipeline <- ig
 }
 
-func (imp *FileImporter) processMMS(line int, mms MMS, opt timeline.ImportParams, dsOpt Options) {
+func (imp *FileImporter) processMMS(ctx context.Context, line int, mms MMS, opt timeline.ImportParams, dsOpt Options) {
 	if !mms.within(opt.Timeframe) {
 		return
 	}
 
-	sender, recipients := mms.people(dsOpt)
+	sender, recipients := mms.people(ctx, dsOpt)
 
 	// the ordering of the parts is not guaranteed, and I've seen them
 	// switched around on different exports; I think it makes sense to

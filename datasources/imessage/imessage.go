@@ -214,7 +214,7 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		// fill in the normalized ID (phone number, usually) of the device; prefer the entry in the DB, I guess,
 		// but fall back to the device's telephony/commcenter information if needed
 		if msg.destinationCallerID != nil {
-			msg.normalizedCallerID = NormalizePhoneNumber(*msg.destinationCallerID, "")
+			msg.normalizedCallerID = NormalizePhoneNumber(ctx, *msg.destinationCallerID, "")
 		} else {
 			msg.normalizedCallerID = im.DeviceID
 		}
@@ -505,7 +505,7 @@ func (h handle) normalizedID() string {
 	if h.country != nil {
 		country = strings.ToUpper(*h.country)
 	}
-	return NormalizePhoneNumber(h.ID(), country)
+	return NormalizePhoneNumber(context.TODO(), h.ID(), country)
 }
 
 func (h handle) entity() timeline.Entity {
@@ -532,8 +532,8 @@ type attachment struct {
 }
 
 // NormalizePhoneNumber tries to NormalizePhoneNumber the ID (phone number), and simply returns the input if it fails.
-func NormalizePhoneNumber(id, country string) string {
-	norm, err := timeline.NormalizePhoneNumber(id, country)
+func NormalizePhoneNumber(ctx context.Context, id, country string) string {
+	norm, err := timeline.NormalizePhoneNumber(ctx, id, country)
 	if err != nil {
 		return id // oh well
 	}

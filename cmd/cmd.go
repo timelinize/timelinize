@@ -84,7 +84,7 @@ func Main(embeddedWebsite fs.FS) {
 
 	if isDesktopAvailable() {
 		// once the server is running, open GUI in web browser
-		if err := openWebBrowser("http://127.0.0.1:12002"); err != nil {
+		if err := openWebBrowser(ctx, "http://127.0.0.1:12002"); err != nil {
 			timeline.Log.Error("could not open web browser", zap.Error(err))
 		}
 	} else {
@@ -107,7 +107,7 @@ func isDesktopAvailable() bool {
 // fully-qualified URL including a trailing slash even if there
 // is no path (e.g. "http://host/" not "http://host"); if the
 // trailing slash is not present, it will be appended.
-func openWebBrowser(loc string) error {
+func openWebBrowser(ctx context.Context, loc string) error {
 	osCommand := map[string][]string{
 		"darwin":  {"open"},
 		"freebsd": {"xdg-open"},
@@ -139,7 +139,7 @@ func openWebBrowser(loc string) error {
 	timeline.Log.Info("opening web browser to application",
 		zap.Strings("command", append([]string{exe}, args...)))
 
-	cmd := exec.Command(exe, args...)
+	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

@@ -159,7 +159,7 @@ func (tl *Timeline) normalizeEntity(e *Entity) error {
 			identityAttr = e.Attributes[i]
 		}
 		// normalize known attributes
-		e.Attributes[i] = normalizeAttribute(e.Attributes[i])
+		e.Attributes[i] = normalizeAttribute(tl.ctx, e.Attributes[i])
 	}
 
 	// clean up name too; use regex to remove repeated spaces, then trim spaces on edges
@@ -311,7 +311,7 @@ func (a Attribute) valueString() string {
 	}
 }
 
-func normalizeAttribute(attr Attribute) Attribute {
+func normalizeAttribute(ctx context.Context, attr Attribute) Attribute {
 	attr.Name = strings.TrimSpace(attr.Name)
 
 	if val, ok := attr.Value.(string); ok {
@@ -333,7 +333,7 @@ func normalizeAttribute(attr Attribute) Attribute {
 			num = region
 			region = ""
 		}
-		stdPhoneNum, err := NormalizePhoneNumber(num, region)
+		stdPhoneNum, err := NormalizePhoneNumber(ctx, num, region)
 		if err == nil {
 			attr.Value = stdPhoneNum
 		}
@@ -352,9 +352,9 @@ func normalizeAttribute(attr Attribute) Attribute {
 // region is assumed; otherwise the US region is assumed.
 //
 // We chose E164 because that's what Twilio uses.
-func NormalizePhoneNumber(number, defaultRegion string) (string, error) {
+func NormalizePhoneNumber(ctx context.Context, number, defaultRegion string) (string, error) {
 	if defaultRegion == "" {
-		if _, localeRegion, _, err := getSystemLocale(); err == nil {
+		if _, localeRegion, _, err := getSystemLocale(ctx); err == nil {
 			defaultRegion = localeRegion
 		} else {
 			defaultRegion = "US"
@@ -1034,7 +1034,7 @@ func (l *latentID) identifyingAttributeID(ctx context.Context, tx *sql.Tx) (uint
 }
 
 // getSystemLocale returns the language, region, and encoding, if available.
-func getSystemLocale() (language, region, encoding string, err error) {
+func getSystemLocale(ctx context.Context) (language, region, encoding string, err error) {
 	// Example of LANG: en_US.UTF-8
 	if lang := os.Getenv("LANG"); lang != "" {
 		underscorePos := strings.Index(lang, "_")
@@ -1052,7 +1052,7 @@ func getSystemLocale() (language, region, encoding string, err error) {
 		return
 	}
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command("powershell", "Get-Culture | select -exp Name")
+		cmd := exec.CommandContext(ctx, "powershell", "Get-Culture | select -exp Name")
 		var output []byte
 		output, err = cmd.Output() // e.g. "en-US"
 		if err != nil {

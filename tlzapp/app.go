@@ -112,8 +112,10 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 		shutdownTimelines()
 
 		// stop python server (will wait for it below)
-		if err := newApp.pyServer.Process.Kill(); err != nil {
-			newApp.log.Error("could not terminate ML server", zap.Error(err))
+		if newApp.pyServer != nil && newApp.pyServer.Process != nil {
+			if err := newApp.pyServer.Process.Kill(); err != nil {
+				newApp.log.Error("could not terminate ML server", zap.Error(err))
+			}
 		}
 
 		// gracefully close the HTTP server (let existing requests finish within a timeout)
@@ -299,7 +301,7 @@ func (a *App) startPythonServer(host string, port int) error {
 	// run the python server such that the venv is relocated to its own
 	// folder outside the project folder (but still in the app data dir)
 	//nolint:gosec
-	cmd := exec.Command(
+	cmd := exec.CommandContext(a.ctx,
 		"uv", "run", "server.py",
 		"--host", host,
 		"--port", strconv.Itoa(port))
@@ -327,7 +329,7 @@ func (a *App) serve() error {
 	adminAddr := a.cfg.listenAddr()
 	a.server.fillAllowedOrigins(a.cfg.AllowedOrigins, adminAddr) // for CORS enforcement
 
-	ln, err := net.Listen("tcp", adminAddr)
+	ln, err := new(net.ListenConfig).Listen(a.ctx, "tcp", adminAddr)
 	if err != nil {
 		return fmt.Errorf("opening listener: %w", err)
 	}
