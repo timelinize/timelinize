@@ -419,6 +419,12 @@ function initMapSingleton() {
 			$('.mapboxgl-canvas-container').style.cursor = '';
 		}
 	});
+
+
+	// Can be useful when troubleshooting zoom-related things
+	// tlz.map.on('zoom', function() {
+	// 	console.debug('MAP ZOOM:', tlz.map.getZoom());
+	// });
 }
 
 

@@ -337,12 +337,6 @@ async function renderMapData(newMapData) {
 		}
 	}
 
-	// remove previous layers/sources
-	tlz.map.tl_removeLayer('route');
-	tlz.map.tl_removeLayer('symbols');
-	tlz.map.tl_removeSource('journey');
-	tlz.map.tl_removeSource('symbols-route');
-	
 	// only draw connecting lines if it makes sense to
 	if (temporallyConsistent(dataToRender.params) && dataToRender.items.length) {
 		// connect markers with lines
@@ -397,7 +391,12 @@ async function renderMapData(newMapData) {
 		}
 		
 		const addSourceAndLayer = function() {
-			tlz.map.once('style.load', addSourceAndLayer);
+			// remove previous layers/sources (remove layers first)
+		tlz.map.tl_removeLayer('route');
+		tlz.map.tl_removeLayer('symbols');
+		tlz.map.tl_removeSource('journey');
+		tlz.map.tl_removeSource('symbols-route');
+
 			tlz.map.tl_addSource('journey', {
 				type: 'geojson',
 				lineMetrics: true,
@@ -444,11 +443,16 @@ async function renderMapData(newMapData) {
 				}
 			});
 		};
-		if (tlz.map.isMoving()) {
-			tlz.map.once('idle', addSourceAndLayer);
-		} else {
+		if (tlz.map.loaded()) {
 			addSourceAndLayer();
+		} else {
+			tlz.map.on('load', addSourceAndLayer);
 		}
+		// if (tlz.map.isMoving()) {
+		// 	tlz.map.once('idle', addSourceAndLayer);
+		// } else {
+		// 	addSourceAndLayer();
+		// }
 	}
 
 	// remove old markers, add new markers
@@ -1010,9 +1014,10 @@ function loadAndRenderHeatmap(repo) {
 }
 
 function renderHeatmap() {
-	tlz.map.tl_removeLayer('items-sample');
-	tlz.map.tl_removeSource('all-items');
-	const addSourceAndLayer = function() { // source can't be added until style loads, apparently: https://stackoverflow.com/q/40557070 (and layer depends on source)
+	const addSourceAndLayer = function() {
+		tlz.map.tl_removeLayer('items-sample'); // always remove layers before sources, which the layers depend on
+		tlz.map.tl_removeSource('all-items');
+
 		tlz.map.tl_addSource('all-items', {
 			type: 'geojson',
 			data: mapData.heatmap
@@ -1023,53 +1028,87 @@ function renderHeatmap() {
 			'type': 'heatmap',
 			'source': 'all-items',
 			// 'maxzoom': 16,
+
+			// The heatmap paint properties have been carefully tuned over hours of various
+			// data sets to try to achieve an optimal viewing experience with the most useful
+			// color presentation. It's very difficult to tune well. I find it helpful to
+			// revert to static values and adjust interpolated properties one at a time for
+			// tuning. Get familiar with exactly how each property behaves/influences the
+			// result.
 			'paint': {
-				// Increase the heatmap weight based on frequency and property magnitude
-				// 'heatmap-weight': [
-				// 	'interpolate', ['linear'], ['get', 'mag'],
-				// 	0, 0,
-				// 	6, 1
-				// ],
-				// Increase the heatmap color weight weight by zoom level
-				// heatmap-intensity is a multiplier on top of heatmap-weight
-				'heatmap-intensity': [
+				// The weight each point carries. Tuned in coordination with the color
+				// settings. When zoomed out, points appear closer together, so it's
+				// easier to get to red/hot blobs, so a lower weight is used. But if
+				// we go too low (i.e. .001), the gaussian algorithm starts to render
+				// a truncated/crosshatched/blotchy heatmap. This value is scaled by
+				// the intensity property. Currently, we increase weight when zoomed
+				// in since points will spread out more, and we want individual points
+				// in sparse areas to still show up, but when zoomed out, we don't
+				// want everything to be a red blob (even though most cities/clusters
+				// will be red anyway). As we zoom in, we want the red to dissipate
+				// quickly to be red/hot only over actual clusters.
+				'heatmap-weight': [
 					'interpolate', ['linear'], ['zoom'],
-					0, 0.1,
-					12, 2
+					1, 0.01,
+					5, 0.015,
+					10, 0.02,
+					20, 0.025,
 				],
-				// Color ramp for heatmap.  Domain is 0 (low) to 1 (high).
-				// Begin color ramp at 0-stop with a 0-transparancy color
-				// to create a blur-like effect.
-				// 'heatmap-color': [
-				// 	'interpolate', ['linear'], ['heatmap-density'],
-				// 	0,   'rgba(33,102,172,0)',
-				// 	0.2, 'rgb(103,169,207)',
-				// 	0.4, 'rgb(209,229,240)',
-				// 	0.6, 'rgb(253,219,199)',
-				// 	0.8, 'rgb(239,138,98)',
-				// 	1,   'rgb(178,24,43)'
-				// ],
-				// Adjust the heatmap radius by zoom level
-				// TODO: the radii should be increased/decreased  when the sampling interval is increased/decreased, respectively
+
+				// Radius adjusts the spread of influence of each point's weight.
+				// Too high, and you'll have hot blobs everywhere. Too low, and
+				// you won't be able to see individual points or even small clusters.
+				// Right now it's tuned to increase, then decrease, then increase
+				// again as zoom level increases, to try to balance the display
+				// across clusters and individual points at various zoom levels.
+				// Ideally, not everything is a hot blob, but also individual points
+				// are still visible.
 				'heatmap-radius': [
 					'interpolate', ['linear'], ['zoom'],
-					0, 8,
-					6, 14
+					1, 20,
+					10, 30,
+					13, 22,
+					16, 50,
 				],
-				'heatmap-opacity': [
+
+				// Intensity apparently scales the weight. Default is 1 (no scaling).
+				// This is tuned so that it's much more intense when extremely zoomed in,
+				// because a single point can easily get lost 
+				'heatmap-intensity': [
 					'interpolate', ['linear'], ['zoom'],
-					7,  .5,
-					14, .25,
-					16, .25,
-					18, 0
-				]
+					1, 0.5,
+					15, 5,
+					20, 10
+				],
+
+				// Tune colors relative to weight so that red appears only for absolute hotspots.
+				// Input range (density) is 0-1. This is the only property that can use density
+				// as an input.
+				'heatmap-color': [
+					'interpolate', ['linear'], ['heatmap-density'],
+					0,   'rgba(0, 0, 0, 0)',
+					0.07, 'royalblue',
+					0.2, 'cyan',
+					0.3, 'lime',
+					0.5, 'yellow',
+					1, 'red'
+				],
+
+				// Opacity could be interpolated based on zoom level as well,
+				// but so far I've found a static value to offer good visibility
+				// at all zoom levels. Zoomed out, less opaque is okay since you
+				// can't see details anyway, but zoomed in you don't want to go
+				// too transparent or you lose the singular points, which may
+				// still be desired. So I just choose this middle ground for now.
+				'heatmap-opacity': .5
 			}
 		}, 'route');
 	};
-	if (tlz.map.isStyleLoaded()) {
+	// source can't be added until style loads, apparently: https://stackoverflow.com/q/40557070 (and layer depends on source)
+	if (tlz.map.loaded()) {
 		addSourceAndLayer();
 	} else {
-		tlz.map.once('style.load', addSourceAndLayer);
+		tlz.map.on('load', addSourceAndLayer);
 	}
 }
 
