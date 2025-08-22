@@ -392,10 +392,10 @@ async function renderMapData(newMapData) {
 		
 		const addSourceAndLayer = function() {
 			// remove previous layers/sources (remove layers first)
-		tlz.map.tl_removeLayer('route');
-		tlz.map.tl_removeLayer('symbols');
-		tlz.map.tl_removeSource('journey');
-		tlz.map.tl_removeSource('symbols-route');
+			tlz.map.tl_removeLayer('route');
+			tlz.map.tl_removeLayer('symbols');
+			tlz.map.tl_removeSource('journey');
+			tlz.map.tl_removeSource('symbols-route');
 
 			tlz.map.tl_addSource('journey', {
 				type: 'geojson',
@@ -443,16 +443,11 @@ async function renderMapData(newMapData) {
 				}
 			});
 		};
-		if (tlz.map.loaded()) {
+		if (tlz.map.idle()) {
 			addSourceAndLayer();
 		} else {
-			tlz.map.on('load', addSourceAndLayer);
+			tlz.map.once('idle', addSourceAndLayer);
 		}
-		// if (tlz.map.isMoving()) {
-		// 	tlz.map.once('idle', addSourceAndLayer);
-		// } else {
-		// 	addSourceAndLayer();
-		// }
 	}
 
 	// remove old markers, add new markers
@@ -463,7 +458,28 @@ async function renderMapData(newMapData) {
 	if (newMapData && dataToRender.items.length) {
 		let bounds = new mapboxgl.LngLatBounds();
 		dataToRender.items.forEach(item => bounds.extend(item.coords));
-		tlz.map.fitBounds(bounds, { padding: 100, maxZoom: 16 });
+
+		// EDIT: Scratch the below; I don't think it's accurate. The load and style.load events are actually just flaky, period.
+		// I can observe the flakiness even without cancelled requests.
+		//
+		// I think idle is the only reliable event.
+		//
+		// OUTDATED: ~~Any function that causes the map to move/pan/zoom/etc can cause it to cancel requests for tiles that are no longer
+		// necessary as part of the new camera position (at least, this is what I assume is correct behavior after observing
+		// network requests for .pbf files being aborted when the movement starts). We can't draw layers until the map has
+		// finished loading apparently, but when the tile requests are canceled, mapbox doesn't fire the load event, ever!
+		// (as far as I can tell) Anyway, that seems like a bug, but we can work around it by waiting until the map is idle,
+		// which includes movement, fade/transition animations, and tile loading. By waiting here, we can more reliably
+		// draw the layers like heatmap and path. Without this wait, we might cause the map to never finish loading sometimes,
+		// and layers randomly don't end up getting drawn.~~
+		const fitBounds = function() {
+			tlz.map.fitBounds(bounds, { padding: 100, maxZoom: 16 });
+		};
+		if (tlz.map.idle()) {
+			fitBounds();
+		} else {
+			tlz.map.once('idle', fitBounds); // note use of "once" instead of "on" so that we don't keep re-homing after the user pans the map or something :)
+		}
 	}
 
 	// replace the current map data with what is rendered
@@ -1058,27 +1074,31 @@ function renderHeatmap() {
 				// Radius adjusts the spread of influence of each point's weight.
 				// Too high, and you'll have hot blobs everywhere. Too low, and
 				// you won't be able to see individual points or even small clusters.
-				// Right now it's tuned to increase, then decrease, then increase
-				// again as zoom level increases, to try to balance the display
-				// across clusters and individual points at various zoom levels.
-				// Ideally, not everything is a hot blob, but also individual points
-				// are still visible.
+				// A lower radius is very helpful at lower zoom levels to avoid
+				// every path looking like a red blob.
 				'heatmap-radius': [
 					'interpolate', ['linear'], ['zoom'],
-					1, 20,
-					10, 30,
-					13, 22,
-					16, 50,
+					1, 5,
+					10, 25,
+					14, 30,
+					18, 75,
 				],
 
 				// Intensity apparently scales the weight. Default is 1 (no scaling).
-				// This is tuned so that it's much more intense when extremely zoomed in,
-				// because a single point can easily get lost 
+				// When zoomed out, lots of points are already going to be close together,
+				// so we desensitize the weight, so that not everything is a red blob when
+				// looking at the big picture. When zoomed in, we increase the intensity
+				// so that singular/sparse points don't get lost. But once we get REALLY
+				// zoomed in, we don't need that intensity as the user isn't scanning or
+				// searching at that point, they're just trying to drill down.
 				'heatmap-intensity': [
 					'interpolate', ['linear'], ['zoom'],
 					1, 0.5,
-					15, 5,
-					20, 10
+					5, 1,
+					9, 3,
+					12, 4,
+					14, 4,
+					18, 2
 				],
 
 				// Tune colors relative to weight so that red appears only for absolute hotspots.
@@ -1100,15 +1120,15 @@ function renderHeatmap() {
 				// can't see details anyway, but zoomed in you don't want to go
 				// too transparent or you lose the singular points, which may
 				// still be desired. So I just choose this middle ground for now.
-				'heatmap-opacity': .5
+				'heatmap-opacity': .6
 			}
 		}, 'route');
 	};
 	// source can't be added until style loads, apparently: https://stackoverflow.com/q/40557070 (and layer depends on source)
-	if (tlz.map.loaded()) {
+	if (tlz.map.idle()) {
 		addSourceAndLayer();
 	} else {
-		tlz.map.on('load', addSourceAndLayer);
+		tlz.map.once('idle', addSourceAndLayer);
 	}
 }
 
