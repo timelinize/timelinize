@@ -1,0 +1,10 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "database": "/Users/iglushenkov/Library/Application Support/BeeperTexts/index.db",
+            "name": "test"
+        }
+    ]
+}
