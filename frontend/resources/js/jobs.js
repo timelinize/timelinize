@@ -50,7 +50,7 @@ function updateActiveJobStats() {
 		const chartContainer = $(`#throughput-chart-container.job-id-${jobID}`);
 		if (chartContainer) {
 			// this element shows the mean throughput over the entire chart data
-			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, elem) => sum+elem.value[1], 0) / chartData.length).toLocaleString({minimumFractionDigits: 1, maximumFractionDigits: 1});
+			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, elem) => sum+elem.value[1], 0) / chartData.length).toLocaleString([], {minimumFractionDigits: 1, maximumFractionDigits: 1});
 			$('#chart-active-job-throughput', chartContainer).chart?.setOption({
 				series: stats.chartSeries,
 				xAxis: {
@@ -116,7 +116,7 @@ function assignJobElements(containerElem, job) {
 
 function jobProgressUpdate(job) {
 	// update live job stats (for charts, etc)
-	const seriesName = "Items"; // TODO: customize per job type
+	const seriesName = "Graphs"; // TODO: customize per job type
 	if (!tlz.jobStats[job.id]) {
 		// TODO: When to clear out the job stats? save to localStorage or anything for future reference?
 		tlz.jobStats[job.id] = {

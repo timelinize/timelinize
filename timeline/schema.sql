@@ -225,6 +225,10 @@ CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
 CREATE INDEX IF NOT EXISTS "idx_items_deleted_original_id_hash" ON "items"("deleted", "original_id_hash") WHERE deleted IS NOT NULL OR original_id_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS "idx_items_initial_content_hash" ON "items"("initial_content_hash") WHERE modified IS NOT NULL OR deleted IS NOT NULL;
 
+-- This partial index speeds up processing for items that have incoming data and we need to check for
+-- existing item by its data (i.e. Collection items, very common with photo libraries; one per media item!)
+CREATE INDEX IF NOT EXISTS "idx_items_data_text_hash" ON "items"("data_text" COLLATE NOCASE, "data_hash") WHERE data_text IS NOT NULL OR data_hash IS NOT NULL;
+
 -- This partial index speeds up processing for items that have IDs assigned by their data source.
 CREATE INDEX IF NOT EXISTS "idx_items_original_id" ON "items"("original_id") WHERE original_ID IS NOT NULL;
 

@@ -766,14 +766,14 @@ var (
 
 // ItemRow has the structure of an item's row in our DB.
 type ItemRow struct {
-	ID                   uint64          `json:"id"`
+	ID                   uint64          `json:"id"` // row ID
 	EmbeddingID          *uint64         `json:"embedding_id,omitempty"`
 	DataSourceID         *uint64         `json:"data_source_id,omitempty"` // row ID, used only for insertion into the DB
 	JobID                *uint64         `json:"job_id,omitempty"`
 	ModifiedJobID        *uint64         `json:"modified_job_id,omitempty"`
 	AttributeID          *uint64         `json:"attribute_id,omitempty"`
 	ClassificationID     *uint64         `json:"classification_id,omitempty"` // row ID, used only internally
-	OriginalID           *string         `json:"original_id,omitempty"`
+	OriginalID           *string         `json:"original_id,omitempty"`       // data-source-assigned item ID
 	OriginalLocation     *string         `json:"original_location,omitempty"`
 	IntermediateLocation *string         `json:"intermediate_location,omitempty"`
 	Filename             *string         `json:"filename,omitempty"`

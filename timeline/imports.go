@@ -223,13 +223,12 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 					innerLoopIdx:   j,
 					estimatedCount: totalSizeEstimate,
 
-					ij:       ij,
-					ds:       ds,
-					dsRowID:  dsRowID,
-					dsOpt:    dsOpt,
-					tl:       job.Timeline(),
-					log:      logger,
-					progress: logger.Named("progress"),
+					ij:      ij,
+					ds:      ds,
+					dsRowID: dsRowID,
+					dsOpt:   dsOpt,
+					tl:      job.Timeline(),
+					log:     logger,
 				}
 				ij.pMu.Lock()
 				ij.p = &p

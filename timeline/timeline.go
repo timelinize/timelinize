@@ -1017,7 +1017,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, option
 	if options.Remember || retention == 0 {
 		for _, rowID := range itemRowIDs {
 			// get the item
-			ir, err := tl.loadItemRow(ctx, tx, rowID, nil, nil, nil, false)
+			ir, err := tl.loadItemRow(ctx, tx, rowID, 0, nil, nil, nil, false)
 			if err != nil {
 				return fmt.Errorf("could not load item to delete: %w", err)
 			}
@@ -1389,15 +1389,20 @@ type InteractiveGraph struct {
 // For the metadata field, this policy is applied per-metadata-key.
 type FieldUpdatePolicy int
 
+// The update policies are ordered such that the first two
+// keep or prefer existing, and the second two keep or
+// prefer incoming, so that you can use > or < to see if
+// the policy will favor the existing value or the incoming
+// value.
 const (
 	UpdatePolicyKeepExisting FieldUpdatePolicy = iota
+
+	// COALESCE(existing, incoming)
+	UpdatePolicyPreferExisting
 
 	// SET existing=incoming
 	// (i.e. prefer incoming even if incoming is NULL)
 	UpdatePolicyOverwriteExisting
-
-	// COALESCE(existing, incoming)
-	UpdatePolicyPreferExisting
 
 	// COALESCE(incoming, existing)
 	UpdatePolicyPreferIncoming

@@ -295,16 +295,10 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 		},
 	}
 	if itemMeta.source.FS != nil {
-		if item.Content.Filename == "" {
-			// if we're on the actual media file itself, and not the metadata file,
-			// we are still likely to get the filename (mostly) right if we use the
-			// filename, AFAIK it only changes if it gets truncated for length, in
-			// which case, the DB row will be updated to the correct filename when
-			// we do eventually read the sidecar file (the data file name in the repo
-			// will still have this name even after the DB row gets updated, but that
-			// name is internal-only for the most part)
-			item.Content.Filename = path.Base(mediaFilePath)
-		}
+		// don't send filename since we can't trust the filename we have here;
+		// Google Takeout likes to truncate them, and also remove/replace special
+		// characters without any indication of the original filename
+
 		item.Content.Data = func(_ context.Context) (io.ReadCloser, error) {
 			return itemMeta.source.FS.Open(path.Join(itemMeta.source.Filename, mediaFilePath))
 		}
@@ -557,24 +551,34 @@ func (fimp *FileImporter) determineMediaFilenameInArchive(jsonFilePath string, i
 	titleWithoutExt := strings.TrimSuffix(transformedTitle, titleExt)
 
 	// Google truncates filenames longer than this (sans extension)
-	const truncateAt = 47
+	const maxLength = 47
+
+	// truncating filenames obviously introduces the chance of filename
+	// collisions, if multiple files have the same long prefix; additionally,
+	// they may also collide with a file whose entire name is the prefix (i.e.
+	// collision with a file that is exactly the max length that does not get
+	// truncated) -- for that reason, we need to count how many times we see
+	// each filename up to the max length -- including path since each folder
+	// has a distinct file list -- even if the name is not longer than the
+	// max length.
 
 	// if the filename is long enough, Google truncates it, so we need
 	// to reconstruct it; this depends on the order we're reading the files,
 	// because Google auto-increments a "uniqueness suffix" in the form of
 	// "(N)" where N is how many times that truncated filename has already
 	// appeared before this.
-	if len(titleWithoutExt) > truncateAt {
-		truncatedTitle := titleWithoutExt[:truncateAt]
-		truncatedTitleWithDir := path.Join(dir, truncatedTitle)
-		fullTruncatedName := truncatedTitleWithDir + titleExt
+	truncateAt := min(maxLength, len(titleWithoutExt))
+	truncatedTitle := titleWithoutExt[:truncateAt]
+	truncatedTitleWithDir := path.Join(dir, truncatedTitle)
+	fullTruncatedName := truncatedTitleWithDir + titleExt
 
-		// then count this "hit" for the name
-		fimp.truncatedNames[fullTruncatedName]++
+	// then count this "hit" for the name
+	fimp.truncatedNames[fullTruncatedName]++
 
-		// now read the count; it will be at least 1
-		seenCount := fimp.truncatedNames[fullTruncatedName]
+	// now read the count; it will be at least 1
+	seenCount := fimp.truncatedNames[fullTruncatedName]
 
+	if len(titleWithoutExt) > maxLength {
 		// a uniqueness suffix is only inserted (before the extension) if the
 		// truncated filename has not already been seen in our walk, so if this
 		// is the first (or only) occurrence, just return the truncated filename

@@ -19,7 +19,6 @@
 package timeline
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -28,27 +27,23 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"maps"
 	"math"
 	"mime"
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // defaultBatchSize is how many items/entities (approximately) to process per transaction
-// if not specified by the user. See the docs for batch size on ProcessingOoptions.
+// if not specified by the user. See the docs for batch size on ProcessingOptions.
 const defaultBatchSize = 10
 
 func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, countOnly bool, done <-chan struct{}) (*sync.WaitGroup, chan<- *Graph) {
@@ -164,738 +159,6 @@ func (p *processor) beginProcessing(ctx context.Context, po ProcessingOptions, c
 	return wg, ch
 }
 
-func (p *processor) interactiveGraph(ctx context.Context, root *Graph, opts *InteractiveImport) error {
-	p.assignGraphIDs(root)
-
-	if err := p.saveInteractiveGraphFromRootNode(root); err != nil {
-		return err
-	}
-
-	// download the data from the graph in the background while we present the initial structure to the user
-	if err := p.downloadGraphDataFiles(ctx, root, opts); err != nil {
-		return err
-	}
-
-	p.log.Info("graph ready", zap.String("graph_id", root.ProcessingID))
-
-	opts.Graphs <- &InteractiveGraph{
-		Graph:         root,
-		DataFileReady: make(chan struct{}),
-	}
-
-	return errors.New("TODO: WIP")
-}
-
-func (p *processor) saveInteractiveGraphFromRootNode(rootNode *Graph) error {
-	graphPath := p.tempGraphFolder()
-	if err := os.MkdirAll(graphPath, 0700); err != nil {
-		return err
-	}
-	file, err := os.Create(filepath.Join(graphPath, "root.graph"))
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err := json.NewEncoder(file).Encode(rootNode); err != nil {
-		return err
-	}
-	return file.Sync()
-}
-
-func (p *processor) assignGraphIDs(g *Graph) {
-	if g == nil {
-		return
-	}
-	if g.ProcessingID == "" {
-		g.ProcessingID = uuid.New().String()
-	}
-	for _, edge := range g.Edges {
-		p.assignGraphIDs(edge.From)
-		p.assignGraphIDs(edge.To)
-	}
-}
-
-//nolint:unparam // TODO: file bug; opts is definitely used!
-func (p *processor) downloadGraphDataFiles(ctx context.Context, g *Graph, opts *InteractiveImport) error {
-	if g == nil {
-		return nil
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if (g.Item != nil && g.Item.Content.Data != nil) ||
-		(g.Entity != nil && g.Entity.NewPicture != nil) {
-		go func() {
-			// TODO: Use CoW (write to a .tmp or .dl file first, then rename when finished, so we can know if it is complete)
-			file, err := p.openInteractiveGraphDataFile(g)
-			if err != nil {
-				p.log.Error("opening graph data file", zap.Error(err))
-				return
-			}
-			defer file.Close()
-
-			// open the reader for either the item data or the entity picture
-			var dataReader io.ReadCloser
-			if g.Item != nil && g.Item.Content.Data != nil {
-				dataReader, err = g.Item.Content.Data(ctx)
-			} else if g.Entity != nil && g.Entity.NewPicture != nil {
-				dataReader, err = g.Entity.NewPicture(ctx)
-			}
-			if err != nil {
-				p.log.Error("opening data reader from graph", zap.Error(err))
-				return
-			}
-			defer dataReader.Close()
-
-			// now copy the data to the file
-			if _, err := io.Copy(file, dataReader); err != nil {
-				p.log.Error("copying data to temporary file", zap.Error(err))
-				return
-			}
-			if err := file.Sync(); err != nil {
-				p.log.Error("syncing data file", zap.Error(err))
-			}
-		}()
-	}
-	// TODO: download the item owner's profile picture too, if available (though I don't know of anywhere this happens yet)
-	// if g.Item != nil && g.Item.Owner.NewPicture != nil {
-	// }
-	for _, edge := range g.Edges {
-		if err := p.downloadGraphDataFiles(ctx, edge.From, opts); err != nil {
-			return err
-		}
-		if err := p.downloadGraphDataFiles(ctx, edge.To, opts); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *processor) openInteractiveGraphDataFile(g *Graph) (*os.File, error) {
-	// We store interactive graph data files, temporarily while the user is
-	// interacting with the graph, somewhat deep in the system temp folder.
-	// It's in a system temp folder because import jobs are not typically
-	// portable; especially starting on one system and continuing on another,
-	// though I guess we could simply change the path to be something within
-	// the timeline if desired. Still, this seems more proper at least for now.
-	tmpFilePath := filepath.Join(p.tempGraphFolder(), g.ProcessingID+".graph.data")
-
-	// ensure folder tree exists or we're gonna have a bad time
-	if err := os.MkdirAll(filepath.Dir(tmpFilePath), 0700); err != nil {
-		return nil, err
-	}
-
-	return os.Create(tmpFilePath)
-}
-
-func (p *processor) tempGraphFolder() string {
-	return filepath.Join(
-		os.TempDir(),
-		"timelinize",
-		fmt.Sprintf("job-%d", p.ij.job.ID()))
-}
-
-func (p *processor) pipeline(ctx context.Context, batch []*Graph) error {
-	// During large imports, I've found that running ANALYZE every so often
-	// can be helpful for improving performance, since an import is much more
-	// than just an INSERT, there's lots of SELECTs along the way that use
-	// indexes. For example, in my tests importing about a quarter million
-	// messages (relation-heavy, since they are sent to an attribute), which
-	// I repeated twice, it would take 30 minutes to import without ANALYZE.
-	// But when running ANALYZE every so often, it only took 23 minutes.
-	p.rootGraphCount += len(batch)
-	if p.rootGraphCount%15000 < len(batch) {
-		p.tl.optimizeDB(p.log.Named("optimizer"))
-	}
-
-	err := p.phase1(ctx, batch)
-	if err != nil {
-		return err
-	}
-	// TODO: We don't need to do phase2 or phase3 if there are no data files in the graph.
-	// But since graphs can have edges, we would need to carry that information through
-	// the recursive calls to processing the graph in phase1. This is doable, but it adds
-	// an extra parameter or return value. Phases 2 and 3 do make some allocations even if
-	// there aren't any data files, but I'd want to dig deeper (likely with a profile) to
-	// determine if avoiding these phases entirely is worth the effort.
-	// (Phase 3 has logging used for live updates by the frontend)
-	if err := p.phase2(ctx, batch); err != nil {
-		return err
-	}
-	if err := p.phase3(ctx, batch); err != nil {
-		return err
-	}
-	return nil
-}
-
-// phase1 inserts items into the database and preps data files for writing.
-func (p *processor) phase1(ctx context.Context, batch []*Graph) error {
-	// TODO: maybe if we first go through the batch in a readlock, we can determine what are
-	// duplicates, before acquiring a write lock, and that could help for faster resumption
-	// (especially if we have even more workers)
-	p.tl.dbMu.Lock()
-	defer p.tl.dbMu.Unlock()
-
-	tx, err := p.tl.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning transaction for batch: %w", err)
-	}
-	defer tx.Rollback()
-
-	for _, g := range batch {
-		if err = p.processGraph(ctx, tx, g); err != nil {
-			p.log.Error("processing graph", zap.String("graph", g.String()), zap.Error(err))
-			g.err = err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction for batch: %w", err)
-	}
-
-	return nil
-}
-
-// phase2 downloads data files. Significantly, there is no lock on the DB in this phase,
-// so it can be run in parallel.
-func (p *processor) phase2(ctx context.Context, batch []*Graph) error {
-	var wg sync.WaitGroup
-	for _, g := range batch {
-		if g.err != nil {
-			continue
-		}
-		wg.Add(1)
-		go func(g *Graph) {
-			defer wg.Done()
-			if err := p.downloadDataFilesInGraph(ctx, g); err != nil {
-				p.log.Error("downloading data files in graph", zap.Error(err))
-				g.err = err
-			}
-		}(g)
-	}
-	wg.Wait()
-	return nil
-}
-
-// phase3 updates the DB with info about the data files that were downloaded in phase 2.
-func (p *processor) phase3(ctx context.Context, batch []*Graph) error {
-	p.tl.dbMu.Lock()
-	defer p.tl.dbMu.Unlock()
-
-	tx, err := p.tl.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning transaction for batch phase 3: %w", err)
-	}
-	defer tx.Rollback()
-
-	for _, g := range batch {
-		if g.err != nil {
-			continue
-		}
-		if err := p.finishProcessingDataFiles(ctx, tx, g); err != nil {
-			p.log.Error("finalizing data files in graph", zap.Error(err))
-			g.err = err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction for batch phase 3: %w", err)
-	}
-
-	return nil
-}
-
-func (p *processor) downloadDataFilesInGraph(ctx context.Context, g *Graph) error {
-	if g == nil {
-		return nil
-	}
-
-	// download main item's data file (root node of graph), only if there is one
-	if g.Item != nil && g.Item.dataFileIn != nil && g.Item.dataFileOut != nil {
-		if err := p.downloadDataFile(ctx, g.Item); err != nil {
-			return err
-		}
-	}
-
-	// traverse graph and download their data files
-	for _, edge := range g.Edges {
-		if err := p.downloadDataFilesInGraph(ctx, edge.From); err != nil {
-			return err
-		}
-		if err := p.downloadDataFilesInGraph(ctx, edge.To); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (p *processor) finishProcessingDataFiles(ctx context.Context, tx *sql.Tx, g *Graph) error {
-	if g == nil {
-		return nil
-	}
-
-	// this whole big thing is one huge log so the UI can stream
-	// a sample of live import data
-	defer func() {
-		// logging the progress every item/entity that gets processed is actually
-		// not super efficient, so we use this trick to only prepare the log entry
-		// if it will, in fact, be logged (we sample logs to increase efficiency,
-		// but those gains are most realized when we avoid our own processing if
-		// a particular log entry will be dropped too, hence the call to Check())
-		if checkedLog := p.log.Check(zapcore.InfoLevel, "finished graph"); checkedLog != nil {
-			graphType := "item"
-			if g.Entity != nil {
-				graphType = "entity"
-			}
-
-			fields := []zapcore.Field{
-				zap.String("graph", fmt.Sprintf("%p", g)),
-				zap.String("type", graphType),
-				zap.Uint64("row_id", g.rowID.id()),
-				zap.Int64("new_entities", atomic.LoadInt64(p.ij.newEntityCount)),
-				zap.Int64("new_items", atomic.LoadInt64(p.ij.newItemCount)),
-				zap.Int64("updated_items", atomic.LoadInt64(p.ij.updatedItemCount)),
-				zap.Int64("skipped_items", atomic.LoadInt64(p.ij.skippedItemCount)),
-				zap.Int64("total_items", atomic.LoadInt64(p.ij.itemCount)),
-			}
-
-			if g.Item != nil && !g.Item.Timestamp.IsZero() {
-				fields = append(fields, zap.Time("item_timestamp", g.Item.Timestamp))
-			}
-
-			entityAttr := func(e Entity) zapcore.Field {
-				if e.Name != "" {
-					return zap.String("entity", e.Name)
-				}
-				for _, attr := range e.Attributes {
-					if attr.Identifying || attr.Identity {
-						return zap.Any("entity", attr.Value)
-					}
-				}
-				return zap.Stringp("entity", nil)
-			}
-			item, entity := g.Item, g.Entity
-			if options, obfuscate := p.tl.obfuscationMode(); obfuscate {
-				// We tediously (shallow-ish) copy the values that are anonymized,
-				// since we have to log them with obfuscation mode enabled. Why
-				// do we need to copy them first? Because the tx isn't finished
-				// yet. This whole method is one iteration's call as part of a
-				// batch, so if we change the values right now, they'll go into
-				// the DB like that -- I have verified this by inspecting the DB,
-				// and found obfuscated values -- yikes! so we do have to copy
-				// the values that get anonymized, even if we don't log them.
-				if item != nil {
-					anonItem := *item
-					anonItem.row.Anonymize(options)
-					anonItem.row.Metadata = make(json.RawMessage, len(item.row.Metadata))
-					copy(anonItem.row.Metadata, item.row.Metadata)
-					anonItem.Owner.Attributes = make([]Attribute, len(item.Owner.Attributes))
-					copy(anonItem.Owner.Attributes, item.Owner.Attributes)
-					for i := range anonItem.Owner.Attributes {
-						anonItem.Owner.Attributes[i].Metadata = make(Metadata)
-						maps.Copy(anonItem.Owner.Attributes[i].Metadata, item.Owner.Attributes[i].Metadata)
-					}
-					anonItem.Owner.Anonymize(options)
-					item = &anonItem
-				}
-				if entity != nil {
-					anonEntity := *entity
-					anonEntity.Metadata = make(Metadata, len(entity.Metadata))
-					maps.Copy(anonEntity.Metadata, entity.Metadata)
-					anonEntity.Attributes = make([]Attribute, len(entity.Attributes))
-					copy(anonEntity.Attributes, entity.Attributes)
-					for i := range anonEntity.Attributes {
-						anonEntity.Attributes[i].Metadata = make(Metadata)
-						maps.Copy(anonEntity.Attributes[i].Metadata, entity.Attributes[i].Metadata)
-					}
-					anonEntity.ID = g.rowID.id()
-					anonEntity.Anonymize(options)
-					entity = &anonEntity
-				}
-			}
-			if item != nil {
-				size := item.dataFileSize
-				if item.row.DataText != nil {
-					size = int64(len(*item.row.DataText))
-				}
-				preview := item.row.DataText
-				const maxPreviewLen = 30
-				if preview != nil && len(*preview) > maxPreviewLen {
-					shortPreview := (*preview)[:maxPreviewLen]
-					preview = &shortPreview
-				}
-				fields = append(fields,
-					zap.String("status", string(item.row.howStored)),
-					zap.String("classification", item.Classification.Name),
-					zap.Stringp("preview", preview),
-					zap.Stringp("filename", item.row.Filename),
-					zap.Int64("size", size),
-					zap.Float64p("lat", item.row.Latitude),
-					zap.Float64p("lon", item.row.Longitude),
-					zap.String("media_type", item.Content.MediaType),
-					entityAttr(item.Owner))
-			} else if entity != nil {
-				fields = append(fields, entityAttr(*entity))
-			}
-			checkedLog.Write(fields...)
-		}
-	}()
-
-	if err := p.finishDataFileProcessing(ctx, tx, g.Item); err != nil {
-		return err
-	}
-	for _, edge := range g.Edges {
-		if err := p.finishProcessingDataFiles(ctx, tx, edge.From); err != nil {
-			return err
-		}
-		if err := p.finishProcessingDataFiles(ctx, tx, edge.To); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, ig *Graph) error {
-	if ig == nil {
-		return nil
-	}
-
-	// validate node type
-	if ig.Item != nil && ig.Entity != nil {
-		return fmt.Errorf("ambiguous node in graph is both an item and entity node (item_graph=%p)", ig)
-	}
-
-	// process root node
-	switch {
-	case ig.Entity != nil:
-		var err error
-		ig.rowID, err = p.processEntity(ctx, tx, *ig.Entity)
-		if err != nil {
-			return fmt.Errorf("processing entity node: %w", err)
-		}
-	case ig.Item != nil:
-		var err error
-		ig.rowID, err = p.processItem(ctx, tx, ig.Item)
-		if err != nil {
-			return fmt.Errorf("processing item node: %w", err)
-		}
-	}
-
-	// process connected nodes
-	for _, r := range ig.Edges {
-		err := p.processRelationship(ctx, tx, r, ig)
-		if err != nil {
-			p.log.Error("processing relationship",
-				zap.Uint64("item_or_attribute_row_id", ig.rowID.id()),
-				zap.Error(err))
-		}
-	}
-
-	return nil
-}
-
-func (p *processor) processItem(ctx context.Context, tx *sql.Tx, it *Item) (latentID, error) {
-	// quick input validation: timestamps outside a certain range are invalid and obviously wrong (cannot be serialized to JSON)
-	it.Timestamp = validTime(it.Timestamp)
-	it.Timespan = validTime(it.Timespan)
-	it.Timeframe = validTime(it.Timeframe)
-
-	// skip item if outside of timeframe (data source should do this for us, but
-	// ultimately we should enforce it: it just means the data source is being
-	// less efficient than it could be)
-	// TODO: also consider Timespan
-	if !it.Timestamp.IsZero() {
-		if !p.ij.ProcessingOptions.Timeframe.Contains(it.Timestamp) {
-			p.log.Warn("ignoring item outside of designated timeframe (data source should not send this item; it is probably being less efficient than it could be)",
-				zap.String("item_id", it.ID),
-				zap.Timep("tf_since", p.ij.ProcessingOptions.Timeframe.Since),
-				zap.Timep("tf_until", p.ij.ProcessingOptions.Timeframe.Until),
-				zap.Time("item_timestamp", it.Timestamp),
-			)
-			return latentID{}, errors.New("item is outside of designated timeframe")
-		}
-
-		// end time must come after start time
-		if !it.Timespan.IsZero() && !it.Timespan.After(it.Timestamp) {
-			return latentID{}, fmt.Errorf("item's ending timespan is not after its starting timestamp (item_id=%s timestamp=%s timespan=%s)",
-				it.ID, it.Timestamp, it.Timespan)
-		}
-	}
-
-	itemRowID, err := p.storeItem(ctx, tx, it)
-	if err != nil {
-		return latentID{itemID: itemRowID}, err
-	}
-
-	return latentID{itemID: itemRowID}, nil
-}
-
-// TODO: godoc about return value of 0, nil
-func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64, error) {
-	// keep count of number of items processed, mainly for logging
-	defer atomic.AddInt64(p.ij.itemCount, 1)
-
-	// obtain a handle on the item data (if any), and determine whether
-	// it'll be stored in the database or on disk
-	var processDataFile bool // if true, we'll be storing the data as a file on disk, not in the DB
-
-	if it.Content.Data != nil {
-		rc, err := it.Content.Data(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("getting item's data stream: %w (item_id=%s)", err, it.ID)
-		}
-		if rc != nil {
-			it.dataFileIn = rc
-			defer func() {
-				if !processDataFile {
-					it.dataFileIn.Close()
-					it.dataFileIn = nil
-				}
-			}()
-
-			// if Content-Type is empty, try to detect it, first by sniffing the start
-			// of data (as that is more reliable, in theory), then by looking at the
-			// file extension if needed (but this is less reliable in theory)
-			if it.Content.MediaType == "" {
-				fileReader := bufio.NewReader(it.dataFileIn)
-
-				// not really concerned with errors here; we don't need the max number of bytes
-				// and if it fails to read later, we'll deal with the error then
-				const bytesNeededToSniff = 512
-				peekedBytes, _ := fileReader.Peek(bytesNeededToSniff)
-
-				detectContentType(peekedBytes, it)
-
-				// since peeking reads from the underlying reader, make sure to read from
-				// the buffered reader when we save the file
-				it.dataFileIn = io.NopCloser(fileReader)
-
-				// if the item classification is missing, but the item is clearly
-				// a common media type, we can probably classify the item anyway
-				// TODO: not sure if a good idea... ho hum.
-				if it.Classification.Name == "" {
-					if strings.HasPrefix(it.Content.MediaType, "image/") ||
-						strings.HasPrefix(it.Content.MediaType, "video/") ||
-						strings.HasPrefix(it.Content.MediaType, "audio/") {
-						it.Classification = ClassMedia
-					}
-				}
-			}
-
-			if it.Content.isPlainTextOrMarkdown() {
-				// store plain text in database unless it's too big to fit comfortably;
-				// read as much as we would feel good about storing in the DB, and if we
-				// fill that buffer, then it's probably big enough to go on disk
-				//
-				// NOTE: if this code ever gets moved into a separate function, make sure
-				// that the buffer is not returned until we're done processing the item; or
-				// copy it to a new buffer first, due to buffer pooling & reuse
-				bufPtr := sizePeekBufPool.Get().(*[]byte)
-				buf := *bufPtr
-				defer func() {
-					// From the standard lib's crypto/tls package:
-					// "You might be tempted to simplify this by just passing &buf to Put,
-					// but that would make the local copy of the buf slice header escape
-					// to the heap, causing an allocation. Instead, we keep around the
-					// pointer to the slice header returned by Get, which is already on the
-					// heap, and overwrite and return that."
-					// See: https://github.com/dominikh/go-tools/issues/1336
-					*bufPtr = buf
-					sizePeekBufPool.Put(bufPtr)
-				}()
-
-				n, err := io.ReadFull(it.dataFileIn, buf)
-				if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-					return 0, fmt.Errorf("buffering item's data stream to peek size: %w", err)
-				}
-				if n == len(buf) {
-					// content is at least as large as our buffer, so it probably belongs on disk;
-					// recover the bytes we already buffered when we go to write the file
-					processDataFile = true
-					it.dataFileIn = io.NopCloser(io.MultiReader(bytes.NewReader(buf), it.dataFileIn))
-				} else if n > 0 {
-					// NOTE: We trim leading/trailing spaces for this because it can be hard
-					// for some data sources to strip them, and I don't think we need them,
-					// especially for short text content stored in the DB
-					dataTextStr := string(buf[:n])
-					dataTextStr = strings.TrimSpace(dataTextStr)
-					it.dataText = &dataTextStr
-				}
-			} else {
-				processDataFile = true
-			}
-		}
-	}
-
-	// at this point, we have the text data, or a handle to the
-	// file data, but we won't download the full file until later;
-	// first we need to do some more preparation and insert its
-	// entry into the DB.
-
-	// prepare for DB queries to see if we have this same item already
-	// in some form or another
-	var dsName *string
-	if p.ds.Name != "" {
-		dsName = &p.ds.Name
-	}
-	it.makeIDHash(dsName)
-	it.makeContentHash()
-	it.Metadata.Clean()
-
-	// if the item is already in our DB, load it
-	ir, err := p.tl.loadItemRow(ctx, tx, 0, it, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("looking up item in database: %w", err)
-	}
-	if ir.ID > 0 {
-		// found it in our DB; skip it?
-
-		// first we need to distill user's update preferences down to update policies for the DB
-		if err := p.distillUpdatePolicies(it, ir); err != nil {
-			return 0, fmt.Errorf("distilling initial update policies: %w", err)
-		}
-		if len(it.fieldUpdatePolicies) > 0 {
-			it.existingRow = ir // we might need this in phase 3
-		}
-
-		// now determine if we should process this duplicate/existing item at all
-		var reprocessItem, reprocessDataFile bool
-		reprocessItem, reprocessDataFile = p.shouldProcessExistingItem(it, ir, processDataFile)
-		if !reprocessItem {
-			// don't confuse phase 2 which downloads data files, by setting
-			// a reader (above) but not a writer (below), so make sure the
-			// dataFileIn gets closed and nilified
-			processDataFile = false
-
-			atomic.AddInt64(p.ij.skippedItemCount, 1)
-			p.log.Debug("skipping processing of existing item",
-				zap.Uint64("row_id", ir.ID),
-				zap.String("filename", it.Content.Filename),
-				zap.String("item_original_id", it.ID))
-			ir.howStored = itemSkipped
-			it.row = ir
-			return ir.ID, nil
-		}
-		processDataFile = reprocessDataFile
-	}
-
-	// get the filename for the data file if we are processing it
-	if processDataFile {
-		it.dataFileOut, it.dataFileName, err = p.tl.openUniqueCanonicalItemDataFile(ctx, tx, p.log, it, p.ds.Name)
-		if err != nil {
-			return 0, fmt.Errorf("opening output data file: %w", err)
-		}
-
-		// mark this data file path as active (and unchanged, for now)
-		activeDataFilesMu.Lock()
-		activeDataFiles[it.dataFileName] = it.dataFileName
-		activeDataFilesMu.Unlock()
-
-		// if we end up returning with an error, it means that the item row was not saved
-		// in the DB; avoid leaving a dangling file reservation and clean up fd resources
-		// as well as any other global state
-		defer func() {
-			if err != nil && it.dataFileOut != nil {
-				it.dataFileIn.Close()
-				it.dataFileOut.Close()
-				_ = p.tl.deleteRepoFile(it.dataFileOut.Name())
-				activeDataFilesMu.Lock()
-				delete(activeDataFiles, it.dataFileName)
-				activeDataFilesMu.Unlock()
-			}
-		}()
-	}
-
-	// make a copy of this 'cause we might use it later to clean up a data file if we ended up setting it to NULL or replacing it
-	startingDataFile := ir.DataFile
-	if ir.DataFile != nil {
-		it.oldDataFile = *ir.DataFile
-
-		// Now, in some cases, there's an edge case to handle: a data file may come in initially without a timestamp,
-		// which defaults to placing it into a folder by today's date; OR, an existing item might be getting an updated
-		// timestamp -- seeing as we organize data files into folders by date, it follows that if the timestamp
-		// is corrected/updated, we should move the data file to match. This is easier when a data file is not shared
-		// by multiple items with different timestamps... I'm not sure which date to use in that case, so here I just
-		// handle the single-item data file case. We see if the timestamp is being updated, and if so, we see if the
-		// data file for this item would be in a different folder based on that timestamp, and if so, we see if the
-		// data file is in use by only 1 item, and if so, we can move the data file. Phew.
-		tsUpdatePol := it.fieldUpdatePolicies["timestamp"]
-		if tsUpdatePol > 0 {
-			// see if the incoming item's timestamp would put the data file in the same folder it's already in,
-			// (ignoring the data source portion at the end)
-			appropriateFolder := p.tl.canonicalItemDataFileDir(it, p.ds.Name)
-			endOfDateComponents := strings.LastIndex(appropriateFolder, "/")
-			if !strings.HasPrefix(it.oldDataFile, appropriateFolder[:endOfDateComponents]) {
-				var count int
-				err := tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? LIMIT 2`, it.oldDataFile).Scan(&count)
-				if err != nil {
-					return 0, fmt.Errorf("could not count how many items refer to data file: %w (data_file=%s)", err, it.dataFileName)
-				} else if count == 1 {
-					newFile, newPath, err := p.tl.openUniqueCanonicalItemDataFile(ctx, tx, p.log, it, p.ds.Name)
-					if err != nil {
-						return 0, fmt.Errorf("could not open file to relocate data file with updated timestamp: %w (data_file=%s)", err, it.dataFileName)
-					}
-					newFile.Close()
-					if err := os.Rename(p.tl.FullPath(it.oldDataFile), p.tl.FullPath(newPath)); err != nil {
-						return 0, fmt.Errorf("renaming data file with updated timestamp to relevant path: %w (data_file_old=%s data_file_name=%s)", err, it.dataFileName, newPath)
-					}
-					// Seeing as the data file we're referring to may very well be in the process of being downloaded
-					// currently, we need a way to inform phase 3 of the processor that the file has moved... so we
-					// have this global map (ew, I know, sorry) which we keep track of the changed file name.
-					// I'm not 100% sure the lock around this query is useful, since the query is part of a Tx that isn't committed
-					// until later, but, doing this for now anyway.
-					activeDataFilesMu.Lock()
-					if _, err := tx.ExecContext(ctx, `UPDATE items SET data_file=? WHERE data_file=?`, newPath, it.oldDataFile); err != nil {
-						activeDataFilesMu.Unlock()
-						return 0, fmt.Errorf("updating data_file in items table from '%s' to '%s': %w", it.oldDataFile, newPath, err)
-					}
-					activeDataFiles[it.oldDataFile] = newPath
-					activeDataFilesMu.Unlock()
-					if err := p.tl.cleanDirs(it.oldDataFile); err != nil {
-						p.log.Error("relocated data file with changed timestamp, but failed to clean its old directory tree",
-							zap.String("old_path", it.oldDataFile),
-							zap.Error(err))
-					}
-					it.oldDataFile = newPath
-					ir.DataFile = &newPath
-					p.log.Debug("relocated data file due to changed timestamp",
-						zap.String("old_path", it.oldDataFile),
-						zap.String("new_path", newPath))
-				}
-			}
-		}
-	}
-
-	err = p.fillItemRow(ctx, tx, &ir, it)
-	if err != nil {
-		return 0, fmt.Errorf("assembling item for storage: %w", err)
-	}
-
-	// run the database query to insert or update the item (and clean up data file if it was changed to NULL),
-	// but carefully so as to not allow zeroing out an item; for example, if a related item is provided only
-	// with its original ID, we can still link a relationship, but if the incoming item has no content we
-	// should not zero out any existing version of the item in the database; the intent by the data source is
-	// to merely link the item by ID (or create a placeholder item), not zero it out!
-	ir.ID, ir.howStored, err = p.insertOrUpdateItem(ctx, tx, ir, startingDataFile, it.HasContent(), it.fieldUpdatePolicies)
-	if err != nil {
-		return 0, fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
-	}
-
-	it.row = ir
-
-	return ir.ID, nil
-}
-
-type itemStoreResult string
-
-const (
-	itemInserted itemStoreResult = "inserted"
-	itemSkipped  itemStoreResult = "skipped"
-	itemUpdated  itemStoreResult = "updated"
-)
-
 func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relationship, ig *Graph) error {
 	// both sides can be set, or if this graph has a node then just
 	// one needs to be set; but at least one of these needs always
@@ -941,7 +204,7 @@ func (p *processor) processRelationship(ctx context.Context, tx *sql.Tx, r Relat
 // I know this function is hard to read, but I initially had this inline above, and the linter complained it was duplicated code,
 // despite the whole "from-to" parts being different; it's just annoying enough to have to change what you are assigning to that
 // I didn't want to refactor this, but I did it anyway, I hope the linter is happy.
-func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r Relationship, rawRel *rawRelationship, fromOrTo string) error {
+func (p *processor) linkRelation(ctx context.Context, g *Graph, tx *sql.Tx, r Relationship, rawRel *rawRelationship, fromOrTo string) error {
 	otherGraph := r.From
 	if fromOrTo == relationTo {
 		otherGraph = r.To
@@ -980,14 +243,14 @@ func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r R
 		}
 	} else {
 		switch {
-		case ig.Item != nil:
+		case g.Item != nil:
 			if fromOrTo == relationFrom {
-				rawRel.fromItemID = &ig.rowID.itemID
+				rawRel.fromItemID = &g.rowID.itemID
 			} else if fromOrTo == relationTo {
-				rawRel.toItemID = &ig.rowID.itemID
+				rawRel.toItemID = &g.rowID.itemID
 			}
-		case ig.Entity != nil:
-			attrID, err := ig.rowID.identifyingAttributeID(ctx, tx)
+		case g.Entity != nil:
+			attrID, err := g.rowID.identifyingAttributeID(ctx, tx)
 			if err != nil {
 				return fmt.Errorf("getting identifying attribute ID for graph entity (on %s side): %w", fromOrTo, err)
 			}
@@ -997,7 +260,7 @@ func (p *processor) linkRelation(ctx context.Context, ig *Graph, tx *sql.Tx, r R
 				rawRel.toAttributeID = &attrID
 			}
 		default:
-			return fmt.Errorf("incomplete relationship: no '%s' node available: %+v (item_graph=%p %+v)", fromOrTo, r, ig, ig)
+			return fmt.Errorf("incomplete relationship: no '%s' node available: %+v (item_graph=%p %+v)", fromOrTo, r, g, g)
 		}
 	}
 
@@ -1067,6 +330,9 @@ func (p *processor) integrityCheck(dbItem ItemRow) error {
 // item in the database. It returns true for item if the whole item should be reprocessed, and
 // it returns true for dataFile if at least the dataFile should be processed.
 // Valid return values: false false, true false, true true.
+//
+// TODO: Returning a second value for whether to process the data file doesn't really make sense
+// since we already downloaded it, but maybe it can help us decide whether we keep/use it or not?
 func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFileIncoming bool) (item bool, dataFile bool) {
 	if it == nil {
 		return
@@ -1080,10 +346,10 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		return
 	}
 
-	// when the function returns, we can trim update policies by comparing what values wealready have with
-	// what's going in (except for data files, of course) -- if it turns out they're all the same, then
-	// no updates are needed; or depending on the policy, even if they're not the same, no updates may be
-	// needed, which can, in theory, greatly speed up repeated imports, since we skip redundant DB writes
+	// when the function returns, we can trim update policies by comparing what values we already have with
+	// what's going in -- if it turns out they're all the same, then no updates are needed; or depending on
+	// the policy, even if they're not the same, no updates may be needed, which can, in theory, greatly
+	// speed up repeated imports, since we skip redundant DB writes
 	defer func() {
 		if !item && !dataFile {
 			return // already not reprocessing, so don't worry about double-checking
@@ -1159,8 +425,9 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 				}
 			case "data":
 				// only handling the case where data is text and small enough to fit nicely into DB page
-				if (dbItem.DataText == nil && it.dataText == nil) || // both empty
-					(dbItem.DataText != nil && it.dataText != nil && *dbItem.DataText == *it.dataText) || // both the same
+				if (it.dataFileHash == nil && dbItem.DataFile == nil && dbItem.DataText == nil && it.dataText == nil) || // not a data file, and both texts are empty
+					(dbItem.DataText != nil && it.dataText != nil && *dbItem.DataText == *it.dataText) || // both the same data text
+					(dbItem.DataHash != nil && it.dataFileHash != nil && bytes.Equal(dbItem.DataHash, it.dataFileHash)) || // both the same data file
 					(it.Content.Data == nil && policy != UpdatePolicyOverwriteExisting) { // update would no-op
 					delete(it.fieldUpdatePolicies, field)
 				}
@@ -1248,57 +515,6 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		dataFile = item && dataFile && it.fieldUpdatePolicies["data"] > 0
 	}()
 
-	// the presence of a retrieval key implies that the data source may not be able to fully
-	// provide the whole item in one import, so in that case, always reprocess if it hasn't
-	// been modified locally -- make sure to use update policies specified by the data source
-	if len(it.Retrieval.key) > 0 && (dbItem.Modified == nil || p.ij.ProcessingOptions.OverwriteLocalChanges) {
-		if it.fieldUpdatePolicies == nil {
-			it.fieldUpdatePolicies = make(map[string]FieldUpdatePolicy)
-		}
-		for field, policy := range it.Retrieval.FieldUpdatePolicies {
-			it.fieldUpdatePolicies[field] = policy
-			if field == "data" && policy != UpdatePolicyKeepExisting {
-				dataFile = true
-			}
-		}
-		item = true
-		return
-	}
-
-	// An item may be referenced by the data source more than once, and thus the same item may be processed concurrently;
-	// when this happens, multiple data files are created in the repo: the first will presumably have the original filename,
-	// while the later ones will have random strings appended. The problem is if a later one end up finishing first, the
-	// mutated filename will persist instead of the original... this is not strictly bad, but is annoying since it doesn't
-	// need to be mutated - also, it implies processing the data file multiple times, unnecessarily! Ideally we only process
-	// an item's data file once per import.
-	//
-	// There are two primary races: both items are in phase1 (they create an empty file, then in lock-step, they insert a
-	// row into the DB), or one is already in or past phase2 while the other is in phase1. The former race is hard to
-	// detect -- more on that later. The latter, we can do something about right now. If the existing row is from this same
-	// import, and the data file exists, and the data hash is nil, we can presume that the item is still being processed and
-	// thus skip processing of our data file entirely. Is this a perfect check? No, because without a data file, the existing
-	// row was likely only detected by way of other columns (timestamp, filename?)  which may be too strict or too loose for
-	// a perfect match. Also, if the first data file did actually have an error, we wouldn't necessarily know; then again, if
-	// it did, there's little chance that our processing would fare any better since we're operating in the same import on the
-	// same data source...
-	//
-	// To detect the first race, the only idea I have right now is to add a scan at the end of each import when things have
-	// settled, to compare the filename column with the base of the filename in the data_file column; if they don't match
-	// up, and the filename using the un-mutated filename is available, then we could rename it and update data_file.
-	// (Example: filename is IMG_1234.HEIC, but data_file ends in IMG_1234__abcd.HEIC. We could rename to IMG_1234.HEIC
-	// if that filename is available in the repo and update the DB row to match.)
-	// TODO: Try to figure this out to make it correct. We might need a process-wide map mutex or something to avoid hacky solutions?
-	if dbItem.JobID != nil && *dbItem.JobID == p.ij.job.id &&
-		dbItem.DataHash == nil &&
-		dbItem.DataFile != nil && FileExists(p.tl.FullPath(*dbItem.DataFile)) {
-		p.log.Debug("processing existing item, but skipping data file because it is already being processed by this import",
-			zap.Uint64("item_row_id", dbItem.ID),
-			zap.String("filename", it.Content.Filename),
-			zap.String("item_original_id", it.ID),
-			zap.String("data_file_path", p.tl.FullPath(*dbItem.DataFile)))
-		return true, false
-	}
-
 	// within the same import, reprocess an item if the data source gives us the item in pieces;
 	// for example, at first we might only get just enough of the item to satisfy a relationship
 	// (like an ID), then later as it iterates it finds that related item and fills out the rest
@@ -1310,7 +526,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		}
 
 		// if there's an incoming data file and we don't have one, then update
-		if dbItem.DataText == nil && dbItem.DataFile == nil && (it.dataText != nil || it.Content.Data != nil) {
+		if dbItem.DataText == nil && dbItem.DataFile == nil && (it.dataText != nil || it.dataFileHash != nil) {
 			dataFile = true
 			it.fieldUpdatePolicies["data"] = UpdatePolicyPreferIncoming
 		}
@@ -1364,8 +580,14 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		if dbItem.OriginalLocation == nil && it.OriginalLocation != "" {
 			it.fieldUpdatePolicies["original_location"] = UpdatePolicyPreferIncoming
 		}
+		if dbItem.IntermediateLocation == nil && it.IntermediateLocation != "" {
+			it.fieldUpdatePolicies["intermediate_location"] = UpdatePolicyPreferIncoming
+		}
 		if dbItem.OriginalID == nil && it.ID != "" {
 			it.fieldUpdatePolicies["original_id"] = UpdatePolicyPreferIncoming
+		}
+		if dbItem.DataText == nil && dbItem.DataFile == nil && (it.dataText != nil || it.dataFileHash != nil) {
+			it.fieldUpdatePolicies["data"] = UpdatePolicyPreferIncoming
 		}
 
 		// the deferred function above will take care of merging the metadata
@@ -1378,6 +600,7 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 		if !item {
 			p.log.Debug("skipping processing of existing item because it was already processed in this import and there are no update overrides",
 				zap.Uint64("item_row_id", dbItem.ID),
+				zap.String("item_classification", it.Classification.Name),
 				zap.String("filename", it.Content.Filename),
 				zap.String("item_original_id", it.ID))
 		}
@@ -1570,14 +793,10 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	}
 	ir.DataText = it.dataText
 	if it.dataFileName != "" {
-		// BIG TIME bug fix :)
-		// When deduplicating data files, if this is not a copy of the dataFileName, then we end up not
-		// updating values in the DB with the existing filename later on, because we end up changing
-		// the value of it.dataFileName if it's a duplicate... but if ir.DataFile points to it, that also
-		// ends up changing even though we expect that to remain the originally-planned filename so that
-		// we can use it in a DB query to update the rows to point to the existing filename...
-		df := it.dataFileName
-		ir.DataFile = &df
+		ir.DataFile = &it.dataFileName
+	}
+	if len(it.dataFileHash) > 0 {
+		ir.DataHash = it.dataFileHash
 	}
 	ir.Metadata = metadata
 	ir.Location = it.Location
@@ -1614,7 +833,11 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 // is the data source and the original ID. If checkDeleted is true, an item which has been deleted
 // will also be included as a possible result, it requires that idHash and contentHash are set on
 // the item already.
-func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID uint64, it *Item, dataSourceName *string, uniqueConstraints map[string]bool, checkDeleted bool) (ItemRow, error) {
+func (tl *Timeline) loadItemRow(ctx context.Context, tx *sql.Tx, rowID, notRowID uint64, it *Item, dataSourceName *string, uniqueConstraints map[string]bool, checkDeleted bool) (ItemRow, error) {
+	if rowID != 0 && notRowID != 0 {
+		return ItemRow{}, errors.New("cannot load item row both by row ID and not by row ID")
+	}
+
 	// little helper function that returns the most correct equality operator (IS or =) based on the value being compared against
 	eq := func(arg any) string {
 		if isNil(arg) {
@@ -1650,7 +873,7 @@ SELECT * FROM (
 	} else {
 		// select the row by the various properties of the item
 
-		if len(uniqueConstraints) == 0 && (dataSourceName == nil || it.ID == "") {
+		if len(uniqueConstraints) == 0 && (dataSourceName == nil || it.ID == "") && len(it.Retrieval.key) == 0 {
 			// if no unique constraints were specified (by mistake?), this could be problematic
 			// as it would match, uh, probably any item from the same data source
 			return ItemRow{}, errors.New("missing unique constraints; at least 1 required when no original ID specified")
@@ -1658,11 +881,26 @@ SELECT * FROM (
 
 		args = make([]any, 0, 1+len(uniqueConstraints))
 
+		// first, honor the retrieval key if set, which allows an item to be pieced
+		// together regardless of what values are in the row already... since the whole
+		// item may not be known yet or some parts may be changing (for reasons known
+		// only to the data source), we use the retrieval key as a globally unique key
+		// to check for an  existing item (even if only part of it is in the DB); we
+		// don't use the retrieval key if selecting by row ID (or not row ID), since
+		// that doesn't make sense to do
+		if len(it.Retrieval.key) > 0 && notRowID == 0 {
+			sb.WriteString(" retrieval_key=?")
+			args = append(args, it.Retrieval.key)
+		}
+
 		// an easy way to select an item is by the ID assigned from the data source;
 		// this should be exclusive enough to uniquely select an item
 		// TODO: See if this is optimized
 		if dataSourceName != nil && it.ID != "" {
-			sb.WriteString("\n\t\t(data_source_name=? AND original_id=?)")
+			if len(args) > 0 {
+				sb.WriteString("\n\t\tOR")
+			}
+			sb.WriteString(" (data_source_name=? AND original_id=?)")
 			args = append(args, dataSourceName, it.ID)
 		}
 
@@ -1710,6 +948,11 @@ SELECT * FROM (
 
 		// iterate each field to be selected on to finish building WHERE clause
 		firstIter := true
+		if notRowID > 0 {
+			sb.WriteString("id != ?")
+			args = append(args, rowID)
+			firstIter = false
+		}
 		for field := range uniqueConstraints {
 			// Note: the value in uniqueConstraints is supposed to be whether NULLs are significant/strictly compared, but it is not currently implemented, and I am not sure if it is useful.
 
@@ -1795,16 +1038,6 @@ SELECT * FROM (
 				args = append(args, arg)
 			}
 		}
-
-		// also honor the retrieval key, if set, which allows an item to be pieced together
-		// regardless of what values are in the row already... since the whole item may not
-		// be known yet or some parts may be changing (for reasons known only to the data
-		// source which we trust), we use the retrieval key as a globally unique key to
-		// check for an existing item (even if only part of it is in the DB)
-		if len(it.Retrieval.key) > 0 {
-			sb.WriteString(" OR retrieval_key=?")
-			args = append(args, it.Retrieval.key)
-		}
 	}
 
 	sb.WriteString("\n)\nLIMIT 1")
@@ -1815,8 +1048,7 @@ SELECT * FROM (
 }
 
 // insertOrUpdateItem inserts the fully-populated ir into the database (TODO: finish godoc)
-func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, startingDataFile *string, allowOverwrite bool,
-	fieldUpdatePolicies map[string]FieldUpdatePolicy) (uint64, itemStoreResult, error) {
+func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, allowOverwrite bool, fieldUpdatePolicies map[string]FieldUpdatePolicy) (uint64, itemStoreResult, error) {
 	// new item? insert it
 	if ir.ID == 0 {
 		var metadata *string
@@ -2005,17 +1237,6 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		return 0, "", fmt.Errorf("updating item row: %w", err)
 	}
 
-	// if there's a chance that we just set the data_file to NULL, check to see if the
-	// file is no longer referenced in the DB; if not, clean it up
-	if startingDataFile != nil && ir.DataFile == nil {
-		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, *startingDataFile); err != nil {
-			p.log.Error("cleaning up data file",
-				zap.Uint64("item_row_id", ir.ID),
-				zap.Stringp("data_file_name", startingDataFile),
-				zap.Error(err))
-		}
-	}
-
 	atomic.AddInt64(p.ij.updatedItemCount, 1)
 
 	return ir.ID, itemUpdated, nil
@@ -2034,7 +1255,7 @@ func detectContentType(peekedBytes []byte, it *Item) {
 	// (last checked Q1 2024: Go's standard lib doesn't support HEIC or
 	// quicktime---a specific kind of .mv/.mp4 video---files,
 	// which are common with Apple devices)
-	if contentType == defaultContentType {
+	if contentType == defaultContentType || contentType == "" {
 		if bytes.Contains(peekedBytes[:16], []byte("ftypheic")) {
 			contentType = "image/heic"
 		} else if bytes.Contains(peekedBytes[:16], []byte("ftypqt")) {
@@ -2044,7 +1265,7 @@ func detectContentType(peekedBytes []byte, it *Item) {
 
 	// if we still don't know, try the file extension as a last resort
 	ext := path.Ext(it.Content.Filename)
-	if contentType == defaultContentType {
+	if contentType == defaultContentType || contentType == "" {
 		if typeByExt := typeByExtension(ext); typeByExt != "" {
 			contentType = typeByExt
 		}
@@ -2190,6 +1411,14 @@ func typeByExtension(ext string) string {
 	return ""
 }
 
+type itemStoreResult string
+
+const (
+	itemInserted itemStoreResult = "inserted"
+	itemSkipped  itemStoreResult = "skipped"
+	itemUpdated  itemStoreResult = "updated"
+)
+
 // Used to see if the size of content is big enough to go on disk
 var sizePeekBufPool = sync.Pool{
 	New: func() any {
@@ -2207,4 +1436,4 @@ const itemCoordDecimalPrecision = 5
 // it's not comfortable to store huge text files in the DB,
 // they belong in files; we just want to avoid lots of little
 // text files on disk.
-const maxTextSizeForDB = 1024 * 1024 * 50 // 50 KiB
+const maxTextSizeForDB = 1024 * 100 // 100 KiB

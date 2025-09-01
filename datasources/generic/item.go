@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io/fs"
 
-	"github.com/mholt/goexif2/exif"
+	"github.com/cozy/goexif2/exif"
 	"github.com/timelinize/timelinize/timeline"
 )
 
