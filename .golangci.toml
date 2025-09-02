@@ -70,7 +70,6 @@ enable = [
 [linters.settings]
 
 [linters.settings.gomoddirectives]
-replace-local = true
 replace-allow-list = [
   'github.com/cozy/goexif2'
 ]
