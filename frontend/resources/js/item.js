@@ -231,13 +231,10 @@ async function itemPageMain() {
 					const boxEl = document.createElement('div');
 					boxEl.id = `face-circle-rel-${rel.relationship_id}`;
 					boxEl.classList.add('face-circle', 'd-none');
-					const imgRect = $('#item-content').getBoundingClientRect();
-					const width = imgRect.width * sizeX;
-					const height = imgRect.height * sizeY;
-					boxEl.style.width = width+"px";
-					boxEl.style.height = height+"px";
-					boxEl.style.left = `${(centerX-sizeX/2)*imgRect.width}px`;
-					boxEl.style.bottom = `${(centerY-sizeY/2)*imgRect.height}px`; // NOTE: Apple's y-coord is from the bottom, not top!!
+					boxEl.style.width = `${sizeX*100}%`;
+					boxEl.style.height = `${sizeY*100}%`;
+					boxEl.style.left = `${(centerX-sizeX/2)*100}%`
+					boxEl.style.bottom = `${(centerY-sizeY/2)*100}%`; // NOTE: Apple's y-coord is from the bottom, not top!!
 					boxEl.innerText = rel.to_entity.name || "unknown";
 					$('#item-content').append(boxEl);
 
