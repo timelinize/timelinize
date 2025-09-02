@@ -455,6 +455,7 @@ function connectLog() {
 				data_id: l.data_id,
 				data_type: l.data_type,
 				repo_id: job.repo_id,
+				thumb_hash: l.thumb_hash,
 			}, { thumbnail: true }))
 
 			gridElem.prepend(cellElem);

@@ -261,7 +261,7 @@ function trigger(el, eventType, detail) {
 // cloneTemplate does a deep clone of the <template> tag selected by tplSelector.
 function cloneTemplate(tplSelector) {
 	// Ohhhhhh wow, we need to use firstElementChild when cloning the content of a template tag (!!!!):
-	// https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template#avoiding_documentfragment_pitfall
+	// https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/template#avoiding_documentfragment_pitfalls
 	// I spent way too long on this.
 	const elem = $(tplSelector);
 	if (!elem) return;

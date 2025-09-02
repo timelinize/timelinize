@@ -1074,7 +1074,7 @@ function itemImgSrc(item, thumbnail = false) {
 		data_type: item.data_type
 	});
 	const ext = thumbnail ? "" : ".avif"; // thumbnail extension is dictated by server
-	return `/repo/${item.repo_id}/${thumbnail ? "thumbnail" : "image"}/${item.id}${ext}?${params.toString()}`;
+	return `/repo/${item.repo_id}/${thumbnail ? "thumbnail" : "image"}/${item.id ? item.id+ext : ""}?${params.toString()}`;
 }
 
 function entityDisplayNameAndAttr(entity) {

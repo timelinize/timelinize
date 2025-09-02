@@ -406,7 +406,6 @@ func (tl *Timeline) runJob(row Job) error {
 		pause:           make(chan chan struct{}),
 		done:            make(chan struct{}),
 		id:              row.ID,
-		started:         *row.Start,
 		tl:              tl,
 		logger:          baseLogger.Named("action").With(zap.Object("job", row)),
 		statusLog:       statusLog,
@@ -416,6 +415,9 @@ func (tl *Timeline) runJob(row Job) error {
 		currentProgress: row.Progress,
 		currentTotal:    row.Total,
 		currentMessage:  row.Message,
+
+		started: *row.Start,
+		jobType: row.Type,
 	}
 
 	// run the job asynchronously -- never block the calling goroutine!
@@ -585,6 +587,7 @@ type ActiveJob struct {
 	action      JobAction
 
 	// these fields are needed mainly for accurate real-time logging purposes
+	jobType JobType
 	started time.Time
 	ended   time.Time
 
@@ -606,6 +609,7 @@ type ActiveJob struct {
 func (j *ActiveJob) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("repo_id", j.tl.id.String())
 	enc.AddUint64("id", j.id)
+	enc.AddString("type", string(j.jobType))
 	enc.AddString("state", string(j.currentState))
 	enc.AddTime("start", j.started)
 	if !j.ended.IsZero() {
