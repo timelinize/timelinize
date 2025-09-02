@@ -951,7 +951,7 @@ func (tl *Timeline) expandRelationshipSingle(ctx context.Context, tx *sql.Tx, sr
 }
 
 func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID uint64) (*SearchResult, error) {
-	ir, err := tl.loadItemRow(ctx, tx, itemRowID, nil, nil, nil, false)
+	ir, err := tl.loadItemRow(ctx, tx, itemRowID, 0, nil, nil, nil, false)
 	if err != nil {
 		return nil, fmt.Errorf("loading related item row: %w", err)
 	}

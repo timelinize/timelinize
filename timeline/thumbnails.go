@@ -43,8 +43,8 @@ import (
 	// but now I just get a distorted green mess:
 	// https://x.com/mholt6/status/1864894439061381393
 	"github.com/davidbyttow/govips/v2/vips"
-	"github.com/galdor/go-thumbhash"
 	_ "github.com/gen2brain/avif" // register AVIF image decoder
+	"go.n16f.net/thumbhash"
 	"go.uber.org/zap"
 	_ "golang.org/x/image/webp" // register WEBP image decoder
 )

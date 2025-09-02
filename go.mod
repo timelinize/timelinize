@@ -2,32 +2,34 @@ module github.com/timelinize/timelinize
 
 go 1.23.3
 
+replace github.com/cozy/goexif2 => github.com/mholt/goexif2 v0.0.0-20250825204601-4f247c43869a
+
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/abema/go-mp4 v1.4.1
 	github.com/adrianmo/go-nmea v1.10.0
 	github.com/apognu/gocal v0.9.1
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
-	github.com/brianvoe/gofakeit/v7 v7.2.1
+	github.com/brianvoe/gofakeit/v7 v7.4.0
 	github.com/caddyserver/caddy/v2 v2.9.1
+	github.com/cozy/goexif2 v1.3.1
 	github.com/davidbyttow/govips/v2 v2.16.0
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
-	github.com/galdor/go-thumbhash v1.0.1-0.20240227061205-5f40e920ff45
-	github.com/gen2brain/avif v0.4.3
+	github.com/gen2brain/avif v0.4.4
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/maruel/natural v1.1.1
-	github.com/mattn/go-sqlite3 v1.14.28
-	github.com/mholt/archives v0.1.1
+	github.com/mattn/go-sqlite3 v1.14.32
+	github.com/mholt/archives v0.1.3
 	github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e
-	github.com/mholt/goexif2 v0.0.0-20230302025153-4d89d35092b2
 	github.com/signal-golang/go-vcard v0.1.2
 	github.com/ttacon/libphonenumber v1.2.1
 	github.com/zeebo/blake3 v0.2.4
+	go.n16f.net/thumbhash v1.0.1-0.20240707140646-ed267c1ad041
 	go.uber.org/zap v1.27.0
-	golang.org/x/image v0.25.0
-	golang.org/x/oauth2 v0.28.0
+	golang.org/x/image v0.30.0
+	golang.org/x/oauth2 v0.30.0
 	howett.net/plist v1.0.1
 )
 
@@ -40,7 +42,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.3.1 // indirect
 	github.com/Microsoft/go-winio v0.6.0 // indirect
 	github.com/STARRY-S/zip v0.2.1 // indirect
-	github.com/andybalholm/brotli v1.1.1 // indirect
+	github.com/andybalholm/brotli v1.1.2-0.20250424173009-453214e765f3 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/aryann/difflib v0.0.0-20210328193216-ff5ff6dc229b // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -100,6 +102,7 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/mholt/acmez/v3 v3.1.1 // indirect
 	github.com/miekg/dns v1.1.63 // indirect
+	github.com/mikelolasagasti/xz v1.0.1 // indirect
 	github.com/minio/minlz v1.0.0 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
@@ -134,7 +137,6 @@ require (
 	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/tailscale/tscert v0.0.0-20240608151842-d3f834017e53 // indirect
 	github.com/tetratelabs/wazero v1.9.0 // indirect
-	github.com/therootcompany/xz v1.0.1 // indirect
 	github.com/ttacon/builder v0.0.0-20170518171403-c099f663e1c2 // indirect
 	github.com/ulikunitz/xz v0.5.12 // indirect
 	github.com/urfave/cli v1.22.14 // indirect
@@ -147,17 +149,17 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
-	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/crypto v0.40.0 // indirect
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20241104001025-71ed71b4faf9 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
-	golang.org/x/mod v0.24.0 // indirect
-	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sync v0.12.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/term v0.30.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/mod v0.26.0 // indirect
+	golang.org/x/net v0.42.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
+	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/term v0.33.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
-	golang.org/x/tools v0.31.0 // indirect
+	golang.org/x/tools v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241007155032-5fefd90f89a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241007155032-5fefd90f89a9 // indirect
 	google.golang.org/grpc v1.67.1 // indirect

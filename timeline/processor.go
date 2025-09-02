@@ -42,8 +42,7 @@ type processor struct {
 
 	tl *Timeline
 
-	log      *zap.Logger
-	progress *zap.Logger
+	log *zap.Logger
 
 	// batching inserts can greatly increase speed
 	batch     []*Graph

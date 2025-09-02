@@ -27,7 +27,6 @@ import (
 	"io"
 	"math/big"
 	"mime"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -270,32 +269,26 @@ type Item struct {
 	// processor must have the same retrieval key, and no other
 	// item globally must use the same key at any time.
 	//
-	// Only set this field if the Item is or may not be complete
-	// (e.g. if you know it will be processed in multiple pieces),
+	// Only set this field if the Item may not be complete (e.g.
+	// if you know it will be processed in multiple pieces),
 	// since setting a retrieval key forces reprocessing of the
 	// item, which is less efficient than skipping duplicates.
 	Retrieval ItemRetrieval `json:"retrieval,omitempty"`
 
-	// Used for storing state during processing; either the
-	// text content of the item, or the source from which
-	// to read when creating the data file on disk. Data
-	// sources should set Content instead; NOT these!
-	dataText *string
-
-	// state for processing pipeline phases
-	row                 ItemRow
-	dataFileIn          io.ReadCloser
-	dataFileOut         *os.File
-	dataFileSize        int64
-	dataFileName        string // path to the data file relative to the repo root
-	dataFileHash        []byte // a non-nil hash indicates the file has been downloaded (if 0 size, it will be an empty slice, as opposed to hash's IV)
-	desiredDataFileName string // base filename (sans path) the processor tried to get for the file, but may have been taken
-	idHash              []byte
-	contentHash         []byte
-	skipThumb           bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
-	oldDataFile         string                       // when replacing a data file, used to clean things up at the end of processing the item
-	existingRow         ItemRow                      // only used if a field update policy requires info about the incoming data file
-	fieldUpdatePolicies map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
+	// the following fields are used to store state across
+	// phases of the processing pipeline, data sources
+	// should NOT set these (hence being unexported)
+	row                  ItemRow                      // the DB row associated with this item
+	dataText             *string                      // for plaintext items, to be stored in the items table
+	intendedDataFileName string                       // the ideal/preferred name for the data file, if available
+	dataFilePath         string                       // path of the data file relative to the repo root
+	dataFileHash         []byte                       // the checksum of the data file
+	dataFileSize         int64                        // number of bytes of data read
+	idHash               []byte                       // hash of the item's original ID so we can avoid duplicates in future imports
+	contentHash          []byte                       // hash of the item's original content so we can avoid duplicates in future imports, even if content changes
+	skipThumb            bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
+	fieldUpdatePolicies  map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
+	skip                 bool                         // the processor may mark some items to skip based on import job configuration or other factors
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
@@ -304,6 +297,16 @@ type Item struct {
 // gets hashed, so it simply opaque bytes to the processor and DB), and if
 // relevant, set PreferFields to control what gets updated or preferred when
 // data already exists in the DB.
+//
+// Retrieval keys are not guaranteed to be persisted across separate imports,
+// particularly if an item appears in another data source that also uses
+// retrieval keys. Retrieval keys should primarily be used to refer to an
+// item within its data source, for that import job, to make multiple graphs
+// act like one graph. If data soruces document how they set retrieval keys,
+// then it may be possible for multiple data sources to corroborate the same
+// item without stepping on each other.
+
+// TODO: actually, our schema is not well-suited for an item appearing in multiple data sources. an item has just one data source... if two update it, which one wins? maybe that's configurable by the user, the update policies...
 type ItemRetrieval struct {
 	key []byte
 
@@ -317,6 +320,29 @@ type ItemRetrieval struct {
 	// though both have metadata, when importing from the actual image, we prefer that,
 	// and this tells the processor to do so.
 	FieldUpdatePolicies map[string]FieldUpdatePolicy `json:"field_update_policies,omitempty"`
+
+	// Override whether the user's configured unique constraints for each field
+	// are strict nulls or soft nulls. Adding to this map will not create new
+	// unique constraints, but can modify what logic the processor applies if,
+	// for example, the data source knows it doesn't know a certain part of the
+	// item, it can say that the nilness of it shouldn't have to match a nil in
+	// the DB row.
+	UniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
+}
+
+// finalUniqueConstraints combines the unique constraints configured by the user with those
+// specified by the data source. It does not add new ones that the user has not configured,
+// it only updates.
+func (ret *ItemRetrieval) finalUniqueConstraints(configuredUniqueConstraints map[string]bool) map[string]bool {
+	uniq := make(map[string]bool, len(configuredUniqueConstraints))
+	for field, strictNull := range configuredUniqueConstraints {
+		if override, ok := ret.UniqueConstraints[field]; ok {
+			uniq[field] = override
+		} else {
+			uniq[field] = strictNull
+		}
+	}
+	return uniq
 }
 
 // SetKey sets the retrieval key for this item. It should be a globally unique
@@ -499,8 +525,10 @@ type ItemData struct {
 	// arbitrary binary blobs or executable programs.
 	MediaType string `json:"media_type,omitempty"`
 
-	// A function that returns a way to read the item's data. The
-	// returned ReadCloser will be closed when processing finishes.
+	// Size of the data in bytes, if known. If set, it must be correct.
+	Size uint64 `json:"size,omitempty"`
+
+	// A function that returns a way to read the item's data.
 	Data DataFunc `json:"-"`
 }
 
@@ -766,14 +794,14 @@ var (
 
 // ItemRow has the structure of an item's row in our DB.
 type ItemRow struct {
-	ID                   uint64          `json:"id"`
+	ID                   uint64          `json:"id"` // row ID
 	EmbeddingID          *uint64         `json:"embedding_id,omitempty"`
 	DataSourceID         *uint64         `json:"data_source_id,omitempty"` // row ID, used only for insertion into the DB
 	JobID                *uint64         `json:"job_id,omitempty"`
 	ModifiedJobID        *uint64         `json:"modified_job_id,omitempty"`
 	AttributeID          *uint64         `json:"attribute_id,omitempty"`
 	ClassificationID     *uint64         `json:"classification_id,omitempty"` // row ID, used only internally
-	OriginalID           *string         `json:"original_id,omitempty"`
+	OriginalID           *string         `json:"original_id,omitempty"`       // data-source-assigned item ID
 	OriginalLocation     *string         `json:"original_location,omitempty"`
 	IntermediateLocation *string         `json:"intermediate_location,omitempty"`
 	Filename             *string         `json:"filename,omitempty"`

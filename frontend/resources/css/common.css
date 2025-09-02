@@ -581,7 +581,9 @@ styles. But it took hours to figure them out!
 
 
 
-
+.content {
+	border-radius: var(--tblr-border-radius);
+}
 
 
 /* TODO: still working on this */

@@ -8,6 +8,7 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
+// TODO: These names seem to depend on locale (see issue #111) -- we may need to either ask that international users rename their files (sigh) or do deeper inspection of contents for recognition
 const (
 	filenameFromLegacyTakeout     = "Records.json"
 	filenameFromiOSDeviceContains = "location-history"

@@ -24,7 +24,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"io/fs"
 	weakrand "math/rand/v2"
@@ -33,380 +32,22 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
 )
 
-// downloadDataFile downloads the data file and hashes it. It attaches the
-// results to the item.
-func (p *processor) downloadDataFile(_ context.Context, it *Item) error {
-	if it == nil {
-		return nil
-	}
-	h := newHash()
-	dataFileSize, err := p.downloadAndHashDataFile(it, h)
-	if err != nil {
-		// always clean up our global state
-		activeDataFilesMu.Lock()
-		delete(activeDataFiles, it.dataFileName)
-		activeDataFilesMu.Unlock()
-		return err
-	}
-	it.dataFileSize = dataFileSize
-	if dataFileSize == 0 {
-		// non-nil indicates we downloaded the file, but empty still makes it
-		// clear that the file was empty (as opposed to the IV of the hash)
-		it.dataFileHash = []byte{}
-	} else {
-		it.dataFileHash = h.Sum(nil)
-	}
-	it.makeContentHash() // update content hash now that we know the data file hash
-	return nil
-}
-
-// finishDataFileProcessing adds the results of a data file to the DB. It takes care of
-// duplicate files and only keeps empty files if the processor is configured to do so.
-// It returns the size of the data file that was downloaded and, if the item was found
-// to be a duplicate, the row ID of the existing row for this item.
-func (p *processor) finishDataFileProcessing(ctx context.Context, tx *sql.Tx, it *Item) error {
-	if it == nil || it.dataFileOut == nil {
-		return nil
-	}
-
-	// always clean up our global state
-	defer func(dataFileKey string) {
-		activeDataFilesMu.Lock()
-		delete(activeDataFiles, dataFileKey)
-		activeDataFilesMu.Unlock()
-	}(it.dataFileName)
-
-	// if we were waiting on the data file to be downloaded before we can determine if/how
-	// to update some field(s) of the item (a "deferred" update policy), then now is the
-	// time to revisit that
-	var hasDeferredUpdatePolicy bool
-	for _, pol := range it.fieldUpdatePolicies {
-		if pol < 0 {
-			hasDeferredUpdatePolicy = true
-			break
-		}
-	}
-	if hasDeferredUpdatePolicy {
-		// now that we have the data file, we shouldn't get any policies < 0, i.e. we can do a full update
-		// TODO: technically, we just need to update the fields where the policies that were previously < 0, right? currently we re-update everything. I haven't noticed any harm in this yet; it's simple...
-		if err := p.distillUpdatePolicies(it, it.existingRow); err != nil {
-			return fmt.Errorf("distilling final update policies: %w", err)
-		}
-		if len(it.fieldUpdatePolicies) > 0 {
-			var err error
-			_, _, err = p.insertOrUpdateItem(ctx, tx, it.row, &it.dataFileName, it.HasContent(), it.fieldUpdatePolicies)
-			if err != nil {
-				return fmt.Errorf("could not update item with deferred update policies: %w", err)
-			}
-		}
-	}
-
-	// in case the data file path changed while we were downloading it, get the updated value
-	activeDataFilesMu.Lock()
-	updatedDataFilePath := activeDataFiles[it.dataFileName]
-	it.dataFileName = updatedDataFilePath
-	if it.row.DataFile != nil {
-		it.row.DataFile = &updatedDataFilePath
-	}
-	activeDataFilesMu.Unlock()
-
-	// Now that we have a hash of the file, perform one last check WITHOUT row/original IDs to ensure the checksum
-	// will be used in the query, to see if this ITEM is a duplicate. The check we performed before processing the
-	// file doesn't have the file hash yet because it hasn't downloaded the item. (Even if the item is distinct,
-	// we will still check for a duplicate data file soon, to see if we should just point to the existing file.)
-	//
-	// Note the conditions: no error, a row ID was returned, and the row ID is NOT equal to the input row ID.
-	// This happened once when I had a bug in my call to loadItemRow, where I passed in itemRowID and originalID.
-	// The query would use the IDs directly and not even use the checksum, which sometimes resulted in
-	// the query loading the same row as the input item, and then we'd remove it, resulting in the item not
-	// being added at all, and any future query to store relationships to fail with FK violations (because
-	// the item was removed, when it was actually the only instance of it).
-	//
-	// If, still, somehow, the only item we discover is the same one, don't delete it!
-	//
-	// First, copy the item so we can zero-out its original ID; then nilify the data source name if empty...
-	itCopy := *it
-	itCopy.ID = ""
-	var dsName *string
-	if p.ds.Name != "" {
-		dsName = &p.ds.Name
-	}
-	if existingItemRow, err := p.tl.loadItemRow(ctx, tx, 0, &itCopy, dsName, p.ij.ProcessingOptions.ItemUniqueConstraints, true); err == nil && existingItemRow.ID > 0 && existingItemRow.ID != it.row.ID {
-		// ah, so with the file hash, we have now determined that we already have the item;
-		// this is a duplicate ITEM, so delete the row and file we just created, and since this
-		// is being done asynchronously, the duplicate item has already finished processing
-		// (it should have been processed in a mutex'ed transaction, so completely done by now)
-		// and we need to: clean up the duplicated file, update any references to this item ID
-		// in the DB, and then delete this item row from the DB
-		p.log.Info("after downloading data file, used file hash to determine that item is a duplicate; removing",
-			zap.Uint64("matched_item_row_id", existingItemRow.ID),
-			zap.Uint64("incoming_duplicate_item_row_id", it.row.ID),
-			zap.Stringp("original_id", existingItemRow.OriginalID),
-			zap.String("data_file_name", it.dataFileName),
-			zap.Binary("data_file_hash", it.dataFileHash),
-			zap.Int64("bytes_written", it.dataFileSize))
-
-		// delete duplicate data file
-		if err := p.tl.deleteRepoFile(it.dataFileOut.Name()); err != nil {
-			return fmt.Errorf("deleting duplicate data file %s: %w", it.dataFileOut.Name(), err)
-		}
-
-		it.row.howStored = itemSkipped
-
-		// update references to the newly-inserted row to refer to the existing row instead,
-		// but if the resulting row already exists, it'll fail uniqueness constraints;
-		// we could probably make this operation more robust, but for now we just assume that
-		// any error is failing the uniqueness constraint and we can move along simply by
-		// logging it at debug level, and then when we delete the item row the FK constraints
-		// should kick in and delete the row we were trying to update or remove
-		// (SQL has an "ON CONFLICT REPLACE" but it's a SQLite extension I guess)
-		if _, err := tx.ExecContext(ctx, `UPDATE relationships SET from_item_id=? WHERE from_item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not update relevant relationships (from->to)", zap.Error(
-				fmt.Errorf("updating relationships referencing from_item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE relationships SET to_item_id=? WHERE to_item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not update relevant relationships (to->from)",
-				zap.Error(fmt.Errorf("updating relationships referencing to_item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE story_elements SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not update relevant curation elements",
-				zap.Error(fmt.Errorf("updating story_elements referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE tagged SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not update relevant tags",
-				zap.Error(fmt.Errorf("updating tagged referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE notes SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not update relevant notes",
-				zap.Error(fmt.Errorf("updating notes referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE logs SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not update relevant logs",
-				zap.Error(fmt.Errorf("updating notes referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE settings SET item_id=? WHERE item_id=?`, existingItemRow.ID, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not update relevant settings",
-				zap.Error(fmt.Errorf("updating settings referencing item_id %d to %d: %w", existingItemRow.ID, it.row.ID, err)))
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM items WHERE id=?`, it.row.ID); err != nil {
-			p.log.Debug("after detecting duplicate item file, could not delete item row",
-				zap.Error(fmt.Errorf("deleting duplicate item row %d: %w", it.row.ID, err)))
-		}
-
-		return nil
-	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		p.log.Error("could not query to determine item uniqueness after file download", zap.Error(err))
-	}
-
-	// don't keep empty files
-	if it.dataFileSize == 0 {
-		p.log.Warn("downloaded data file was empty; removing item",
-			zap.Uint64("item_row_id", it.row.ID),
-			zap.String("item_original_id", it.ID),
-			zap.String("data_file_name", it.dataFileName),
-			zap.Int64("bytes_written", it.dataFileSize))
-
-		// delete col value from DB first, because then it's easy to sweep for stray/dangling data
-		// files if we can know the DB is the ultimate source of truth, because nothing points to them
-		// TODO: LIMIT 1... (see https://github.com/mattn/go-sqlite3/pull/802)
-		if _, err := tx.ExecContext(ctx, `UPDATE items SET data_file=NULL, data_hash=NULL WHERE id=?`, it.row.ID); err != nil {
-			return fmt.Errorf("unlinking data file from item row: %w", err)
-		}
-
-		// delete the empty data file
-		if err := p.tl.deleteRepoFile(it.dataFileOut.Name()); err != nil {
-			return fmt.Errorf("deleting empty data file: %w", err)
-		}
-
-		return nil
-	}
-
-	// file is non-empty, so that's good - and item is distinct; but if the exact same file
-	// (byte-for-byte) already exists, delete this copy and reuse the existing one - don't do
-	// this for empty files, that would leave all empty files pointing to the same empty file,
-	// which is kind of pointless IMO
-	// (this is where it's important that it.row.DataFile is not a pointer to it.dataFileName,
-	// because we end up changing the value of it.dataFileName in this method)
-	_, err := p.replaceWithExisting(ctx, tx, &it.dataFileName, it.dataFileHash, it.row.ID)
-	if err != nil {
-		return fmt.Errorf("replacing data file with identical existing file: %w", err)
-	}
-
-	// If this item had a deferred field update policy, such as one that required knowing
-	// the size of the data file, and if the field was the data itself, and if the data
-	// file we just downloaded was not actually used, then we need to clean it up to avoid
-	// a dangling data file.
-	if hasDeferredUpdatePolicy {
-		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, it.dataFileName); err != nil {
-			p.log.Error("could not clean up unused downloaded data file",
-				zap.Error(err),
-				zap.String("unused_data_file", it.dataFileName),
-				zap.Uint64("row_id", it.row.ID))
-		}
-	}
-
-	// Count data files which are eligible for a thumbnail and which are not excluded from
-	// receiving a thumbnail (like live photos/motion picture sidecar files, which are
-	// generally an exception from normal related items). This count is not used to configure
-	// the thumbnail job's total size, but it was in a previous version of the code. Now the
-	// job calculates it when it starts. This count is mainly used to determine whether to
-	// even start a thumbnail job. TODO: That said, maybe we should always start a thumbnail
-	// job even if it does nothing? Then we don't have to count here.
-	if qualifiesForThumbnail(it.row.DataType) && !it.skipThumb {
-		atomic.AddInt64(p.ij.thumbnailCount, 1)
-	}
-
-	// if this replaced an item's previous data file, clean up the old one if it is no longer
-	// referenced by any other items
-	if it.oldDataFile != "" && it.dataFileName != it.oldDataFile {
-		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, it.oldDataFile); err != nil {
-			p.log.Error("could not clean up old, unreferenced data file and any associated thumbnail",
-				zap.Error(err),
-				zap.String("old_data_file", it.oldDataFile),
-				zap.String("replaced_by", it.dataFileName),
-				zap.Uint64("row_id", it.row.ID))
-		}
-
-		// additionally, if the incoming file has the same filename as the one we just deleted, let's see
-		// if now that filename is available, to try to preserve the item's original filename best we can
-		// (for example, if an item with a file named "A.JPG" is being replaced by a new "A.JPG", the
-		// processor will initially create "A__asdf.jpg" because "A.JPG" already exists; but once we get
-		// here, that old file has been deleted, so we can now restore the original name to the new file)
-		if it.desiredDataFileName != "" && path.Base(it.dataFileName) != it.desiredDataFileName {
-			desiredFilename := path.Join(path.Dir(it.dataFileName), it.desiredDataFileName)
-			desiredFilenameFullPath := p.tl.FullPath(desiredFilename)
-			f, err := os.OpenFile(desiredFilenameFullPath, os.O_CREATE|os.O_RDWR|os.O_EXCL, 0600)
-			if err == nil {
-				f.Close()
-				if err := os.Rename(p.tl.FullPath(it.dataFileName), desiredFilenameFullPath); err != nil {
-					p.log.Error("could not restore data file name from temporary name",
-						zap.Error(err),
-						zap.String("temporary_name", it.dataFileName),
-						zap.String("name_to_restore", desiredFilename),
-						zap.Uint64("row_id", it.row.ID))
-				} else {
-					it.dataFileName = desiredFilename
-				}
-			} else if !errors.Is(err, fs.ErrExist) {
-				p.log.Error("could not create placeholder file for data file of the which original filename is being restored",
-					zap.Error(err),
-					zap.String("temporary_name", it.dataFileName),
-					zap.String("name_to_restore", desiredFilename),
-					zap.Uint64("row_id", it.row.ID))
-			}
-		}
-	}
-
-	// save the file's name and hash to all items which use it, to confirm it was downloaded successfully
-	// (if it.row.DataFile was a pointer to it.dataFileName, this is where the query would no-op because
-	// we updated it.dataFileName's value to the existing file, but that would also change it.row.DataFile
-	// to be the same because they point to the same value in memory!! yet we expect it.row.DataFile to
-	// keep the duplicate filename so we can select the row(s) to update...)
-	_, err = tx.ExecContext(ctx, `UPDATE items SET data_file=?, data_hash=? WHERE data_file=?`,
-		it.dataFileName, it.dataFileHash, it.row.DataFile)
-	if err != nil {
-		p.log.Error("updating item's data file hash in DB failed; hash info will be incorrect or missing",
-			zap.Error(err),
-			zap.String("filename", it.dataFileOut.Name()),
-			zap.Uint64("row_id", it.row.ID),
-		)
-	}
-
-	// update content hash to be correct, now that we have the data file hash
-	_, err = tx.ExecContext(ctx, `UPDATE items SET initial_content_hash=? WHERE id=?`, it.contentHash, it.row.ID)
-	if err != nil {
-		p.log.Error("updating item's initial content hash failed; duplicate detection for this item will not function",
-			zap.Error(err),
-			zap.Binary("initial_content_hash", it.contentHash),
-			zap.Uint64("row_id", it.row.ID),
-		)
-	}
-
-	return nil
-}
-
-// downloadAndHashDataFile downloads the data file for the item, computing h along the way.
-// It closes the file handles and returns the number of bytes copied.
-//
-// The item must not be nil, but it can have nil file handles without error; in that
-// case this is a no-op. If only one file handle is nil, the other file is closed and
-// an error is returned.
-func (p *processor) downloadAndHashDataFile(it *Item, h hash.Hash) (int64, error) {
-	if it == nil {
-		return 0, errors.New("missing item for which to download file")
-	}
-
-	// make sure that the data files get closed even if only one is set
-	// (just some defensive programming to prevent a leak)
-	defer func() {
-		if it.dataFileIn != nil {
-			it.dataFileIn.Close()
-		}
-		if it.dataFileOut != nil {
-			it.dataFileOut.Close()
-			// don't set dataFileOut to nil, since the processor needs to access this later
-		}
-	}()
-
-	// if there's no file to process, nbd, just no-op; but if only
-	// one file is open, then that's an error!
-	if it.dataFileIn == nil && it.dataFileOut == nil {
-		return 0, nil
-	}
-	if it.dataFileIn == nil {
-		return 0, fmt.Errorf("%s: missing reader from which to download file (filename=%s original_location=%s intermediate_location=%s rowid=%d)", it.dataFileName, it.Content.Filename, it.OriginalLocation, it.IntermediateLocation, it.row.ID)
-	}
-	if it.dataFileOut == nil {
-		return 0, fmt.Errorf("%s: missing writer with which to write file (filename=%s original_location=%s intermediate_location=%s rowid=%d)", it.dataFileName, it.Content.Filename, it.OriginalLocation, it.IntermediateLocation, it.row.ID)
-	}
-
-	// give the hasher a copy of the file bytes
-	tr := io.TeeReader(it.dataFileIn, h)
-
-	n, err := io.Copy(it.dataFileOut, tr)
-	if err != nil {
-		// TODO: The error should be highlighted as a notification of some sort. Ideally, keep what we have, but somehow indicate in the DB that it's corrupt/incomplete (like not filling out a data_hash)
-		_ = p.tl.deleteRepoFile(it.dataFileOut.Name())
-		return n, fmt.Errorf("copying contents: %w", err)
-	}
-
-	// TODO: If n == 0, should we retry? (would need to call h.Reset() first) - to help handle sporadic I/O issues maybe
-
-	// we can probably increase performance if we don't sync all the time, but that would be less reliable...
-	if n > 0 {
-		if err := it.dataFileOut.Sync(); err != nil {
-			return n, fmt.Errorf("syncing file after downloading: %w", err)
-		}
-	}
-
-	p.log.Debug("downloaded data file",
-		zap.String("item_id", it.ID),
-		zap.String("filename", it.dataFileOut.Name()),
-		zap.Int64("size", n),
-	)
-
-	return n, nil
-}
-
 // openUniqueCanonicalItemDataFile opens a file for saving the content of the given item. It
-// ensures the filename is unique within its folder even for case-insensitive file systems
-// when running in a case-sensitive file system. It returns the file handle as well as the
-// path to the file relative to the repo root, which can be stored in the data_file column.
-//
-// NOTE: It is crucial that the item row is inserted or updated with the data file path/name
-// in the same transaction as tx, otherwise it's theoretically possible (though unlikely) for
-// a collision to occur, as the DB is the source of truth, and this function creates a file
-// but does not update the DB, so it is expected that the filename is "claimed" in the DB in
-// the transaction tx before tx is committed.
-func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, tx *sql.Tx, logger *zap.Logger, it *Item, dataSourceID string) (*os.File, string, error) {
+// ensures the filename is unique within its folder, but only according to the file system's
+// case sensitivity. The transaction parameter is optional. If set, the DB will be consulted
+// to ensure the chosen filename is case-insensitively unique, even if on a case-sensitive
+// file system. That check uses the COLLATE NOCASE (i.e. do a case-insensitive lookup in
+// the DB, to ensure the timeline repo will transfer from case-insensitive file systems to
+// case-insensitive ones). It returns the file handle as well as the path to the file
+// relative to the repo root, which can be stored in the data_file column.
+func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, logger *zap.Logger, tx *sql.Tx, it *Item, dataSourceID string) (*os.File, string, error) {
 	if dataSourceID == "" {
 		return nil, "", errors.New("missing data source ID")
 	}
@@ -418,11 +59,11 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, tx *sql
 		return nil, "", fmt.Errorf("making directory for data file: %w", err)
 	}
 
-	// find a unique filename for this item
-	canonicalFilename := tl.canonicalItemDataFileName(it)
-	it.desiredDataFileName = canonicalFilename // hold onto this name through processing, as it may be used later if we have to add random suffix to the end
-	canonicalFilenameExt := path.Ext(canonicalFilename)
-	canonicalFilenameWithoutExt := strings.TrimSuffix(canonicalFilename, canonicalFilenameExt)
+	// find a unique filename for this item - we starrt with the desired file name based
+	// on the info we have, but we may have to adjust it based on availability
+	it.intendedDataFileName = tl.canonicalItemDataFileName(it)
+	canonicalFilenameExt := path.Ext(it.intendedDataFileName)
+	canonicalFilenameWithoutExt := strings.TrimSuffix(it.intendedDataFileName, canonicalFilenameExt)
 
 	const randSuffixLen = 4
 
@@ -452,15 +93,17 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, tx *sql
 		// case-sensitive FS to a case-insensitive FS!) -- if an item row has claim to it, then the file
 		// is either still processing or was lost and needs to be reconstituted, but for now we should
 		// not collide with it
-		var count int
-		err = tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? LIMIT 1`, tryPath).Scan(&count)
-		if err != nil {
-			return nil, "", fmt.Errorf("checking DB for file uniqueness: %w", err)
-		}
-		if count > 0 {
-			// an existing item has claim to it, so let it keep that, it might still be processing
-			logger.Warn("file did not exist on disk but is already claimed in database - will try to make filename unique", zap.String("filepath", tryPath))
-			continue
+		if tx != nil {
+			var count int
+			err = tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? LIMIT 1`, tryPath).Scan(&count)
+			if err != nil {
+				return nil, "", fmt.Errorf("checking DB for case-insensitive filename uniqueness: %w", err)
+			}
+			if count > 0 {
+				// an existing item has claim to it, so let it keep that, it might still be processing
+				logger.Warn("file did not exist on disk but is already claimed in database - will try to make filename unique", zap.String("filepath", tryPath))
+				continue
+			}
 		}
 
 		return f, tryPath, nil
@@ -469,40 +112,41 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, tx *sql
 	return nil, "", fmt.Errorf("unable to find available filename for item: %s", it)
 }
 
-// canonicalItemDataFileName returns the plain, canonical name of the
-// data file for the item. Canonical data file names are relative to
-// the base storage (repo) path (i.e. the folder of the DB file). This
-// function does no improvising in case of a name missing from the item,
-// nor does it do uniqueness checks. If the item does not have enough
-// information to generate a deterministic file name, the returned path
-// will end with a trailing slash (i.e. the path's last component empty).
-// Things considered deterministic for filename construction include the
-// item's filename, the item's original ID, and its timestamp.
-// TODO: fix godoc (this returns only the name now, not the whole dir)
+// canonicalItemDataFileName returns the filename to be used in the
+// timeline repository for the item's data file. It pulls from elements
+// of the item including its filename and timestamp, if present.
+// It ensures the filename is a safe path component, and will not
+// generate different names that end up conflicting on case-insensitive
+// file systems.
 func (tl *Timeline) canonicalItemDataFileName(it *Item) string {
+	// this is stupid, but I really don't want to see .jfif at the end of my JPEGs ever again
+	extensionByType := func(mediaType string) string {
+		if exts, err := mime.ExtensionsByType(mediaType); err == nil && len(exts) > 0 {
+			sort.Slice(exts, func(a, _ int) bool {
+				if exts[a] == ".jpg" || exts[a] == ".jpeg" {
+					return true
+				}
+				return false
+			})
+			return exts[0]
+		}
+		return ""
+	}
+
 	// ideally, the filename is simply the one provided with the item
 	var filename string
-	if fname := it.Content.Filename; fname != "" {
-		filename = tl.safePathComponent(fname)
+	if it.Content.Filename != "" {
+		filename = tl.safePathComponent(it.Content.Filename)
 	}
 
 	// otherwise, try a filename based on the item's original ID
-	if filename == "" {
-		if it.ID != "" {
-			filename = "item_" + it.ID
-			if exts, err := mime.ExtensionsByType(it.Content.MediaType); err == nil && len(exts) > 0 {
-				filename += exts[0]
-			}
-		}
+	if filename == "" && it.ID != "" {
+		filename = "item_id_" + tl.safePathComponent(it.ID) + extensionByType(it.Content.MediaType)
 	}
 
 	// otherwise, try a filename based on the item's timestamp
-	ts := it.Timestamp
-	if filename == "" && !ts.IsZero() {
-		filename = ts.Format("2006_01_02_150405")
-		if exts, err := mime.ExtensionsByType(it.Content.MediaType); err == nil && len(exts) > 0 {
-			filename += exts[0]
-		}
+	if filename == "" && !it.Timestamp.IsZero() {
+		filename = "item_ts_" + it.Timestamp.Format("2006_01_02_150405") + extensionByType(it.Content.MediaType)
 	}
 
 	// otherwise, out of options; revert to a random string
@@ -510,9 +154,7 @@ func (tl *Timeline) canonicalItemDataFileName(it *Item) string {
 	if filename == "" {
 		const randomNameLen = 24
 		filename = safeRandomString(randomNameLen, true, nil) // same case == true for portability to case-insensitive file systems
-		if exts, err := mime.ExtensionsByType(it.Content.MediaType); err == nil && len(exts) > 0 {
-			filename += exts[0]
-		}
+		filename += extensionByType(it.Content.MediaType)
 	}
 
 	// shorten the name if needed (thanks for nothing, Windows)
@@ -542,6 +184,8 @@ func (tl *Timeline) canonicalItemDataFileDir(it *Item, dataSourceID string) stri
 		tl.safePathComponent(dataSourceID))
 }
 
+// ensureDataFileNameShortEnough returns the filename that is guaranteed to be short
+// enough for... yeah, you guessed it: Windows. Of course.
 func (tl *Timeline) ensureDataFileNameShortEnough(filename string) string {
 	// Windows max filename length is 255, but it's unclear exactly what the limit is; choose slightly less...
 	// see https://www.fileside.app/blog/2023-03-17_windows-file-paths/
@@ -566,6 +210,12 @@ func (tl *Timeline) ensureDataFileNameShortEnough(filename string) string {
 // file that is not the file with the given canonical path or row ID. It returns true if the file
 // already exists and a replacement occurred; false otherwise (i.e. the file was unique).
 // TODO:/NOTE: If changing a file name, all items with same data_hash must also be updated to use same file name
+//
+// TODO: The newly refactored processor does not use this yet, since we have deemed the detection of
+// duplicate rows to be different from finding an existing row that represents an item, but we can
+// potentially use this in a function that removes duplicate items/rows.
+//
+//nolint:unused
 func (p *processor) replaceWithExisting(ctx context.Context, tx *sql.Tx, canonical *string, checksum []byte, itemRowID uint64) (bool, error) {
 	if canonical == nil || *canonical == "" || len(checksum) == 0 {
 		return false, errors.New("missing data filename and/or hash of contents")
@@ -667,8 +317,7 @@ func randomString(n int, sameCase bool, r weakrand.Source) string {
 	}
 	dict := []rune("ABCDEFGHJKLMNPQRTUVWXYabcdefghijkmnopqrstuvwxyz23456789")
 	if sameCase {
-		// TODO: maybe it should be ONLY uppercase letters...
-		dict = dict[22:]
+		dict = dict[22:] // skip uppercase letters
 	}
 	b := make([]rune, n)
 	for i := range b {
@@ -746,17 +395,6 @@ func containsBlocklistedWord(s string) bool {
 	}
 	return false
 }
-
-// While data files are processing, maintain a map of its original
-// path in the repo to its current path in the repo. It's possible,
-// while a data file is downloading, that it may be moved when new
-// timestamp information becomes available. In that case, this map
-// is updated to point the old/original path to the new one so the
-// processor can use the right path for DB queries and such.
-var (
-	activeDataFiles   = make(map[string]string)
-	activeDataFilesMu sync.Mutex
-)
 
 // safePathRE matches any undesirable characters in a filepath.
 // Note that this allows dots, so you'll have to strip ".." manually.

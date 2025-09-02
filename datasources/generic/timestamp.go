@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mholt/goexif2/exif"
+	"github.com/cozy/goexif2/exif"
 )
 
 func (fi fileItem) timestamp() time.Time {

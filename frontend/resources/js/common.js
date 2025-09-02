@@ -337,15 +337,17 @@ function connectLog() {
 			return;
 		}
 
-		if (l.logger == "job.status") {
+		if (l.logger == "job.status" && l.job) {
+			const job = l.job;
+
 			// if this job has a parent that happens to be on the screen showing
 			// previews of its children, make sure this job is rendered so it
 			// can be updated
-			if (l.parent_job_id != null) {
-				const container = $(`#subsequent-jobs-container.job-id-${l.parent_job_id}`);
-				if (container && !$(`.job-preview.job-id-${l.id}`, container)) {
+			if (job.parent_job_id != null) {
+				const container = $(`#subsequent-jobs-container.job-id-${job.parent_job_id}`);
+				if (container && !$(`.job-preview.job-id-${job.id}`, container)) {
 					container.classList.remove('d-none');
-					renderJobPreview($('#subsequent-jobs-list'), l);
+					renderJobPreview($('#subsequent-jobs-list'), job);
 				}
 			}
 
@@ -355,17 +357,17 @@ function connectLog() {
 				// does this for us, but we are wrapping the container for the sake of
 				// display in the navbar dropdown, which is a list-group, so we have
 				// to check for duplicates ourselves
-				if ($(`.job-preview.job-id-${l.id}`, listElem)) {
+				if ($(`.job-preview.job-id-${job.id}`, listElem)) {
 					continue;
 				}
 				const listItemWrapperElem = document.createElement('div');
 				listItemWrapperElem.classList.add('list-group-item');
-				renderJobPreview(listItemWrapperElem, l);
+				renderJobPreview(listItemWrapperElem, job);
 				listElem.prepend(listItemWrapperElem);
 			}
 
 			// update UI elements that portray this job
-			jobProgressUpdate(l);
+			jobProgressUpdate(job);
 
 			return;
 		}
@@ -375,11 +377,13 @@ function connectLog() {
 			updateRepoOwners(true);
 		}
 
-		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.id}`)) {
+		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.job.id}`)) {
+			const job = l.job;
+
 			// this page is for this import job, so display its table
 			$('.job-import-stream-container').classList.remove('d-none');
 			
-			const tableElem = $(`.job-import-stream.job-id-${l.id}`);
+			const tableElem = $(`.job-import-stream.job-id-${job.id}`);
 			const rowElem = cloneTemplate('#tpl-job-import-stream-row');
 
 			let location = l?.lat?.toFixed?.(4) || "";
@@ -437,17 +441,20 @@ function connectLog() {
 			for (let i = MAX_STREAM_TABLE_ROWS; i < $$('tbody tr', tableElem).length; i++) {
 				$$('tbody tr', tableElem)[i].remove();
 			}
-		} else if (l.logger == "job.action" && l.msg == "finished thumbnail" && $(`.job-thumbnail-stream.job-id-${l.id}`)) {
+		} else if (l.logger == "job.action" && l.msg == "finished thumbnail" && $(`.job-thumbnail-stream.job-id-${l.job.id}`)) {
+			const job = l.job;
+
 			// this page is for this thumbnail job, so display its output
 			$('.job-thumbnail-stream-container').classList.remove('d-none');
 
-			
-			
-			const gridElem = $(`.job-thumbnail-stream.job-id-${l.id}`);
+			const gridElem = $(`.job-thumbnail-stream.job-id-${job.id}`);
 			const cellElem = cloneTemplate('#tpl-job-thumbnail-stream-cell');
 
 			$('.datagrid-content', cellElem).append(itemContentElement({
-				...l,
+				data_file: l.data_file,
+				data_id: l.data_id,
+				data_type: l.data_type,
+				repo_id: job.repo_id,
 			}, { thumbnail: true }))
 
 			gridElem.prepend(cellElem);

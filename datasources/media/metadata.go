@@ -32,11 +32,11 @@ import (
 	"time"
 
 	"github.com/abema/go-mp4"
+	"github.com/cozy/goexif2/exif"
+	"github.com/cozy/goexif2/mknote"
+	"github.com/cozy/goexif2/tiff"
 	"github.com/dhowden/tag"
 	"github.com/mholt/go-xmp/xmp"
-	"github.com/mholt/goexif2/exif"
-	"github.com/mholt/goexif2/mknote"
-	"github.com/mholt/goexif2/tiff"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -68,7 +68,6 @@ func ExtractAllMetadata(logger *zap.Logger, fsys fs.FS, path string, item *timel
 	if seeker, ok := file.(io.ReadSeeker); ok {
 		fileSeeker = seeker
 	} else {
-		// TODO: I have not tested this code yet, but:
 		// since this isn't a seekable reader, we have to make it seekable by reading it
 		// into memory; obviously this is problematic if the file is large, but even if
 		// it is, we can hope that the metadata is at the beginning (sometimes it is at
