@@ -321,9 +321,9 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 		return false, errors.New("missing data filename and/or hash of contents")
 	}
 
-	var existingDatafileName *string
+	var existingDataFilePath *string
 	err := tx.QueryRowContext(ctx, `SELECT data_file FROM items WHERE data_hash=? AND data_file!=? LIMIT 1`,
-		it.dataFileHash, it.dataFilePath).Scan(&existingDatafileName)
+		it.dataFileHash, it.dataFilePath).Scan(&existingDataFilePath)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // file is unique; carry on
 	}
@@ -335,24 +335,24 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 	// it.dataFileName should not exist anymore and should be reassigned to
 	// *existingDatafileName instead.
 
-	p.log.Info("data file is a duOrenameplicate",
+	p.log.Info("data file is a duplicate",
 		zap.String("duplicate_data_file", it.dataFilePath),
-		zap.Stringp("existing_data_file", existingDatafileName),
+		zap.Stringp("existing_data_file", existingDataFilePath),
 		zap.Binary("checksum", it.dataFileHash))
 
-	if existingDatafileName == nil {
+	if existingDataFilePath == nil {
 		// ... that's weird, how's this possible? it has a hash but no file name recorded
 		return false, fmt.Errorf("item with matching hash is missing data file name; hash: %x", it.dataFileHash)
 	}
 
 	// TODO: maybe this all should be limited to only when integrity checks are enabled? how do we know that this download has the right version/contents?
 	p.log.Debug("verifying existing file is still the same",
-		zap.Stringp("existing_data_file", existingDatafileName),
+		zap.Stringp("existing_data_file", existingDataFilePath),
 		zap.Binary("checksum", it.dataFileHash))
 
 	// ensure the existing file is still the same
 	h := newHash()
-	f, err := os.Open(p.tl.FullPath(*existingDatafileName))
+	f, err := os.Open(p.tl.FullPath(*existingDataFilePath))
 	if err != nil {
 		return false, fmt.Errorf("opening existing file: %w", err)
 	}
@@ -371,11 +371,11 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 		// (by simply renaming the file on disk, we don't have
 		// to update any entries in the DB)
 		p.log.Warn("existing data file failed integrity check (checksum on disk changed; file corrupted or modified?) - replacing existing file with this one",
-			zap.Stringp("existing_data_file", existingDatafileName),
+			zap.Stringp("existing_data_file", existingDataFilePath),
 			zap.Binary("expected_checksum", it.dataFileHash),
 			zap.Binary("actual_checksum", existingFileHash),
 			zap.String("replacement_data_file", it.dataFilePath))
-		err := os.Rename(p.tl.FullPath(it.dataFilePath), p.tl.FullPath(*existingDatafileName))
+		err := os.Rename(p.tl.FullPath(it.dataFilePath), p.tl.FullPath(*existingDataFilePath))
 		if err != nil {
 			return false, fmt.Errorf("replacing modified data file: %w", err)
 		}
@@ -383,7 +383,7 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 		// everything checks out; delete the newly-downloaded file
 		// and use the existing file instead of duplicating it
 		p.log.Debug("existing file passed integrity check; using it instead of newly-downloaded duplicate",
-			zap.Stringp("existing_data_file", existingDatafileName),
+			zap.Stringp("existing_data_file", existingDataFilePath),
 			zap.String("new_data_file", it.dataFilePath),
 			zap.Binary("checksum", it.dataFileHash))
 		err = p.tl.deleteRepoFile(it.dataFilePath)
@@ -394,10 +394,10 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 
 	p.log.Info("removed duplicate data file based on integrity check",
 		zap.String("duplicate_data_file", it.dataFilePath),
-		zap.Stringp("existing_data_file", existingDatafileName),
+		zap.Stringp("existing_data_file", existingDataFilePath),
 		zap.Binary("checksum", it.dataFileHash))
 
-	it.dataFilePath = *existingDatafileName
+	it.dataFilePath = *existingDataFilePath
 
 	return true, nil
 }
@@ -793,7 +793,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 
 	// if this replaced an item's previous data file, clean up the old one if it is no longer
 	// referenced by any other items
-	if startingDataFile != nil && it.dataFilePath != *startingDataFile {
+	if it.dataFilePath != "" && startingDataFile != nil && it.dataFilePath != *startingDataFile {
 		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, *startingDataFile); err != nil {
 			p.log.Error("could not clean up old, unreferenced data file and any associated thumbnail",
 				zap.Error(err),
@@ -849,29 +849,29 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	return ir.ID, nil
 }
 
-func (p *processor) renameDataFile(ctx context.Context, tx *sql.Tx, incoming *Item, oldDataFileName, newFilename string) (string, error) {
+func (p *processor) renameDataFile(ctx context.Context, tx *sql.Tx, incoming *Item, oldDataFilePath, newFilename string) (string, error) {
 	incoming.Content.Filename = newFilename
 
-	placeholderFile, newDataFileName, err := p.tl.openUniqueCanonicalItemDataFile(ctx, p.log, tx, incoming, p.ds.Name)
+	placeholderFile, newDataFilePath, err := p.tl.openUniqueCanonicalItemDataFile(ctx, p.log, tx, incoming, p.ds.Name)
 	if err != nil {
-		return "", fmt.Errorf("could not rename data file: %w (old_data_file_name=%s new_filename=%s)", err, oldDataFileName, newFilename)
+		return "", fmt.Errorf("could not rename data file: %w (old_data_file_name=%s new_filename=%s)", err, oldDataFilePath, newFilename)
 	}
 	_ = placeholderFile.Close()
 
 	// NOTE: if DB transaction fails, this rename does not get rolled back
-	err = os.Rename(p.tl.FullPath(oldDataFileName), p.tl.FullPath(newDataFileName))
+	err = os.Rename(p.tl.FullPath(oldDataFilePath), p.tl.FullPath(newDataFilePath))
 	if err != nil {
-		return "", fmt.Errorf("could not rename data file: %w (old=%s new=%s)", err, oldDataFileName, newDataFileName)
+		return "", fmt.Errorf("could not rename data file: %w (old=%s new=%s)", err, oldDataFilePath, newDataFilePath)
 	}
 
 	logger := p.log.With(
-		zap.String("old_data_file_name", oldDataFileName),
-		zap.String("new_data_file_name", newDataFileName),
+		zap.String("old_data_file_path", oldDataFilePath),
+		zap.String("new_data_file_path", newDataFilePath),
 		zap.String("new_filename", newFilename),
 	)
 
 	// update all rows that may point to this data file to use the new path
-	if _, err := tx.ExecContext(ctx, "UPDATE items SET data_file=? WHERE data_file=?", newDataFileName, oldDataFileName); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE items SET data_file=? WHERE data_file=?", newDataFilePath, oldDataFilePath); err != nil {
 		logger.Error("renamed data file, but failed to update timeline database", zap.Error(err))
 	} else {
 		logger.Info("renamed data file")
@@ -879,19 +879,19 @@ func (p *processor) renameDataFile(ctx context.Context, tx *sql.Tx, incoming *It
 
 	// also update thumbnails DB in case any thumbnails were already generated for the item
 	p.tl.thumbsMu.Lock()
-	_, err = p.tl.thumbs.ExecContext(ctx, "UPDATE thumbnails SET data_file=? WHERE data_file=?", newDataFileName, oldDataFileName)
+	_, err = p.tl.thumbs.ExecContext(ctx, "UPDATE thumbnails SET data_file=? WHERE data_file=?", newDataFilePath, oldDataFilePath)
 	p.tl.thumbsMu.Unlock()
 	if err != nil {
 		logger.Error("renamed data file, but failed to update thumbnail database", zap.Error(err))
 	}
 
 	// if the rename left the folder empty, clean it up
-	oldDir := path.Dir(oldDataFileName)
+	oldDir := path.Dir(oldDataFilePath)
 	if err := p.tl.cleanDirs(oldDir); err != nil {
 		logger.Error("failed tidying potentially empty folder of old path",
 			zap.String("old_data_file_path", oldDir),
 			zap.Error(err))
 	}
 
-	return newDataFileName, nil
+	return newDataFilePath, nil
 }
