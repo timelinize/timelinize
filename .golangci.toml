@@ -94,7 +94,6 @@ allow = [
   'github.com/mattn/go-sqlite3',
   'github.com/mholt/archives',
   'github.com/mholt/go-xmp',
-  'github.com/mholt/goexif2/',
   'github.com/signal-golang/go-vcard',
   'github.com/strukturag/libheif/go/heif',
   'github.com/timelinize',
@@ -111,7 +110,7 @@ files = [
   '$test'
 ]
 
-# this has to be a list of objects to prevent golangci-lint from panicking (
+# this has to be a list of objects to prevent golangci-lint from panicking
 [[linters.settings.depguard.rules.Tests.deny]]
 pkg = 'github.com/stretchr/testify'
 desc = 'Please use standard library for tests'
@@ -249,3 +248,9 @@ paths = [
   'builtin$',
   'examples$'
 ]
+
+[linters.settings.gomoddirectives]
+replace-allow-list = [
+  'github.com/mholt/goexif2'
+]
+
