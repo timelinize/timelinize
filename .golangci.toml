@@ -250,7 +250,9 @@ paths = [
 ]
 
 [linters.settings.gomoddirectives]
+replace-local = true
 replace-allow-list = [
-  'github.com/mholt/goexif2'
+  'github.com/mholt/goexif2',
+  'github.com/cozy/goexif2'
 ]
 
