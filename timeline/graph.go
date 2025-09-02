@@ -269,8 +269,8 @@ type Item struct {
 	// processor must have the same retrieval key, and no other
 	// item globally must use the same key at any time.
 	//
-	// Only set this field if the Item is or may not be complete
-	// (e.g. if you know it will be processed in multiple pieces),
+	// Only set this field if the Item may not be complete (e.g.
+	// if you know it will be processed in multiple pieces),
 	// since setting a retrieval key forces reprocessing of the
 	// item, which is less efficient than skipping duplicates.
 	Retrieval ItemRetrieval `json:"retrieval,omitempty"`
@@ -297,6 +297,16 @@ type Item struct {
 // gets hashed, so it simply opaque bytes to the processor and DB), and if
 // relevant, set PreferFields to control what gets updated or preferred when
 // data already exists in the DB.
+//
+// Retrieval keys are not guaranteed to be persisted across separate imports,
+// particularly if an item appears in another data source that also uses
+// retrieval keys. Retrieval keys should primarily be used to refer to an
+// item within its data source, for that import job, to make multiple graphs
+// act like one graph. If data soruces document how they set retrieval keys,
+// then it may be possible for multiple data sources to corroborate the same
+// item without stepping on each other.
+
+// TODO: actually, our schema is not well-suited for an item appearing in multiple data sources. an item has just one data source... if two update it, which one wins? maybe that's configurable by the user, the update policies...
 type ItemRetrieval struct {
 	key []byte
 
@@ -317,7 +327,6 @@ type ItemRetrieval struct {
 	// for example, the data source knows it doesn't know a certain part of the
 	// item, it can say that the nilness of it shouldn't have to match a nil in
 	// the DB row.
-	// EXPERIMENTAL: SUBJECT TO CHANGE.
 	UniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
 }
 
@@ -516,8 +525,10 @@ type ItemData struct {
 	// arbitrary binary blobs or executable programs.
 	MediaType string `json:"media_type,omitempty"`
 
-	// A function that returns a way to read the item's data. The
-	// returned ReadCloser will be closed when processing finishes.
+	// Size of the data in bytes, if known. If set, it must be correct.
+	Size uint64 `json:"size,omitempty"`
+
+	// A function that returns a way to read the item's data.
 	Data DataFunc `json:"-"`
 }
 
