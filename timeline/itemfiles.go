@@ -41,12 +41,13 @@ import (
 
 // openUniqueCanonicalItemDataFile opens a file for saving the content of the given item. It
 // ensures the filename is unique within its folder, but only according to the file system's
-// case sensitivity. Later, when a database transaction is open, the file should be checked
-// for uniqueness using the database's COLLATE NOCASE (i.e. do a case-insensitive lookup in
+// case sensitivity. The transaction parameter is optional. If set, the DB will be consulted
+// to ensure the chosen filename is case-insensitively unique, even if on a case-sensitive
+// file system. That check uses the COLLATE NOCASE (i.e. do a case-insensitive lookup in
 // the DB, to ensure the timeline repo will transfer from case-insensitive file systems to
 // case-insensitive ones). It returns the file handle as well as the path to the file
 // relative to the repo root, which can be stored in the data_file column.
-func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, logger *zap.Logger, it *Item, dataSourceID string) (*os.File, string, error) {
+func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, logger *zap.Logger, tx *sql.Tx, it *Item, dataSourceID string) (*os.File, string, error) {
 	if dataSourceID == "" {
 		return nil, "", errors.New("missing data source ID")
 	}
@@ -58,11 +59,11 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, logger 
 		return nil, "", fmt.Errorf("making directory for data file: %w", err)
 	}
 
-	// find a unique filename for this item
-	canonicalFilename := tl.canonicalItemDataFileName(it)
-	it.desiredDataFileName = canonicalFilename // hold onto this name through processing, as it may be used later if we have to add random suffix to the end for now
-	canonicalFilenameExt := path.Ext(canonicalFilename)
-	canonicalFilenameWithoutExt := strings.TrimSuffix(canonicalFilename, canonicalFilenameExt)
+	// find a unique filename for this item - we starrt with the desired file name based
+	// on the info we have, but we may have to adjust it based on availability
+	it.intendedDataFileName = tl.canonicalItemDataFileName(it)
+	canonicalFilenameExt := path.Ext(it.intendedDataFileName)
+	canonicalFilenameWithoutExt := strings.TrimSuffix(it.intendedDataFileName, canonicalFilenameExt)
 
 	const randSuffixLen = 4
 
@@ -85,6 +86,24 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, logger 
 		}
 		if err != nil {
 			return nil, "", fmt.Errorf("creating data file: %w", err)
+		}
+
+		// also check with the database to see if filename is taken, case-insensitively (the column or index
+		// should have COLLATE NOCASE; this is important to avoid file collisions when copying from a
+		// case-sensitive FS to a case-insensitive FS!) -- if an item row has claim to it, then the file
+		// is either still processing or was lost and needs to be reconstituted, but for now we should
+		// not collide with it
+		if tx != nil {
+			var count int
+			err = tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? LIMIT 1`, tryPath).Scan(&count)
+			if err != nil {
+				return nil, "", fmt.Errorf("checking DB for case-insensitive filename uniqueness: %w", err)
+			}
+			if count > 0 {
+				// an existing item has claim to it, so let it keep that, it might still be processing
+				logger.Warn("file did not exist on disk but is already claimed in database - will try to make filename unique", zap.String("filepath", tryPath))
+				continue
+			}
 		}
 
 		return f, tryPath, nil

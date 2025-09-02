@@ -967,10 +967,10 @@ func (tl *Timeline) loadInteractiveImportJob(jobID uint64) (*ImportJob, error) {
 
 // DeleteOptions configures how to perform a delete.
 type DeleteOptions struct {
-	Remember     bool           `json:"remember,omitempty"`
-	Retain       *time.Duration `json:"retain,omitempty"` // if not specified, use global default
-	PreserveNote bool           `json:"preserve_note,omitempty"`
-	Subtrees     bool           `json:"subtrees,omitempty"` // TODO: probably a good idea for the UI to make this the default
+	Remember     bool           `json:"remember,omitempty"`      // preserve footprint of original ID and data to avoid re-importing
+	Retain       *time.Duration `json:"retain,omitempty"`        // how long to keep items before erasure; if not specified, use global default
+	PreserveNote bool           `json:"preserve_note,omitempty"` // whether to preserve user annotation
+	Subtrees     bool           `json:"subtrees,omitempty"`      // TODO: probably a good idea for the UI to make this the default
 }
 
 // DeleteItems deletes data from the items table with the given row IDs, according to the given deletion options.
@@ -1353,7 +1353,9 @@ type ProcessingOptions struct {
 	// Names of columns in the items table to check for sameness when loading an item
 	// that doesn't have data_source+original_id. The field/column is the same if the
 	// values are identical or if one of the values is NULL. If the map value is true,
-	// however, strict NULL comparison is applied, where NULL=NULL only.
+	// however, strict NULL comparison is applied, where NULL=NULL only. In other words,
+	// with a false value, it is as if the field is not in the unique constraints at
+	// all when applied to a field that is null.
 	ItemUniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
 
 	// How to update existing items, specified per-field.
@@ -1502,14 +1504,6 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 				const bigger, smaller = "bigger", "smaller"
 				if v != bigger && v != smaller {
 					return 0, fmt.Errorf("unknown policy for 'size' property: %v (expected bigger or smaller)", v)
-				}
-				if incoming.dataFileIn != nil && incoming.dataFileSize == 0 && incoming.dataFileHash == nil {
-					// there's a data file incoming, and we don't know its size yet;
-					// we can't determine size until after processing the incoming data...
-					// signal to the processor that the data file should be processed,
-					// but before finalizing things at the end of the pipeline, do all
-					// this again to know how to handle the item
-					return -1, nil
 				}
 				// existing item content could be either in the DB or on disk, so
 				// whichever it is, get the length of it

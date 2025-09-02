@@ -792,8 +792,8 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 		ir.DataType = &it.Content.MediaType
 	}
 	ir.DataText = it.dataText
-	if it.dataFileName != "" {
-		ir.DataFile = &it.dataFileName
+	if it.dataFilePath != "" {
+		ir.DataFile = &it.dataFilePath
 	}
 	if len(it.dataFileHash) > 0 {
 		ir.DataHash = it.dataFileHash
@@ -815,7 +815,10 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 
 	// create the row hashes so we can prevent duplicating imported data later
 	ir.OriginalIDHash = it.idHash
-	ir.InitialContentHash = it.contentHash
+	if ir.InitialContentHash == nil && it.contentHash != nil {
+		// this one should only be set with the initial content, not changes later -- TODO: technically, initial content from imports; not manual changes !! figure this out
+		ir.InitialContentHash = it.contentHash
+	}
 
 	ir.RetrievalKey = it.Retrieval.key
 
@@ -946,32 +949,59 @@ SELECT * FROM (
 			}
 		}
 
-		// iterate each field to be selected on to finish building WHERE clause
 		firstIter := true
 		if notRowID > 0 {
 			sb.WriteString("id != ?")
 			args = append(args, rowID)
 			firstIter = false
 		}
-		for field := range uniqueConstraints {
-			// Note: the value in uniqueConstraints is supposed to be whether NULLs are significant/strictly compared, but it is not currently implemented, and I am not sure if it is useful.
 
-			if !firstIter {
-				sb.WriteString("\n\t\tAND ")
+		// Iterate each field to be selected on to finish building WHERE clause.
+		// The value of the map indicates whether to treat NULLs strictly, i.e.
+		// NULL == NULL and only matches another NULL. If false, soft nulls are
+		// enforced, meaning that an incoming NULL (nil) means that the value
+		// is likely not known, and thus should basically be removed from the
+		// unique constraints. Hence, when not strict nulls, you will see that
+		// we skip adding a field to the query when the incoming item's value
+		// is null. Non-strict null is the same as "always match if either
+		// incoming or DB value are null" (but right now only the "incoming"
+		// half is implemented).
+		for field, strictNull := range uniqueConstraints {
+			// used for concatenating segments of the query
+			and := func() {
+				if !firstIter {
+					sb.WriteString("\n\t\tAND ")
+				}
+				firstIter = false
 			}
-			firstIter = false
 
 			// TODO: should we take into account time_uncertainty and coordinate_uncertainty and allow any value in that range to be a match?
 
 			switch field {
 			case "data":
+				if !strictNull && it.Content.Data == nil {
+					break
+				}
+				and()
 				sb.WriteString("(data_text")
 				sb.WriteString(eq(it.dataText))
 				sb.WriteString("? AND data_hash")
 				sb.WriteString(eq(it.dataFileHash))
 				sb.WriteString("?)")
 				args = append(args, it.dataText, it.dataFileHash)
+
+				// TODO: I do think this logic is correct (it applies non-strict null the other way too, allowing an empty value in DB to mean "We don't know it") - but not sure if this is useful.
+				// sb.WriteString("((data_text")
+				// sb.WriteString(eq(it.dataText))
+				// sb.WriteString("? AND data_hash")
+				// sb.WriteString(eq(it.dataFileHash))
+				// sb.WriteString("?) OR (data_text IS NULL AND data_hash IS NULL))")
+				// args = append(args, it.dataText, it.dataFileHash)
 			case "latlon":
+				if !strictNull && it.Location.IsEmpty() {
+					break
+				}
+				and()
 				sb.WriteString("((longitude")
 				sb.WriteString(eq(it.Location.Longitude))
 				sb.WriteString("? OR (? <= round(longitude, ?) AND round(longitude, ?) <= ?)) \n\t\t\tAND (latitude")
@@ -986,6 +1016,10 @@ SELECT * FROM (
 					it.Location.Latitude, lowLat, latDecimals, latDecimals, highLat,
 					it.Location.CoordinateSystem)
 			case "altitude":
+				if !strictNull && it.Location.Altitude == nil {
+					break
+				}
+				and()
 				// doesn't make sense on its own
 				if _, ok := uniqueConstraints["latlon"]; !ok {
 					return ItemRow{}, errors.New("altitude requires latlon also be used as a unique constraint")
@@ -1031,6 +1065,11 @@ SELECT * FROM (
 					return ItemRow{}, fmt.Errorf("item unique constraints configure unsupported/unrecognized field: %s", field)
 				}
 
+				if !strictNull && arg == nil {
+					break
+				}
+
+				and()
 				sb.WriteString(field)
 				sb.WriteString(eq(arg))
 				sb.WriteRune('?')
@@ -1047,7 +1086,9 @@ SELECT * FROM (
 	return scanItemRow(row, nil)
 }
 
-// insertOrUpdateItem inserts the fully-populated ir into the database (TODO: finish godoc)
+// insertOrUpdateItem inserts the fully-populated ir into the database.
+// It returns the item's row ID, and an indication of how the item was
+// stored (updated or inserted).
 func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemRow, allowOverwrite bool, fieldUpdatePolicies map[string]FieldUpdatePolicy) (uint64, itemStoreResult, error) {
 	// new item? insert it
 	if ir.ID == 0 {
@@ -1155,11 +1196,15 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			appendToQuery("data_text", policy)
 			appendToQuery("data_file", policy)
 			appendToQuery("data_hash", policy)
+			appendToQuery("initial_content_hash", UpdatePolicyPreferExisting) // only keep initial value - TODO: But what if this new import IS the new "initial content"? I think it should just not be updated if the item import comes from a manual change.
 		case "latlon":
 			appendToQuery("longitude", policy)
 			appendToQuery("latitude", policy)
 			appendToQuery("coordinate_system", policy)
 			appendToQuery("coordinate_uncertainty", policy)
+		case "original_id":
+			appendToQuery("original_id", policy)
+			appendToQuery("original_id_hash", policy)
 		default:
 			appendToQuery(field, policy)
 		}
@@ -1169,6 +1214,8 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			args = append(args, ir.AttributeID)
 		case "classification_id":
 			args = append(args, ir.ClassificationID)
+		case "original_id":
+			args = append(args, ir.OriginalID, ir.OriginalIDHash)
 		case "original_location":
 			args = append(args, ir.OriginalLocation)
 		case "intermediate_location":
@@ -1187,10 +1234,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		case "time_uncertainty":
 			args = append(args, ir.TimeUncertainty)
 		case "data":
-			args = append(args, ir.DataType)
-			args = append(args, ir.DataText)
-			args = append(args, ir.DataFile)
-			args = append(args, ir.DataHash)
+			args = append(args, ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, ir.InitialContentHash)
 		case "data_type", "data_text", "data_file", "data_hash":
 			return errors.New("data components cannot be individually configured for updates; use 'data' as field name instead")
 		case "metadata":
@@ -1201,10 +1245,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			}
 			args = append(args, metadata)
 		case "latlon":
-			args = append(args, ir.Longitude)
-			args = append(args, ir.Latitude)
-			args = append(args, ir.CoordinateSystem)
-			args = append(args, ir.CoordinateUncertainty)
+			args = append(args, ir.Longitude, ir.Latitude, ir.CoordinateSystem, ir.CoordinateUncertainty)
 		case "altitude":
 			args = append(args, ir.Altitude)
 		case "longitude", "latitude", "coordinate_system", "coordinate_uncertainty":

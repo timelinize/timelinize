@@ -27,7 +27,6 @@ import (
 	"io"
 	"math/big"
 	"mime"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -276,26 +275,20 @@ type Item struct {
 	// item, which is less efficient than skipping duplicates.
 	Retrieval ItemRetrieval `json:"retrieval,omitempty"`
 
-	// Used for storing state during processing; either the
-	// text content of the item, or the source from which
-	// to read when creating the data file on disk. Data
-	// sources should set Content instead; NOT these!
-	dataText *string
-
-	// state for processing pipeline phases
-	row                 ItemRow
-	dataFileIn          io.ReadCloser
-	dataFileOut         *os.File
-	dataFileSize        int64
-	dataFileName        string // path to the data file relative to the repo root
-	dataFileHash        []byte // a non-nil hash indicates the file has been downloaded (if 0 size, it will be an empty slice, as opposed to hash's IV)
-	desiredDataFileName string // base filename (sans path) the processor tried to get for the file, but may have been taken
-	idHash              []byte
-	contentHash         []byte
-	skipThumb           bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
-	oldDataFile         string                       // when replacing a data file, used to clean things up at the end of processing the item
-	existingRow         ItemRow                      // only used if a field update policy requires info about the incoming data file
-	fieldUpdatePolicies map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
+	// the following fields are used to store state across
+	// phases of the processing pipeline, data sources
+	// should NOT set these (hence being unexported)
+	row                  ItemRow                      // the DB row associated with this item
+	dataText             *string                      // for plaintext items, to be stored in the items table
+	intendedDataFileName string                       // the ideal/preferred name for the data file, if available
+	dataFilePath         string                       // path of the data file relative to the repo root
+	dataFileHash         []byte                       // the checksum of the data file
+	dataFileSize         int64                        // number of bytes of data read
+	idHash               []byte                       // hash of the item's original ID so we can avoid duplicates in future imports
+	contentHash          []byte                       // hash of the item's original content so we can avoid duplicates in future imports, even if content changes
+	skipThumb            bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
+	fieldUpdatePolicies  map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
+	skip                 bool                         // the processor may mark some items to skip based on import job configuration or other factors
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
@@ -317,6 +310,30 @@ type ItemRetrieval struct {
 	// though both have metadata, when importing from the actual image, we prefer that,
 	// and this tells the processor to do so.
 	FieldUpdatePolicies map[string]FieldUpdatePolicy `json:"field_update_policies,omitempty"`
+
+	// Override whether the user's configured unique constraints for each field
+	// are strict nulls or soft nulls. Adding to this map will not create new
+	// unique constraints, but can modify what logic the processor applies if,
+	// for example, the data source knows it doesn't know a certain part of the
+	// item, it can say that the nilness of it shouldn't have to match a nil in
+	// the DB row.
+	// EXPERIMENTAL: SUBJECT TO CHANGE.
+	UniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
+}
+
+// finalUniqueConstraints combines the unique constraints configured by the user with those
+// specified by the data source. It does not add new ones that the user has not configured,
+// it only updates.
+func (ret *ItemRetrieval) finalUniqueConstraints(configuredUniqueConstraints map[string]bool) map[string]bool {
+	uniq := make(map[string]bool, len(configuredUniqueConstraints))
+	for field, strictNull := range configuredUniqueConstraints {
+		if override, ok := ret.UniqueConstraints[field]; ok {
+			uniq[field] = override
+		} else {
+			uniq[field] = strictNull
+		}
+	}
+	return uniq
 }
 
 // SetKey sets the retrieval key for this item. It should be a globally unique

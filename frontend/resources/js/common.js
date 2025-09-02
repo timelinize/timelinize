@@ -447,13 +447,14 @@ function connectLog() {
 			// this page is for this thumbnail job, so display its output
 			$('.job-thumbnail-stream-container').classList.remove('d-none');
 
-			
-			
 			const gridElem = $(`.job-thumbnail-stream.job-id-${job.id}`);
 			const cellElem = cloneTemplate('#tpl-job-thumbnail-stream-cell');
 
 			$('.datagrid-content', cellElem).append(itemContentElement({
-				...l,
+				data_file: l.data_file,
+				data_id: l.data_id,
+				data_type: l.data_type,
+				repo_id: job.repo_id,
 			}, { thumbnail: true }))
 
 			gridElem.prepend(cellElem);

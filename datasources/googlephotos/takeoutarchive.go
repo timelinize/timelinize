@@ -332,6 +332,17 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 	retKey := fmt.Sprintf("%s::%s::%s", dataSourceName, archiveName, mediaFilePath)
 	item.Retrieval.SetKey(retKey)
 
+	// since we don't know the filename if we are on the picture file,
+	// and we don't know the data if we are on the metadata file, tell
+	// the processor that a nil value of these means that we don't know
+	// what it is, rather than us asserting that it's intentionally nil
+	// (this is crucial to allow us to process takeouts with duplicates
+	// without having duplicates in the timeline)
+	item.Retrieval.UniqueConstraints = map[string]bool{
+		"filename": item.Content.Filename != "",
+		"data":     item.Content.Data != nil,
+	}
+
 	ig := &timeline.Graph{Item: item}
 
 	// add to album/collection
