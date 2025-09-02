@@ -122,7 +122,7 @@ func (tl *Timeline) canonicalItemDataFileName(it *Item) string {
 	// this is stupid, but I really don't want to see .jfif at the end of my JPEGs ever again
 	extensionByType := func(mediaType string) string {
 		if exts, err := mime.ExtensionsByType(mediaType); err == nil && len(exts) > 0 {
-			sort.Slice(exts, func(a, b int) bool {
+			sort.Slice(exts, func(a, _ int) bool {
 				if exts[a] == ".jpg" || exts[a] == ".jpeg" {
 					return true
 				}
@@ -210,9 +210,12 @@ func (tl *Timeline) ensureDataFileNameShortEnough(filename string) string {
 // file that is not the file with the given canonical path or row ID. It returns true if the file
 // already exists and a replacement occurred; false otherwise (i.e. the file was unique).
 // TODO:/NOTE: If changing a file name, all items with same data_hash must also be updated to use same file name
+//
 // TODO: The newly refactored processor does not use this yet, since we have deemed the detection of
 // duplicate rows to be different from finding an existing row that represents an item, but we can
 // potentially use this in a function that removes duplicate items/rows.
+//
+//nolint:unused
 func (p *processor) replaceWithExisting(ctx context.Context, tx *sql.Tx, canonical *string, checksum []byte, itemRowID uint64) (bool, error) {
 	if canonical == nil || *canonical == "" || len(checksum) == 0 {
 		return false, errors.New("missing data filename and/or hash of contents")

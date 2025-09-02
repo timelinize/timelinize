@@ -59,12 +59,13 @@ func (p *processor) phase0(ctx context.Context, batch []*Graph) error {
 	// quick input sanitization: timestamps outside a certain range are
 	// invalid and obviously wrong (cannot be serialized to JSON), and
 	// clean up any metadata as well
-	for i := 0; i < len(batch); i++ {
+	for _, g := range batch {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		g := batch[i]
-		p.sanitize(g)
+		if err := p.sanitize(g); err != nil {
+			p.log.Error("sanitizing batch", zap.Error(err))
+		}
 	}
 	return nil
 }
