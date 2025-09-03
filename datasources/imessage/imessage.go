@@ -142,6 +142,7 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		}
 	}
 
+	//nolint:gosec // string concatenation is done safely
 	rows, err := im.DB.QueryContext(ctx,
 		`SELECT
 			m.ROWID, m.guid, m.text, m.attributedBody, m.service, m.date, m.date_read, m.date_delivered,

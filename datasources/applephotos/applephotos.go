@@ -167,6 +167,7 @@ func (fimp *FileImporter) ProcessPhotosDB(ctx context.Context, owner timeline.En
 	// (it's unclear whether it's better to use ZASSET.Z_PK or ZASSET.ZUUID for this; Z_PK is the
 	// row ID, ZUUID is a UUID assigned to the image; both are nullable, but have no null rows)
 	// (there are a lot more columns we can get interesting data from, I just chose a few of my favorites)
+	//nolint:gosec // string concatenation is done safely
 	rows, err := photosDB.QueryContext(ctx, `
 		SELECT
 			ZASSET.Z_PK, ZASSET.ZDATECREATED, ZASSET.ZLATITUDE, ZASSET.ZLONGITUDE, ZASSET.ZMODIFICATIONDATE, ZASSET.ZOVERALLAESTHETICSCORE,
