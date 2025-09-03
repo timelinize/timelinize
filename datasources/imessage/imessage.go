@@ -120,6 +120,28 @@ type Importer struct {
 
 // ImportMessages imports messages from the chat DB.
 func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams) error {
+	var whereClause string
+	var args []any
+
+	// honor configured timeframe to greatly speed up such imports
+	if !opt.Timeframe.IsEmpty() {
+		if opt.Timeframe.Since != nil {
+			appleTsStart := TimeToCocoaNano(*opt.Timeframe.Since)
+			whereClause = "WHERE m.date >= ?"
+			args = append(args, appleTsStart)
+		}
+		if opt.Timeframe.Until != nil {
+			if whereClause == "" {
+				whereClause = "WHERE "
+			} else {
+				whereClause = " AND "
+			}
+			appleTsEnd := TimeToCocoaNano(*opt.Timeframe.Until)
+			whereClause += "m.date < ?"
+			args = append(args, appleTsEnd)
+		}
+	}
+
 	rows, err := im.DB.QueryContext(ctx,
 		`SELECT
 			m.ROWID, m.guid, m.text, m.attributedBody, m.service, m.date, m.date_read, m.date_delivered,
@@ -136,7 +158,8 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		LEFT JOIN handle       AS h      ON h.ROWID        = m.handle_id    -- handle from message row
 		LEFT JOIN message_attachment_join AS maj ON maj.message_id = m.ROWID
 		LEFT JOIN attachment              AS a   ON a.ROWID        = maj.attachment_id
-		ORDER BY m.ROWID ASC`)
+		`+whereClause+`
+		ORDER BY m.ROWID ASC`, args...)
 	if err != nil {
 		return fmt.Errorf("querying for message rows: %w", err)
 	}
@@ -336,7 +359,7 @@ func (m message) timestamp() time.Time {
 	if m.date == nil {
 		return time.Time{}
 	}
-	return AppleNanoToTime(*m.date)
+	return CocoaNanoToTime(*m.date)
 }
 
 // fromMe returns true if the message was sent by the owner of the device.
@@ -397,7 +420,7 @@ func (m message) attachments(ctx context.Context, im Importer, sender timeline.E
 		}
 		var ts time.Time
 		if a.createdDate != nil {
-			ts = AppleSecondsToTime(*a.createdDate)
+			ts = CocoaSecondsToTime(*a.createdDate)
 		}
 
 		it := &timeline.Item{
@@ -479,10 +502,10 @@ func (m message) metadata() timeline.Metadata {
 		meta["Service"] = *m.service
 	}
 	if m.dateRead != nil {
-		meta["Date read"] = AppleNanoToTime(*m.dateRead)
+		meta["Date read"] = CocoaNanoToTime(*m.dateRead)
 	}
 	if m.dateDelivered != nil {
-		meta["Date delivered"] = AppleNanoToTime(*m.dateDelivered)
+		meta["Date delivered"] = CocoaNanoToTime(*m.dateDelivered)
 	}
 	return meta
 }

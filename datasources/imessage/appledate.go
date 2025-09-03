@@ -25,10 +25,12 @@ import (
 	"time"
 )
 
-// ParseAppleDate converts a date represented by a string of the decimal number of
+// TODO: Standardize these function names. It's Core Data API, Cocoa Epoch.
+
+// ParseCocoaDate converts a date represented by a string of the decimal number of
 // seconds since the Apple epoch to a Unix date. Example input: "-23919039.000000"
 // TODO: This does seem to result in a timestamp offset by the local timezone (e.g. GMT -6 gets stored as 6 hours later than actual timestamp)
-func ParseAppleDate(date string) (time.Time, error) {
+func ParseCocoaDate(date string) (time.Time, error) {
 	fractionalSeconds, err := strconv.ParseFloat(date, 64)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parsing string '%s' as float: %w", date, err)
@@ -37,19 +39,32 @@ func ParseAppleDate(date string) (time.Time, error) {
 	return time.Unix(int64(sec)+timestampOffsetSeconds, int64(fraction*nanoToSec)), nil
 }
 
-// AppleSecondsToTime converts Apple timestamp in seconds to a normal timestamp.
-func AppleSecondsToTime(appleSec int64) time.Time {
+// CocoaSecondsToTime converts Apple timestamp in seconds to a normal timestamp.
+func CocoaSecondsToTime(appleSec int64) time.Time {
 	return time.Unix(appleSec+timestampOffsetSeconds, 0)
 }
 
-// AppleNanoToTime converts Apple timestamp in nanoseconds to a normal timestamp.
-func AppleNanoToTime(appleNano int64) time.Time {
+// CocoaNanoToTime converts Apple timestamp in nanoseconds to a normal timestamp.
+func CocoaNanoToTime(appleNano int64) time.Time {
 	sec, nano := appleNano/nanoToSec, appleNano%nanoToSec
 	return time.Unix(sec+timestampOffsetSeconds, nano)
 }
 
-const nanoToSec = 1e9
+// TimeToCocoaSecondsWithMilli returns the given time in seconds since the Cocoa epoch
+// with millisecond decimal precision.
+func TimeToCocoaSecondsWithMilli(t time.Time) float64 {
+	return float64(t.UnixMilli()-timestampOffsetSeconds*milliToSec) / milliToSec
+}
 
-// Apple uses an epoch of Jan 1, 2001.
+func TimeToCocoaNano(t time.Time) int64 {
+	return t.UnixNano() - timestampOffsetSeconds*nanoToSec
+}
+
+const (
+	milliToSec = 1e3 // number of milliseconds in a second
+	nanoToSec  = 1e9 // number of nanoseconds in a second
+)
+
+// Apple "Core Data" (part of the Cocoa API) uses an epoch of midnight on Jan 1, 2001 (the "Cocoa Epoch").
 // This is the number of seconds that is after the Unix epoch.
 const timestampOffsetSeconds = 978307200

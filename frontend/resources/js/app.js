@@ -265,8 +265,7 @@ function cloneTemplate(tplSelector) {
 	// I spent way too long on this.
 	const elem = $(tplSelector);
 	if (!elem) return;
-	return elem.content.firstElementChild.cloneNode(true);
-	// return document.importNode(elem.content, true);
+	return document.importNode(elem.content.firstElementChild, true);
 }
 
 function fadeOut(sel, duration) {

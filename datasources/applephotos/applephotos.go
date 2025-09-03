@@ -146,6 +146,23 @@ func (fimp *FileImporter) ProcessPhotosDB(ctx context.Context, owner timeline.En
 		trashedState = 1
 	}
 
+	args := []any{trashedState}
+
+	// honor configured timeframe, which can greatly speed up such imports
+	var andClause string
+	if !params.Timeframe.IsEmpty() {
+		if params.Timeframe.Since != nil {
+			appleTsStart := imessage.TimeToCocoaSecondsWithMilli(*params.Timeframe.Since)
+			andClause += "\n\t\t\tAND ZASSET.ZDATECREATED >= ?"
+			args = append(args, appleTsStart)
+		}
+		if params.Timeframe.Until != nil {
+			appleTsEnd := imessage.TimeToCocoaSecondsWithMilli(*params.Timeframe.Until)
+			andClause += "\n\t\t\tAND ZASSET.ZDATECREATED < ?"
+			args = append(args, appleTsEnd)
+		}
+	}
+
 	// sort by the same column that we use to keep track of duplicate asset rows while iterating
 	// (it's unclear whether it's better to use ZASSET.Z_PK or ZASSET.ZUUID for this; Z_PK is the
 	// row ID, ZUUID is a UUID assigned to the image; both are nullable, but have no null rows)
@@ -164,9 +181,9 @@ func (fimp *FileImporter) ProcessPhotosDB(ctx context.Context, owner timeline.En
 		JOIN ZADDITIONALASSETATTRIBUTES AS AAA ON AAA.Z_PK = ZASSET.ZADDITIONALATTRIBUTES
 		LEFT JOIN ZDETECTEDFACE AS FACE ON FACE.ZASSETFORFACE = ZASSET.Z_PK
 		LEFT JOIN ZPERSON ON ZPERSON.Z_PK = FACE.ZPERSONFORFACE
-		WHERE ZASSET.ZTRASHEDSTATE=0 OR ZASSET.ZTRASHEDSTATE=?
+		WHERE (ZASSET.ZTRASHEDSTATE=0 OR ZASSET.ZTRASHEDSTATE=?)`+andClause+`
 		ORDER BY ZASSET.Z_PK
-	`, trashedState)
+	`, args...)
 	if err != nil {
 		return err
 	}
@@ -264,7 +281,7 @@ func (fimp *FileImporter) ProcessPhotosDB(ctx context.Context, owner timeline.En
 				item.Metadata["Aesthetic score"] = *aestheticScore
 			}
 			if modDate != nil {
-				if ts, err := imessage.ParseAppleDate(*modDate); err == nil {
+				if ts, err := imessage.ParseCocoaDate(*modDate); err == nil {
 					item.Metadata["Modified"] = ts
 				}
 			}
@@ -279,7 +296,7 @@ func (fimp *FileImporter) ProcessPhotosDB(ctx context.Context, owner timeline.En
 					zap.String("asset_path", mediaRelPath))
 			}
 			if item.Timestamp.IsZero() && dateCreated != nil {
-				if ts, err := imessage.ParseAppleDate(*dateCreated); err == nil {
+				if ts, err := imessage.ParseCocoaDate(*dateCreated); err == nil {
 					item.Timestamp = ts
 				}
 			}
