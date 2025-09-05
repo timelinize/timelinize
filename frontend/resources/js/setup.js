@@ -126,13 +126,22 @@ on('click', '#continue', async () => {
 			});
 		}
 
+		// store repo owner and update our local cache of this info
 		await app.AddEntity(emptyRepo.instance_id, {
 			type: 'person',
 			name: $('[name=name]').value,
 			attributes: attributes
 		});
-
 		await updateRepoOwners();
+
+		// configure repo with repo-specific settings
+		const timelineSettings = {};
+		timelineSettings[emptyRepo.instance_id] = {
+			'semantic_features': $('#semantic-features').checked
+		};
+		await app.ChangeSettings({
+			Timelines: timelineSettings,
+		})
 
 		// continue to app
 		await navigateSPA('/', true);

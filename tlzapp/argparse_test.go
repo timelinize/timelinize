@@ -55,7 +55,7 @@ func TestArgParseFlagValuePairs(t *testing.T) {
 		{
 			input: []string{"--foo", "[val1", "val2", "val3]", "--bar", "42"},
 			expect: []flagValPair{
-				{flag: "--foo", val: []interface{}{"val1", "val2", "val3"}},
+				{flag: "--foo", val: []any{"val1", "val2", "val3"}},
 				{flag: "--bar", val: 42},
 			},
 		},

@@ -57,7 +57,8 @@ type App struct {
 
 	server server
 
-	pyServer *exec.Cmd
+	pyServer   *exec.Cmd
+	pyServerMu *sync.Mutex
 
 	// references to embedded assets... due to limitations
 	// in the go embed tool, the vars have to be in a parent
@@ -98,6 +99,7 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 		cfg:             cfg,
 		log:             timeline.Log,
 		embeddedWebsite: embeddedWebsite,
+		pyServerMu:      new(sync.Mutex),
 	}
 	newApp.server = server{
 		app:      newApp,
@@ -111,10 +113,13 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 		// close all open timelines (TODO: Maybe they should be open on the app, not global in the timeline package?)
 		shutdownTimelines()
 
+		newApp.pyServerMu.Lock()
+		defer newApp.pyServerMu.Unlock()
+
 		// stop python server (will wait for it below)
 		if newApp.pyServer != nil && newApp.pyServer.Process != nil {
 			if err := newApp.pyServer.Process.Kill(); err != nil {
-				newApp.log.Error("could not terminate ML server", zap.Error(err))
+				newApp.log.Error("could not terminate Python server", zap.Error(err))
 			}
 		}
 
@@ -129,8 +134,10 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 
 		// finish waiting for python server to exit
 		if state, err := newApp.pyServer.Process.Wait(); err != nil {
-			newApp.log.Error("ML server", zap.Error(err), zap.String("state", state.String()))
+			newApp.log.Error("Python server", zap.Error(err), zap.String("state", state.String()))
 		}
+
+		newApp.pyServer = nil
 	}
 	newApp.registerCommands()
 
@@ -140,6 +147,8 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 
 	return newApp, nil
 }
+
+func (a *App) Shutdown() { a.cancel() }
 
 func (a *App) RunCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
@@ -252,6 +261,15 @@ func (a *App) MustServe() error {
 }
 
 func (a *App) startPythonServer(host string, port int) error {
+	// only start the python server if it isn't already running
+	a.pyServerMu.Lock()
+	serverRunning := a.pyServer != nil
+	a.pyServerMu.Unlock()
+	if serverRunning {
+		a.log.Debug("skipping starting python server since it is already non-nil, so should be running")
+		return nil
+	}
+
 	// nothing to do if uv isn't installed
 	if _, err := exec.LookPath("uv"); err != nil {
 		a.log.Warn("uv is not installed in PATH; semantic features will be unavailable (to fix: install uv into PATH, then restart app)", zap.Error(err))
@@ -309,15 +327,25 @@ func (a *App) startPythonServer(host string, port int) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "UV_PROJECT_ENVIRONMENT="+venvPath)
+	a.pyServerMu.Lock()
 	a.pyServer = cmd
+	a.pyServerMu.Unlock()
 	return cmd.Start() // TODO: need to be sure this stops when our program stops
 }
 
-func (a *App) serve() error {
-	if err := a.startPythonServer(timeline.PyHost, timeline.PyPort); err != nil {
-		return fmt.Errorf("starting ML server: %w", err)
+func (a *App) stopPythonServer() error {
+	a.pyServerMu.Lock()
+	defer a.pyServerMu.Unlock()
+	if a.pyServer == nil {
+		return nil
 	}
+	if a.pyServer != nil && a.pyServer.Process != nil {
+		return a.pyServer.Process.Kill()
+	}
+	return nil
+}
 
+func (a *App) serve() error {
 	if err := a.openRepos(); err != nil {
 		return fmt.Errorf("opening previously-opened repositories: %w", err)
 	}

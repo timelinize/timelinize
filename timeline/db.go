@@ -97,9 +97,9 @@ func provisionDB(ctx context.Context, db *sql.DB) error {
 	// assign this repo a persistent UUID for the UI, links, etc; and
 	// store version so readers can know how to work with this DB/timeline repo
 	repoID := uuid.New()
-	_, err = db.ExecContext(ctx, `INSERT OR IGNORE INTO repo (key, value) VALUES (?, ?), (?, ?)`,
-		"id", repoID.String(),
-		"version", 1,
+	_, err = db.ExecContext(ctx, `INSERT OR IGNORE INTO repo (key, value, type) VALUES (?, ?, ?), (?, ?, ?)`,
+		"id", repoID.String(), "string",
+		"version", 1, "int",
 	)
 	if err != nil {
 		return fmt.Errorf("persisting repo UUID and version: %w", err)
@@ -242,7 +242,7 @@ func saveAllStandardClassifications(ctx context.Context, db *sql.DB) error {
 
 func loadRepoID(ctx context.Context, db *sql.DB) (uuid.UUID, error) {
 	var idStr string
-	err := db.QueryRowContext(ctx, `SELECT value FROM repo WHERE key=? LIMIT 1`, "id").Scan(&idStr)
+	err := db.QueryRowContext(ctx, `SELECT value FROM repo WHERE key='id' LIMIT 1`).Scan(&idStr)
 	if err != nil {
 		return uuid.UUID{}, fmt.Errorf("selecting repo UUID: %w", err)
 	}

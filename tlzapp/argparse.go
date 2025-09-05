@@ -26,7 +26,7 @@ import (
 // flagValPair associates a flag with its value.
 type flagValPair struct {
 	flag string
-	val  interface{}
+	val  any
 }
 
 // flagValPairs parses args and associates flags with their values.
@@ -48,10 +48,10 @@ func flagValPairs(args []string) []flagValPair {
 		}
 
 		// then get the flag's value, which should immediately follow the flag
-		var val interface{}
+		var val any
 		if len(arg) > 0 && arg[0] == '[' {
 			// an array
-			vals := []interface{}{}
+			vals := []any{}
 			args[i] = args[i][1:]
 			for j := i; j < len(args); j++ {
 				elem := args[j]
@@ -87,7 +87,7 @@ func isFlag(s string) bool {
 }
 
 // autoType returns the value of str in its JSON type.
-func autoType(str string) interface{} {
+func autoType(str string) any {
 	s := strings.TrimSpace(strings.ToLower(str))
 	if s == "true" {
 		return true

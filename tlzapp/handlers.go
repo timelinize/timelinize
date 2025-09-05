@@ -160,8 +160,8 @@ func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) error {
 }
 
 type changeSettingsPayload struct {
-	Application map[string]json.RawMessage            `json:"application"`
-	Timelines   map[string]map[string]json.RawMessage `json:"timelines"` // map of repo ID to map of setting keys to their new values
+	Application map[string]json.RawMessage `json:"application"`
+	Timelines   map[string]map[string]any  `json:"timelines,omitempty"` // map of repo ID to map of property keys to values
 }
 
 // TODO: I guess, "get settings" could just be this handler with an empty payload. *shrug*

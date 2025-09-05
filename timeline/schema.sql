@@ -16,10 +16,11 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
--- Generic key/value store for the repo itself (version, ID, etc).
+-- Generic key/value store for the repo itself (version, ID, etc), and settings.
 CREATE TABLE IF NOT EXISTS "repo" (
 	"key" TEXT PRIMARY KEY,
-	"value"
+	"value",
+	"type" TEXT -- hint to the application since all values come back as strings - TODO: can we just infer this? That would be much nicer, but could also be problematic
 ) WITHOUT ROWID;
 
 -- A data source is where data comes from, like a content provider, like a cloud photo service,
@@ -359,20 +360,6 @@ CREATE TABLE IF NOT EXISTS "embeddings" (
 	"embedding" BLOB, -- TODO: could define as float[768] (unless STRICT) and then use `check(typeof(contents_embedding) == 'blob' AND vec_length(contents_embedding) == 768)`
 	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
-
-CREATE TABLE IF NOT EXISTS "settings" (
-	"key" TEXT PRIMARY KEY,
-	"title" TEXT,
-	"description" TEXT,
-	"type" TEXT,
-	"value",
-	"item_id" INTEGER,
-	"attribute_id" INTEGER,
-	"data_source_id" INTEGER, -- setting this implies this is a data source option, not merely a general setting that refers a data source
-	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE
-);
 
 -- TODO: this is convenient -- will probably keep this, because the db-based enums like data sources and classifications
 -- don't get translated earlier; maybe we could, but I still need to think on that... if we do keep this,

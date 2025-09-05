@@ -51,7 +51,15 @@ func sanitizeFlag(s string) string {
 	case strings.HasPrefix(s, "-"):
 		name = s[1:]
 	}
-	return strings.ReplaceAll(name, "-", "_")
+	// Command line convention is to use -, but our JSON keys typically use _.
+	// TODO: This condition is kind of a hack. Timeline UUIDs have "-" and replacing them with
+	// "_" will obviously break things... if flag name is part of an object, we assume user
+	// has done the conversion already and we will just take it literally. This is not the
+	// correct fix though. I'm not sure what is (that won't interfere with shell syntax).
+	if !strings.Contains(name, ".") {
+		name = strings.ReplaceAll(name, "-", "_")
+	}
+	return name
 }
 
 // makeJSON parses args and encodes the data as JSON.
@@ -67,7 +75,7 @@ func makeJSON(args []string) ([]byte, error) {
 	}
 
 	// create the object we will populate based on flags
-	var obj interface{}
+	var obj any
 
 	// match up each flag to its value
 	keyVals := flagValPairs(args)
@@ -108,7 +116,7 @@ func makeJSON(args []string) ([]byte, error) {
 // traverse recursively builds obj from the bottom-up. On the way down, it
 // turns nil obj into either an array or a map, and on the way back up,
 // it assigns values to the new structure according to the first flagPart.
-func traverse(obj interface{}, flagParts []string, val interface{}) (interface{}, error) {
+func traverse(obj any, flagParts []string, val any) (any, error) {
 	if len(flagParts) == 0 {
 		return val, nil
 	}
@@ -124,11 +132,11 @@ func traverse(obj interface{}, flagParts []string, val interface{}) (interface{}
 			return obj, fmt.Errorf("invalid array index %s", part)
 		}
 		if obj == nil {
-			obj = make([]interface{}, idx+1)
+			obj = make([]any, idx+1)
 		}
-		if objArr, ok := obj.([]interface{}); ok {
+		if objArr, ok := obj.([]any); ok {
 			if len(objArr) <= idx {
-				objArr = append(objArr, make([]interface{}, idx-len(objArr)+1)...)
+				objArr = append(objArr, make([]any, idx-len(objArr)+1)...)
 			}
 			objArr[idx], err = traverse(objArr[idx], flagParts[1:], val)
 			if err != nil {
@@ -142,9 +150,9 @@ func traverse(obj interface{}, flagParts []string, val interface{}) (interface{}
 	// part is an object key
 
 	if obj == nil {
-		obj = make(map[string]interface{})
+		obj = make(map[string]any)
 	}
-	if objMap, ok := obj.(map[string]interface{}); ok {
+	if objMap, ok := obj.(map[string]any); ok {
 		var err error
 		objMap[part], err = traverse(objMap[part], flagParts[1:], val)
 		if err != nil {

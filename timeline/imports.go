@@ -555,6 +555,10 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 }
 
 func (ij ImportJob) generateEmbeddingsForImportedItems() {
+	if enabled, ok := ij.job.tl.GetProperty(ij.job.tl.ctx, "semantic_features").(bool); !ok || !enabled {
+		return
+	}
+
 	ij.job.Logger().Info("creating embeddings job from import")
 
 	job := embeddingJob{

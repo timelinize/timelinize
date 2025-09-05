@@ -121,6 +121,9 @@ const app = {
 	GetEntity(repo_id, entity_id) {
 		return post("/api/get-entity", { repo_id, entity_id });
 	},
+	GetSettings() {
+		return get("/api/settings");
+	},
 	Import(params) {
 		return post("/api/import", params);
 	},
@@ -168,9 +171,6 @@ const app = {
 	},
 	SearchEntities(params) {
 		return post("/api/search-entities", params);
-	},
-	GetSettings() {
-		return get("/api/settings");
 	},
 	SubmitGraph(repo_id, job_id, graph, skip) {
 		return post("/api/submit-graph", { repo_id, job_id, graph, skip });

@@ -50,6 +50,7 @@ func Main(embeddedWebsite fs.FS) {
 	if err != nil {
 		timeline.Log.Fatal("failed to run application", zap.Error(err))
 	}
+	defer app.Shutdown() // close timelines, stop python server if running, etc.
 
 	flag.Parse()
 

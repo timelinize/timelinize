@@ -161,6 +161,18 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 		a.log.Error("unable to persist config", zap.Error(err))
 	}
 
+	// start python server if it hasn't started already, if this timeline enables those features
+	if enabled, ok := tl.GetProperty(ctx, "semantic_features").(bool); ok && enabled {
+		a.pyServerMu.Lock()
+		pyServer := a.pyServer
+		a.pyServerMu.Unlock()
+		if pyServer == nil {
+			if err := a.startPythonServer(timeline.PyHost, timeline.PyPort); err != nil {
+				a.log.Error("failed starting Python server", zap.Error(err))
+			}
+		}
+	}
+
 	return otl, nil
 }
 
@@ -807,69 +819,107 @@ func (*App) ChartStats(ctx context.Context, chartName, repoID string, params url
 }
 
 type Settings struct {
-	Application *Config `json:"application"`
-
-	// Map of repo ID to map of property name to value.
-	Timelines map[string]map[string]any `json:"timelines,omitempty"`
+	Application *Config                   `json:"application,omitempty"`
+	Timelines   map[string]map[string]any `json:"timelines,omitempty"` // map of repo ID to map of property key to value
 }
 
-func (a *App) GetSettings(_ context.Context) (Settings, error) {
+func (a *App) GetSettings(ctx context.Context) (Settings, error) {
+	openTimelinesMu.RLock()
+	defer openTimelinesMu.RUnlock()
+
+	timelineSettings := make(map[string]map[string]any)
+	for _, tl := range openTimelines {
+		tlID := tl.ID().String()
+		props, err := tl.Timeline.GetProperties(ctx)
+		if err != nil {
+			return Settings{}, fmt.Errorf("getting properties of timeline %s: %w", tlID, err)
+		}
+		timelineSettings[tlID] = props
+	}
+
 	return Settings{
 		Application: a.cfg,
+		Timelines:   timelineSettings,
 	}, nil
 }
 
-func (a *App) ChangeSettings(_ context.Context, newSettings *changeSettingsPayload) error {
-	a.cfg.Lock()
-	defer a.cfg.Unlock()
-
-	// some settings, when changed, may necessitate a restart of the server/app to take effect
-	var restart bool
-
-	for key, val := range newSettings.Application {
-		var err error
-		switch key {
-		case "app.mapbox_api_key":
-			err = json.Unmarshal(val, &a.cfg.MapboxAPIKey)
-		case "app.website_dir":
-			var newVal string
-			err = json.Unmarshal(val, &newVal)
-			restart = restart || newVal != a.cfg.WebsiteDir
-			a.cfg.WebsiteDir = newVal
-		case "app.obfuscation.enabled":
-			err = json.Unmarshal(val, &a.cfg.Obfuscation.Enabled)
-		case "app.obfuscation.locations":
-			err = json.Unmarshal(val, &a.cfg.Obfuscation.Locations)
-		case "app.obfuscation.data_files":
-			err = json.Unmarshal(val, &a.cfg.Obfuscation.DataFiles)
-		}
-		if err != nil {
-			return fmt.Errorf("saving setting %s: %w (value=%s)", key, err, string(val))
+func (a *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsPayload) error {
+	if len(newSettings.Timelines) > 0 {
+		for repoID, properties := range newSettings.Timelines {
+			openTimelinesMu.RLock()
+			tl, ok := openTimelines[repoID]
+			openTimelinesMu.RUnlock()
+			if ok {
+				if err := tl.SetProperties(ctx, properties); err != nil {
+					return fmt.Errorf("setting properties for timeline %s: %w", repoID, err)
+				}
+				if semantic, ok := properties["semantic_features"].(bool); ok && semantic {
+					if err := a.startPythonServer(timeline.PyHost, timeline.PyPort); err != nil {
+						a.log.Error("could not start Python server", zap.Error(err))
+					}
+				} else {
+					if err := a.stopPythonServer(); err != nil {
+						a.log.Error("could not stop Python server", zap.Error(err))
+					}
+				}
+			} else {
+				return fmt.Errorf("timeline %s is not open", repoID)
+			}
 		}
 	}
 
-	if err := a.cfg.unsyncedSave(); err != nil {
-		return fmt.Errorf("saving config: %w", err)
-	}
+	if len(newSettings.Application) > 0 {
+		a.cfg.Lock()
+		defer a.cfg.Unlock()
 
-	if restart {
-		go func(oldApp *App) {
-			oldApp.cancel()
+		// some settings, when changed, may necessitate a restart of the server/app to take effect
+		var restart bool
 
-			newApp, err := New(context.Background(), oldApp.cfg, oldApp.embeddedWebsite)
+		for key, val := range newSettings.Application {
+			var err error
+			switch key {
+			case "app.mapbox_api_key":
+				err = json.Unmarshal(val, &a.cfg.MapboxAPIKey)
+			case "app.website_dir":
+				var newVal string
+				err = json.Unmarshal(val, &newVal)
+				restart = restart || newVal != a.cfg.WebsiteDir
+				a.cfg.WebsiteDir = newVal
+			case "app.obfuscation.enabled":
+				err = json.Unmarshal(val, &a.cfg.Obfuscation.Enabled)
+			case "app.obfuscation.locations":
+				err = json.Unmarshal(val, &a.cfg.Obfuscation.Locations)
+			case "app.obfuscation.data_files":
+				err = json.Unmarshal(val, &a.cfg.Obfuscation.DataFiles)
+			}
 			if err != nil {
-				oldApp.log.Error("initializing new app", zap.Error(err))
-				return
+				return fmt.Errorf("saving setting %s: %w (value=%s)", key, err, string(val))
 			}
+		}
 
-			started, err := newApp.Serve()
-			if err != nil {
-				oldApp.log.Fatal("could not start server", zap.Error(err))
-			}
-			if !started {
-				oldApp.log.Error("server not started; maybe the old listener is still bound (please report this as a bug)")
-			}
-		}(a)
+		if err := a.cfg.unsyncedSave(); err != nil {
+			return fmt.Errorf("saving config: %w", err)
+		}
+
+		if restart {
+			go func(oldApp *App) {
+				oldApp.cancel()
+
+				newApp, err := New(context.Background(), oldApp.cfg, oldApp.embeddedWebsite)
+				if err != nil {
+					oldApp.log.Error("initializing new app", zap.Error(err))
+					return
+				}
+
+				started, err := newApp.Serve()
+				if err != nil {
+					oldApp.log.Fatal("could not start server", zap.Error(err))
+				}
+				if !started {
+					oldApp.log.Error("server not started; maybe the old listener is still bound (please report this as a bug)")
+				}
+			}(a)
+		}
 	}
 
 	return nil
