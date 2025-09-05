@@ -5,6 +5,7 @@ const galleryLimit = 100;
 async function galleryPageMain() {
 	// set up the preview modal to work on our page
 	PreviewModal.prev = async (currentItem) => {
+		// TODO: These don't play nicely when semantic_text is filled out, is there a better way to do these?
 		const params = galleryFilterParams("prev", currentItem);
 		// params.limit = 1;
 		// params.sort = null; // let backend use smart sort
@@ -33,6 +34,7 @@ async function galleryPageMain() {
 
 	// perform search
 	const results = await app.SearchItems(galleryFilterParams());
+	console.log("RESULTS:", results)
 
 	// configure pagination links: enable next if we overflowed the search results limit,
 	// and enable prev if we are not on page 1; otherwise disable prev/next link(s)

@@ -916,6 +916,7 @@ func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension 
 		}
 	}
 
+	// apparently Windows does not support 10-bit color depth!?
 	bitDepth := 10
 	if runtime.GOOS == "windows" {
 		bitDepth = 8

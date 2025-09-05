@@ -490,6 +490,17 @@ func (it Item) timeframeUnix() *int64 {
 	return &unix
 }
 
+func (it Item) timeOffset() *int {
+	if it.Timestamp.IsZero() {
+		return nil
+	}
+	_, offsetSec := it.Timestamp.Zone()
+	if offsetSec == 0 {
+		return nil
+	}
+	return &offsetSec
+}
+
 // ItemData represents the actual content (data) of an item.
 // Depending on size and type, it might be stored in the database
 // or as a file on disk.
@@ -794,8 +805,7 @@ var (
 
 // ItemRow has the structure of an item's row in our DB.
 type ItemRow struct {
-	ID                   uint64          `json:"id"` // row ID
-	EmbeddingID          *uint64         `json:"embedding_id,omitempty"`
+	ID                   uint64          `json:"id"`                       // row ID
 	DataSourceID         *uint64         `json:"data_source_id,omitempty"` // row ID, used only for insertion into the DB
 	JobID                *uint64         `json:"job_id,omitempty"`
 	ModifiedJobID        *uint64         `json:"modified_job_id,omitempty"`
@@ -880,7 +890,7 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	var ts, tspan, tframe, modified, deleted *int64 // will convert from Unix milli timestamp
 	var stored int64                                // will convert from Unix milli timestamp
 
-	itemTargets := []any{&ir.ID, &ir.EmbeddingID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedJobID, &ir.AttributeID,
+	itemTargets := []any{&ir.ID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedJobID, &ir.AttributeID,
 		&ir.ClassificationID, &ir.OriginalID, &ir.OriginalLocation, &ir.IntermediateLocation, &ir.Filename,
 		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeUncertainty, &stored, &modified,
 		&ir.DataID, &ir.DataType, &ir.DataText, &ir.DataFile, &ir.DataHash,
@@ -926,7 +936,7 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 }
 
 // used for selecting from the extended_items view, but "AS items"
-const itemDBColumns = `items.id, items.embedding_id, items.data_source_id, items.job_id, items.modified_job_id, items.attribute_id,
+const itemDBColumns = `items.id, items.data_source_id, items.job_id, items.modified_job_id, items.attribute_id,
 items.classification_id, items.original_id, items.original_location, items.intermediate_location, items.filename,
 items.timestamp, items.timespan, items.timeframe, items.time_offset, items.time_uncertainty, items.stored, items.modified,
 items.data_id, items.data_type, items.data_text, items.data_file, items.data_hash, items.metadata,

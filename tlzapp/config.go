@@ -156,7 +156,11 @@ func (cfg *Config) syncOpenRepos() error {
 func DefaultConfigFilePath() string {
 	cfgDir, err := os.UserConfigDir()
 	if err == nil {
-		return filepath.Join(cfgDir, "Timelinize", "config.json")
+		timelinize := "timelinize"
+		if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+			timelinize = "Timelinize"
+		}
+		return filepath.Join(cfgDir, timelinize, "config.json")
 	}
 	cfgDir, err = os.UserHomeDir()
 	if err == nil {

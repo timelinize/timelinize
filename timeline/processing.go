@@ -769,10 +769,7 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	}
 	if !it.Timestamp.IsZero() {
 		ir.Timestamp = &it.Timestamp
-		_, offsetSec := it.Timestamp.Zone()
-		if offsetSec != 0 {
-			ir.TimeOffset = &offsetSec
-		}
+		ir.TimeOffset = it.timeOffset()
 	}
 	if !it.Timespan.IsZero() && !it.Timespan.Equal(it.Timestamp) {
 		ir.Timespan = &it.Timespan

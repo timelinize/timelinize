@@ -455,7 +455,7 @@ func (tl *Timeline) runJob(row Job) error {
 		// type conversion for checkpoint; it's easier for actions to use []byte, but we like using *string
 		// for database since most DB viewers make it easier to read TEXT columns than BLOB columns
 		var chkpt []byte
-		if row.Checkpoint != nil {
+		if row.Checkpoint != nil && len(*row.Checkpoint) > 0 {
 			chkpt = []byte(*row.Checkpoint)
 		}
 

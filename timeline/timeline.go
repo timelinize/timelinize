@@ -468,7 +468,19 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 //nolint:unused
 func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB *sql.DB, deleteDataFilesAndAssets bool) error {
 	Log.Warn("WIPING REPO...", zap.String("dir", repoDir), zap.Bool("data_files", deleteDataFilesAndAssets))
-	_, err := db.ExecContext(ctx, `DELETE FROM items`)
+	_, err := db.ExecContext(ctx, `DELETE FROM embeddings`)
+	if err != nil {
+		return fmt.Errorf("resetting embeddings: %w", err)
+	}
+	_, err = db.ExecContext(ctx, `DELETE FROM relationships`)
+	if err != nil {
+		return fmt.Errorf("resetting relationships: %w", err)
+	}
+	_, err = db.ExecContext(ctx, `DELETE FROM relations`)
+	if err != nil {
+		return fmt.Errorf("resetting relations: %w", err)
+	}
+	_, err = db.ExecContext(ctx, `DELETE FROM items`)
 	if err != nil {
 		return fmt.Errorf("resetting items: %w", err)
 	}
@@ -488,21 +500,9 @@ func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB *sql.DB, deleteD
 	if err != nil {
 		return fmt.Errorf("resetting entity_attributes: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM relationships`)
-	if err != nil {
-		return fmt.Errorf("resetting relationships: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM relations`)
-	if err != nil {
-		return fmt.Errorf("resetting relations: %w", err)
-	}
 	_, err = db.ExecContext(ctx, `DELETE FROM jobs`)
 	if err != nil {
 		return fmt.Errorf("resetting jobs: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM embeddings`)
-	if err != nil {
-		return fmt.Errorf("resetting embeddings: %w", err)
 	}
 	_, err = thumbsDB.ExecContext(ctx, `DELETE FROM thumbnails`)
 	if err != nil {

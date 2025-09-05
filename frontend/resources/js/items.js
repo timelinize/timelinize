@@ -144,7 +144,7 @@ async function itemsMain() {
 			$('a.owner-entity', tpl).href = `/entities/${repo.instance_id}/${item.entity.id}`;
 		}
 
-		if (item.embedding_id) {
+		if (item.has_embedding) {
 			const a = document.createElement('a');
 			a.classList.add("btn", "btn-outline", "secondary");
 			a.innerText = "Similar items";
@@ -220,7 +220,7 @@ async function itemsMain() {
 			}
 		}
 
-		if (!item.entity && $('.other-entities', tpl).isEmpty()) {
+		if (!item.entity && $('.other-entities', tpl).isEmpty() && $('.similar-to', tpl).isEmpty()) {
 			$('.item-entities', tpl).remove();
 		}
 

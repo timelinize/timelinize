@@ -273,20 +273,21 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		}
 
 		var re relatedEntity // entity is left-joined, so could be null
-		var embedDist float64
-		extraTargets := []any{&re.ID, &re.Name, &re.Picture, &re.Attribute.Name, &re.Attribute.Value, &re.Attribute.AltValue}
+		var embeddingDistance float64
+		var embeddingID *uint64 // just to know whether there are any embeddings for the item
+		extraTargets := []any{&re.ID, &re.Name, &re.Picture, &re.Attribute.Name, &re.Attribute.Value, &re.Attribute.AltValue, &embeddingID}
 		if params.WithTotal {
 			extraTargets = append(extraTargets, &totalCount)
 		}
 		if params.SemanticText != "" || params.SimilarTo > 0 {
-			extraTargets = append(extraTargets, &embedDist)
+			extraTargets = append(extraTargets, &embeddingDistance)
 		}
 		itemRow, err := scanItemRow(rows, extraTargets)
 		if err != nil {
 			rows.Close()
 			return SearchResults{}, err
 		}
-		sr := &SearchResult{RepoID: tl.id.String(), ItemRow: itemRow, Distance: embedDist}
+		sr := &SearchResult{RepoID: tl.id.String(), ItemRow: itemRow, HasEmbedding: embeddingID != nil, Distance: embeddingDistance}
 		if re.ID != nil {
 			sr.Entity = &re
 		}
@@ -437,7 +438,7 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 
 	// TODO: use strings.Builder (also in RecentConversations())
 
-	q += fmt.Sprintf("\t\tSELECT %s, entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value", itemDBColumns)
+	q += fmt.Sprintf("\t\tSELECT %s, entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value, embeddings.id", itemDBColumns)
 	if params.OnlyTotal {
 		q = "\t\tSELECT count(DISTINCT items.id)"
 	}
@@ -452,7 +453,8 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 		FROM extended_items AS items
 		LEFT JOIN attributes ON items.attribute_id = attributes.id
 		LEFT JOIN entity_attributes ON attributes.id = entity_attributes.attribute_id
-		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`
+		LEFT JOIN entities ON entity_attributes.entity_id = entities.id
+		LEFT JOIN embeddings ON embeddings.item_id = items.id`
 
 	// TODO: It's possible that we could move all these (ToAttributeID, ToEntityID, rootItemsOnly) into RelationParams
 	if len(params.ToAttributeID) > 0 || len(params.ToEntityID) > 0 {
@@ -779,7 +781,7 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 		var targetVectorClause string
 
 		if params.SimilarTo > 0 {
-			targetVectorClause = "(SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)"
+			targetVectorClause = "(SELECT embedding FROM embeddings JOIN items ON embeddings.item_id = items.id WHERE items.id=? LIMIT 1)"
 			args = append(args, params.SimilarTo)
 		} else if params.SemanticText != "" {
 			// search relative to an arbitrary input (TODO: support image inputs too) - python server must be online
@@ -800,7 +802,7 @@ SELECT
 	search_results.*,
 	vec_distance_l2(%s, embeddings.embedding) AS distance
 FROM search_results
-JOIN embeddings ON embeddings.id = search_results.embedding_id
+JOIN embeddings ON embeddings.item_id = search_results.id
 ORDER BY distance`, targetVectorClause)
 		if params.Limit == 0 {
 			params.Limit = 100
@@ -981,9 +983,10 @@ func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID u
 type SearchResult struct {
 	RepoID string `json:"repo_id,omitempty"`
 	ItemRow
-	Entity  *relatedEntity `json:"entity,omitempty"`
-	Related []Related      `json:"related,omitempty"`
-	Size    int64          `json:"size,omitempty"`
+	HasEmbedding bool           `json:"has_embedding,omitempty"`
+	Entity       *relatedEntity `json:"entity,omitempty"`
+	Related      []Related      `json:"related,omitempty"`
+	Size         int64          `json:"size,omitempty"`
 
 	// from ML model
 	Distance float64 `json:"distance,omitempty"`

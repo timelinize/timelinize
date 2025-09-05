@@ -87,6 +87,10 @@ func (p *processor) sanitize(g *Graph) error {
 		g.Item.Timestamp = validTime(g.Item.Timestamp)
 		g.Item.Timespan = validTime(g.Item.Timespan)
 		g.Item.Timeframe = validTime(g.Item.Timeframe)
+
+		// TODO: Also ensure Timestamp, Timespan, and Timeframe, and all
+		// other time values are in the same zone as Timestamp. (If not,
+		// change them to that zone?)
 	}
 
 	// traverse graph nodes recursively to sanitize them
@@ -664,6 +668,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("looking up item in database: %w", err)
 	}
+	defer func() { it.row = ir }() // used later in the pipeline for logging
 
 	// if the item is already in the DB, figure out what, if anything, will be updated
 	if ir.ID > 0 {
@@ -673,8 +678,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 		}
 
 		// now determine if we should process this duplicate/existing item at all
-		var reprocessItem bool
-		reprocessItem, _ = p.shouldProcessExistingItem(it, ir, it.dataFilePath != "")
+		reprocessItem, _ := p.shouldProcessExistingItem(it, ir, it.dataFilePath != "")
 		if !reprocessItem {
 			atomic.AddInt64(p.ij.skippedItemCount, 1)
 			p.log.Debug("skipping processing of existing item",
@@ -685,7 +689,6 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 				zap.String("original_id", it.ID))
 			// add some info for logging purposes
 			ir.howStored = itemSkipped
-			it.row = ir
 			return ir.ID, nil
 		}
 
@@ -708,15 +711,15 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 				!it.Timestamp.IsZero() && (ir.Timestamp == nil || !it.Timestamp.Equal(*ir.Timestamp))
 
 			if incomingItemAddsFilename || incomingItemUpdatesFilename || incomingItemUpdatesFilenameWithTime {
-				newDataFileName, err := p.renameDataFile(ctx, tx, it, *ir.DataFile, it.Content.Filename)
+				newDataFilePath, err := p.renameDataFile(ctx, tx, it, *ir.DataFile, it.Content.Filename)
 				if err != nil {
 					p.log.Error("could not rename existing data file given new filename information", zap.Error(err))
 				} else {
 					p.log.Info("renamed existing data file given new filename information",
 						zap.String("new_filename", it.Content.Filename),
 						zap.String("old_data_file_path", *ir.DataFile),
-						zap.String("new_data_file_path", newDataFileName))
-					ir.DataFile = &newDataFileName
+						zap.String("new_data_file_path", newDataFilePath))
+					ir.DataFile = &newDataFilePath
 					ir.Filename = &it.Content.Filename
 				}
 			}
@@ -725,15 +728,40 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 		// if a filename is already in the database, but is not in this item graph, use the one in the database
 		// (useful if the data source sends an item piecewise, like filename first, then actual data file in a later graph)
 		if ir.Filename != nil && it.Content.Filename == "" && it.dataFilePath != "" {
-			newDataFileName, err := p.renameDataFile(ctx, tx, it, it.dataFilePath, *ir.Filename)
+			newDataFilePath, err := p.renameDataFile(ctx, tx, it, it.dataFilePath, *ir.Filename)
 			if err != nil {
 				p.log.Error("could not rename data file given filename information found in database", zap.Error(err))
 			} else {
 				p.log.Info("renamed data file given filename information found in database",
 					zap.String("discovered_filename", *ir.Filename),
 					zap.String("old_data_file_path", it.dataFilePath),
+					zap.String("new_data_file_path", newDataFilePath))
+				it.dataFilePath = newDataFilePath
+			}
+		}
+	}
+
+	// we assume we're on a case-sensitive file system; that means that the filename might collide
+	// with another if moved to a case-sensitive file system - that'd be really bad, so let's make
+	// sure the filename is unique case-insensitively too
+	if it.dataFilePath != "" {
+		// query the DB for a data_file that matches case-insensitively (data_file is defined to be COLLATE NOCASE)
+		// and doesn't match exactly ("COLLATE BINARY")
+		var count int
+		err = tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? AND data_file!=? COLLATE BINARY LIMIT 1`,
+			it.dataFilePath, it.dataFilePath).Scan(&count)
+		if err != nil {
+			return 0, fmt.Errorf("checking DB for case-insensitive filename uniqueness: %w", err)
+		}
+		if count > 0 {
+			newDataFileName, err := p.renameDataFile(ctx, tx, it, it.dataFilePath, path.Base(it.dataFilePath))
+			if err == nil {
+				p.log.Info("data file renamed to be case-insensitively unique",
+					zap.String("old_data_file_path", it.dataFilePath),
 					zap.String("new_data_file_path", newDataFileName))
 				it.dataFilePath = newDataFileName
+			} else {
+				p.log.Error("could not rename existing data file to avoid potential case-insensitive collisions", zap.Error(err))
 			}
 		}
 	}
@@ -741,47 +769,44 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	// make a copy of this 'cause we might use it later to clean up a data file if we ended up setting it to NULL or replacing it
 	startingDataFile := ir.DataFile
 
+	// convert incoming item to a row that can be inserted into the DB
 	err = p.fillItemRow(ctx, tx, &ir, it)
 	if err != nil {
 		return 0, fmt.Errorf("assembling item for storage: %w", err)
 	}
 
-	// run the database query to insert or update the item (and clean up data file if it was changed to NULL),
-	// but carefully so as to not allow zeroing out an item; for example, if a related item is provided only
-	// with its original ID, we can still link a relationship, but if the incoming item has no content we
-	// should not zero out any existing version of the item in the database; the intent by the data source is
-	// to merely link the item by ID (or create a placeholder item), not zero it out!
+	// execute query to insert or update the item
 	ir.ID, ir.howStored, err = p.insertOrUpdateItem(ctx, tx, ir, it.HasContent(), it.fieldUpdatePolicies)
 	if err != nil {
 		return 0, fmt.Errorf("storing item in database: %w (row_id=%d item_id=%v)", err, ir.ID, ir.OriginalID)
 	}
 
-	// also check with the database to see if filename is taken, case-insensitively (the column or index
-	// should have COLLATE NOCASE; this is important to avoid file collisions when copying from a
-	// case-sensitive FS to a case-insensitive FS!) -- if an item row has claim to it, then the file
-	// is either still processing or was lost and needs to be reconstituted, but for now we should
-	// not collide with it
+	// items that are updated should have new embeddings generated; delete any old ones
+	if ir.howStored == itemUpdated {
+		_, err = tx.ExecContext(ctx, `DELETE FROM embeddings WHERE item_id=?`, ir.ID)
+		if err != nil {
+			return 0, fmt.Errorf("deleting old embeddings of updated item(s): %w", err)
+		}
+	}
+
+	// if the incoming data file didn't end up being used, clean it up
 	if it.dataFilePath != "" {
 		var count int
-		err = tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? AND id!=? LIMIT 1`, it.dataFilePath, ir.ID).Scan(&count)
+		err = tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? LIMIT 1`, it.dataFilePath).Scan(&count)
 		if err != nil {
-			return 0, fmt.Errorf("checking DB for case-insensitive filename uniqueness: %w", err)
+			return 0, fmt.Errorf("checking DB for unused incoming data file: %w", err)
 		}
-		if count > 0 {
-			newDataFileName, err := p.renameDataFile(ctx, tx, it, it.dataFilePath, path.Base(it.dataFilePath))
-			if err != nil {
-				p.log.Error("could not rename existing data file given new filename information", zap.Error(err))
-			} else {
-				p.log.Info("data file renamed to be case-insensitively unique",
-					zap.String("old_data_file_path", it.dataFilePath),
-					zap.String("new_data_file_path", newDataFileName))
-				it.dataFilePath = newDataFileName
+		if count == 0 {
+			if err = p.tl.deleteRepoFile(it.dataFilePath); err != nil {
+				p.log.Error("unable to clean up unused incoming data file",
+					zap.String("data_file_path", it.dataFilePath),
+					zap.Error(err))
 			}
 		}
 	}
 
 	// if there's a chance that we just set the data_file to NULL, check to see if the
-	// file is no longer referenced in the DB; if not, clean it up
+	// old file is no longer referenced in the DB, and if not, clean it up
 	if startingDataFile != nil && ir.DataFile == nil {
 		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, *startingDataFile); err != nil {
 			p.log.Error("cleaning up unused data file",
@@ -796,10 +821,10 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	if it.dataFilePath != "" && startingDataFile != nil && it.dataFilePath != *startingDataFile {
 		if err := p.tl.deleteDataFileAndThumbnailIfUnreferenced(ctx, tx, *startingDataFile); err != nil {
 			p.log.Error("could not clean up old, unreferenced data file and any associated thumbnail",
-				zap.Error(err),
 				zap.String("old_data_file", *startingDataFile),
 				zap.String("replaced_by", it.dataFilePath),
-				zap.Uint64("row_id", it.row.ID))
+				zap.Uint64("row_id", ir.ID),
+				zap.Error(err))
 		}
 
 		// additionally, if the incoming file has the same filename as the one we just deleted, let's see
@@ -815,25 +840,31 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 				f.Close()
 				if err := os.Rename(p.tl.FullPath(it.dataFilePath), desiredFilenameFullPath); err != nil {
 					p.log.Error("could not restore data file name from temporary name",
-						zap.Error(err),
 						zap.String("temporary_name", it.dataFilePath),
 						zap.String("name_to_restore", desiredFilename),
-						zap.Uint64("row_id", it.row.ID))
+						zap.Uint64("row_id", ir.ID),
+						zap.Error(err))
 				} else {
-					it.dataFilePath = desiredFilename
+					_, err = tx.ExecContext(ctx, "UPDATE items SET data_file=? WHERE data_file=?", desiredFilename, it.dataFilePath)
+					if err == nil {
+						it.dataFilePath = desiredFilename
+					} else {
+						p.log.Error("could not update row with renamed data file paths",
+							zap.String("previous_path", it.dataFilePath),
+							zap.String("new_path", desiredFilename),
+							zap.Uint64("row_id", ir.ID),
+							zap.Error(err))
+					}
 				}
 			} else if !errors.Is(err, fs.ErrExist) {
 				p.log.Error("could not create placeholder file for data file of the which original filename is being restored",
-					zap.Error(err),
 					zap.String("temporary_name", it.dataFilePath),
 					zap.String("name_to_restore", desiredFilename),
-					zap.Uint64("row_id", it.row.ID))
+					zap.Uint64("row_id", ir.ID),
+					zap.Error(err))
 			}
 		}
 	}
-
-	// used for logging progress by the caller
-	it.row = ir
 
 	// Count data files which are eligible for a thumbnail and which are not excluded from
 	// receiving a thumbnail (like live photos/motion picture sidecar files, which are
@@ -842,7 +873,7 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 	// job calculates it when it starts. This count is mainly used to determine whether to
 	// even start a thumbnail job. TODO: That said, maybe we should always start a thumbnail
 	// job even if it does nothing? Then we don't have to count here.
-	if qualifiesForThumbnail(it.row.DataType) && !it.skipThumb {
+	if qualifiesForThumbnail(ir.DataType) && !it.skipThumb {
 		atomic.AddInt64(p.ij.thumbnailCount, 1)
 	}
 

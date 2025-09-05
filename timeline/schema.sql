@@ -58,17 +58,6 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	FOREIGN KEY ("parent_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
 
--- TODO: Update comment; should the embedding just be stored in the items table now??
---
--- Embeddings enable "intelligent" search using ML models to derive semantics and meaning.
--- By finding other embeddings that are close (dot product or euclidean distance),
--- similarity searches are possible. This requires the sqlite-vec module.
-CREATE TABLE IF NOT EXISTS "embeddings" (
-	"id" INTEGER PRIMARY KEY,
-	"generated" INTEGER NOT NULL DEFAULT (unixepoch()), -- when the embedding was generated (timestamp in unix seconds UTC)
-	"embedding" BLOB -- TODO: could define as float[768] (unless STRICT) and then use `check(typeof(contents_embedding) == 'blob' AND vec_length(contents_embedding) == 768)`
-) STRICT;
-
 -- Entity type names are hard-coded (but their IDs are not).
 CREATE TABLE IF NOT EXISTS "entity_types" (
 	"id" INTEGER PRIMARY KEY,
@@ -170,7 +159,6 @@ CREATE TABLE IF NOT EXISTS "item_data" (
 -- specific temporal significance. Items typically exist as a result of entities existing.
 CREATE TABLE IF NOT EXISTS "items" (
 	"id" INTEGER PRIMARY KEY,
-	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model; TODO: we may need an item_embeddings table for multiple...
 	"data_source_id" INTEGER,
 	"job_id" INTEGER, -- the import job that originally inserted this item
 	"modified_job_id" INTEGER, -- the import job that most recently modified this existing item
@@ -206,7 +194,6 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"retrieval_key" BLOB UNIQUE, -- an optional opaque value that indicates this item may not be fully populated in a single import; not an ID but still a unique identifier
 	"hidden" INTEGER,  -- if owner would like to forget about this item, don't show it in search results, etc. TODO: keep?
 	"deleted" INTEGER, -- 1 = if the columns will be erased, they have been erased; >1 = a unix epoch timestamp after which the columns can be erased
-	FOREIGN KEY ("embedding_id") REFERENCES "embeddings"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE, --TODO: maybe add ON DELETE CASCADE someday, which would rely on a regular sweeping of the files (garbage collection)! or we could do SET NULL
 	FOREIGN KEY ("modified_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL, -- deleting that import won't undo the changes, however
@@ -216,7 +203,8 @@ CREATE TABLE IF NOT EXISTS "items" (
 	UNIQUE ("data_source_id", "original_id")
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
+CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp"); -- the need for this is obvious
+CREATE INDEX IF NOT EXISTS "idx_items_data_file" ON "items"("data_file"); -- used during imports especially for maintenance
 
 -- These next two partial indexes greatly speed up processing when importing items, or any queries that
 -- check for existing rows that may have been deleted or modified from their original content. Because
@@ -359,6 +347,17 @@ CREATE TABLE IF NOT EXISTS "logs" (
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("relationship_id") REFERENCES "relationships"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("entity_attribute_id") REFERENCES "entity_attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE
+) STRICT;
+
+-- Embeddings enable "intelligent" search using ML models to derive semantics and meaning.
+-- By finding other embeddings that are close (dot product or euclidean distance),
+-- similarity searches are possible. This requires the sqlite-vec module.
+CREATE TABLE IF NOT EXISTS "embeddings" (
+	"id" INTEGER PRIMARY KEY,
+	"item_id" INTEGER,
+	"generated" INTEGER NOT NULL DEFAULT (unixepoch()), -- when the embedding was generated (timestamp in unix seconds UTC)
+	"embedding" BLOB, -- TODO: could define as float[768] (unless STRICT) and then use `check(typeof(contents_embedding) == 'blob' AND vec_length(contents_embedding) == 768)`
+	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS "settings" (
