@@ -961,8 +961,8 @@ SELECT * FROM (
 		// unique constraints. Hence, when not strict nulls, you will see that
 		// we skip adding a field to the query when the incoming item's value
 		// is null. Non-strict null is the same as "always match if either
-		// incoming or DB value are null" (but right now only the "incoming"
-		// half is implemented).
+		// incoming or DB value are null" (TODO: but right now only the "incoming"
+		// half is implemented) and tends to imply "null = unknown"
 		for field, strictNull := range uniqueConstraints {
 			// used for concatenating segments of the query
 			and := func() {
@@ -1188,6 +1188,9 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		}
 
 		switch field {
+		case "timestamp":
+			appendToQuery("timestamp", policy)
+			appendToQuery("time_offset", policy)
 		case "data":
 			appendToQuery("data_type", policy)
 			appendToQuery("data_text", policy)
@@ -1220,7 +1223,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		case "filename":
 			args = append(args, ir.Filename)
 		case "timestamp":
-			args = append(args, ir.timestampUnix())
+			args = append(args, ir.timestampUnix(), ir.timeOffset())
 		case "timespan":
 			args = append(args, ir.timespanUnix())
 		case "timeframe":

@@ -875,6 +875,17 @@ func (ir ItemRow) timeframeUnix() *int64 {
 	return &unix
 }
 
+func (ir ItemRow) timeOffset() *int {
+	if ir.Timestamp.IsZero() {
+		return nil
+	}
+	_, offsetSec := ir.Timestamp.Zone()
+	if offsetSec == 0 {
+		return nil
+	}
+	return &offsetSec
+}
+
 type sqlScanner interface {
 	Scan(dest ...any) error
 }
