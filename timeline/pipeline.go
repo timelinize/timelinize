@@ -558,7 +558,7 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, g *Graph) erro
 					size = int64(len(*item.row.DataText))
 				}
 				preview := item.row.DataText
-				const maxPreviewLen = 30
+				const maxPreviewLen = 35
 				if preview != nil && len(*preview) > maxPreviewLen {
 					shortPreview := (*preview)[:maxPreviewLen]
 					preview = &shortPreview
@@ -568,6 +568,8 @@ func (p *processor) processGraph(ctx context.Context, tx *sql.Tx, g *Graph) erro
 					zap.String("classification", item.Classification.Name),
 					zap.Stringp("preview", preview),
 					zap.Stringp("filename", item.row.Filename),
+					zap.String("original_path", item.OriginalLocation),
+					zap.String("intermediate_path", item.IntermediateLocation),
 					zap.Int64("size", size),
 					zap.Float64p("lat", item.row.Latitude),
 					zap.Float64p("lon", item.row.Longitude),

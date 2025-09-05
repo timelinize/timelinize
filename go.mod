@@ -2,7 +2,7 @@ module github.com/timelinize/timelinize
 
 go 1.23.3
 
-replace github.com/cozy/goexif2 => github.com/mholt/goexif2 v0.0.0-20250905030003-736be4396fef
+replace github.com/cozy/goexif2 => github.com/mholt/goexif2 v0.0.0-20250905145741-a3b1c27b037e
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0

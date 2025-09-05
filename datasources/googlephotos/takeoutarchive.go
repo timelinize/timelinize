@@ -115,7 +115,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 				return err
 			}
 
-			fpath := path.Join(thisAlbumFolderPath, dirEntry.Name())
+			fpath := path.Join(thisAlbumFolderPath, d.Name())
 			if checkpoint != "" {
 				if fpath != checkpoint {
 					continue // keep going until we find the checkpoint position

@@ -428,7 +428,7 @@ function connectLog() {
 			$('.import-stream-row-data-source', rowElem).innerHTML = `<img src="/ds-image/${l.data_source_name}">`;
 			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "";
 			$('.import-stream-row-entity', rowElem).innerText = l.entity || "";
-			$('.import-stream-row-content', rowElem).innerText = l.preview || maxlenStr(l.filename, 25) || "";
+			$('.import-stream-row-content', rowElem).innerText = l.preview || maxlenStr(l.filename, 35) || maxlenStr(l.intermediate_path, 35) || maxlenStr(l.original_path, 35) || "";
 			$('.import-stream-row-timestamp', rowElem).innerText = l.item_timestamp ? DateTime.fromSeconds(l.item_timestamp).toLocaleString(DateTime.DATETIME_SHORT_WITH_SECONDS) : "";
 			$('.import-stream-row-location', rowElem).innerText = location;
 			// $('.import-stream-row-content-type', rowElem).innerText = l.media_type || "";

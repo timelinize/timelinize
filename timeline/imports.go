@@ -38,9 +38,8 @@ type importJobCheckpoint struct {
 	OuterIndex    int    `json:"outer_index"`
 	InnerIndex    int    `json:"inner_index"`
 
-	// these fields remember the count of new items that will need thumbnails or embeddings
+	// these fields remember the count of new items that will need thumbnails
 	ThumbnailCount int64 `json:"thumbnail_count"`
-	EmbeddingCount int64 `json:"embedding_count"`
 
 	// This is passed through to the data source; and we would be using
 	// json.RawMessage here so that, when loading a checkpoint, the
