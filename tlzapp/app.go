@@ -133,8 +133,10 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 		}
 
 		// finish waiting for python server to exit
-		if state, err := newApp.pyServer.Process.Wait(); err != nil {
-			newApp.log.Error("Python server", zap.Error(err), zap.String("state", state.String()))
+		if newApp.pyServer != nil && newApp.pyServer.Process != nil {
+			if state, err := newApp.pyServer.Process.Wait(); err != nil {
+				newApp.log.Error("Python server", zap.Error(err), zap.String("state", state.String()))
+			}
 		}
 
 		newApp.pyServer = nil

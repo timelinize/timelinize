@@ -122,7 +122,7 @@ func TestSanitizeFlag(t *testing.T) {
 		t.Errorf("Wanted '%s' but got '%s'", want, got)
 	}
 
-	want = "foo_bar.flub_dub"
+	want = "foo-bar.flub-dub"
 	if got := sanitizeFlag("--foo-bar.flub-dub"); got != want {
 		t.Errorf("Wanted '%s' but got '%s'", want, got)
 	}
