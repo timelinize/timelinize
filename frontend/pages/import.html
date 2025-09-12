@@ -86,6 +86,26 @@
 						<div class="small text-secondary">Manually review and edit each incoming item one by one.</div>
 					</div>
 
+					<div class="form-label">Estimate total</div>
+					<div class="mb-4">
+						<label class="form-check form-switch">
+							<input id="estimate-total" class="form-check-input" type="checkbox">
+							<span class="form-check-label form-check-label-on">Yes</span>
+							<span class="form-check-label form-check-label-off">No</span>
+						</label>
+						<div class="small text-secondary">Take extra time up front to estimate total size of the import, solely for progress updates.</div>
+					</div>
+
+					<div class="form-label">Infer time zones</div>
+					<div class="mb-4">
+						<label class="form-check form-switch">
+							<input id="infer-time-zones" class="form-check-input" type="checkbox" checked>
+							<span class="form-check-label form-check-label-on">Yes</span>
+							<span class="form-check-label form-check-label-off">No</span>
+						</label>
+						<div class="small text-secondary">If timestamp lacks time zone, use geocoordinate, if available, to infer local time offset.</div>
+					</div>
+
 					<div class="form-label">Integrity checks</div>
 					<div class="mb-4">
 						<label class="form-check form-switch">
@@ -104,16 +124,6 @@
 							<span class="form-check-label form-check-label-off">No</span>
 						</label>
 						<div class="small text-secondary">Items modified manually after being imported will be updated to conform to the data in this import.</div>
-					</div>
-
-					<div class="form-label">Estimate total</div>
-					<div class="mb-4">
-						<label class="form-check form-switch">
-							<input id="estimate-total" class="form-check-input" type="checkbox">
-							<span class="form-check-label form-check-label-on">Yes</span>
-							<span class="form-check-label form-check-label-off">No</span>
-						</label>
-						<div class="small text-secondary">Take extra time up front to estimate total size of the import, solely for progress updates.</div>
 					</div>
 
 					<div class="form-label">Timeframe</div>

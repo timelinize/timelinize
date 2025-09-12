@@ -9,8 +9,6 @@ function itemsPageFilterParams() {
 	const lim = limit();
 	
 	let params = {
-		start_timestamp: datePicker.selectedDates[0],
-		end_timestamp: datePicker.selectedDates[1],
 		offset: lim * (currentPageNum()-1),
 		limit: lim + 1, // add one to know if there's a next page
 		sort: $('.date-sort').value,
@@ -122,7 +120,7 @@ async function itemsMain() {
 	// render all items
 	for (let i = 0; i < results.items?.length; i++) {
 		const item = results.items[i];
-		const ts = DateTime.fromISO(item.timestamp);
+		const ts = DateTime.fromISO(item.timestamp, { setZone: true });
 		const itemLink = `/items/${repo.instance_id}/${item.id}`;
 
 		const tpl = cloneTemplate('#tpl-item');

@@ -362,6 +362,7 @@ on('click', '#start-import', async event => {
 				files: []
 			},
 			processing_options: {
+				infer_time_zone: $('#infer-time-zones').checked,
 				integrity: $('#integrity-checks').checked,
 				overwrite_local_changes: $('#overwrite-local-changes').checked,
 				item_unique_constraints: page.itemUniqueConstraints,
@@ -382,6 +383,11 @@ on('click', '#start-import', async event => {
 		importParams.job.processing_options.timeframe = {
 			since: timeframe[0],
 			until: timeframe[1]
+		};
+	} else if (timeframe?.length == 1) {
+		importParams.job.processing_options.timeframe = {
+			since: timeframe[0],
+			until: DateTime.fromJSDate(timeframe[0]).plus({ days: 1 }).toJSDate()
 		};
 	}
 

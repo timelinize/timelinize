@@ -540,7 +540,8 @@ func (m mediaArchiveMetadata) timestamp() (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	return time.Unix(parsed, 0), nil
+	// timestamp represents UTC (no offset), so call UTC() since Unix() defaults to local offset
+	return time.Unix(parsed, 0).UTC(), nil
 }
 
 // determineMediaFilenameInArchive returns the path to the media file in the archive

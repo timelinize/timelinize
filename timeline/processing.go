@@ -768,14 +768,17 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 		ir.Filename = &it.Content.Filename
 	}
 	if !it.Timestamp.IsZero() {
-		ir.Timestamp = &it.Timestamp
 		ir.TimeOffset = it.timeOffset()
+		ir.Timestamp = &it.Timestamp
 	}
 	if !it.Timespan.IsZero() && !it.Timespan.Equal(it.Timestamp) {
 		ir.Timespan = &it.Timespan
 	}
 	if !it.Timeframe.IsZero() && !it.Timeframe.Equal(it.Timestamp) {
 		ir.Timeframe = &it.Timeframe
+	}
+	if it.tsOffsetOrigin != "" {
+		ir.TimeOffsetOrigin = &it.tsOffsetOrigin
 	}
 	if it.TimeUncertainty > 0 {
 		uncert := int64(it.TimeUncertainty / time.Millisecond)
@@ -973,7 +976,6 @@ SELECT * FROM (
 			}
 
 			// TODO: should we take into account time_uncertainty and coordinate_uncertainty and allow any value in that range to be a match?
-
 			switch field {
 			case "data":
 				if !strictNull && it.Content.Data == nil {
@@ -1048,11 +1050,11 @@ SELECT * FROM (
 						arg = &it.Content.Filename
 					}
 				case "timestamp":
-					arg = it.timestampUnix()
+					arg = nullableUnixMilli(&it.Timestamp)
 				case "timespan":
-					arg = it.timespanUnix()
+					arg = nullableUnixMilli(&it.Timespan)
 				case "timeframe":
-					arg = it.timeframeUnix()
+					arg = nullableUnixMilli(&it.Timeframe)
 				case "data_type", "data_text", "data_hash":
 					return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
 				case "longitude", "latitude", "coordinate_system", "coordinate_uncertainty":
@@ -1101,15 +1103,16 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			`INSERT INTO items
 				(data_source_id, job_id, attribute_id, classification_id,
 				original_id, original_location, intermediate_location, filename,
-				timestamp, timespan, timeframe, time_offset, time_uncertainty,
+				timestamp, timespan, timeframe, time_offset, time_offset_origin, time_uncertainty,
 				data_type, data_text, data_file, data_hash, metadata,
 				longitude, latitude, altitude, coordinate_system, coordinate_uncertainty,
 				note, starred, original_id_hash, initial_content_hash, retrieval_key)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			RETURNING id`,
 			ir.DataSourceID, ir.JobID, ir.AttributeID, ir.ClassificationID,
 			ir.OriginalID, ir.OriginalLocation, ir.IntermediateLocation, ir.Filename,
-			ir.timestampUnix(), ir.timespanUnix(), ir.timeframeUnix(), ir.TimeOffset, ir.TimeUncertainty,
+			nullableUnixMilli(ir.Timestamp), nullableUnixMilli(ir.Timespan), nullableUnixMilli(ir.Timeframe),
+			ir.TimeOffset, ir.TimeOffsetOrigin, ir.TimeUncertainty,
 			ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, metadata,
 			ir.Location.Longitude, ir.Location.Latitude, ir.Location.Altitude,
 			ir.Location.CoordinateSystem, ir.Location.CoordinateUncertainty,
@@ -1191,6 +1194,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		case "timestamp":
 			appendToQuery("timestamp", policy)
 			appendToQuery("time_offset", policy)
+			appendToQuery("time_offset_origin", policy)
 		case "data":
 			appendToQuery("data_type", policy)
 			appendToQuery("data_text", policy)
@@ -1223,11 +1227,11 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		case "filename":
 			args = append(args, ir.Filename)
 		case "timestamp":
-			args = append(args, ir.timestampUnix(), ir.timeOffset())
+			args = append(args, nullableUnixMilli(ir.Timestamp), ir.TimeOffset, ir.TimeOffsetOrigin)
 		case "timespan":
-			args = append(args, ir.timespanUnix())
+			args = append(args, nullableUnixMilli(ir.Timespan))
 		case "timeframe":
-			args = append(args, ir.timeframeUnix())
+			args = append(args, nullableUnixMilli(ir.Timeframe))
 		case "time_offset":
 			// TODO: should this be bundled with timestamp? would users ever want to update time but not the zone? what if an incoming timestamp is more correct but lacks zone?
 			args = append(args, ir.TimeOffset)

@@ -224,7 +224,7 @@ func (imp *FileImporter) processSMS(line int, sms SMS, opt timeline.ImportParams
 	ig := &timeline.Graph{
 		Item: &timeline.Item{
 			Classification: timeline.ClassMessage,
-			Timestamp:      time.UnixMilli(sms.Date),
+			Timestamp:      time.UnixMilli(sms.Date).UTC(), // these unix timestamps represent the actual UTC date, not local time
 			Owner:          sender,
 			Content: timeline.ItemData{
 				MediaType: "text/plain",

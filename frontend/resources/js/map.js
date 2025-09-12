@@ -98,14 +98,15 @@ async function loadAndRenderMapData() {
 			latStr = latStr.substring(0, latDigits+coordPrecision+1);
 			const coordsStr = `${lonStr}, ${latStr}`;
 
+			// use setZone: true so that the time displays in the item's time zone
 			const mapItem = {
 				item,
 				coords: [item.longitude, item.latitude],
 				coordsStr: coordsStr,
-				timestamp: DateTime.fromISO(item.timestamp)
+				timestamp: DateTime.fromISO(item.timestamp, {setZone: true})
 			};
 			if (item.timespan) {
-				mapItem.timespan = DateTime.fromISO(item.timespan);
+				mapItem.timespan = DateTime.fromISO(item.timespan, {setZone: true})
 			}
 
 			if (newMapData.items.length > 0) {
@@ -165,8 +166,9 @@ async function loadAndRenderMapData() {
 
 		// update legend labels
 		if (newMapData.items.length > 0) {
-			$('.color-legend-start').innerText = DateTime.fromISO(newMapData.items[0].item.timestamp).toLocaleString(DateTime.DATETIME_FULL);
-			$('.color-legend-end').innerText = DateTime.fromISO(newMapData.items[newMapData.items.length-1].item.timestamp).toLocaleString(DateTime.DATETIME_FULL);
+			// setZone: true makes the time display in the timestamp's local timezone, rather than the user's local time zone
+			$('.color-legend-start').innerText = DateTime.fromISO(newMapData.items[0].item.timestamp, { setZone: true }).toLocaleString(DateTime.DATETIME_FULL);
+			$('.color-legend-end').innerText = DateTime.fromISO(newMapData.items[newMapData.items.length-1].item.timestamp, { setZone: true }).toLocaleString(DateTime.DATETIME_FULL);
 		}
 
 		// TODO: I don't think this will work cleanly if there's more than 1 open repo
@@ -219,7 +221,8 @@ function makeMarker(repo, mapItem) {
 		// show timestamp on hover
 		markerElem.addEventListener('mouseenter', e => {
 			popup.setLngLat(mapItem.coords)
-				.setHTML(`${mapItem.timestamp.toLocaleString(DateTime.DATETIME_FULL)}`)
+				// setZone: true makes the time display in the timestamp's local timezone, rather than the user's local time zone
+				.setHTML(`${mapItem.timestamp.toLocaleString(DateTime.DATETIME_FULL, {setZone: true})}`)
 				.setOffset(0)
 				.addTo(tlz.map);
 		});
@@ -502,12 +505,12 @@ async function renderMapData(newMapData) {
 			prevTs = prevTs || dataPoint.item.timestamp;
 			nextTs = nextTs || dataPoint.item.timestamp;
 
-			const dt = DateTime.fromISO(dataPoint.item.timestamp);
+			const dt = DateTime.fromISO(dataPoint.item.timestamp, { setZone: true });
 
 			// as a last resort, choose an arbitrary span of time if that's all we can do;
 			// and convert to luxon DT values so we can split the differences...
-			let prevDT = prevTs ? DateTime.fromISO(prevTs) : dt.minus({ minutes: 30 });
-			let nextDT = nextTs ? DateTime.fromISO(nextTs) : dt.plus({ minutes: 30 });
+			let prevDT = prevTs ? DateTime.fromISO(prevTs, { setZone: true }) : dt.minus({ minutes: 30 });
+			let nextDT = nextTs ? DateTime.fromISO(nextTs, { setZone: true }) : dt.plus({ minutes: 30 });
 
 			// if location data is too far apart in time, arbitrarily cap the time span
 			prevDT = DateTime.max(prevDT, dt.minus({ hours: 12 }));
@@ -885,17 +888,21 @@ function mapPageFilterParams(repo) {
 	};
 	commonFilterSearchParams(params);
 
+	// This makes the Date object be interpreted as UTC time, not local time, i.e. "15:00" in -6 GMT will be shifted to "21:00" with no TZ offset.s
+	// Same thing as Luxon's ".toUTC(null, { keepLocalTime: true })".
+	function reinterpretAsUTC(localDate) {
+		// Shift by the local offset so wall time = UTC time
+		return new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60_000);
+	}
+
+
 	// date range
 	// if one date is selected, set the range to that day;
 	// if two dates are selected, make the range inclusive
 	const pickerDates = $('.date-input').datepicker.selectedDates;
 	if (pickerDates.length > 0) {
-		params.start_timestamp = pickerDates[0];
-		if (pickerDates.length == 1) {
-			params.end_timestamp = DateTime.fromJSDate(pickerDates[0]).plus({ days: 1 }).toJSDate();
-		} else if (pickerDates.length == 2) {
-			params.end_timestamp = DateTime.fromJSDate(pickerDates[1]).plus({ days: 1 }).toJSDate();
-		}
+		params.start_timestamp = reinterpretAsUTC(pickerDates[0])
+		params.end_timestamp = DateTime.fromJSDate(pickerDates[pickerDates.length-1]).toUTC(null, { keepLocalTime: true }).plus({ days: 1 }).toJSDate();
 	}
 
 	// location proximity
@@ -1080,7 +1087,7 @@ function renderHeatmap() {
 					'interpolate', ['linear'], ['zoom'],
 					1, 5,
 					10, 25,
-					14, 30,
+					14, 40,
 					18, 75,
 				],
 
@@ -1093,9 +1100,9 @@ function renderHeatmap() {
 				// searching at that point, they're just trying to drill down.
 				'heatmap-intensity': [
 					'interpolate', ['linear'], ['zoom'],
-					1, 0.5,
-					5, 1,
-					9, 3,
+					1, 0.2,
+					5, 0.5,
+					9, 1,
 					12, 4,
 					14, 4,
 					18, 2
@@ -1107,10 +1114,10 @@ function renderHeatmap() {
 				'heatmap-color': [
 					'interpolate', ['linear'], ['heatmap-density'],
 					0,   'rgba(0, 0, 0, 0)',
-					0.07, 'royalblue',
-					0.2, 'cyan',
-					0.3, 'lime',
-					0.5, 'yellow',
+					0.015, 'royalblue', // don't raise this too much relative to weight*intensity, or the lone points will disappear
+					0.1, 'cyan',
+					0.12, 'lime',
+					0.4, 'yellow',
 					1, 'red'
 				],
 
@@ -1120,7 +1127,7 @@ function renderHeatmap() {
 				// can't see details anyway, but zoomed in you don't want to go
 				// too transparent or you lose the singular points, which may
 				// still be desired. So I just choose this middle ground for now.
-				'heatmap-opacity': .6
+				'heatmap-opacity': .5
 			}
 		}, 'route');
 	};

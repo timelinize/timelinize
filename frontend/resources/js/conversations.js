@@ -204,7 +204,7 @@ async function renderConversations() {
 		// TODO: richer preview, all around...
 		const preview = maxlenStr(convo.messages[0].data_text, 200);
 		$('.convo-preview', elem).innerText = preview;
-		$('.convo-datetime', elem).innerText = DateTime.fromISO(convo.messages[0].timestamp).toLocaleString(DateTime.DATETIME_MED);
+		$('.convo-datetime', elem).innerText = DateTime.fromISO(convo.messages[0].timestamp, { setZone: true }).toLocaleString(DateTime.DATETIME_MED);
 
 		// render avatars
 		const maxAvatars = 5;

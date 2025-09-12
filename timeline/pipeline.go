@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -54,7 +55,8 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph) error {
 }
 
 // phase0 sanitizes graphs in the batch, and also marks items for skipping if they
-// cannot be sanitized in a way that makes them processable.
+// cannot be sanitized in a way that makes them processable. It also enhances the
+// data if possible, for example adding time zone information, if enabled.
 func (p *processor) phase0(ctx context.Context, batch []*Graph) error {
 	// quick input sanitization: timestamps outside a certain range are
 	// invalid and obviously wrong (cannot be serialized to JSON), and
@@ -63,19 +65,71 @@ func (p *processor) phase0(ctx context.Context, batch []*Graph) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := p.sanitize(g); err != nil {
+		if err := p.sanitizeAndEnhance(g); err != nil {
 			p.log.Error("sanitizing batch", zap.Error(err))
 		}
 	}
 	return nil
 }
 
-func (p *processor) sanitize(g *Graph) error {
+func (p *processor) sanitizeAndEnhance(g *Graph) error {
 	if g == nil {
 		return nil
 	}
 
 	if g.Item != nil {
+		// TODO: Also ensure Timestamp, Timespan, and Timeframe, and all
+		// other time values are in the same zone as Timestamp. (If not,
+		// change them to that zone?)
+
+		// before we know whether we need to skip an item, we may need to fill
+		// out its time zone so our calculations are accurate
+		// augment timestamp with time zone if enabled, and time zone is missing
+		// TODO: somehow indicate that we've filled it in so it can be stored in the time_offset_origin column
+		if p.ij.ProcessingOptions.InferTimeZone {
+			timeZone := g.Item.Timestamp.Location()
+			if !g.Item.Timestamp.IsZero() &&
+				(timeZone == time.Local || timeZone == time.UTC) &&
+				g.Item.Location.Latitude != nil && g.Item.Location.Longitude != nil {
+				tzName := p.tzFinder.GetTimezoneName(*g.Item.Location.Longitude, *g.Item.Location.Latitude)
+				loc, err := time.LoadLocation(tzName)
+				if err == nil {
+					if timeZone == time.Local {
+						// the time value is "wall time", or the time local to whenever it was recorded;
+						// we need to preserve the exact components of the wall time, while setting its
+						// time zone to what should be local based on the coordinates; in Go, this requires
+						// creating a new time.Time since we're actually changing the absolute moment in time
+						g.Item.Timestamp = time.Date(
+							g.Item.Timestamp.Year(),
+							g.Item.Timestamp.Month(),
+							g.Item.Timestamp.Day(),
+							g.Item.Timestamp.Hour(),
+							g.Item.Timestamp.Minute(),
+							g.Item.Timestamp.Second(),
+							g.Item.Timestamp.Nanosecond(),
+							loc,
+						)
+					} else if timeZone == time.UTC {
+						// the time is already an absolute moment in time, so we interpret that to be
+						// correct, we just need to assign a time zone for display/serialization purposes
+						g.Item.Timestamp = g.Item.Timestamp.In(loc)
+					}
+					g.Item.tsOffsetOrigin = tzOriginGeoLookup // record how/why we implicitly changed or set the time zone
+					p.log.Debug("assigned time zone from coordinates",
+						zap.Float64p("latitude", g.Item.Location.Latitude),
+						zap.Float64p("longitude", g.Item.Location.Longitude),
+						zap.String("time_zone", tzName))
+				}
+				if err != nil {
+					p.log.Error("could not load inferred location based on coordinates",
+						zap.Float64p("latitude", g.Item.Location.Latitude),
+						zap.Float64p("longitude", g.Item.Location.Longitude),
+						zap.String("time_zone", tzName),
+						zap.Error(err))
+				}
+			}
+		}
+
 		// items outside the configured timeframe should be skipped
 		// (data sources should also elide these items and not even
 		// send them, if possible)
@@ -87,18 +141,14 @@ func (p *processor) sanitize(g *Graph) error {
 		g.Item.Timestamp = validTime(g.Item.Timestamp)
 		g.Item.Timespan = validTime(g.Item.Timespan)
 		g.Item.Timeframe = validTime(g.Item.Timeframe)
-
-		// TODO: Also ensure Timestamp, Timespan, and Timeframe, and all
-		// other time values are in the same zone as Timestamp. (If not,
-		// change them to that zone?)
 	}
 
 	// traverse graph nodes recursively to sanitize them
 	for _, edge := range g.Edges {
-		if err := p.sanitize(edge.From); err != nil {
+		if err := p.sanitizeAndEnhance(edge.From); err != nil {
 			return err
 		}
-		if err := p.sanitize(edge.To); err != nil {
+		if err := p.sanitizeAndEnhance(edge.To); err != nil {
 			return err
 		}
 	}

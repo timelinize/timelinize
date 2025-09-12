@@ -551,13 +551,11 @@ func splitCamelCaseIntoWords(s string) string {
 }
 
 func upper(ch rune) bool {
-	// ASCII only
-	return ch >= 65 && ch <= 90
+	return ch >= 65 && ch <= 90 // ASCII only
 }
 
 func lower(ch rune) bool {
-	// ASCII only
-	return ch >= 97 && ch <= 122
+	return ch >= 97 && ch <= 122 // ASCII only
 }
 
 // isoIEC14496Timestamp converts the number of seconds since January 1, 1904 (as
@@ -568,13 +566,16 @@ func isoIEC14496Timestamp(ts uint64) time.Time {
 		return time.Time{}
 	}
 	unixSec := ts - isoIEC14496_12_5thEdition_2015EpochToUnixEpochSeconds
-	return time.Unix(int64(unixSec), 0) //nolint:gosec // This could technically overflow but I don't think the incoming timestamp is going to be THAT big
+	// This timestamp standard is in UTC time, not local time, so we need to be sure to call .UTC()
+	// (This could technically overflow but I don't think the incoming timestamp is going to be THAT big)
+	//nolint:gosec
+	return time.Unix(int64(unixSec), 0).UTC()
 }
 
 // The difference between January 1, 1904 (the Mac epoch used by MP4 file metadata)
 // and January 1, 1970 (the Unix epoch) in seconds.
 const isoIEC14496_12_5thEdition_2015EpochToUnixEpochSeconds uint64 = 2082844800 //nolint // Yeah screw it, I'm using underscores for this one
-
+// 3731705977 - 2082844800 = 1648861177 = absolute time it happened (Apr 2 12:59:37 AM UTC), but obviously in Hawaii time, it was 10 hours earlier.
 // Regex to extract lat-lon data from the ©xyz field of MP4 metadata which
 // takes the form: "*data+50.1234-101.1234+000.000/" in North America.
 // And sometimes the +000.000 is missing (sometimes there's just a trailing slash).

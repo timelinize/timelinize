@@ -163,7 +163,7 @@ func (c *Client) FileImport(_ context.Context, dirEntry timeline.DirEntry, param
 	for _, story := range storyIdx.IgStories {
 		params.Pipeline <- &timeline.Graph{
 			Item: &timeline.Item{
-				Timestamp:            time.Unix(story.CreationTimestamp, 0),
+				Timestamp:            time.Unix(story.CreationTimestamp, 0).UTC(),
 				Owner:                owner,
 				IntermediateLocation: story.URI,
 				Content: timeline.ItemData{

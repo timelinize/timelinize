@@ -289,6 +289,7 @@ type Item struct {
 	skipThumb            bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
 	fieldUpdatePolicies  map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
 	skip                 bool                         // the processor may mark some items to skip based on import job configuration or other factors
+	tsOffsetOrigin       tzOrigin                     // if the processor adjusts/sets an item's time zone, it is indicated here
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
@@ -463,41 +464,26 @@ func (it *Item) SetTimeframe() {
 	}
 }
 
-// timestampUnix returns the timestamp as Unix timestamp, if non-zero.
-func (it Item) timestampUnix() *int64 {
-	if it.Timestamp.IsZero() {
-		return nil
-	}
-	unix := it.Timestamp.UnixMilli()
-	return &unix
-}
-
-// timestampUnix returns the timespan as Unix timestamp, if non-zero.
-func (it Item) timespanUnix() *int64 {
-	if it.Timespan.IsZero() {
-		return nil
-	}
-	unix := it.Timespan.UnixMilli()
-	return &unix
-}
-
-// timeframeUnix returns the timeframe as Unix timestamp, if non-zero.
-func (it Item) timeframeUnix() *int64 {
-	if it.Timeframe.IsZero() {
-		return nil
-	}
-	unix := it.Timeframe.UnixMilli()
-	return &unix
-}
-
+// timeOffset returns the time zone offset as a number of seconds
+// east of UTC, based on the item's timestamp. It returns nil if
+// the timestamp is the zero value, or if the timestamp's location
+// is time.Local where we don't know which time zone the item's
+// timestamp is supposed to have originated from. We can't assume
+// it's this same local zone the program is running in. For example,
+// if you go on vacation 4 time zones away like I did and take a
+// bunch of pictures with a camera that only has a wall clock (i.e.
+// no GPS -- or, you made an edit to a photo with time zone info in
+// its EXIF, but the app didn't retain all the EXIF fields in the
+// edited version, omitting OffsetTime) then you come home and
+// import your vacation photos, and if you assumed local time, you'd
+// be 4 hours off, really throwing off the timeline continuity!
+// So, for that reason we don't return a time offset if the timestamp
+// isn't associated with a specific time zone. (Go falls back to "Local")
 func (it Item) timeOffset() *int {
-	if it.Timestamp.IsZero() {
+	if it.Timestamp.IsZero() || it.Timestamp.Location() == time.Local {
 		return nil
 	}
 	_, offsetSec := it.Timestamp.Zone()
-	if offsetSec == 0 {
-		return nil
-	}
 	return &offsetSec
 }
 
@@ -797,7 +783,7 @@ var (
 	RelQuotes       = Relation{Label: "quotes", Directed: true}                          // "<from_item> quotes <to>", or "<to> is quoted by <from>"
 	RelReacted      = Relation{Label: "reacted", Directed: true}                         // "<from_entity>" reacted to <to_item> with <value>"
 	RelInCollection = Relation{Label: "in_collection", Directed: true}                   // "<from_item> is in collection <to_item> at position <value>"
-	RelEdit         = Relation{Label: "edit", Directed: true}                            // "<to_item> is edit of <from_item>"
+	RelEdit         = Relation{Label: "edit", Directed: true, Subordinating: false}      // "<to_item> is edit of <from_item>" // TODO: set to true when we have a way of showing edits...
 	RelIncludes     = Relation{Label: "includes", Directed: true}                        // "<from_item> includes <to>" (has, depicts, portrays, contains... doesn't have to be item->entity either)
 	RelVisit        = Relation{Label: "visit", Directed: true}                           // "<from_item> is a visit to/with <to_entity>"
 	// RelTranscript = Relation{Label: "transcript", Directed: true, Subordinating: true} // "<from_item> is transcribed by <to_item>"
@@ -819,6 +805,7 @@ type ItemRow struct {
 	Timespan             *time.Time      `json:"timespan,omitempty"`
 	Timeframe            *time.Time      `json:"timeframe,omitempty"`
 	TimeOffset           *int            `json:"time_offset,omitempty"`
+	TimeOffsetOrigin     *tzOrigin       `json:"time_offset_origin,omitempty"`
 	TimeUncertainty      *int64          `json:"time_uncertainty,omitempty"`
 	Stored               time.Time       `json:"stored,omitempty"`
 	Modified             *time.Time      `json:"modified,omitempty"`
@@ -851,39 +838,18 @@ func (ir ItemRow) hasContent() bool {
 	return ir.DataID != nil || ir.DataText != nil || ir.DataFile != nil || !ir.Location.IsEmpty()
 }
 
-func (ir ItemRow) timestampUnix() *int64 {
-	if ir.Timestamp == nil {
+// nullableUnixMilli returns the Unix epoch millisecond UTC timestamp
+// associated with the given time value. If it is nil or zero, nil
+// is returned. Otherwise, the returned value is UTC-adjusted (the
+// time's location is set to UTC and then the unix milli is generated).
+// This means that the return value of this function, when non-nil,
+// is always normalized to UTC time.
+func nullableUnixMilli(t *time.Time) *int64 {
+	if t == nil || t.IsZero() {
 		return nil
 	}
-	unix := ir.Timestamp.UnixMilli()
+	unix := t.UTC().UnixMilli()
 	return &unix
-}
-
-func (ir ItemRow) timespanUnix() *int64 {
-	if ir.Timespan == nil {
-		return nil
-	}
-	unix := ir.Timespan.UnixMilli()
-	return &unix
-}
-
-func (ir ItemRow) timeframeUnix() *int64 {
-	if ir.Timeframe == nil {
-		return nil
-	}
-	unix := ir.Timeframe.UnixMilli()
-	return &unix
-}
-
-func (ir ItemRow) timeOffset() *int {
-	if ir.Timestamp.IsZero() {
-		return nil
-	}
-	_, offsetSec := ir.Timestamp.Zone()
-	if offsetSec == 0 {
-		return nil
-	}
-	return &offsetSec
 }
 
 type sqlScanner interface {
@@ -898,12 +864,12 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	var ir ItemRow
 
 	var metadata, className *string
-	var ts, tspan, tframe, modified, deleted *int64 // will convert from Unix milli timestamp
-	var stored int64                                // will convert from Unix milli timestamp
+	var ts, tspan, tframe, modified, deleted *int64 // will convert from Unix or Unix milli timestamp
+	var stored int64                                // will convert from Unix timestamp
 
 	itemTargets := []any{&ir.ID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedJobID, &ir.AttributeID,
 		&ir.ClassificationID, &ir.OriginalID, &ir.OriginalLocation, &ir.IntermediateLocation, &ir.Filename,
-		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeUncertainty, &stored, &modified,
+		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeOffsetOrigin, &ir.TimeUncertainty, &stored, &modified,
 		&ir.DataID, &ir.DataType, &ir.DataText, &ir.DataFile, &ir.DataHash,
 		&metadata, &ir.Location.Longitude, &ir.Location.Latitude, &ir.Location.Altitude,
 		&ir.Location.CoordinateSystem, &ir.Location.CoordinateUncertainty, &ir.Note, &ir.Starred,
@@ -930,6 +896,26 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 		tframeVal := time.UnixMilli(*tframe)
 		ir.Timeframe = &tframeVal
 	}
+	if ir.TimeOffset != nil {
+		// apply the time zone offset to each timestamp, as we want to retain
+		// its local time ("wall time"), rather than use the system's current
+		// time, which is Go's default when using time.UnixMilli().
+		// Note how we don't actually change the time instance, we just set
+		// its location for rendering/serialization purposes.
+		if ir.Timestamp != nil {
+			adjusted := ir.Timestamp.In(time.FixedZone("", *ir.TimeOffset))
+			ir.Timestamp = &adjusted
+		}
+		if ir.Timespan != nil {
+			adjusted := ir.Timespan.In(time.FixedZone("", *ir.TimeOffset))
+			ir.Timespan = &adjusted
+		}
+		if ir.Timeframe != nil {
+			adjusted := ir.Timeframe.In(time.FixedZone("", *ir.TimeOffset))
+			ir.Timeframe = &adjusted
+		}
+	}
+
 	if modified != nil {
 		modVal := time.Unix(*modified, 0)
 		ir.Modified = &modVal
@@ -949,7 +935,8 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 // used for selecting from the extended_items view, but "AS items"
 const itemDBColumns = `items.id, items.data_source_id, items.job_id, items.modified_job_id, items.attribute_id,
 items.classification_id, items.original_id, items.original_location, items.intermediate_location, items.filename,
-items.timestamp, items.timespan, items.timeframe, items.time_offset, items.time_uncertainty, items.stored, items.modified,
+items.timestamp, items.timespan, items.timeframe, items.time_offset, items.time_offset_origin, items.time_uncertainty,
+items.stored, items.modified,
 items.data_id, items.data_type, items.data_text, items.data_file, items.data_hash, items.metadata,
 items.longitude, items.latitude, items.altitude, items.coordinate_system, items.coordinate_uncertainty,
 items.note, items.starred, items.thumb_hash, items.original_id_hash, items.initial_content_hash,
@@ -1201,3 +1188,9 @@ func getClassification(name string) Classification {
 	}
 	return Classification{}
 }
+
+// tzOrigin defines how/why a time zone is inferred or adjusted
+type tzOrigin string
+
+// A time zone was inferred by its geo-coordinates
+const tzOriginGeoLookup = "G"

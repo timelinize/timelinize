@@ -76,7 +76,7 @@ func GetMessages(dsName string, dirEntry timeline.DirEntry, params timeline.Impo
 					},
 				}
 				msgText := FixString(msg.Content)
-				msgTimestamp := time.UnixMilli(msg.TimestampMS)
+				msgTimestamp := time.UnixMilli(msg.TimestampMS).UTC()
 
 				var attachments []*timeline.Item
 

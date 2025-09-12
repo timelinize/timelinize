@@ -1240,12 +1240,12 @@ func (tl *Timeline) cleanDirs(pathInRepo string) error {
 	for p := path.Dir(pathInRepo); p != "."; p = path.Dir(p) {
 		fullPath := tl.FullPath(p)
 		isEmpty, _, err := directoryEmpty(fullPath, true)
-		if err != nil {
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("deleted %q, but could not check parent folder %q: %w",
 				pathInRepo, fullPath, err)
 		}
 		if isEmpty {
-			if err := os.Remove(fullPath); err != nil {
+			if err := os.Remove(fullPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("deleted %q, but could not clean up empty parent folder %q: %w",
 					pathInRepo, fullPath, err)
 			}
@@ -1337,43 +1337,6 @@ func DownloadData(url string) DataFunc {
 		}
 		return resp.Body, err
 	}
-}
-
-// ProcessingOptions configures how item processing is carried out.
-type ProcessingOptions struct {
-	// Whether to perform integrity checks
-	Integrity bool `json:"integrity,omitempty"`
-
-	// Constrain processed items to within a timeframe
-	Timeframe Timeframe `json:"timeframe,omitempty"`
-
-	// If true, items with manual modifications may be updated, overwriting local changes.
-	OverwriteLocalChanges bool `json:"overwrite_local_changes,omitempty"`
-
-	// Names of columns in the items table to check for sameness when loading an item
-	// that doesn't have data_source+original_id. The field/column is the same if the
-	// values are identical or if one of the values is NULL. If the map value is true,
-	// however, strict NULL comparison is applied, where NULL=NULL only. In other words,
-	// with a false value, it is as if the field is not in the unique constraints at
-	// all when applied to a field that is null.
-	ItemUniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
-
-	// How to update existing items, specified per-field.
-	// If not set, items that already exist will simply be skipped.
-	ItemUpdatePreferences []FieldUpdatePreference `json:"item_update_preferences,omitempty"`
-
-	// TODO: WIP (Should this be in importjob or processingoptions?)
-	Interactive *InteractiveImport `json:"interactive,omitempty"`
-
-	// How many items to process in one database transaction. This is a minimum value,
-	// not a maximum, due to the recursive nature of graphs. (Hopefully data sources
-	// do not build out graphs that are too big for available memory. Most graphs
-	// just have 1-2 things on it). This setting is sensitive. Smaller batches can
-	// reduce performance, slowing down imports. Larger batches can be faster, allowing
-	// for more throughput especially when data files are large, but reduces the
-	// granularity of the live progress updates, and the performance benefit gets
-	// smaller as the database gets larger and the items get smaller.
-	BatchSize int `json:"batch_size,omitempty"`
 }
 
 type InteractiveImport struct {

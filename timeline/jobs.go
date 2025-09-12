@@ -499,9 +499,9 @@ func (tl *Timeline) runJob(row Job) error {
 		tl.dbMu.Lock()
 		defer tl.dbMu.Unlock()
 
-		tx, err := tl.db.BeginTx(ctx, nil)
+		tx, err := tl.db.BeginTx(tl.ctx, nil) // don't use the job's context, it might have been canceled!
 		if err != nil {
-			logger.Error("beginning transaction for running job", zap.Error(err))
+			logger.Error("beginning transaction for ended job", zap.Error(err))
 			return
 		}
 		defer tx.Rollback()

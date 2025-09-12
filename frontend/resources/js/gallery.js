@@ -95,11 +95,13 @@ async function galleryPageMain() {
 			</div>
 		*/
 
+		const dt = DateTime.fromISO(item.timestamp, { setZone: true });
+
 		elem.prepend(mediaElem);
 		elem.dataset.rowid = item.id;
 		$('.media-owner-avatar', elem).innerHTML = avatar(true, item.entity, "me-3");
 		$('.media-owner-name', elem).innerText = entityDisplayNameAndAttr(item.entity).name;
-		$('.media-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
+		$('.media-timestamp', elem).innerText = `${dt.toLocaleString(DateTime.DATETIME_MED)} ${dt.toFormat("ZZZZ")}`;
 		
 		if (item.score) {
 			$('.media-similarity-score', elem).innerHTML = `<b>${(item.score * 100).toFixed(3)}%</b> match`;

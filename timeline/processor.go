@@ -24,6 +24,7 @@ import (
 	"runtime/debug"
 	"sync/atomic"
 
+	"github.com/ringsaturn/tzf"
 	"go.uber.org/zap"
 )
 
@@ -51,6 +52,9 @@ type processor struct {
 	// counter used for periodic DB optimization during an import
 	// TODO: this should ideally be global per timeline, even if multiple jobs run simultaneously
 	rootGraphCount int
+
+	// used for guessing time zones based on geo coordinates
+	tzFinder tzf.F
 }
 
 func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint json.RawMessage) error {
@@ -128,6 +132,51 @@ func (p processor) process(ctx context.Context, dirEntry DirEntry, dsCheckpoint 
 	wg.Wait()
 
 	return err
+}
+
+// ProcessingOptions configures how item processing is carried out.
+type ProcessingOptions struct {
+	// Whether to perform integrity checks
+	Integrity bool `json:"integrity,omitempty"`
+
+	// Constrain processed items to within a timeframe
+	Timeframe Timeframe `json:"timeframe,omitempty"`
+
+	// If true, items with manual modifications may be updated, overwriting local changes.
+	OverwriteLocalChanges bool `json:"overwrite_local_changes,omitempty"`
+
+	// Names of columns in the items table to check for sameness when loading an item
+	// that doesn't have data_source+original_id. The field/column is the same if the
+	// values are identical or if one of the values is NULL. If the map value is true,
+	// however, strict NULL comparison is applied, where NULL=NULL only. In other words,
+	// with a false value, it is as if the field is not in the unique constraints at
+	// all when applied to a field that is null.
+	ItemUniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
+
+	// How to update existing items, specified per-field.
+	// If not set, items that already exist will simply be skipped.
+	ItemUpdatePreferences []FieldUpdatePreference `json:"item_update_preferences,omitempty"`
+
+	// TODO: WIP (Should this be in importjob or processingoptions?)
+	Interactive *InteractiveImport `json:"interactive,omitempty"`
+
+	// How many items to process in one database transaction. This is a minimum value,
+	// not a maximum, due to the recursive nature of graphs. (Hopefully data sources
+	// do not build out graphs that are too big for available memory. Most graphs
+	// just have 1-2 things on it). This setting is sensitive. Smaller batches can
+	// reduce performance, slowing down imports. Larger batches can be faster, allowing
+	// for more throughput especially when data files are large, but reduces the
+	// granularity of the live progress updates, and the performance benefit gets
+	// smaller as the database gets larger and the items get smaller.
+	BatchSize int `json:"batch_size,omitempty"`
+
+	// When enabled, items that are received for processing which have coordinates and
+	// a timestamp but lack a time zone may have the time zone augmented by doing a
+	// geopoly lookup. The data set uses more memory but can help make timestamps more
+	// correct/complete. Since Go does not actually support time.Time values without a
+	// time zone, by "lack a time zone" we mean the location is time.Local (i.e. "wall
+	// time"), which essentially means, "time zone unknown".
+	InferTimeZone bool `json:"infer_time_zone,omitempty"`
 }
 
 type ctxKey string

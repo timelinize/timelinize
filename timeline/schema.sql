@@ -172,7 +172,8 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"timestamp" INTEGER, -- unix epoch millisecond timestamp when item content was originally created (NOT when the database row was created)
 	"timespan" INTEGER,  -- ending unix epoch ms timestamp if this item spans time (instead of being a single point in time); can be used in conjunction with timeframe to suggest duration
 	"timeframe" INTEGER, -- ending unix epoch ms timestamp if this item takes place somewhere between timestamp and timeframe, but it's not certain exactly when
-	"time_offset" INTEGER, -- offset of original timestamp/timespan/timeframe in seconds east of UTC/GMT (time zone)
+	"time_offset" INTEGER, -- offset of original timestamp in seconds east of UTC/GMT (time zone); null means "local time" or "wall time"
+	"time_offset_origin" TEXT, -- if the offset (time zone) was explicitly part of the timestamp, this will be null; otherwise a byte indicating how we sourced/inferred the offset
 	"time_uncertainty" INTEGER, -- if nonzero, time columns may be inaccurate on the order of this number of milliseconds, essentially sliding the times in a fuzzy interval
 	"stored" INTEGER NOT NULL DEFAULT (unixepoch()), -- unix epoch second timestamp when row was created or last retrieved from source
 	"modified" INTEGER, -- unix epoch second timestamp when item was manually modified (not via an import); if not null, then item is "not clean"

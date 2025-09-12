@@ -103,12 +103,12 @@ body {
 }
 
 .translucent {
-	backdrop-filter: blur(10px);
-	-webkit-backdrop-filter: blur(10px);
+	backdrop-filter: blur(25px);
+	-webkit-backdrop-filter: blur(25px);
 }
 
 .translucent:not([data-bs-theme=dark]) {
-	--tblr-navbar-bg: rgba(255, 255, 255, .75);
+	--tblr-navbar-bg: rgba(255, 255, 255, .65);
 }
 
 .container-xl {

@@ -243,7 +243,7 @@ function getEntityAttribute(entity, attributeName) {
 function setDynamicTimestamp(elem, isoOrUnixSecTime, forDuration) {
 	elem._timestamp = typeof isoOrUnixSecTime === 'number'
 		? DateTime.fromSeconds(isoOrUnixSecTime)
-		: DateTime.fromISO(isoOrUnixSecTime);
+		: DateTime.fromISO(isoOrUnixSecTime, { setZone: true });
 	elem.innerText = elem._timestamp.toRelative();
 	elem.classList.add(forDuration ? "dynamic-duration" : "dynamic-time");
 }

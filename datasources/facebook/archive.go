@@ -195,7 +195,7 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 
 		item := &timeline.Item{
 			Classification: timeline.ClassSocial,
-			Timestamp:      time.Unix(post.Timestamp, 0),
+			Timestamp:      time.Unix(post.Timestamp, 0).UTC(), // these unix timestams are set in UTC
 			Owner:          a.owner,
 			Content: timeline.ItemData{
 				Data: timeline.StringData(postText),
@@ -508,7 +508,7 @@ type fbArchiveMedia struct {
 
 func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postText string, logger *zap.Logger) {
 	if m.CreationTimestamp > 0 {
-		item.Timestamp = time.Unix(m.CreationTimestamp, 0)
+		item.Timestamp = time.Unix(m.CreationTimestamp, 0).UTC()
 	}
 
 	if item.Content.Data == nil {
@@ -539,7 +539,7 @@ func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postT
 	if m.MediaMetadata.PhotoMetadata != nil {
 		for _, exif := range m.MediaMetadata.PhotoMetadata.EXIFData {
 			if exif.TakenTimestamp != 0 { // negative is valid! (pre-1970)
-				item.Timestamp = time.Unix(exif.TakenTimestamp, 0)
+				item.Timestamp = time.Unix(exif.TakenTimestamp, 0).UTC()
 
 				// I've seen this happen where the value is -62169958800 (for multiple items!)
 				// which results in a Very Wrong Timestamp. I don't know what to make of this
@@ -559,7 +559,7 @@ func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postT
 			item.Metadata["Focal length"] = exif.FocalLength
 			item.Metadata["Upload IP"] = exif.UploadIP
 			if exif.ModifiedTimestamp > 0 {
-				item.Metadata["Modified"] = time.Unix(exif.ModifiedTimestamp, 0)
+				item.Metadata["Modified"] = time.Unix(exif.ModifiedTimestamp, 0).UTC()
 			}
 			item.Metadata["Camera make"] = exif.CameraMake
 			item.Metadata["Camera model"] = exif.CameraModel
@@ -572,7 +572,7 @@ func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postT
 	} else if m.MediaMetadata.VideoMetadata != nil {
 		for _, exif := range m.MediaMetadata.VideoMetadata.EXIFData {
 			item.Metadata["Upload IP"] = exif.UploadTimestamp
-			item.Metadata["Upload timestamp"] = time.Unix(exif.UploadTimestamp, 0)
+			item.Metadata["Upload timestamp"] = time.Unix(exif.UploadTimestamp, 0).UTC()
 		}
 	}
 }

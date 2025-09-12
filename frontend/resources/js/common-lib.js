@@ -1185,13 +1185,16 @@ function itemTimestampDisplay(item, endItem) {
 		endItem = undefined;
 	}
 
-	const dt = DateTime.fromISO(item.timestamp);
+	// setZone: true will show the time in the local time zone if set,
+	// which makes the most sense for most places in our application
+	const dt = DateTime.fromISO(item.timestamp, { setZone: true });
+
 	result.relative = dt.toRelative();
 
 	if (item.timeframe) {
 		// find the level of precision by looking at each major compontent of the timestamps
 
-		const tf = DateTime.fromISO(item.timeframe);
+		const tf = DateTime.fromISO(item.timeframe, { setZone: true });
 		const itvl = Interval.fromDateTimes(dt, tf);
 
 		// hasSame() is a weirdly-named function, since it seems to actually return true
@@ -1203,6 +1206,7 @@ function itemTimestampDisplay(item, endItem) {
 				dateWithWeekday: `${dt.toLocaleString(DateTime.DATE_MED)} (${dt.weekdayLong})`,
 				time: `${dt.hour % 12} o'clock` // TODO: have it be like "1pm" instead of "13 o'clock"
 			};
+			result.timeWithZone = `${result.time} ${dt.toFormat("ZZZZ")}`;
 		} else {
 			if (itvl.hasSame('day')) {
 				result.dateTime = `${dt.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)}`;
@@ -1220,11 +1224,12 @@ function itemTimestampDisplay(item, endItem) {
 		}
 	} else {
 		result = {
-			dateTime: `${dt.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)} ${dt.toLocaleString(DateTime.TIME_WITH_SECONDS)}`,
+			dateTime: `${dt.toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY)} ${dt.toFormat("ZZZZ")}`,
 			weekdayDate: `${dt.weekdayLong}, ${dt.toLocaleString(DateTime.DATE_MED)}`,
 			dateWithWeekday: `${dt.toLocaleString(DateTime.DATE_MED)} (${dt.weekdayLong})`,
-			time: dt.toLocaleString(DateTime.TIME_SIMPLE)
+			time: dt.toLocaleString(DateTime.TIME_SIMPLE),
 		};
+		result.timeWithZone = `${result.time} ${dt.toFormat("ZZZZ")}`;
 	}
 
 	const timespan = endItem?.timespan || endItem?.timestamp || item.timespan;
@@ -1877,7 +1882,8 @@ function renderMessageItem(item, options) {
 		$('.align-items-top', elem).classList.add('flex-row-reverse');
 		$('.chat-bubble', elem).classList.add('chat-bubble-me');
 	}
-	$('.message-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
+	const dt = DateTime.fromISO(item.timestamp, { setZone: true });
+	$('.message-timestamp', elem).innerText = `${dt.toLocaleString(DateTime.DATETIME_MED)} ${dt.toFormat("ZZZZ")}`;
 	$('.message-avatar', elem).innerHTML = avatar(true, item.entity);
 	$('.data-source-icon', elem).style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
 	$('.data-source-icon', elem).title = item.data_source_title;
@@ -2194,7 +2200,7 @@ const PreviewModal = (function() {
 
 			$('#modal-preview .media-owner-avatar').innerHTML = avatar(true, item.entity, "me-3");
 			$('#modal-preview .media-owner-name').innerText = entityDisplayNameAndAttr(item.entity).name;
-			$('#modal-preview .text-secondary').innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
+			$('#modal-preview .text-secondary').innerText = DateTime.fromISO(item.timestamp, { setZone: true }).toLocaleString(DateTime.DATETIME_MED);
 
 			$('#modal-preview .modal-title').innerHTML = `<span class="avatar avatar-xs rounded me-2" style="background-image: url('/ds-image/${item.data_source_name}')"></span>`;
 			$('#modal-preview .modal-title').appendChild(document.createTextNode(item?.filename || baseFilename(item?.data_file)));

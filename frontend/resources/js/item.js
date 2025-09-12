@@ -24,7 +24,7 @@ async function itemPageMain() {
 	console.log("RESULT:", results);
 	
 	const item = results.items[0];
-	const dt = DateTime.fromISO(item.timestamp);
+	const dt = DateTime.fromISO(item.timestamp, { setZone: true });
 	
 	const {hourAngle, minuteAngle} = clockArms(dt.hour, dt.minute);
 	$('#time .hour-hand').setAttribute('transform', `rotate(${hourAngle} 12 12)`);
@@ -76,7 +76,7 @@ async function itemPageMain() {
 		$('#item-relative-time').remove();
 	}
 	if (tsDisplay.time) {
-		$('#item-time').innerText = tsDisplay.time;
+		$('#item-time').innerText = tsDisplay.timeWithZone;
 	} else {
 		$('#item-time').parentElement.remove();
 	}
@@ -151,7 +151,7 @@ async function itemPageMain() {
 	} else {
 		$('#item-altitude').parentElement.remove();
 	}
-	$('#item-stored').innerText = DateTime.fromISO(item.stored).toLocaleString(DateTime.DATETIME_MED_WITH_SECONDS);
+	$('#item-stored').innerText = DateTime.fromISO(item.stored, { setZone: true }).toLocaleString(DateTime.DATETIME_MED_WITH_SECONDS);
 
 	$('#data-source-icon').style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
 	$('#data-source-title').innerText = item.data_source_title;

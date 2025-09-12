@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/mholt/archives"
+	"github.com/ringsaturn/tzf"
 	"go.uber.org/zap"
 )
 
@@ -217,17 +218,28 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 					return err
 				}
 
+				// if time zone inference is enabled, initialize the TZ finder,
+				// which can be expensive, so only do it once
+				var tzFinder tzf.F
+				if ij.ProcessingOptions.InferTimeZone {
+					tzFinder, err = tzf.NewDefaultFinder()
+					if err != nil {
+						return fmt.Errorf("initializing time zone finder: %w", err)
+					}
+				}
+
 				p := processor{
 					outerLoopIdx:   i,
 					innerLoopIdx:   j,
 					estimatedCount: totalSizeEstimate,
 
-					ij:      ij,
-					ds:      ds,
-					dsRowID: dsRowID,
-					dsOpt:   dsOpt,
-					tl:      job.Timeline(),
-					log:     logger,
+					ij:       ij,
+					ds:       ds,
+					dsRowID:  dsRowID,
+					dsOpt:    dsOpt,
+					tl:       job.Timeline(),
+					log:      logger,
+					tzFinder: tzFinder,
 				}
 				ij.pMu.Lock()
 				ij.p = &p
