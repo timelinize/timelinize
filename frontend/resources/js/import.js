@@ -285,6 +285,16 @@ async function renderDataSourceOptionsModal(ds) {
 		const owner = await getOwner(tlz.openRepos[0]);
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
+
+		noUiSlider.create($('.geojson-simplification', dsOptElem), {
+			start: defaultPathSimplificationLevel,
+			connect: [true, false],
+			step: 0.1,
+			range: {
+				min: 0,
+				max: 10
+			}
+		});
 	}
 	if (ds.name == "email") {
 		new TomSelect($(".email-skip-labels", dsOptElem),{
@@ -304,6 +314,22 @@ async function renderDataSourceOptionsModal(ds) {
 		const owner = await getOwner(tlz.openRepos[0]);
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
+	}
+	if (ds.name == "nmea0183") {
+		const entitySelect = newEntitySelect($('.nmea0183-owner', dsOptElem), 1);
+		const owner = await getOwner(tlz.openRepos[0]);
+		entitySelect.addOption(owner);
+		entitySelect.addItem(owner.id);
+
+		noUiSlider.create($('.nmea0183-simplification', dsOptElem), {
+			start: defaultPathSimplificationLevel,
+			connect: [true, false],
+			step: 0.1,
+			range: {
+				min: 0,
+				max: 10
+			}
+		});
 	}
 	if (ds.name == "apple_photos") {
 		// This data source can sometimes detect its owner, so it's not required for us to assume!
@@ -498,6 +524,10 @@ async function dataSourceOptions(ds) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
 		dsOpt.lenient = $('.geojson-lenient', dsoptContainer).checked;
+		const simplification = $('.geojson-simplification', dsoptContainer).noUiSlider.get();
+		if (simplification) {
+			dsOpt.simplification = Number(simplification);
+		}
 	}
 	if (ds.name == "media") {
 		dsOpt = {
@@ -515,6 +545,17 @@ async function dataSourceOptions(ds) {
 		}
 		if ($('.media-end-year', dsoptContainer).value) {
 			dsOpt.date_range.until = DateTime.utc(Number($('.media-end-year', dsoptContainer).value)).endOf('year').toISO();
+		}
+	}
+	if (ds.name == "nmea0183") {
+		dsOpt = {};
+		const owner = $('.nmea0183-owner', dsoptContainer).tomselect.getValue();
+		if (owner.length) {
+			dsOpt.owner_entity_id = Number(owner[0]);
+		}
+		const simplification = $('.nmea0183-simplification', dsoptContainer).noUiSlider.get();
+		if (simplification) {
+			dsOpt.simplification = Number(simplification);
 		}
 	}
 	if (ds.name == "email") {

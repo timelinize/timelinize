@@ -207,7 +207,54 @@
 				</div>
 			</div>
 		</div>
-		<!-- todo: simplification -->
+		<div class="mb-3 row">
+			<label class="col-3 col-form-label">Simplification</label>
+			<div class="col">
+				<div class="geojson-simplification form-range mb-2 mt-2"></div>
+				<div class="small form-hint">
+					Reduce the size of the data set by dropping unimportant points
+					(after denoising and clustering).
+					Lower values keeps more data by dropping only those on straight paths,
+					whereas higher values drops more points.
+					A value of 0 means that no points will be discarded, resulting in a
+					large data set.
+					A value of 10 means that almost every point except those at the
+					ends of paths will be discarded.
+				</div>
+			</div>
+		</div>
+	</fieldset>
+</template>
+
+
+<template id="tpl-dsopt-nmea0183">
+	<fieldset class="form-fieldset mb-0">
+		<div class="mb-3 row">
+			<label class="col-4 col-form-label required">Person</label>
+			<div class="col">
+				<select class="nmea0183-owner form-select" placeholder="Name or contact info">
+				</select>
+				<div class="small form-hint">
+					Select the person whose location data this is.
+				</div>
+			</div>
+		</div>
+		<div class="mb-3 row">
+			<label class="col-3 col-form-label">Simplification</label>
+			<div class="col">
+				<div class="nmea0183-simplification form-range mb-2 mt-2"></div>
+				<div class="small form-hint">
+					Reduce the size of the data set by dropping unimportant points
+					(after denoising and clustering).
+					Lower values keeps more data by dropping only those on straight paths,
+					whereas higher values drops more points.
+					A value of 0 means that no points will be discarded, resulting in a
+					large data set.
+					A value of 10 means that almost every point except those at the
+					ends of paths will be discarded.
+				</div>
+			</div>
+		</div>
 	</fieldset>
 </template>
 
