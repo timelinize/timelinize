@@ -17,3 +17,7 @@
 	min-width: 0;
 	width: 0;
 }
+
+td {
+	word-break: break-all;
+}
