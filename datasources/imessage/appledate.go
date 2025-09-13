@@ -36,28 +36,28 @@ func ParseCocoaDate(date string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("parsing string '%s' as float: %w", date, err)
 	}
 	sec, fraction := math.Modf(fractionalSeconds)
-	return time.Unix(int64(sec)+timestampOffsetSeconds, int64(fraction*nanoToSec)), nil
+	return time.Unix(int64(sec)+timestampOffsetSeconds, int64(fraction*nanoToSec)).UTC(), nil
 }
 
 // CocoaSecondsToTime converts Apple timestamp in seconds to a normal timestamp.
 func CocoaSecondsToTime(appleSec int64) time.Time {
-	return time.Unix(appleSec+timestampOffsetSeconds, 0)
+	return time.Unix(appleSec+timestampOffsetSeconds, 0).UTC()
 }
 
 // CocoaNanoToTime converts Apple timestamp in nanoseconds to a normal timestamp.
 func CocoaNanoToTime(appleNano int64) time.Time {
 	sec, nano := appleNano/nanoToSec, appleNano%nanoToSec
-	return time.Unix(sec+timestampOffsetSeconds, nano)
+	return time.Unix(sec+timestampOffsetSeconds, nano).UTC()
 }
 
 // TimeToCocoaSecondsWithMilli returns the given time in seconds since the Cocoa epoch
 // with millisecond decimal precision.
 func TimeToCocoaSecondsWithMilli(t time.Time) float64 {
-	return float64(t.UnixMilli()-timestampOffsetSeconds*milliToSec) / milliToSec
+	return float64(t.UTC().UnixMilli()-timestampOffsetSeconds*milliToSec) / milliToSec
 }
 
 func TimeToCocoaNano(t time.Time) int64 {
-	return t.UnixNano() - timestampOffsetSeconds*nanoToSec
+	return t.UTC().UnixNano() - timestampOffsetSeconds*nanoToSec
 }
 
 const (

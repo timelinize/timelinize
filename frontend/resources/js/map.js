@@ -124,7 +124,7 @@ async function loadAndRenderMapData() {
 		// compute actual time range (time between first and last item)
 		let actualTimeframeSeconds = 0, firstItemTimestamp, lastItemTimestamp;
 		if (newMapData.items.length > 0) {
-			firstItemTimestamp = newMapData.items[0].timestamp;
+			firstItemTimestamp = newMapData.items[0].timespan ? newMapData.items[0].timespan : newMapData.items[0].timestamp;
 			lastItemTimestamp = newMapData.items[newMapData.items.length - 1].timestamp;
 			actualTimeframeSeconds = Math.abs(firstItemTimestamp.diff(lastItemTimestamp).toFormat('s'));
 		}
