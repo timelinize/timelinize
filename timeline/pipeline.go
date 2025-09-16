@@ -338,7 +338,7 @@ func (p *processor) downloadDataFile(it *Item, source io.Reader, destination *os
 
 	h := newHash()
 
-	dataFileSize, err := p.downloadAndHashDataFile(source, destination, h)
+	dataFileSize, err := p.downloadAndHashDataFile(source, destination, h, path.Dir(it.dataFilePath))
 	if err != nil {
 		return err
 	}
@@ -458,7 +458,22 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 
 // downloadAndHashDataFile writes source to destination, hashing it along the way.
 // It returns the number of bytes copied.
-func (p *processor) downloadAndHashDataFile(source io.Reader, destination *os.File, h hash.Hash) (int64, error) {
+func (p *processor) downloadAndHashDataFile(source io.Reader, destination *os.File, h hash.Hash, destinationDir string) (int64, error) {
+	// writing a data file consists of non-atomic steps: creating directory, writing the
+	// file, and cleaning up the file and its empty dir tree if the file was empty; and
+	// since data files are downloaded concurrently, we need to sync these steps, otherwise
+	// it's possible to delete a directory that another file is writing into... so we keep
+	// track of which directories are in use while creating data files, and when we're
+	// done, we can remove the "lock" on that directory
+	defer func() {
+		p.tl.dataFileWorkingDirsMu.Lock()
+		p.tl.dataFileWorkingDirs[destinationDir]--
+		if p.tl.dataFileWorkingDirs[destinationDir] == 0 {
+			delete(p.tl.dataFileWorkingDirs, destinationDir)
+		}
+		p.tl.dataFileWorkingDirsMu.Unlock()
+	}()
+
 	// give the hasher a copy of the file bytes
 	tr := io.TeeReader(source, h)
 

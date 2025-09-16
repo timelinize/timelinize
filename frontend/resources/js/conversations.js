@@ -160,6 +160,8 @@ async function renderConversations() {
 	const end = DateTime.now();
 	const duration = end.diff(start, 'seconds');
 
+	console.log("RECENT CONVERSATIONS:", results);
+
 	// delete prior results
 	$('#convos-container').replaceChildren();
 
@@ -180,6 +182,7 @@ async function renderConversations() {
 		let tooltipNames = [];
 		const maxRenderNames = 3;
 		const maxTooltipNames = 10;
+		console.log("CONVO:", convo);
 		for (const entity of convo.entities) {
 			const display = entity.name || entity.attributes[0].value;
 			const displayTooltip = entity.name ? entity.attributes[0].value : "";
@@ -209,15 +212,16 @@ async function renderConversations() {
 		// render avatars
 		const maxAvatars = 5;
 		let more = "";
+		let entitiesWithAvatars = [];
 		if (convo.entities.length > maxAvatars) {
 			more = `<span
 					title="${convo.entities.length-maxAvatars} more"
 					class="avatar avatar-sm avatar-rounded">
 					+${convo.entities.length-maxAvatars}
 				</span>`;
-			convo.entities = convo.entities.slice(0, maxAvatars);
+			entitiesWithAvatars = convo.entities.slice(0, maxAvatars);
 		}
-		const avatars = convo.entities.map((e)=>`<a href="/entities/${e.id}" title="${e.name || e.attributes[0].value}">${avatar(true, e, "avatar-sm avatar-rounded")}</a>`).join("");
+		const avatars = entitiesWithAvatars.map((e)=>`<a href="/entities/${e.id}" title="${e.name || e.attributes[0].value}">${avatar(true, e, "avatar-sm avatar-rounded")}</a>`).join("");
 		$('.avatar-list', elem).innerHTML = avatars+more;
 
 		// attach the conversation info to the card so we can fill out the filter when clicked
@@ -398,6 +402,7 @@ on('click', '#convos-container .card-link', event => {
 	ts.clear();
 	ts.clearOptions();
 	for (const entity of convoCard.conversation.entities) {
+		console.log("ADDING ENTITY:", entity.id, entity.name);
 		ts.addOption(entity);
 		ts.addItem(entity.id, true); // true = don't fire event (the updated filter gets submitted later)
 	}

@@ -54,6 +54,12 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, logger 
 
 	dir := tl.canonicalItemDataFileDir(it, dataSourceID)
 
+	// let the timeline know we're working in this directory (creating the dir, and creating the file in the dir,
+	// are not an atomic operation, so we want to avoid deleting an empty folder during parallel downloads)
+	tl.dataFileWorkingDirsMu.Lock()
+	tl.dataFileWorkingDirs[dir]++
+	tl.dataFileWorkingDirsMu.Unlock()
+
 	err := os.MkdirAll(tl.FullPath(dir), 0700)
 	if err != nil {
 		return nil, "", fmt.Errorf("making directory for data file: %w", err)
@@ -68,10 +74,10 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, logger 
 	const randSuffixLen = 4
 
 	// TODO: If this isn't enough iterations (for some reason!?) we can either increase the iteration count, or try an outer loop that extends the randSuffixLen to 5, even 6 chars.
-	for i := range 10 {
+	for namingAttempt := range 10 {
 		// build the filepath to try; only add randomness to the filename if the original name isn't available
 		tryPath := path.Join(dir, canonicalFilenameWithoutExt)
-		if i > 0 {
+		if namingAttempt > 0 {
 			tryPath += "__" + safeRandomString(randSuffixLen, true, nil) // same case == true for portability to case-insensitive file systems
 		}
 		tryPath += canonicalFilenameExt

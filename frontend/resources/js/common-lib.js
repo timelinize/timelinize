@@ -1917,12 +1917,12 @@ function renderMessageItem(item, options) {
 		for (const rel of item.related) {
 			if (rel.label == 'attachment' && rel.to_item) {
 				$('.attachments', elem).classList.remove('d-none');
-				if (rel.to_item.data_type.startsWith('image/')) {
+				if (rel.to_item.data_type?.startsWith('image/')) {
 					let imgTag = document.createElement('span');
 					imgTag.classList.add("avatar", "avatar-xl", "m-1");
 					imgTag.style.backgroundImage = `url('${itemImgSrc(rel.to_item, true)}')`;
 					$('.attachments', elem).appendChild(imgTag);
-				} else if (rel.to_item.data_type.startsWith('video/')) {
+				} else if (rel.to_item?.data_type?.startsWith('video/')) {
 					let videoTag = document.createElement('video');
 					videoTag.src = `/repo/${item.repo_id}/${rel.to_item.data_file}`;
 					videoTag.setAttribute('type', rel.to_item.data_type);

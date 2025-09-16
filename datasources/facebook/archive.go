@@ -26,10 +26,12 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -50,6 +52,7 @@ const (
 	year2024YourVideosPath              = "your_facebook_activity/posts/your_videos.json"
 	year2024YourPostsPrefix             = "your_facebook_activity/posts/your_posts__check_ins__photos_and_videos_"
 	year2024MessagesPrefix              = "your_facebook_activity/messages"
+	year2024PostMediaPrefix             = "your_facebook_activity/posts/media"
 )
 
 // Archive implements the importer for Facebook archives.
@@ -63,13 +66,14 @@ func (Archive) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeli
 		dirEntry.FileExists(year2024ProfileInfoPath) {
 		return timeline.Recognition{Confidence: 1}, nil
 	}
+	if strings.HasPrefix(dirEntry.Name(), "facebook-") {
+		return timeline.Recognition{Confidence: .9}, nil
+	}
 	return timeline.Recognition{}, nil
 }
 
 // FileImport imports the data in the file.
 func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	// dsOpt := opt.DataSourceOptions.(*Options)
-
 	if err := a.setOwnerEntity(dirEntry); err != nil {
 		return err
 	}
@@ -100,6 +104,13 @@ func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 		if err != nil {
 			return fmt.Errorf("processing %s: %w", postsFilename, err)
 		}
+	}
+
+	// post media (done separately since they may not be in the same archive as the JSON manifest)
+	if err := a.processPostMedia(ctx, dirEntry, params, []string{
+		year2024PostMediaPrefix,
+	}); err != nil {
+		return fmt.Errorf("processing post media: %w", err)
 	}
 
 	// uncategorized photos
@@ -255,6 +266,67 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 		}
 
 		params.Pipeline <- ig
+	}
+
+	return nil
+}
+
+func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string) error {
+	file, err := tlDirEntry.FS.Open(pathsToTry[0])
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	err = fs.WalkDir(tlDirEntry.FS, year2024PostMediaPrefix, func(fpath string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			return fmt.Errorf("visiting %s: %w", fpath, err)
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		it := &timeline.Item{
+			Classification:       timeline.ClassMedia,
+			IntermediateLocation: fpath,
+			Owner:                a.owner,
+			Content: timeline.ItemData{
+				Filename: d.Name(),
+				Size:     uint64(info.Size()), //nolint:gosec // Sigh, yes, I know this can overflow... but will it really??
+				Data: func(_ context.Context) (io.ReadCloser, error) {
+					return tlDirEntry.Open(fpath)
+				},
+			},
+		}
+
+		_, err = media.ExtractAllMetadata(opt.Log, tlDirEntry.FS, fpath, it, timeline.MetaMergeAppend)
+		if err != nil {
+			opt.Log.Error("extracting metadata from Facebook media",
+				zap.String("file", fpath),
+				zap.Error(err))
+		}
+
+		retKey := retrievalKey(tlDirEntry, fpath)
+		it.Retrieval.SetKey(retKey)
+		it.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+			"data":     timeline.UpdatePolicyPreferIncoming,
+			"metadata": timeline.UpdatePolicyKeepExisting,
+		}
+
+		opt.Pipeline <- &timeline.Graph{Item: it}
+
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -507,6 +579,19 @@ type fbArchiveMedia struct {
 }
 
 func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postText string, logger *zap.Logger) {
+	// the media item might not be in this archive if it's a multi-archive export, so set a retrieval key so we can
+	// fill the item in later
+	retKey := retrievalKey(d, m.URI)
+	item.Retrieval.SetKey(retKey)
+	item.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+		"intermediate_location": timeline.UpdatePolicyPreferExisting,
+		"timestamp":             timeline.UpdatePolicyPreferIncoming,
+		"location":              timeline.UpdatePolicyPreferIncoming,
+		"owner":                 timeline.UpdatePolicyPreferIncoming,
+		"data":                  timeline.UpdatePolicyPreferExisting,
+		"metadata":              timeline.UpdatePolicyPreferIncoming,
+	}
+
 	if m.CreationTimestamp > 0 {
 		item.Timestamp = time.Unix(m.CreationTimestamp, 0).UTC()
 	}
@@ -514,9 +599,8 @@ func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postT
 	if item.Content.Data == nil {
 		item.Content = timeline.ItemData{
 			Filename: path.Base(m.URI),
-			Data: func(_ context.Context) (io.ReadCloser, error) {
-				return d.FS.Open(m.URI)
-			},
+			// don't set the Data func here, because it might not be in this archive at all;
+			// we traverse media folder separately and use retrieval key to fill in the data file
 		}
 	}
 
@@ -575,6 +659,16 @@ func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postT
 			item.Metadata["Upload timestamp"] = time.Unix(exif.UploadTimestamp, 0).UTC()
 		}
 	}
+}
+
+func retrievalKey(d timeline.DirEntry, pathOrURI string) string {
+	archiveName := filepath.Base(d.FullPath())
+	splitAt := strings.LastIndex(archiveName, "-")
+	exportID := archiveName
+	if splitAt > -1 {
+		exportID = archiveName[:splitAt]
+	}
+	return fmt.Sprintf("facebook::%s::%s", exportID, pathOrURI)
 }
 
 type fbMessengerThread struct {

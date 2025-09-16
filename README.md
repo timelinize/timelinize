@@ -127,6 +127,8 @@ This sets up a docker container with all the dependencies required for building 
 
 ## Motivation and vision
 
+(For roadmap, see [issues tagged `long-term 🔭`](https://github.com/timelinize/timelinize/issues?q=is%3Aissue%20label%3A%22long-term%20%F0%9F%94%AD%22).)
+
 The motivation for this project is two-fold. Both press upon me with a sense of urgency, which is why I dedicated some nights and weekends to work on this.
 
 1. Connecting with my family -- both living and deceased -- is important to me and my close relatives. But I wish we had more insights into the lives of those who came before us. What was important to them? Where did they live / travel / spend their time? What lessons did they learn? How did global and local events -- or heck, even the weather -- affect them? What hardships did they endure? What would they have wanted to remember? What would it be like to talk to them? A lot of this could not be known unless they wrote it all down. But these days, we have that data for ourselves. What better time than right now to start collecting personal histories from all available sources and develop a rich timeline of our life for our family, or even just for our own reference and nostalgia.

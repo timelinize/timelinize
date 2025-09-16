@@ -43,7 +43,7 @@ import (
 
 // Timeline represents an opened timeline repository.
 // The zero value is NOT valid; use Open() to obtain
-// a valid value.
+// a valid value. Timeline values MUST NOT be copied.
 type Timeline struct {
 	// A context used primarily for cancellation.
 	ctx    context.Context
@@ -66,6 +66,12 @@ type Timeline struct {
 	// currently-running jobs for this timeline
 	activeJobs   map[uint64]*ActiveJob
 	activeJobsMu sync.RWMutex
+
+	// keeps track of which data file directories are being worked, and
+	// by how many goroutines; this is useful so we don't accidentally
+	// delete an empty directory that may still have a file created in it
+	dataFileWorkingDirs   map[string]int
+	dataFileWorkingDirsMu sync.Mutex
 
 	// The database handle and its mutex. Why a mutex for a DB handle? Because
 	// high-volume imports can sometimes yield "database is locked" errors,
@@ -400,20 +406,21 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	ctx, cancel := context.WithCancel(context.Background())
 
 	tl := &Timeline{
-		ctx:             ctx,
-		cancel:          cancel,
-		repoDir:         repoDir,
-		cacheDir:        cacheDir,
-		rateLimiters:    make(map[int64]RateLimit),
-		id:              id,
-		db:              db,
-		thumbs:          thumbsDB,
-		optimizing:      new(int64),
-		dataSources:     dbDataSources,
-		classifications: classes,
-		entityTypes:     entityTypes,
-		relations:       relations,
-		activeJobs:      make(map[uint64]*ActiveJob),
+		ctx:                 ctx,
+		cancel:              cancel,
+		repoDir:             repoDir,
+		cacheDir:            cacheDir,
+		rateLimiters:        make(map[int64]RateLimit),
+		id:                  id,
+		db:                  db,
+		thumbs:              thumbsDB,
+		optimizing:          new(int64),
+		dataSources:         dbDataSources,
+		classifications:     classes,
+		entityTypes:         entityTypes,
+		relations:           relations,
+		activeJobs:          make(map[uint64]*ActiveJob),
+		dataFileWorkingDirs: make(map[string]int),
 	}
 
 	// start maintenance goroutine; this erases items that have been
@@ -1238,6 +1245,15 @@ func (tl *Timeline) deleteRepoFile(pathInRepo string) error {
 // to the repo path, until there are no more folders left to bubble up.
 func (tl *Timeline) cleanDirs(pathInRepo string) error {
 	for p := path.Dir(pathInRepo); p != "."; p = path.Dir(p) {
+		// if the directory is being actively utilized (a data file is about to be
+		// created and downloaded into it), don't delete it, or any of its parents
+		tl.dataFileWorkingDirsMu.Lock()
+		usageCount := tl.dataFileWorkingDirs[p]
+		tl.dataFileWorkingDirsMu.Unlock()
+		if usageCount > 0 {
+			break
+		}
+
 		fullPath := tl.FullPath(p)
 		isEmpty, _, err := directoryEmpty(fullPath, true)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
