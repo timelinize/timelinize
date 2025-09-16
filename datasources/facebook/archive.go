@@ -53,6 +53,7 @@ const (
 	year2024YourPostsPrefix             = "your_facebook_activity/posts/your_posts__check_ins__photos_and_videos_"
 	year2024MessagesPrefix              = "your_facebook_activity/messages"
 	year2024PostMediaPrefix             = "your_facebook_activity/posts/media"
+	year2024AlbumPrefix                 = "your_facebook_activity/posts/album"
 )
 
 // Archive implements the importer for Facebook archives.
@@ -104,6 +105,13 @@ func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 		if err != nil {
 			return fmt.Errorf("processing %s: %w", postsFilename, err)
 		}
+	}
+
+	// album media
+	if err := a.processAlbumFiles(ctx, dirEntry, params, []string{
+		year2024AlbumPrefix,
+	}); err != nil {
+		return fmt.Errorf("processing album folder: %w", err)
 	}
 
 	// post media (done separately since they may not be in the same archive as the JSON manifest)
@@ -272,61 +280,156 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 }
 
 func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string) error {
-	file, err := tlDirEntry.FS.Open(pathsToTry[0])
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	err = fs.WalkDir(tlDirEntry.FS, year2024PostMediaPrefix, func(fpath string, d fs.DirEntry, err error) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+	for i, pathToTry := range pathsToTry {
+		file, err := tlDirEntry.FS.Open(pathToTry)
 		if err != nil {
-			return fmt.Errorf("visiting %s: %w", fpath, err)
+			if i == len(pathsToTry)-1 {
+				return fmt.Errorf("could not open any known post media folder: %w - tried: %v", err, pathsToTry)
+			}
+			continue
 		}
-		if d.IsDir() {
-			return nil
-		}
+		defer file.Close()
 
-		info, err := d.Info()
+		err = fs.WalkDir(tlDirEntry.FS, pathToTry, func(fpath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return fmt.Errorf("visiting %s: %w", fpath, err)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+
+			it := &timeline.Item{
+				Classification:       timeline.ClassMedia,
+				IntermediateLocation: fpath,
+				Owner:                a.owner,
+				Content: timeline.ItemData{
+					Filename: d.Name(),
+					Size:     uint64(info.Size()), //nolint:gosec // Sigh, yes, I know this can overflow... but will it really??
+					Data: func(_ context.Context) (io.ReadCloser, error) {
+						return tlDirEntry.Open(fpath)
+					},
+				},
+			}
+
+			_, err = media.ExtractAllMetadata(opt.Log, tlDirEntry.FS, fpath, it, timeline.MetaMergeAppend)
+			if err != nil {
+				opt.Log.Error("extracting metadata from Facebook media",
+					zap.String("file", fpath),
+					zap.Error(err))
+			}
+
+			retKey := retrievalKey(tlDirEntry, fpath)
+			it.Retrieval.SetKey(retKey)
+			it.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+				"data":     timeline.UpdatePolicyPreferIncoming,
+				"metadata": timeline.UpdatePolicyKeepExisting,
+			}
+
+			opt.Pipeline <- &timeline.Graph{Item: it}
+
+			return nil
+		})
 		if err != nil {
 			return err
 		}
 
-		it := &timeline.Item{
-			Classification:       timeline.ClassMedia,
-			IntermediateLocation: fpath,
-			Owner:                a.owner,
-			Content: timeline.ItemData{
-				Filename: d.Name(),
-				Size:     uint64(info.Size()), //nolint:gosec // Sigh, yes, I know this can overflow... but will it really??
-				Data: func(_ context.Context) (io.ReadCloser, error) {
-					return tlDirEntry.Open(fpath)
-				},
-			},
-		}
+		break
+	}
 
-		_, err = media.ExtractAllMetadata(opt.Log, tlDirEntry.FS, fpath, it, timeline.MetaMergeAppend)
+	return nil
+}
+
+func (a Archive) processAlbumFiles(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string) error {
+	for i, pathToTry := range pathsToTry {
+		file, err := tlDirEntry.FS.Open(pathToTry)
 		if err != nil {
-			opt.Log.Error("extracting metadata from Facebook media",
-				zap.String("file", fpath),
-				zap.Error(err))
+			if i == len(pathsToTry)-1 {
+				return fmt.Errorf("could not open any known post media folder: %w - tried: %v", err, pathsToTry)
+			}
+			continue
+		}
+		defer file.Close()
+
+		err = fs.WalkDir(tlDirEntry.FS, pathToTry, func(fpath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return fmt.Errorf("visiting %s: %w", fpath, err)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			f, err := tlDirEntry.Open(fpath)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			var albumInfo fbAlbumMeta
+			if err := json.NewDecoder(f).Decode(&albumInfo); err != nil {
+				return fmt.Errorf("decoding album file: %s: %w", fpath, err)
+			}
+
+			for _, entry := range albumInfo.Photos {
+				if entry.URI == "" {
+					continue
+				}
+				it := &timeline.Item{
+					Classification:       timeline.ClassMedia,
+					IntermediateLocation: entry.URI,
+					Owner:                a.owner,
+					Timestamp:            time.Unix(entry.CreationTimestamp, 0).UTC(), // this is not when the photo was taken, but we'll get that later, if it's in the actual photo itself
+					Content: timeline.ItemData{
+						Filename: path.Base(entry.URI),
+					},
+					Metadata: timeline.Metadata{
+						"Description": entry.Description,
+					},
+				}
+				it.Retrieval.SetKey(retrievalKey(tlDirEntry, entry.URI))
+				it.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+					"intermediate_location": timeline.UpdatePolicyPreferExisting,
+					"timestamp":             timeline.UpdatePolicyPreferExisting,
+					"location":              timeline.UpdatePolicyPreferIncoming,
+					"owner":                 timeline.UpdatePolicyPreferIncoming,
+					"data":                  timeline.UpdatePolicyPreferExisting,
+					"metadata":              timeline.UpdatePolicyPreferIncoming,
+				}
+
+				g := &timeline.Graph{Item: it}
+
+				// add photo to album
+				g.ToItem(timeline.RelInCollection, &timeline.Item{
+					Classification: timeline.ClassCollection,
+					Content: timeline.ItemData{
+						Data: timeline.StringData(albumInfo.Name),
+					},
+					Owner: a.owner,
+					Metadata: timeline.Metadata{
+						"Description": albumInfo.Description,
+					},
+				})
+
+				opt.Pipeline <- g
+			}
+
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 
-		retKey := retrievalKey(tlDirEntry, fpath)
-		it.Retrieval.SetKey(retKey)
-		it.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
-			"data":     timeline.UpdatePolicyPreferIncoming,
-			"metadata": timeline.UpdatePolicyKeepExisting,
-		}
-
-		opt.Pipeline <- &timeline.Graph{Item: it}
-
-		return nil
-	})
-	if err != nil {
-		return err
+		break
 	}
 
 	return nil
@@ -550,22 +653,7 @@ type fbArchiveMedia struct {
 	CreationTimestamp int64  `json:"creation_timestamp"`
 	MediaMetadata     struct {
 		PhotoMetadata *struct {
-			EXIFData []struct {
-				ISO               int     `json:"iso"`
-				FocalLength       string  `json:"focal_length"`
-				UploadIP          string  `json:"upload_ip"`
-				TakenTimestamp    int64   `json:"taken_timestamp"`
-				ModifiedTimestamp int64   `json:"modified_timestamp"`
-				CameraMake        string  `json:"camera_make"`
-				CameraModel       string  `json:"camera_model"`
-				Exposure          string  `json:"exposure"`
-				FStop             string  `json:"f_stop"`
-				Orientation       int     `json:"orientation"`
-				OriginalWidth     int     `json:"original_width"`
-				OriginalHeight    int     `json:"original_height"`
-				Latitude          float64 `json:"latitude"`
-				Longitude         float64 `json:"longitude"`
-			} `json:"exif_data"`
+			EXIFData []fbEXIFData `json:"exif_data"`
 		} `json:"photo_metadata"`
 		VideoMetadata *struct {
 			EXIFData []struct {
@@ -591,6 +679,8 @@ func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postT
 		"data":                  timeline.UpdatePolicyPreferExisting,
 		"metadata":              timeline.UpdatePolicyPreferIncoming,
 	}
+
+	item.IntermediateLocation = m.URI
 
 	if m.CreationTimestamp > 0 {
 		item.Timestamp = time.Unix(m.CreationTimestamp, 0).UTC()
@@ -719,6 +809,51 @@ func (thread fbMessengerThread) sentTo(senderName, dsName string) []*timeline.En
 		})
 	}
 	return sentTo
+}
+
+type fbAlbumMeta struct {
+	Name   string `json:"name"`
+	Photos []struct {
+		URI               string `json:"uri"`
+		CreationTimestamp int64  `json:"creation_timestamp"`
+		MediaMetadata     struct {
+			PhotoMetadata struct {
+				EXIFData []fbEXIFData `json:"exif_data"`
+			} `json:"photo_metadata"`
+		} `json:"media_metadata"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	} `json:"photos"`
+	CoverPhoto struct {
+		URI               string `json:"uri"`
+		CreationTimestamp int64  `json:"creation_timestamp"`
+		MediaMetadata     struct {
+			PhotoMetadata struct {
+				EXIFData []fbEXIFData `json:"exif_data"`
+			} `json:"photo_metadata"`
+		} `json:"media_metadata"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	} `json:"cover_photo"`
+	LastModifiedTimestamp int64  `json:"last_modified_timestamp"`
+	Description           string `json:"description"`
+}
+
+type fbEXIFData struct {
+	ISO               int     `json:"iso"`
+	FocalLength       string  `json:"focal_length"`
+	UploadIP          string  `json:"upload_ip"`
+	TakenTimestamp    int64   `json:"taken_timestamp"`
+	ModifiedTimestamp int64   `json:"modified_timestamp"`
+	CameraMake        string  `json:"camera_make"`
+	CameraModel       string  `json:"camera_model"`
+	Exposure          string  `json:"exposure"`
+	FStop             string  `json:"f_stop"`
+	Orientation       int     `json:"orientation"`
+	OriginalWidth     int     `json:"original_width"`
+	OriginalHeight    int     `json:"original_height"`
+	Latitude          float64 `json:"latitude"`
+	Longitude         float64 `json:"longitude"`
 }
 
 var wroteOnOtherTimelineRegex = regexp.MustCompile(`.* wrote on (.*)'s timeline.`)

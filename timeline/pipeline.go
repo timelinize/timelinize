@@ -347,6 +347,7 @@ func (p *processor) downloadDataFile(it *Item, source io.Reader, destination *os
 		// don't keep empty data files laying around
 		p.log.Warn("downloaded data file was empty; removing file",
 			zap.String("item_original_id", it.ID),
+			zap.String("intermediate_path", it.IntermediateLocation),
 			zap.String("data_file_name", it.dataFilePath),
 			zap.Int64("bytes_written", it.dataFileSize))
 
