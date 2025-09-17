@@ -477,21 +477,6 @@ func (ij ImportJob) successCleanup() error {
 // deleteEmptyItems deletes items that have no content and no meaningful relationships,
 // from the given import.
 func (ij ImportJob) deleteEmptyItems() error {
-	// TODO: we can perform the deletes all at once with the commented query below,
-	// but it does not account for cleaning up the data files, which should only
-	// be done if they're only used by the one item -- maybe we could use `RETURNING data_file` to take care of this?
-	/*
-		DELETE FROM items WHERE id IN (SELECT id FROM items
-			WHERE job_id=?
-			AND (data_text IS NULL OR data_text='')
-				AND data_file IS NULL
-				AND longitude IS NULL
-				AND latitude IS NULL
-				AND altitude IS NULL
-				AND retrieval_key IS NULL
-				AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL))
-	*/
-
 	// we actually keep rows with no content if they are in a relationship, or if
 	// they have a retrieval key, which implies that they will be completed later
 	// (bookmark items are also a special case: they may be empty, to later be populated
@@ -506,7 +491,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 			AND latitude IS NULL
 			AND altitude IS NULL
 			AND retrieval_key IS NULL
-			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL)`,
+			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL OR to_attribute_id IS NOT NULL)`,
 		ij.job.id, ClassBookmark.Name) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
 	if err != nil {
 		ij.job.tl.dbMu.RUnlock()

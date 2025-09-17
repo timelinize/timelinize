@@ -777,15 +777,15 @@ func sameJSON(a, b any) bool {
 var (
 	// TODO: rename to RelAttaches? (and label to "attaches"?)
 	RelAttachment   = Relation{Label: "attachment", Directed: true, Subordinating: true} // "<from_item> has attachment <to_item>", or "<to> is attached to <from>"
-	RelSent         = Relation{Label: "sent", Directed: true}                            // "<from_item> was sent to <to_person>"
-	RelCCed         = Relation{Label: "cc", Directed: true}                              // "<from_item> is carbon-copied to <to_person>"
+	RelSent         = Relation{Label: "sent", Directed: true}                            // "<from_item> was sent to <to_entity>"
+	RelCCed         = Relation{Label: "cc", Directed: true}                              // "<from_item> is carbon-copied to <to_entity>"
 	RelReply        = Relation{Label: "reply", Directed: true}                           // "<from_item> is reply to <to_item>"
 	RelQuotes       = Relation{Label: "quotes", Directed: true}                          // "<from_item> quotes <to>", or "<to> is quoted by <from>"
 	RelReacted      = Relation{Label: "reacted", Directed: true}                         // "<from_entity>" reacted to <to_item> with <value>"
 	RelInCollection = Relation{Label: "in_collection", Directed: true}                   // "<from_item> is in collection <to_item> at position <value>"
 	RelEdit         = Relation{Label: "edit", Directed: true, Subordinating: false}      // "<to_item> is edit of <from_item>" // TODO: set to true when we have a way of showing edits...
 	RelIncludes     = Relation{Label: "includes", Directed: true}                        // "<from_item> includes <to>" (has, depicts, portrays, contains... doesn't have to be item->entity either)
-	RelVisit        = Relation{Label: "visit", Directed: true}                           // "<from_item> is a visit to/with <to_entity>"
+	RelVisit        = Relation{Label: "visit", Directed: true}                           // "<from_item/entity> is a visit to/with <to_item/entity>"
 	// RelTranscript = Relation{Label: "transcript", Directed: true, Subordinating: true} // "<from_item> is transcribed by <to_item>"
 )
 
@@ -1169,7 +1169,7 @@ var (
 	ClassMessage  = getClassification("message")
 	ClassEmail    = getClassification("email")
 	ClassSocial   = getClassification("social")
-	ClassLocation = getClassification("location")
+	ClassLocation = getClassification("location") // ideally has a coordinate, but could also represent the attribute_id's visit to a named place at a certain time (TODO: Test that, does it actually work without coords?)
 	ClassMedia    = getClassification("media")
 	// ClassScreen = getClassification("screen") // TODO: call it screenshot maybe...? but screen recordings...
 	ClassCollection = getClassification("collection")
