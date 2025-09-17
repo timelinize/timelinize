@@ -203,6 +203,7 @@ async function itemPageMain() {
 			} else if ((rel.label == 'sent' || rel.label == 'cc') && rel.to_entity) {
 				$('#primary-entities').classList.remove('d-none');
 				$('#related-entities').classList.remove('d-none');
+				$('#related-entities-sent-to').classList.remove('d-none');
 
 				const entTpl = cloneTemplate('#tpl-related-entity');
 				
