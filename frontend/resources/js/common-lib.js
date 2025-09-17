@@ -1391,41 +1391,41 @@ function itemContentElement(item, opts) {
 			const container = document.createElement('div');
 
 			// if a thumbhash is available, render it while we load the full image/thumbnail
-			// if (item.thumb_hash) {
-			// 	const thumbHashWithAspectRatio = decodeBase64ToBytes(item.thumb_hash);
-			// 	const aspectRatioBytes = thumbHashWithAspectRatio.subarray(0, 4);
-			// 	const thumbHash = thumbHashWithAspectRatio.subarray(4);
-			// 	const aspectRatio = new DataView(aspectRatioBytes.buffer).getFloat32(0);
+			if (item.thumb_hash) {
+				const thumbHashWithAspectRatio = decodeBase64ToBytes(item.thumb_hash);
+				const aspectRatioBytes = thumbHashWithAspectRatio.subarray(0, 4);
+				const thumbHash = thumbHashWithAspectRatio.subarray(4);
+				const aspectRatio = new DataView(aspectRatioBytes.buffer).getFloat32(0);
 
-			// 	const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
-			// 	thumbhashImgTag.classList.add('thumbhash');
-			// 	thumbhashImgTag.style.aspectRatio = aspectRatio;
+				const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
+				thumbhashImgTag.classList.add('thumbhash');
+				thumbhashImgTag.style.aspectRatio = aspectRatio;
 
-			// 	container.classList.add('thumbhash-container', 'rounded');
+				container.classList.add('thumbhash-container', 'rounded');
 
-			// 	container.append(thumbhashImgTag);
+				container.append(thumbhashImgTag);
 
-			// 	if (imgTag) {
-			// 		// getting the preview image will take some time: hide the img tag until it's
-			// 		// done loading, and when it's done, swap the placeholder for, or show, the image
-			// 		imgTag.classList.add('invisible');
+				if (imgTag) {
+					// getting the preview image will take some time: hide the img tag until it's
+					// done loading, and when it's done, swap the placeholder for, or show, the image
+					imgTag.classList.add('invisible');
 
-			// 		// make final image appear directly over the thumbhash image
-			// 		imgTag.classList.add('absolute');
+					// make final image appear directly over the thumbhash image
+					imgTag.classList.add('absolute');
 
-			// 		// when the image has loaded, fade in the picture over the thumbhash
-			// 		imgTag.addEventListener('load', function() {
-			// 			imgTag.classList.add('fade-in');
-			// 			imgTag.classList.remove('invisible');
-			// 			// TODO: This is used on the item page where the image may be replaced by the motionpic...
-			// 			setTimeout(function() {
-			// 				imgTag.classList.remove('fade-in');
-			// 			}, 1000);
-			// 		});
+					// when the image has loaded, fade in the picture over the thumbhash
+					imgTag.addEventListener('load', function() {
+						imgTag.classList.add('fade-in');
+						imgTag.classList.remove('invisible');
+						// TODO: This is used on the item page where the image may be replaced by the motionpic...
+						setTimeout(function() {
+							imgTag.classList.remove('fade-in');
+						}, 1000);
+					});
 
-			// 		container.append(imgTag);
-			// 	}
-			// } else {
+					container.append(imgTag);
+				}
+			} else {
 				const loaderSupercontainer = cloneTemplate('#loader-container');
 				$('.loading-message', loaderSupercontainer).innerText = "Rendering preview";
 
@@ -1451,7 +1451,7 @@ function itemContentElement(item, opts) {
 					}, 1000);
 					
 				});
-			// }
+			}
 
 			return container;
 		}
