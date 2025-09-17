@@ -160,19 +160,18 @@ body {
 
 .loader-supercontainer {
 	position: relative;
+	display: grid;
+	place-items: stretch;
+	height: 100%;
+	overflow: hidden; /* mainly for rounded corners, so the sharp corners don't stick out */
+}
+
+.loader-supercontainer > * {
+	grid-area: 1 / 1; /* the content and the loader are superimposed on each other, without position: absolute -- neat! now the container considers both elements' sizes */
 }
 
 .loader-container {
 	padding: 1rem;
-	min-width: 150px;
-	width: 100%;
-	border-radius: 5px;
-
-	position: absolute;
-	top: 0;
-	bottom: 0;
-	left: 0;
-	right: 0;
 }
 
 .loader-container-content {
@@ -583,6 +582,12 @@ styles. But it took hours to figure them out!
 
 .content {
 	border-radius: var(--tblr-border-radius);
+}
+
+.card-img-top .content, /* images */
+.card-img-top.content { /* videos */
+	border-bottom-left-radius: 0;
+	border-bottom-right-radius: 0;
 }
 
 
