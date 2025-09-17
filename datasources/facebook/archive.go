@@ -311,7 +311,7 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 				// }
 				// attachedItem.Metadata["Description"] = newDescription
 
-				if attachedItem.Content.Data != nil {
+				if attachedItem.Content.Data != nil || attachedItem.Content.Filename != "" {
 					ig.ToItem(timeline.RelAttachment, attachedItem)
 				}
 			}
@@ -437,7 +437,7 @@ func (a Archive) processAlbumFiles(ctx context.Context, tlDirEntry timeline.DirE
 						Filename: path.Base(entry.URI),
 					},
 					Metadata: timeline.Metadata{
-						"Description": entry.Description,
+						"Description": FixString(entry.Description),
 					},
 				}
 				it.Retrieval.SetKey(retrievalKey(tlDirEntry, entry.URI))
@@ -460,7 +460,7 @@ func (a Archive) processAlbumFiles(ctx context.Context, tlDirEntry timeline.DirE
 					},
 					Owner: a.owner,
 					Metadata: timeline.Metadata{
-						"Description": albumInfo.Description,
+						"Description": FixString(albumInfo.Description),
 					},
 				})
 
