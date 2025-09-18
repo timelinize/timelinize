@@ -107,7 +107,7 @@
 	<div class="mb-3">
 		<div class="row">
 			<div class="col-auto">
-				<span class="avatar avatar-md" style="background-image: url(./static/avatars/002m.jpg)"></span>
+				<span class="avatar avatar-md"></span>
 			</div>
 			<div class="col">
 				<div class="mb-3">
@@ -115,6 +115,24 @@
 					<input type="text" class="sms_backup_restore-owner-phone form-control" placeholder="+1-123-456-7890"
 						required>
 					<small class="form-hint">The phone number that originated this file. A phone number is required, so if this is empty, the timeline owner's phone number will be used (if it is already in the timeline).</small>
+				</div>
+			</div>
+		</div>
+	</div>
+</template>
+
+<template id="tpl-dsopt-facebook">
+	<div class="mb-3">
+		<div class="row">
+			<div class="col-auto">
+				<span class="avatar avatar-md"></span>
+			</div>
+			<div class="col">
+				<div class="mb-3">
+					<label class="form-label required">Facebook account username</label>
+					<input type="text" class="facebook-owner-username form-control" placeholder="happy_person123"
+						required>
+					<small class="form-hint">The username of the Facebook account from which the data originated. A username is required, so if this is empty, the timeline owner's Facebook username will be used (if it is already in the timeline).</small>
 				</div>
 			</div>
 		</div>

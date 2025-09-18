@@ -30,9 +30,17 @@ func init() {
 		Name:            "facebook",
 		Title:           "Facebook",
 		Icon:            "facebook.svg",
+		NewOptions:      func() any { return new(Options) },
 		NewFileImporter: func() timeline.FileImporter { return new(Archive) },
 	})
 	if err != nil {
 		timeline.Log.Fatal("registering data source", zap.Error(err))
 	}
+}
+
+type Options struct {
+	// The Facebook username of the account from whence this data came.
+	// Required input, since with multi-archive exports, there's no
+	// guarantee that the profile information is in the first archive.
+	Username string `json:"username,omitempty"`
 }

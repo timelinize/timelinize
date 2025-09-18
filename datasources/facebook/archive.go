@@ -68,6 +68,9 @@ func (Archive) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeli
 		dirEntry.FileExists(year2024ProfileInfoPath) {
 		return timeline.Recognition{Confidence: 1}, nil
 	}
+	if dirEntry.FileExists("your_facebook_activity") {
+		return timeline.Recognition{Confidence: .95}, nil
+	}
 	if strings.HasPrefix(dirEntry.Name(), "facebook-") {
 		return timeline.Recognition{Confidence: .9}, nil
 	}
@@ -76,7 +79,9 @@ func (Archive) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeli
 
 // FileImport imports the data in the file.
 func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	if err := a.setOwnerEntity(dirEntry); err != nil {
+	dsOpt := params.DataSourceOptions.(*Options)
+
+	if err := a.setOwnerEntity(dirEntry, dsOpt); err != nil {
 		return err
 	}
 
@@ -650,10 +655,30 @@ func (Archive) loadProfileInfo(d timeline.DirEntry) (profileInfo, error) {
 	return profileInfo, err
 }
 
-func (a *Archive) setOwnerEntity(d timeline.DirEntry) error {
+func (a *Archive) setOwnerEntity(d timeline.DirEntry, options *Options) error {
 	profileInfo, err := a.loadProfileInfo(d)
+	if errors.Is(err, fs.ErrNotExist) {
+		// this archive doesn't contain profile info; that's expected with multi-archive exports
+		// for all the archives but one; so use the user-supplied username
+		a.owner = timeline.Entity{
+			Attributes: []timeline.Attribute{
+				{
+					Name:     "facebook_username",
+					Value:    options.Username,
+					Identity: true,
+				},
+			},
+		}
+		return nil
+	}
 	if err != nil {
 		return err
+	}
+
+	// these have to match to ensure the imported data is attributed consistently to the correct owner entity
+	if profileInfo.ProfileV2.Username != options.Username {
+		return fmt.Errorf("configured username (%q) does not match what is in the profile manifest: %q",
+			profileInfo.ProfileV2.Username, options.Username)
 	}
 
 	name := FixString(profileInfo.ProfileV2.Name.FullName)

@@ -495,6 +495,28 @@ async function dataSourceOptions(ds) {
 			return;
 		}
 	}
+	if (ds.name == "facebook") {
+		const ownerUsername = $('.facebook-owner-username', dsoptContainer);
+		if (ownerUsername.value) {
+			dsOpt = {
+				username: ownerUsername.value
+			};
+		} else {
+			// this DS requires we input the username of the account that created the data,
+			// so if the input field was left empty, ensure the repo owner has a username
+			const owner = await getOwner(tlz.openRepos[0]);
+			if (getEntityAttribute(owner, 'facebook_username').length == 0) {
+				ownerUsername.classList.add('is-invalid');
+				ownerUsername.classList.remove('is-valid');
+				throw {
+					elem: ownerUsername,
+					title: "Facebook username required",
+					message: "In order to properly associate this Facebook data with its owner, entering the username of the Facebook account it originated from is required. Please enter the Facebook account username (not email address)."
+				}
+			}
+			return;
+		}
+	}
 	if (ds.name == "google_location") {
 		dsOpt = {};
 		const owner = $('.google_location-owner', dsoptContainer).tomselect.getValue();
