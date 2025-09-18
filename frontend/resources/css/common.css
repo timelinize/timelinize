@@ -629,9 +629,8 @@ styles. But it took hours to figure them out!
 	max-height: 150px;
 	min-width: 180px;
 	max-width: 100%;
-	flex: 1;
 	object-fit: cover;
-	flex-basis: content;
+	align-self: stretch;
 }
 
 .minidisp-media .thumbhash-container .content {

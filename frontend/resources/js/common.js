@@ -145,6 +145,13 @@ function updateFilterResults() {
 	setTimeout(async function() {
 		// update the results
 		await tlz.currentPageController?.render();
+
+		// I find it's generally expected to start at the top of the results after updating filters
+		window.scrollTo({
+			top: 0,
+			left: 0,
+			behavior: 'instant'
+		});
 		
 		// after the rendering is complete, fade in results
 		// (need brief timeout to allow time for paint, I guess; otherwise browser just flashes in the content)

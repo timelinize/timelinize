@@ -710,7 +710,7 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 				"-an",
 
 				// bitrate, important quality determination
-				"-b:v", "128k", // constant bitrate, default is 256k
+				"-b:v", "256k", // constant bitrate, default is 256k
 				// "-crf", "40", // variable bitrate (slower encode), valid range for vpx is 4-63; higher number is lower quality
 
 				// we are already running concurrently, but if there's CPU cores available...
