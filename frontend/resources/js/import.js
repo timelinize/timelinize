@@ -392,7 +392,8 @@ on('click', '#start-import', async event => {
 				integrity: $('#integrity-checks').checked,
 				overwrite_local_changes: $('#overwrite-local-changes').checked,
 				item_unique_constraints: page.itemUniqueConstraints,
-				interactive: $('#interactive').checked ? {} : null
+				interactive: $('#interactive').checked ? {} : null,
+				thumbnails: $('#generate-thumbnails').checked
 			},
 			estimate_total: $('#estimate-total').checked
 		}

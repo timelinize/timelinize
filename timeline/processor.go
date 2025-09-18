@@ -177,6 +177,11 @@ type ProcessingOptions struct {
 	// time zone, by "lack a time zone" we mean the location is time.Local (i.e. "wall
 	// time"), which essentially means, "time zone unknown".
 	InferTimeZone bool `json:"infer_time_zone,omitempty"`
+
+	// Generate thumbnails of images and videos as they are processed, rather than waiting
+	// until the thumbnailing job after the import finishes. This uses more memory and
+	// slows down the import job during media items.
+	Thumbnails bool `json:"thumbnails,omitempty"`
 }
 
 type ctxKey string

@@ -532,6 +532,11 @@ func (ij ImportJob) deleteEmptyItems() error {
 // run after the import completes. It only creates a thumbnail job if there
 // are any imported items that qualify for a thumbnail.
 func (ij ImportJob) generateThumbnailsForImportedItems() {
+	// no-op if thumbnails were generated during the import
+	if ij.ProcessingOptions.Thumbnails {
+		return
+	}
+
 	thumbnailCount := atomic.LoadInt64(ij.thumbnailCount)
 	if thumbnailCount == 0 {
 		ij.job.Logger().Info("no items qualify for thumbnail, so skipping thumbnail generation job")

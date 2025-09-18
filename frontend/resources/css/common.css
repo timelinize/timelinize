@@ -169,7 +169,6 @@ body {
 .loader-supercontainer {
 	position: relative;
 	display: grid;
-	place-items: stretch;
 	height: 100%;
 	overflow: hidden; /* mainly for rounded corners, so the sharp corners don't stick out */
 }
@@ -180,6 +179,7 @@ body {
 
 .loader-container {
 	padding: 1rem;
+	place-self: stretch;
 }
 
 .loader-container-content {

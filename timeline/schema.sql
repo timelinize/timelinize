@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"coordinate_uncertainty" REAL, -- if nonzero, lat/lon values may be inaccurate by this amount (same unit as coordinates)
 	"note" TEXT,      -- optional user-added information
 	"starred" INTEGER, -- like a bookmark; TODO: different numbers indicate different kinds of stars or something?
-	"thumb_hash" BLOB, -- bytes of the ThumbHash that represent a visual preview of the item (https://evanw.github.io/thumbhash/ and https://github.com/evanw/thumbhash)
+	"thumb_hash" BLOB, -- bytes of the ThumbHash that represent a visual preview of the item (https://evanw.github.io/thumbhash/ and https://github.com/evanw/thumbhash) - prefixed with aspect ratio
 	"original_id_hash" BLOB, -- a hash of the data source and original ID of the item, also used for duplicate detection, optionally stored when item is deleted
 	"initial_content_hash" BLOB, -- a hash computed during initial import, used for duplicate detection (remains same even if item is modified by user)
 	"retrieval_key" BLOB UNIQUE, -- an optional opaque value that indicates this item may not be fully populated in a single import; not an ID but still a unique identifier

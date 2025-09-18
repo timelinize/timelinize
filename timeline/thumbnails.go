@@ -418,13 +418,17 @@ func (thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, star
 			// show for the user during longer tasks such that it isn't overwritten?
 			job.Message(task.DataFile)
 
-			_, thash, err := task.thumbnailAndThumbhash(job.Context(), task.DataID, task.DataFile)
+			thumb, thash, err := task.thumbnailAndThumbhash(job.Context())
 			if err != nil {
 				// don't terminate the job if there's an error
 				// TODO: but we should probably note somewhere in the job's row in the DB that this error happened... maybe?
 				logger.Error("thumbnail/thumbhash generation failed", zap.Error(err))
 			} else {
-				logger.Info("finished thumbnail", zap.Binary("thumb_hash", thash))
+				if thumb.alreadyExisted {
+					logger.Info("thumbnail already existed")
+				} else {
+					logger.Info("finished thumbnail", zap.Binary("thumb_hash", thash))
+				}
 			}
 
 			job.Progress(1)
@@ -459,47 +463,60 @@ type thumbnailTask struct {
 }
 
 // thumbnailAndThumbhash returns the thumbnail, even if this returns an error because thumbhash
-// generation fails, the thumbnail is still usable in yhat case.
-func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context, dataID int64, dataFile string) (Thumbnail, []byte, error) {
-	if dataID > 0 && dataFile != "" {
+// generation fails, the thumbnail is still usable in that case.
+func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context) (Thumbnail, []byte, error) {
+	if task.DataID > 0 && task.DataFile != "" {
 		// is the content in the DB or a file?? can't be both
 		panic("ambiguous thumbnail task given both dataID and dataFile")
 	}
-	thumb, err := task.generateAndStoreThumbnail(ctx, dataID, dataFile)
+	thumb, err := task.generateAndStoreThumbnail(ctx)
 	if err != nil {
 		return Thumbnail{}, nil, fmt.Errorf("generating/storing thumbnail: %w", err)
 	}
-	// TODO: For now, thumbhashes are generated during import pipeline as an experiment
+	if thumb.alreadyExisted {
+		return thumb, nil, nil
+	}
 	var thash []byte
-	// if strings.HasPrefix(thumb.MediaType, "image/") {
-	// 	if thash, err = task.generateAndStoreThumbhash(ctx, dataID, dataFile, thumb.Content); err != nil {
-	// 		return thumb, thash, fmt.Errorf("generating/storing thumbhash: %w", err)
-	// 	}
-	// }
+	if strings.HasPrefix(thumb.MediaType, "image/") {
+		if thash, err = task.generateAndStoreThumbhash(ctx, thumb.Content); err != nil {
+			return thumb, thash, fmt.Errorf("generating/storing thumbhash: %w", err)
+		}
+	}
 	return thumb, thash, nil
 }
 
 var thumbnailMapMu = newMapMutex()
 
-func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID int64, dataFile string) (Thumbnail, error) {
+func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context) (Thumbnail, error) {
 	task.DataType = strings.ToLower(task.DataType)
 	task.ThumbType = strings.ToLower(task.ThumbType)
 
 	if !qualifiesForThumbnail(&task.DataType) {
-		return Thumbnail{}, fmt.Errorf("media type does not support thumbnailing: %s (item_data_id=%d data_file='%s')", task.DataType, dataID, dataFile)
+		return Thumbnail{}, fmt.Errorf("media type does not support thumbnailing: %s (item_data_id=%d data_file='%s')", task.DataType, task.DataID, task.DataFile)
 	}
 
 	// sync generation to save resources: don't allow a thumbnail to be generated multiple times
-	var lockKey any = dataFile
-	if dataID != 0 {
-		lockKey = dataID
+	var lockKey any = task.DataFile
+	if task.DataID != 0 {
+		lockKey = task.DataID
 	}
 	thumbnailMapMu.Lock(lockKey)
 	defer thumbnailMapMu.Unlock(lockKey)
 
-	// see if it was already done (TODO: Is this extra query worth the potential resource savings? how often do they get generated concurrently?)
-	if thumb, err := task.tl.loadThumbnail(ctx, dataID, dataFile, task.ThumbType); err == nil {
-		return thumb, nil
+	// see if it was already done
+	if thumb, err := task.tl.loadThumbnail(ctx, task.DataID, task.DataFile, task.ThumbType); err == nil {
+		// thumbnail already exists, which implies that there's a row in the DB with a thumbhash for it,
+		// so copy that thumbhash to all other rows that use that data file
+		thumb.alreadyExisted = true
+		task.tl.dbMu.Lock()
+		defer task.tl.dbMu.Unlock()
+		var err error
+		if task.DataID != 0 {
+			_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=(SELECT thumb_hash FROM items WHERE data_id=? AND thumb_hash IS NOT NULL LIMIT 1) WHERE data_id=?`, task.DataID, task.DataID)
+		} else {
+			_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=(SELECT thumb_hash FROM items WHERE data_file=? AND thumb_hash IS NOT NULL LIMIT 1) WHERE data_file=?`, task.DataFile, task.DataFile)
+		}
+		return thumb, err
 	}
 
 	// if not, or if the other goroutine failed, we need to generate it
@@ -507,12 +524,12 @@ func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID 
 	var inputBuf []byte
 	var inputFilename string
 
-	if dataFile != "" {
-		inputFilename = task.tl.FullPath(dataFile)
-	} else if dataID > 0 {
+	if task.DataFile != "" {
+		inputFilename = task.tl.FullPath(task.DataFile)
+	} else if task.DataID > 0 {
 		task.tl.dbMu.RLock()
 		err := task.tl.db.QueryRowContext(ctx,
-			`SELECT content FROM item_data WHERE id=? LIMIT 1`, dataID).Scan(&inputBuf)
+			`SELECT content FROM item_data WHERE id=? LIMIT 1`, task.DataID).Scan(&inputBuf)
 		task.tl.dbMu.RUnlock()
 		if err != nil {
 			return Thumbnail{}, fmt.Errorf("querying item data content: %w", err)
@@ -521,11 +538,11 @@ func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID 
 
 	thumbnail, mimeType, err := task.generateThumbnail(ctx, inputFilename, inputBuf)
 	if err != nil {
-		return Thumbnail{}, fmt.Errorf("generating thumbnail for content: %w (item_data_id=%d data_file='%s')", err, dataID, inputFilename)
+		return Thumbnail{}, fmt.Errorf("generating thumbnail for content: %w (item_data_id=%d data_file='%s')", err, task.DataID, inputFilename)
 	}
 
-	dataFileToInsert, dataIDToInsert := &dataFile, &dataID
-	if dataFile == "" {
+	dataFileToInsert, dataIDToInsert := &task.DataFile, &task.DataID
+	if task.DataFile == "" {
 		dataFileToInsert = nil
 	} else {
 		dataIDToInsert = nil
@@ -545,11 +562,11 @@ func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context, dataID 
 		now.Unix(), mimeType, thumbnail,
 		dataFileToInsert, dataIDToInsert)
 	if err != nil {
-		return Thumbnail{}, fmt.Errorf("saving thumbnail to database: %w (item_data_id=%d data_file='%s')", err, dataID, dataFile)
+		return Thumbnail{}, fmt.Errorf("saving thumbnail to database: %w (item_data_id=%d data_file='%s')", err, task.DataID, task.DataFile)
 	}
 
 	return Thumbnail{
-		Name:      fakeThumbnailFilename(dataID, dataFile, mimeType),
+		Name:      fakeThumbnailFilename(task.DataID, task.DataFile, mimeType),
 		MediaType: mimeType,
 		ModTime:   now,
 		Content:   thumbnail,
@@ -682,8 +699,8 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 				// video length pretty quickly with: `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 input.mp4`)
 				"-t", "5",
 
-				// important to scale down the video for fast encoding
-				"-vf", "scale='min(720,iw)':-1",
+				// important to scale down the video for fast encoding -- perhaps biggest impact on encoding speed
+				"-vf", "scale='min(480,iw)':-1",
 
 				// libvpx is much faster than default encoder
 				"-vcodec", "libvpx",
@@ -693,11 +710,11 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 				"-an",
 
 				// bitrate, important quality determination
-				"-b:v", "256k", // constant bitrate, default is 256k
+				"-b:v", "128k", // constant bitrate, default is 256k
 				// "-crf", "40", // variable bitrate (slower encode), valid range for vpx is 4-63; higher number is lower quality
 
-				// we are already running concurrently, so limit to just 1 CPU thread
-				"-threads", "1",
+				// we are already running concurrently, but if there's CPU cores available...
+				"-threads", "4",
 
 				// when piping out (no output filename), we have to explicitly specify
 				// the format since ffmpeg can't deduce it from a file extension
@@ -732,22 +749,25 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 	return thumbnail, mimeType, nil
 }
 
-/*
-func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, dataID int64, dataFile string, thumb []byte) ([]byte, error) {
+func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, thumb []byte) ([]byte, error) {
 	thash, err := generateThumbhashFromThumbnail(thumb)
 	if err != nil {
 		return nil, err
 	}
+	return thash, task.storeThumbhash(ctx, thash)
+}
 
+func (task thumbnailTask) storeThumbhash(ctx context.Context, thash []byte) error {
 	task.tl.dbMu.Lock()
 	defer task.tl.dbMu.Unlock()
 
-	if dataID != 0 {
-		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_id=?`, thash, dataID)
+	var err error
+	if task.DataID != 0 {
+		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_id=?`, thash, task.DataID)
 	} else {
-		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_file=?`, thash, dataFile)
+		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_file=?`, thash, task.DataFile)
 	}
-	return thash, err
+	return err
 }
 
 func generateThumbhashFromThumbnail(thumb []byte) ([]byte, error) {
@@ -762,7 +782,6 @@ func generateThumbhashFromThumbnail(thumb []byte) ([]byte, error) {
 
 	return generateThumbhash(img), nil
 }
-*/
 
 // generateThumbhash returns the thumbhash of the decoded image prepended by the aspect ratio;
 // the frontend will need to detach the aspect ratio (and can use it to size elements for a
@@ -791,10 +810,12 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 		// no existing thumbnail; generate it and return it
 		task := thumbnailTask{
 			tl:        tl,
+			DataID:    itemDataID,
+			DataFile:  dataFile,
 			DataType:  dataType,
 			ThumbType: thumbType,
 		}
-		thumb, _, err = task.thumbnailAndThumbhash(ctx, itemDataID, dataFile)
+		thumb, _, err = task.thumbnailAndThumbhash(ctx)
 		if err != nil {
 			return Thumbnail{}, fmt.Errorf("existing thumbnail not found, so tried generating one, but got error: %w", err)
 		}
@@ -849,6 +870,8 @@ type Thumbnail struct {
 	MediaType string
 	ModTime   time.Time
 	Content   []byte
+
+	alreadyExisted bool
 }
 
 func qualifiesForThumbnail(mimeType *string) bool {
