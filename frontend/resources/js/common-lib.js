@@ -1329,8 +1329,34 @@ function itemContentElement(item, opts) {
 
 		return container;
 	}
-	else if (item.data_file || item.data_hash)
+	else if (item.data_file || item.data_hash || item.data_id)
 	{
+		const wrapInLoaderContainer = function(container, mediaTag, readyEvent) {
+			const loaderSupercontainer = cloneTemplate('#loader-container');
+			$('.loading-message', loaderSupercontainer).innerText = "Rendering preview";
+
+			// prepend the img tag to the supercontainer since it's (probably)
+			// lazy-loaded, and it has to be on the DOM to try loading -- then
+			// we can fade out the loader 
+			loaderSupercontainer.prepend(mediaTag);
+
+			container.append(loaderSupercontainer);
+
+			// when the image has loaded, replace loader element with the image
+			// (img tags might be unset if obfuscation is enabled)
+			mediaTag?.addEventListener(readyEvent, function() {
+				// In case the caller added classes to the returned element (the container),
+				// we will need to add those to the mediaTag since it will replace the container.
+				container.classList.forEach(name => mediaTag.classList.add(name));
+
+				$('.loader-container', loaderSupercontainer).classList.add('fade-out');
+				setTimeout(function() {
+					$('.loader-container', loaderSupercontainer).remove();
+				}, 1000);
+				
+			});
+		}
+
 		if (item.data_type.startsWith("image/"))
 		{
 			// initial image tag (or placeholder element, if processing) to return
@@ -1398,7 +1424,7 @@ function itemContentElement(item, opts) {
 				const aspectRatio = new DataView(aspectRatioBytes.buffer).getFloat32(0);
 
 				const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
-				thumbhashImgTag.classList.add('thumbhash');
+				thumbhashImgTag.classList.add('thumbhash', 'breathing');
 				thumbhashImgTag.style.aspectRatio = aspectRatio;
 
 				container.classList.add('thumbhash-container', 'rounded');
@@ -1420,37 +1446,14 @@ function itemContentElement(item, opts) {
 						// TODO: This is used on the item page where the image may be replaced by the motionpic...
 						setTimeout(function() {
 							imgTag.classList.remove('fade-in');
+							thumbhashImgTag.classList.remove('breathing');
 						}, 1000);
 					});
 
 					container.append(imgTag);
 				}
 			} else {
-				const loaderSupercontainer = cloneTemplate('#loader-container');
-				$('.loading-message', loaderSupercontainer).innerText = "Rendering preview";
-
-				// prepend the img tag to the supercontainer since it's (probably)
-				// lazy-loaded, and it has to be on the DOM to try loading -- then
-				// we can fade out the loader 
-				// TODO: Make videos have the same effect
-				loaderSupercontainer.prepend(imgTag);
-
-				container.append(loaderSupercontainer);
-
-				// when the image has loaded, replace loader element with the image
-				// (imgTag might be unset if obfuscation is enabled)
-				imgTag?.addEventListener('load', function() {
-					// TODO: is this still true now that we don't replace the container? (TODO: actually, we probably should, to keep things tidy, no need to keep the "supercontainer" around. just the content)
-					// In case the caller added classes to the returned element (the container),
-					// we will need to add those to the imgTag since it will replace the container.
-					container.classList.forEach(name => imgTag.classList.add(name));
-
-					$('.loader-container', loaderSupercontainer).classList.add('fade-out');
-					setTimeout(function() {
-						$('.loader-container', loaderSupercontainer).remove();
-					}, 1000);
-					
-				});
+				wrapInLoaderContainer(container, imgTag, 'load');
 			}
 
 			return container;
@@ -1502,7 +1505,10 @@ function itemContentElement(item, opts) {
 				// 	}
 				// });
 
-				return videoTag;
+				const container = document.createElement('div');
+				wrapInLoaderContainer(container, videoTag, 'canplay');
+
+				return container;
 			};
 
 			// // 3GPP files are common among text messages.

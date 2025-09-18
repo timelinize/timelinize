@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"image"
 	"io"
 	"io/fs"
 	"maps"
@@ -18,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/davidbyttow/govips/v2/vips"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -362,7 +364,90 @@ func (p *processor) downloadDataFile(it *Item, source io.Reader, destination *os
 	} else {
 		it.dataFileSize = dataFileSize
 		it.dataFileHash = h.Sum(nil)
+
+		// generating the thumbhash during import pipeline is not necessary,
+		// but it does make the UI more useful/interesting if browsing while
+		// the import job is still running / before the thumbnail job starts;
+		// but it is ironic, that generating a thumbhash requires generating a
+		// thumbnail first, although we use a smaller, much lower-quality
+		// thumbnail than what the actual user-facing thumbnail would be; if
+		// we could find a way to do a raw pixel transfer from vips to Go,
+		// then this might make more sense (in terms of efficiency) - this
+		// is only for UX, and should probably be configurable
+		if err := p.generateThumbhashIfItemQualifies(p.ij.job.ctx, it); err != nil {
+			p.log.Error("failed generating thumbhash for image item",
+				zap.String("item_original_id", it.ID),
+				zap.String("item_intermediate_path", it.IntermediateLocation),
+				zap.String("data_file_name", it.dataFilePath),
+				zap.Error(err))
+		}
+
 	}
+
+	return nil
+}
+
+func (p *processor) generateThumbhashIfItemQualifies(_ context.Context, it *Item) error {
+	const maxSize = 100 * 1024 * 1024 // just trying to avoid OOM... 100 MB should fit most RAWs
+	if it.dataFileSize == 0 || it.dataFileSize > maxSize || !strings.HasPrefix(it.Content.MediaType, "image/") {
+		return nil
+	}
+
+	// TODO: potentially load from buffered bytes, if we want to eliminate an extra disk read
+	// loadStart := time.Now()
+	img, err := loadImageVips(p.tl.FullPath(it.dataFilePath), nil)
+	if err != nil {
+		return err
+	}
+	// loadEnd := time.Now()
+
+	const maxDimension = 128 // the thumbhash package will resize to this if any bigger; avoid resizing twice
+	if img.Width() > maxDimension || img.Height() > maxDimension {
+		// TODO: make the algorithm configurable: https://www.libvips.org/API/current/enum.Interesting.html
+		if err := img.Thumbnail(maxDimension, maxDimension, vips.InterestingNone); err != nil {
+			return err
+		}
+	}
+	// resizeEnd := time.Now()
+
+	// TODO: Turns out img.ToImage(nil) is inefficient; it just calls .Encode() (which is deprecated)
+	// to the original format, at a relatively high quality setting. I was hoping for some sort of raw
+	// byte/pixel transfer. Oh well. So instead, I'm going to encode as JPEG at a very low quality,
+	// which is more universal and likely a little faster... oh well.
+	// See https://github.com/davidbyttow/govips/issues/489.
+	lowQualJPEG, _, err := img.ExportJpeg(&vips.JpegExportParams{
+		Quality: 20,
+	})
+	if err != nil {
+		return err
+	}
+	goImg, _, err := image.Decode(bytes.NewReader(lowQualJPEG))
+	if err != nil {
+		return err
+	}
+	// exportEnd := time.Now()
+
+	it.thumbhash = generateThumbhash(goImg)
+
+	// thumbEnd := time.Now()
+
+	// Typical timings:
+	//
+	// 	TIMINGS: FILE READ: 12.121827ms
+	// 	RESIZE: 3.840385ms
+	// 	EXPORT: 144.044098ms
+	// 	THUMBHASH: 896.781µs
+	// 	TOTAL: 160.903091ms
+	//
+	// Possible speedups:
+	// - Raw pixel transfer from vips to native Go image.Image, if possible
+	// - Buffer entire image into memory while copying it to avoid extra read? Though this requires more allocating
+	//
+	// log.Println("TIMINGS: FILE READ:", loadEnd.Sub(loadStart),
+	// 	" - RESIZE:", resizeEnd.Sub(loadEnd),
+	// 	" - EXPORT:", exportEnd.Sub(resizeEnd),
+	// 	" - THUMBHASH:", thumbEnd.Sub(exportEnd),
+	// 	" - TOTAL:", thumbEnd.Sub(loadStart))
 
 	return nil
 }

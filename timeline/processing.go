@@ -798,6 +798,9 @@ func (p *processor) fillItemRow(ctx context.Context, tx *sql.Tx, ir *ItemRow, it
 	if len(it.dataFileHash) > 0 {
 		ir.DataHash = it.dataFileHash
 	}
+	if len(it.thumbhash) > 0 {
+		ir.ThumbHash = it.thumbhash
+	}
 	ir.Metadata = metadata
 	ir.Location = it.Location
 
@@ -1106,8 +1109,8 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 				timestamp, timespan, timeframe, time_offset, time_offset_origin, time_uncertainty,
 				data_type, data_text, data_file, data_hash, metadata,
 				longitude, latitude, altitude, coordinate_system, coordinate_uncertainty,
-				note, starred, original_id_hash, initial_content_hash, retrieval_key)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				note, starred, thumb_hash, original_id_hash, initial_content_hash, retrieval_key)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			RETURNING id`,
 			ir.DataSourceID, ir.JobID, ir.AttributeID, ir.ClassificationID,
 			ir.OriginalID, ir.OriginalLocation, ir.IntermediateLocation, ir.Filename,
@@ -1116,7 +1119,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, metadata,
 			ir.Location.Longitude, ir.Location.Latitude, ir.Location.Altitude,
 			ir.Location.CoordinateSystem, ir.Location.CoordinateUncertainty,
-			ir.Note, ir.Starred, ir.OriginalIDHash, ir.InitialContentHash, ir.RetrievalKey,
+			ir.Note, ir.Starred, ir.ThumbHash, ir.OriginalIDHash, ir.InitialContentHash, ir.RetrievalKey,
 		).Scan(&rowID)
 
 		atomic.AddInt64(p.ij.newItemCount, 1)
@@ -1200,6 +1203,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 			appendToQuery("data_text", policy)
 			appendToQuery("data_file", policy)
 			appendToQuery("data_hash", policy)
+			appendToQuery("thumb_hash", policy)
 			appendToQuery("initial_content_hash", UpdatePolicyPreferExisting) // only keep initial value - TODO: But what if this new import IS the new "initial content"? I think it should just not be updated if the item import comes from a manual change.
 		case "latlon":
 			appendToQuery("longitude", policy)
@@ -1238,7 +1242,7 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 		case "time_uncertainty":
 			args = append(args, ir.TimeUncertainty)
 		case "data":
-			args = append(args, ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, ir.InitialContentHash)
+			args = append(args, ir.DataType, ir.DataText, ir.DataFile, ir.DataHash, ir.ThumbHash, ir.InitialContentHash)
 		case "data_type", "data_text", "data_file", "data_hash":
 			return errors.New("data components cannot be individually configured for updates; use 'data' as field name instead")
 		case "metadata":

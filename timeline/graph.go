@@ -290,6 +290,7 @@ type Item struct {
 	fieldUpdatePolicies  map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
 	skip                 bool                         // the processor may mark some items to skip based on import job configuration or other factors
 	tsOffsetOrigin       tzOrigin                     // if the processor adjusts/sets an item's time zone, it is indicated here
+	thumbhash            []byte                       // for when thumbhash is generated during import pipeline (solely for benefit of more interesting UI sooner)
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.

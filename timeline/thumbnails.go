@@ -372,7 +372,7 @@ func (thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, star
 	// assuming mostly stills in the batch. But not too large, so that pausing doesn't
 	// take forever.
 	var wg sync.WaitGroup
-	batchSize := 25
+	batchSize := 10
 	if checkpoints {
 		batchSize = 5
 	}
@@ -469,12 +469,13 @@ func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context, dataID int6
 	if err != nil {
 		return Thumbnail{}, nil, fmt.Errorf("generating/storing thumbnail: %w", err)
 	}
+	// TODO: For now, thumbhashes are generated during import pipeline as an experiment
 	var thash []byte
-	if strings.HasPrefix(thumb.MediaType, "image/") {
-		if thash, err = task.generateAndStoreThumbhash(ctx, dataID, dataFile, thumb.Content); err != nil {
-			return thumb, thash, fmt.Errorf("generating/storing thumbhash: %w", err)
-		}
-	}
+	// if strings.HasPrefix(thumb.MediaType, "image/") {
+	// 	if thash, err = task.generateAndStoreThumbhash(ctx, dataID, dataFile, thumb.Content); err != nil {
+	// 		return thumb, thash, fmt.Errorf("generating/storing thumbhash: %w", err)
+	// 	}
+	// }
 	return thumb, thash, nil
 }
 
@@ -592,8 +593,9 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 		defer inputImage.Close()
 
 		// scale down to a thumbnail size
-		if err := scaleDownImage(inputImage, maxThumbnailDimension); err != nil {
-			return nil, "", fmt.Errorf("resizing image: %w", err)
+		// TODO: Make the algorithm configurable
+		if err := inputImage.Thumbnail(maxThumbnailDimension, maxThumbnailDimension, vips.InterestingNone); err != nil {
+			return nil, "", fmt.Errorf("thumbnailing image: %w", err)
 		}
 
 		// 10-bit is HDR, but the underlying lib (libvips, and then libheif) doesn't support "10-bit colour depth" on Windows
@@ -730,8 +732,9 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 	return thumbnail, mimeType, nil
 }
 
+/*
 func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, dataID int64, dataFile string, thumb []byte) ([]byte, error) {
-	thash, err := task.generateThumbhash(thumb)
+	thash, err := generateThumbhashFromThumbnail(thumb)
 	if err != nil {
 		return nil, err
 	}
@@ -747,7 +750,7 @@ func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, dataID 
 	return thash, err
 }
 
-func (thumbnailTask) generateThumbhash(thumb []byte) ([]byte, error) {
+func generateThumbhashFromThumbnail(thumb []byte) ([]byte, error) {
 	// throttle expensive operation
 	cpuIntensiveThrottle <- struct{}{}
 	defer func() { <-cpuIntensiveThrottle }()
@@ -757,6 +760,14 @@ func (thumbnailTask) generateThumbhash(thumb []byte) ([]byte, error) {
 		return nil, fmt.Errorf("decoding thumbnail (format=%s) for thumbhash computation failed: %w", format, err)
 	}
 
+	return generateThumbhash(img), nil
+}
+*/
+
+// generateThumbhash returns the thumbhash of the decoded image prepended by the aspect ratio;
+// the frontend will need to detach the aspect ratio (and can use it to size elements for a
+// more graceful layout flow) before using the thumbhash.
+func generateThumbhash(img image.Image) []byte {
 	// thumbhash can recover the _approximate_ aspect ratio, but not
 	// exactly, which makes sizing the image difficult on the UI because
 	// replacing the thumbhash image with the real image would result in
@@ -765,7 +776,7 @@ func (thumbnailTask) generateThumbhash(thumb []byte) ([]byte, error) {
 	// the frontend to split it... hey, it works...
 	aspectRatio := float32(img.Bounds().Dx()) / float32(img.Bounds().Dy())
 
-	return append(float32ToByte(aspectRatio), thumbhash.EncodeImage(img)...), nil
+	return append(float32ToByte(aspectRatio), thumbhash.EncodeImage(img)...)
 }
 
 // Thumbnail returns a thumbnail for either the given itemDataID or the dataFile, along with
@@ -995,6 +1006,8 @@ func float32ToByte(f float32) []byte {
 	return buf[:]
 }
 
+// loadImageVips loads an image for vips to work with from either a file path or
+// a buffer of bytes directly; precisely one must be non-nil.
 func loadImageVips(inputFilePath string, inputBytes []byte) (*vips.ImageRef, error) {
 	if inputFilePath != "" && inputBytes != nil {
 		panic("load image with vips: input cannot be both a filename and a buffer")

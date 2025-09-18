@@ -131,6 +131,14 @@ body {
 	overflow: hidden;
 }
 
+/* Used to indicate something is loading/processing */
+.breathing {
+	animation: 3s ease-in 0s infinite radiate;
+}
+@keyframes radiate {
+	50% { opacity: 0.65; }
+}
+
 .thumbhash-container .content {
 	width: 100%;
 	max-height: 100%;
