@@ -171,8 +171,10 @@ async function renderConversations() {
 	// TODO: display something nice if there's no results
 
 	for (const convo of results) {
-		// put repo owner last, since I think most commonly they'll be in the conversations
-		convo.entities.sort((a, b) => a.id > 1 ? -1 : 1);
+		// put repo owner first; they're most likely to be in all the conversations,
+		// and the last entity in the list has the full avatar shown in the stack,
+		// and it's more useful to show the other participants more prominently
+		convo.entities.sort((a, b) => a.id == 1 ? -1 : 1);
 
 		const elem = cloneTemplate('#tpl-convo');
 
@@ -212,7 +214,7 @@ async function renderConversations() {
 		// render avatars
 		const maxAvatars = 5;
 		let more = "";
-		let entitiesWithAvatars = [];
+		let entitiesWithAvatars = convo.entities;
 		if (convo.entities.length > maxAvatars) {
 			more = `<span
 					title="${convo.entities.length-maxAvatars} more"
