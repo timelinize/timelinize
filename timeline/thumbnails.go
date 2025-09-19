@@ -418,7 +418,7 @@ func (thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, star
 			// show for the user during longer tasks such that it isn't overwritten?
 			job.Message(task.DataFile)
 
-			thumb, thash, err := task.thumbnailAndThumbhash(job.Context())
+			thumb, thash, err := task.thumbnailAndThumbhash(job.Context(), false)
 			if err != nil {
 				// don't terminate the job if there's an error
 				// TODO: but we should probably note somewhere in the job's row in the DB that this error happened... maybe?
@@ -464,7 +464,7 @@ type thumbnailTask struct {
 
 // thumbnailAndThumbhash returns the thumbnail, even if this returns an error because thumbhash
 // generation fails, the thumbnail is still usable in that case.
-func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context) (Thumbnail, []byte, error) {
+func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context, forceThumbhashGeneration bool) (Thumbnail, []byte, error) {
 	if task.DataID > 0 && task.DataFile != "" {
 		// is the content in the DB or a file?? can't be both
 		panic("ambiguous thumbnail task given both dataID and dataFile")
@@ -473,7 +473,7 @@ func (task thumbnailTask) thumbnailAndThumbhash(ctx context.Context) (Thumbnail,
 	if err != nil {
 		return Thumbnail{}, nil, fmt.Errorf("generating/storing thumbnail: %w", err)
 	}
-	if thumb.alreadyExisted {
+	if thumb.alreadyExisted && !forceThumbhashGeneration {
 		return thumb, nil, nil
 	}
 	var thash []byte
@@ -801,6 +801,7 @@ func generateThumbhash(img image.Image) []byte {
 // Thumbnail returns a thumbnail and associated thumbhash for either the given itemDataID or the dataFile.
 // If both do not exist, they are generated and stored before being returned.
 func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, dataType, thumbType string) (Thumbnail, []byte, error) {
+	var forceThumbhashGeneration bool
 	// first try loading existing thumbnail from DB
 	thumb, err := tl.loadThumbnail(ctx, itemDataID, dataFile, thumbType)
 	if err == nil {
@@ -808,13 +809,14 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 		if strings.HasPrefix(dataType, "image/") {
 			var thash []byte
 			tl.dbMu.RLock()
-			err2 := tl.db.QueryRowContext(ctx, "SELECT thumb_hash FROM items WHERE data_file=? OR data_id=? LIMIT 1", dataFile, itemDataID).Scan(&thash)
+			err2 := tl.db.QueryRowContext(ctx, "SELECT thumb_hash FROM items WHERE (data_file=? OR data_id=?) AND thumb_hash IS NOT NULL LIMIT 1", dataFile, itemDataID).Scan(&thash)
 			tl.dbMu.RUnlock()
 			if err2 == nil {
 				return thumb, thash, nil
 			}
 			// interesting! thumbnail exists, but thumbhash does not; pretend there was no result, and we'll regenerate
-			err = sql.ErrNoRows
+			err = err2
+			forceThumbhashGeneration = true
 		} else {
 			return thumb, nil, nil
 		}
@@ -828,7 +830,7 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 			DataType:  dataType,
 			ThumbType: thumbType,
 		}
-		thumb, thash, err := task.thumbnailAndThumbhash(ctx)
+		thumb, thash, err := task.thumbnailAndThumbhash(ctx, forceThumbhashGeneration)
 		if err != nil {
 			return Thumbnail{}, nil, fmt.Errorf("existing thumbnail (or thumbhash) not found, so tried generating one, but got error: %w", err)
 		}
@@ -960,8 +962,8 @@ func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension 
 		// how much blur is needed depends on the size of the image; I have found that the square root
 		// of the max dimension, fine-tuned by a coefficient is pretty good: for thumbnails of 120px,
 		// this ends up being about 8-10; for larger preview images of 1400px, we get more like 30, which
-		// is helpful for obscuruing sensitive features like faces
-		sigma := math.Sqrt(float64(maxDimension) * .75) //nolint:mnd
+		// is helpful for obscuruing sensitive features like faces (higher sigma = more blur)
+		sigma := math.Sqrt(float64(maxDimension) * .9) //nolint:mnd
 		if err := inputImage.GaussianBlur(sigma); err != nil {
 			return nil, fmt.Errorf("applying guassian blur to image for obfuscation: %w", err)
 		}

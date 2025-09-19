@@ -376,8 +376,8 @@ func (p *processor) downloadDataFile(it *Item, source io.Reader, destination *os
 				ThumbType: thumbnailType(it.Content.MediaType, false),
 			}
 			start := time.Now()
-			if thumb, thash, err := task.thumbnailAndThumbhash(p.ij.job.ctx); err != nil {
-				p.log.Error("failed generating thumbhash for item",
+			if thumb, thash, err := task.thumbnailAndThumbhash(p.ij.job.ctx, true); err != nil {
+				p.log.Error("failed generating thumbnail and thumbhash for item",
 					zap.String("item_original_id", it.ID),
 					zap.String("item_intermediate_path", it.IntermediateLocation),
 					zap.String("data_file_name", it.dataFilePath),

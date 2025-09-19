@@ -24,6 +24,7 @@
 
 .page-body .card .thumbhash-container,
 .page-body .card .content {
+	height: 100%;
 	max-height: 250px;
 }
 

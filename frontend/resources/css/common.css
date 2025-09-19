@@ -171,6 +171,7 @@ body {
 	display: grid;
 	height: 100%;
 	overflow: hidden; /* mainly for rounded corners, so the sharp corners don't stick out */
+	place-items: center;
 }
 
 .loader-supercontainer > * {
@@ -299,6 +300,10 @@ form .dropdown-menu {
 	min-width: var(--tblr-icon-size);
 }
 
+/* This is needed to make date dropdowns fill the width, for some reason */
+.filter .input-icon {
+	flex: 1;
+}
 
 
 
