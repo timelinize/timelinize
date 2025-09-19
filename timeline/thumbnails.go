@@ -804,16 +804,20 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 	// first try loading existing thumbnail from DB
 	thumb, err := tl.loadThumbnail(ctx, itemDataID, dataFile, thumbType)
 	if err == nil {
-		// found existing thumbnail! get thumbhash real quick
-		var thash []byte
-		tl.dbMu.RLock()
-		err2 := tl.db.QueryRowContext(ctx, "SELECT thumb_hash FROM items WHERE data_file=? OR data_id=? LIMIT 1", dataFile, itemDataID).Scan(&thash)
-		tl.dbMu.RUnlock()
-		if err2 == nil {
-			return thumb, thash, nil
+		// found existing thumbnail! get thumbhash real quick, if it's an image
+		if strings.HasPrefix(dataType, "image/") {
+			var thash []byte
+			tl.dbMu.RLock()
+			err2 := tl.db.QueryRowContext(ctx, "SELECT thumb_hash FROM items WHERE data_file=? OR data_id=? LIMIT 1", dataFile, itemDataID).Scan(&thash)
+			tl.dbMu.RUnlock()
+			if err2 == nil {
+				return thumb, thash, nil
+			}
+			// interesting! thumbnail exists, but thumbhash does not; pretend there was no result, and we'll regenerate
+			err = sql.ErrNoRows
+		} else {
+			return thumb, nil, nil
 		}
-		// interesting! thumbnail exists, but thumbhash does not; pretend there was no result, and we'll regenerate
-		err = sql.ErrNoRows
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		// no existing thumbnail; generate it and return it
