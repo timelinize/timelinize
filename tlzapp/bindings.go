@@ -622,7 +622,7 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		"gpx",
 		"geojson",
 		"kml",
-		"nmea",
+		"nmea0183",
 		"strava",
 		"sms_backup_restore",
 

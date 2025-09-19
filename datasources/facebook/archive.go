@@ -202,7 +202,8 @@ func (a Archive) processPhotosOrVideos(ctx context.Context, d timeline.DirEntry,
 		}
 
 		item := &timeline.Item{
-			Owner: a.owner,
+			Owner:          a.owner,
+			Classification: timeline.ClassMedia,
 		}
 
 		media.fillItem(item, d, "", opt.Log)
