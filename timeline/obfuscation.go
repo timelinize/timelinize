@@ -472,7 +472,7 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 		ir.DataText = &txt
 	}
 
-	if ir.Filename != nil {
+	if ir.Filename != nil || ir.IntermediateLocation != nil || ir.OriginalLocation != nil {
 		// try to preserve the file extension, but we can't be sure what it is
 		// (what if it's .tar.gz? What if there's a dot in the middle of the filename?
 		// I don't want to chance preserving sensitive parts of the filename by parsing)
@@ -480,15 +480,19 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 		var extensions []string
 		var err error
 		if ir.DataType != nil {
-			extensions, err = mime.ExtensionsByType(*ir.DataType)
-			// prefer common extensions, not ".jfif" and ".f4v" or whatever
-			sort.Slice(extensions, func(i int, _ int) bool {
-				switch extensions[i] {
-				case ".jpg", ".jpeg", ".mp4", ".m4v", ".mov":
-					return true
-				}
-				return false
-			})
+			if *ir.DataType == "image/heic" {
+				extensions = []string{".heic"}
+			} else {
+				extensions, err = mime.ExtensionsByType(*ir.DataType)
+				// prefer common extensions, not ".jfif" and ".f4v" or whatever
+				sort.Slice(extensions, func(i int, _ int) bool {
+					switch extensions[i] {
+					case ".jpg", ".jpeg", ".mp4", ".m4v", ".mov", ".heic":
+						return true
+					}
+					return false
+				})
+			}
 		}
 		if err != nil || len(extensions) == 0 {
 			opts.Logger.Warn("no extensions for MIME type; generating a random one",
@@ -497,7 +501,17 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 			extensions = []string{"." + faker.FileExtension()}
 		}
 		fakeName := faker.Word() + faker.Password(true, true, true, false, false, weakrand.IntN(3)+2) + extensions[0] //nolint:gosec
-		ir.Filename = &fakeName
+		if ir.Filename != nil {
+			ir.Filename = &fakeName
+		}
+		if ir.IntermediateLocation != nil {
+			fakePath := fmt.Sprintf("demo/%s/%s", faker.Word(), fakeName)
+			ir.IntermediateLocation = &fakePath
+		}
+		if ir.OriginalLocation != nil {
+			fakePath := fmt.Sprintf("%s/%s", faker.Word(), fakeName)
+			ir.OriginalLocation = &fakePath
+		}
 	}
 
 	if ir.DataFile != nil {

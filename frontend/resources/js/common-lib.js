@@ -1424,7 +1424,10 @@ function itemContentElement(item, opts) {
 				const aspectRatio = new DataView(aspectRatioBytes.buffer).getFloat32(0);
 
 				const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
-				thumbhashImgTag.classList.add('thumbhash', 'breathing');
+				thumbhashImgTag.classList.add('thumbhash');
+				if (!tlz.settings?.application?.obfuscation?.enabled) {
+					thumbhashImgTag.classList.add('breathing'); // this indicates it's loading, which it's really not when in demo mode
+				}
 				thumbhashImgTag.style.aspectRatio = aspectRatio;
 
 				container.classList.add('thumbhash-container', 'rounded');
