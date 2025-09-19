@@ -601,32 +601,46 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		plan.Files = append(plan.Files, p...)
 	}
 
-	// improve import speed by putting large, DB-bound data sources first, to take advantage of when the DB is the fastest (when it is small)
+	// We want to get as much content into the DB as soon as possible, both to help imports go faster (DBs are
+	// fastest when they are small), and to improve the UX (user can start browsing more content right away).
+	// Except for contact lists, sort data sources so that those which tend to add lots of content quickly go
+	// first. Then put I/O-heavy data sources at the end. Imagine if we imported their photo library first...
+	// they'd have to wait potentially hours and hours before they can browse, since thumbnails don't get
+	// generated until after the whole import is complete (unless they enable it during the import, but then
+	// it's super slow!). This way, the user can browse potentially hundreds of thousands of items while
+	// waiting for the slower data sources to finish and have thumbnails generated.
 	dsPriorities := []string{
 		// contact lists are an excellent first import since they can give names to entities right off the bat
 		"vcard",
 		"contact_list",
 		"apple_contacts",
 
-		// then we prioritize data sources with large amounts of items in a single file; when the DB
-		// is small, imports are fastest, so putting data sources with the most smallest items up
+		// then we prioritize data sources with large amounts of small items; when the DB is
+		// small, imports are fastest, so putting data sources with the most small items up
 		// first makes imports faster
 		"google_location",
+		"gpx",
+		"geojson",
+		"kml",
+		"nmea",
+		"strava",
 		"sms_backup_restore",
 
 		// these next ones are a blend of lots of items and I/O heavy
+		"whatsapp",
+		"telegram",
+		"facebook",
+		"email",
 		"imessage",
+		"twitter",
+		"instagram",
 		"iphone",
 
-		// the remaining ones are mostly I/O heavy but can still have lots of items
+		// the remaining ones are mostly I/O heavy, but can still have lots of items
+		"media",
+		"icloud",
 		"apple_photos",
 		"google_photos",
-		"icloud",
-		"media",
-		"whatsapp",
-		"facebook",
-		"instagram",
-		"twitter",
 	}
 	slices.SortStableFunc(plan.Files, func(a, b timeline.ProposedFileImport) int {
 		if len(a.DataSources) == 0 || len(b.DataSources) == 0 {
