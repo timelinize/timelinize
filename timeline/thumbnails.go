@@ -798,13 +798,22 @@ func generateThumbhash(img image.Image) []byte {
 	return append(float32ToByte(aspectRatio), thumbhash.EncodeImage(img)...)
 }
 
-// Thumbnail returns a thumbnail for either the given itemDataID or the dataFile, along with
-// media type. If a thumbnail does not yet exist, one is generated and stored for future use.
-func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, dataType, thumbType string) (Thumbnail, error) {
+// Thumbnail returns a thumbnail and associated thumbhash for either the given itemDataID or the dataFile.
+// If both do not exist, they are generated and stored before being returned.
+func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, dataType, thumbType string) (Thumbnail, []byte, error) {
 	// first try loading existing thumbnail from DB
 	thumb, err := tl.loadThumbnail(ctx, itemDataID, dataFile, thumbType)
 	if err == nil {
-		return thumb, nil // found existing thumbnail!
+		// found existing thumbnail! get thumbhash real quick
+		var thash []byte
+		tl.dbMu.RLock()
+		err2 := tl.db.QueryRowContext(ctx, "SELECT thumb_hash FROM items WHERE data_file=? OR data_id=? LIMIT 1", dataFile, itemDataID).Scan(&thash)
+		tl.dbMu.RUnlock()
+		if err2 == nil {
+			return thumb, thash, nil
+		}
+		// interesting! thumbnail exists, but thumbhash does not; pretend there was no result, and we'll regenerate
+		err = sql.ErrNoRows
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		// no existing thumbnail; generate it and return it
@@ -815,13 +824,13 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 			DataType:  dataType,
 			ThumbType: thumbType,
 		}
-		thumb, _, err = task.thumbnailAndThumbhash(ctx)
+		thumb, thash, err := task.thumbnailAndThumbhash(ctx)
 		if err != nil {
-			return Thumbnail{}, fmt.Errorf("existing thumbnail not found, so tried generating one, but got error: %w", err)
+			return Thumbnail{}, nil, fmt.Errorf("existing thumbnail (or thumbhash) not found, so tried generating one, but got error: %w", err)
 		}
-		return thumb, nil
+		return thumb, thash, nil
 	}
-	return Thumbnail{}, err
+	return Thumbnail{}, nil, err
 }
 
 func (tl *Timeline) loadThumbnail(ctx context.Context, dataID int64, dataFile, thumbType string) (Thumbnail, error) {
@@ -944,7 +953,11 @@ func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension 
 	}
 
 	if obfuscate {
-		const sigma = 8 // I've found that anywhere from ~6-10 works pretty well for our purposes.
+		// how much blur is needed depends on the size of the image; I have found that the square root
+		// of the max dimension, fine-tuned by a coefficient is pretty good: for thumbnails of 120px,
+		// this ends up being about 8-10; for larger preview images of 1400px, we get more like 30, which
+		// is helpful for obscuruing sensitive features like faces
+		sigma := math.Sqrt(float64(maxDimension) * .75) //nolint:mnd
 		if err := inputImage.GaussianBlur(sigma); err != nil {
 			return nil, fmt.Errorf("applying guassian blur to image for obfuscation: %w", err)
 		}

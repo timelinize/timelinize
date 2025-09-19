@@ -520,21 +520,6 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 			// but if this setting is enabled, the frontend shouldn't be trying to request the data files anyway
 			fakePath := path.Join(path.Dir(*ir.DataFile), "(obfuscated)")
 			ir.DataFile = &fakePath
-		} else {
-			switch {
-			case ir.DataType != nil && strings.HasPrefix(*ir.DataType, "image/"):
-				// simply use thumbhash (TODO: if the image is requested anyways, return a blurred variant)
-				ir.DataFile = nil
-
-				// or use a random image completely... :shrug:
-				// pic := fmt.Sprintf("https://picsum.photos/seed/%d/1024/768", ir.ID)
-				// ir.DataFile = &pic
-			case ir.DataType != nil && strings.HasPrefix(*ir.DataType, "video/"):
-				// let frontend request videos; frontend handler will obfuscate them
-			default:
-				// TODO: not sure how to generate/obfuscate other stuff for now
-				ir.DataFile = nil
-			}
 		}
 	}
 

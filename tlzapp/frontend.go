@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"io"
 	"mime"
 	"net/http"
@@ -39,6 +40,7 @@ import (
 	"github.com/Masterminds/sprig/v3"
 	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
+	"go.n16f.net/thumbhash"
 )
 
 // serveFrontend serves frontend assets, such as repository resources,
@@ -342,7 +344,7 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 		}
 	}
 
-	thumb, err := tl.Thumbnail(r.Context(), itemDataID, r.FormValue("data_file"), dataType, thumbType)
+	thumb, thash, err := tl.Thumbnail(r.Context(), itemDataID, r.FormValue("data_file"), dataType, thumbType)
 	if err != nil {
 		return fmt.Errorf("unable to provide thumbnail: %w", err)
 	}
@@ -351,13 +353,25 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 		w.Header().Set("Content-Type", thumb.MediaType)
 	}
 
+	// if obfuscation is enabled, return the thumbhash of an image (easy, quick blurred version)
+	// or blurry-transcoded video
 	thumbReader := bytes.NewReader(thumb.Content)
 	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
 	if obfuscate {
 		if strings.HasPrefix(thumbType, "image/") {
-			return Error{
-				Err:        errors.New("obfuscation mode enabled: image thumbnail can just be thumbhash"),
-				HTTPStatus: http.StatusNoContent,
+			const aspectRatioPrefixLen = 4
+			if len(thash) < aspectRatioPrefixLen {
+				w.WriteHeader(http.StatusNoContent)
+				return nil
+			}
+			img, err := thumbhash.DecodeImage(thash[aspectRatioPrefixLen:])
+			if err != nil {
+				return fmt.Errorf("invalid thumbhash %x: %w", thash, err)
+			}
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.WriteHeader(http.StatusOK)
+			if err := jpeg.Encode(w, img, nil); err != nil {
+				return fmt.Errorf("encoding and streaming out JPEG thumbhash: %w", err)
 			}
 		} else if strings.HasPrefix(thumbType, "video/") {
 			return s.transcodeVideo(r.Context(), w, "", thumbReader, obfuscate)

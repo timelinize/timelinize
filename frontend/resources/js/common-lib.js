@@ -1423,9 +1423,11 @@ function itemContentElement(item, opts) {
 				const thumbHash = thumbHashWithAspectRatio.subarray(4);
 				const aspectRatio = new DataView(aspectRatioBytes.buffer).getFloat32(0);
 
+				const obfuscate = tlz.settings?.application?.obfuscation?.enabled;
+
 				const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
 				thumbhashImgTag.classList.add('thumbhash');
-				if (!tlz.settings?.application?.obfuscation?.enabled) {
+				if (!obfuscate) {
 					thumbhashImgTag.classList.add('breathing'); // this indicates it's loading, which it's really not when in demo mode
 				}
 				thumbhashImgTag.style.aspectRatio = aspectRatio;
@@ -1434,8 +1436,8 @@ function itemContentElement(item, opts) {
 
 				container.append(thumbhashImgTag);
 
-				if (imgTag) {
-					// getting the preview image will take some time: hide the img tag until it's
+				if (imgTag && !obfuscate) {
+					// getting the encoded image will take some time: hide the img tag until it's
 					// done loading, and when it's done, swap the placeholder for, or show, the image
 					imgTag.classList.add('invisible');
 
@@ -1455,7 +1457,7 @@ function itemContentElement(item, opts) {
 
 					container.append(imgTag);
 				}
-			} else {
+			} else if (imgTag) {
 				wrapInLoaderContainer(container, imgTag, 'load');
 			}
 
