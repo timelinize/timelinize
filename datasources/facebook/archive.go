@@ -92,12 +92,12 @@ func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 	for i := 1; i < 10000; i++ {
 		postsFilename := fmt.Sprintf("%s%d.json", postsFilePrefix, i)
 
-		postsFile, err := dirEntry.FS.Open(postsFilename)
+		postsFile, err := dirEntry.Open(postsFilename)
 		if errors.Is(err, fs.ErrNotExist) && postsFilePrefix == pre2024YourPostsPrefix {
 			// try newer version
 			postsFilePrefix = year2024YourPostsPrefix
 			postsFilename = fmt.Sprintf("%s%d.json", postsFilePrefix, i)
-			postsFile, err = dirEntry.FS.Open(postsFilename)
+			postsFile, err = dirEntry.Open(postsFilename)
 		}
 		if errors.Is(err, fs.ErrNotExist) {
 			break // no more posts files
@@ -123,6 +123,7 @@ func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 	// post media (done separately since they may not be in the same archive as the JSON manifest)
 	if err := a.processPostMedia(ctx, dirEntry, params, []string{
 		year2024PostMediaPrefix,
+		"your_activity_across_facebook", // also found this in a year 2024 archive, full of media files
 	}); err != nil {
 		return fmt.Errorf("processing post media: %w", err)
 	}
@@ -131,15 +132,15 @@ func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 	if err := a.processPhotosOrVideos(ctx, dirEntry, params, []string{
 		pre2024YourUncategorizedPhotosPath,
 		year2024YourUncategorizedPhotosPath,
-	}, fbYourUncategorizedPhotos{}); err != nil {
+	}, new(fbYourUncategorizedPhotos)); err != nil {
 		return fmt.Errorf("processing uncategorized photos: %w", err)
 	}
 
-	// (uncategorized) videos
+	// uncategorized videos
 	if err := a.processPhotosOrVideos(ctx, dirEntry, params, []string{
 		pre2024YourVideosPath,
 		year2024YourVideosPath,
-	}, fbYourVideos{}); err != nil {
+	}, new(fbYourVideos)); err != nil {
 		return fmt.Errorf("processing videos: %w", err)
 	}
 
@@ -230,6 +231,7 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 						attachedItem.Content.Data = timeline.StringData(text)
 					}
 				case attachment.Media.URI != "":
+					attachedItem.Classification = timeline.ClassSocial
 					attachment.Media.fillItem(attachedItem, d, postText, params.Log)
 				case attachment.ExternalContext.URL != "":
 					attachedItem.Content.Data = timeline.StringData(attachment.ExternalContext.Name)
@@ -356,8 +358,6 @@ func (a Archive) processAlbumFiles(ctx context.Context, tlDirEntry timeline.DirE
 		if err != nil {
 			return fmt.Errorf("could not walk known album folder: %s: %w", pathToTry, err)
 		}
-
-		break
 	}
 
 	return nil
@@ -381,6 +381,14 @@ func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEn
 				return err
 			}
 
+			ext := strings.ToLower(path.Ext(info.Name()))
+			switch ext {
+			// in reality I've only seen .jpg, .mp4, and no extension, for valid media files
+			case ".jpg", ".jpeg", ".gif", ".png", ".heic", "", ".mp4", ".mov":
+			default:
+				return nil
+			}
+
 			it := &timeline.Item{
 				Classification:       timeline.ClassMedia,
 				IntermediateLocation: fpath,
@@ -394,7 +402,7 @@ func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEn
 				},
 			}
 
-			_, err = media.ExtractAllMetadata(opt.Log, tlDirEntry.FS, fpath, it, timeline.MetaMergeAppend)
+			_, err = media.ExtractAllMetadata(opt.Log, tlDirEntry, fpath, it, timeline.MetaMergeAppend)
 			if err != nil {
 				opt.Log.Error("extracting metadata from Facebook media",
 					zap.String("file", fpath),
@@ -418,8 +426,6 @@ func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEn
 		if err != nil {
 			return fmt.Errorf("could not open known post media folder: %w - tried: %s", err, pathToTry)
 		}
-
-		break
 	}
 
 	return nil
@@ -427,7 +433,7 @@ func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEn
 
 func (a Archive) processPhotosOrVideos(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string, unmarshalInto any) error {
 	for _, pathToTry := range pathsToTry {
-		file, err := tlDirEntry.FS.Open(pathToTry)
+		file, err := tlDirEntry.Open(pathToTry)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue // it's valid for an archive not to have this data
 		}
@@ -436,15 +442,15 @@ func (a Archive) processPhotosOrVideos(ctx context.Context, tlDirEntry timeline.
 		}
 		defer file.Close()
 
-		if err := json.NewDecoder(file).Decode(&unmarshalInto); err != nil {
+		if err := json.NewDecoder(file).Decode(unmarshalInto); err != nil {
 			return err
 		}
 
 		var medias []fbArchiveMedia
 		switch v := unmarshalInto.(type) {
-		case fbYourUncategorizedPhotos:
+		case *fbYourUncategorizedPhotos:
 			medias = v.OtherPhotosV2
-		case fbYourVideos:
+		case *fbYourVideos:
 			medias = v.VideosV2
 		}
 
@@ -462,8 +468,6 @@ func (a Archive) processPhotosOrVideos(ctx context.Context, tlDirEntry timeline.
 
 			opt.Pipeline <- &timeline.Graph{Item: item}
 		}
-
-		break
 	}
 
 	return nil
@@ -471,7 +475,7 @@ func (a Archive) processPhotosOrVideos(ctx context.Context, tlDirEntry timeline.
 
 func (a Archive) processTaggedPlaces(ctx context.Context, tlDirEntry timeline.DirEntry, params timeline.ImportParams, pathsToTry []string) error {
 	for _, pathToTry := range pathsToTry {
-		file, err := tlDirEntry.FS.Open(pathToTry)
+		file, err := tlDirEntry.Open(pathToTry)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue // it's valid for an archive not to have this data
 		}
@@ -525,8 +529,6 @@ func (a Archive) processTaggedPlaces(ctx context.Context, tlDirEntry timeline.Di
 
 			params.Pipeline <- g
 		}
-
-		break
 	}
 
 	return nil
@@ -534,7 +536,7 @@ func (a Archive) processTaggedPlaces(ctx context.Context, tlDirEntry timeline.Di
 
 func (a Archive) processCheckins(ctx context.Context, tlDirEntry timeline.DirEntry, params timeline.ImportParams, pathsToTry []string) error {
 	for _, pathToTry := range pathsToTry {
-		file, err := tlDirEntry.FS.Open(pathToTry)
+		file, err := tlDirEntry.Open(pathToTry)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue // it's valid for an archive not to have this data
 		}
@@ -617,8 +619,6 @@ func (a Archive) processCheckins(ctx context.Context, tlDirEntry timeline.DirEnt
 
 			params.Pipeline <- g
 		}
-
-		break
 	}
 
 	return nil
@@ -634,7 +634,7 @@ func (Archive) loadProfileInfo(tlDirEntry timeline.DirEntry) (profileInfo, error
 		year2024ProfileInfoPath,
 		pre2024ProfileInfoPath,
 	} {
-		file, err := tlDirEntry.FS.Open(pathToTry)
+		file, err := tlDirEntry.Open(pathToTry)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
