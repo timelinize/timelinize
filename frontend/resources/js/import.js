@@ -512,7 +512,7 @@ async function dataSourceOptions(ds) {
 				throw {
 					elem: ownerUsername,
 					title: "Facebook username required",
-					message: "In order to properly associate this Facebook data with its owner, entering the username of the Facebook account it originated from is required. Please enter the Facebook account username (not email address)."
+					message: "In order to properly associate Facebook data with its owner, you must provide the username of the Facebook account it came from. On the next screen, please enter the Facebook account username (not email address)."
 				}
 			}
 			return;

@@ -81,7 +81,7 @@ func (Archive) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeli
 func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	dsOpt := params.DataSourceOptions.(*Options)
 
-	if err := a.setOwnerEntity(dirEntry, dsOpt); err != nil {
+	if err := a.setOwnerEntity(ctx, dirEntry, dsOpt); err != nil {
 		return err
 	}
 
@@ -161,54 +161,6 @@ func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 	err := GetMessages("facebook", dirEntry, params)
 	if err != nil {
 		return err
-	}
-
-	return nil
-}
-
-func (a Archive) processPhotosOrVideos(ctx context.Context, d timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string, unmarshalInto any) error {
-	const archiveVersionsSupported = 2
-
-	if len(pathsToTry) != archiveVersionsSupported {
-		return fmt.Errorf("should have %d paths to try, since we support %d archive versions; got %d",
-			archiveVersionsSupported, archiveVersionsSupported, len(pathsToTry))
-	}
-
-	file, err := d.FS.Open(pathsToTry[0])
-	if errors.Is(err, fs.ErrNotExist) {
-		// try newer archive version
-		file, err = d.FS.Open(pathsToTry[1])
-	}
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if err := json.NewDecoder(file).Decode(&unmarshalInto); err != nil {
-		return err
-	}
-
-	var medias []fbArchiveMedia
-	switch v := unmarshalInto.(type) {
-	case fbYourUncategorizedPhotos:
-		medias = v.OtherPhotosV2
-	case fbYourVideos:
-		medias = v.VideosV2
-	}
-
-	for _, media := range medias {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		item := &timeline.Item{
-			Owner:          a.owner,
-			Classification: timeline.ClassMedia,
-		}
-
-		media.fillItem(item, d, "", opt.Log)
-
-		opt.Pipeline <- &timeline.Graph{Item: item}
 	}
 
 	return nil
@@ -329,86 +281,9 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 	return nil
 }
 
-func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string) error {
-	for i, pathToTry := range pathsToTry {
-		file, err := tlDirEntry.FS.Open(pathToTry)
-		if err != nil {
-			if i == len(pathsToTry)-1 {
-				return fmt.Errorf("could not open any known post media folder: %w - tried: %v", err, pathsToTry)
-			}
-			continue
-		}
-		defer file.Close()
-
-		err = fs.WalkDir(tlDirEntry.FS, pathToTry, func(fpath string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return fmt.Errorf("visiting %s: %w", fpath, err)
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-
-			it := &timeline.Item{
-				Classification:       timeline.ClassMedia,
-				IntermediateLocation: fpath,
-				Owner:                a.owner,
-				Content: timeline.ItemData{
-					Filename: d.Name(),
-					Size:     uint64(info.Size()), //nolint:gosec // Sigh, yes, I know this can overflow... but will it really??
-					Data: func(_ context.Context) (io.ReadCloser, error) {
-						return tlDirEntry.Open(fpath)
-					},
-				},
-			}
-
-			_, err = media.ExtractAllMetadata(opt.Log, tlDirEntry.FS, fpath, it, timeline.MetaMergeAppend)
-			if err != nil {
-				opt.Log.Error("extracting metadata from Facebook media",
-					zap.String("file", fpath),
-					zap.Error(err))
-			}
-
-			retKey := retrievalKey(tlDirEntry, fpath)
-			it.Retrieval.SetKey(retKey)
-			it.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
-				"data":     timeline.UpdatePolicyPreferIncoming,
-				"metadata": timeline.UpdatePolicyKeepExisting,
-			}
-
-			opt.Pipeline <- &timeline.Graph{Item: it}
-
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-
-		break
-	}
-
-	return nil
-}
-
 func (a Archive) processAlbumFiles(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string) error {
-	for i, pathToTry := range pathsToTry {
-		file, err := tlDirEntry.FS.Open(pathToTry)
-		if err != nil {
-			if i == len(pathsToTry)-1 {
-				return fmt.Errorf("could not open any known post media folder: %w - tried: %v", err, pathsToTry)
-			}
-			continue
-		}
-		defer file.Close()
-
-		err = fs.WalkDir(tlDirEntry.FS, pathToTry, func(fpath string, d fs.DirEntry, err error) error {
+	for _, pathToTry := range pathsToTry {
+		err := fs.WalkDir(tlDirEntry, pathToTry, func(fpath string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return fmt.Errorf("visiting %s: %w", fpath, err)
 			}
@@ -475,8 +350,11 @@ func (a Archive) processAlbumFiles(ctx context.Context, tlDirEntry timeline.DirE
 
 			return nil
 		})
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
 		if err != nil {
-			return err
+			return fmt.Errorf("could not walk known album folder: %s: %w", pathToTry, err)
 		}
 
 		break
@@ -485,14 +363,120 @@ func (a Archive) processAlbumFiles(ctx context.Context, tlDirEntry timeline.DirE
 	return nil
 }
 
-func (a Archive) processTaggedPlaces(ctx context.Context, d timeline.DirEntry, params timeline.ImportParams, pathsToTry []string) error {
-	for i, pathToTry := range pathsToTry {
-		file, err := d.Open(pathToTry)
-		if err != nil {
-			if i == len(pathsToTry)-1 {
-				return fmt.Errorf("could not open any known tagged places file: %w - tried: %v", err, pathsToTry)
+func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string) error {
+	for _, pathToTry := range pathsToTry {
+		err := fs.WalkDir(tlDirEntry, pathToTry, func(fpath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return fmt.Errorf("visiting %s: %w", fpath, err)
 			}
-			continue
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+
+			it := &timeline.Item{
+				Classification:       timeline.ClassMedia,
+				IntermediateLocation: fpath,
+				Owner:                a.owner,
+				Content: timeline.ItemData{
+					Filename: d.Name(),
+					Size:     uint64(info.Size()), //nolint:gosec // Sigh, yes, I know this can overflow... but will it really??
+					Data: func(_ context.Context) (io.ReadCloser, error) {
+						return tlDirEntry.Open(fpath)
+					},
+				},
+			}
+
+			_, err = media.ExtractAllMetadata(opt.Log, tlDirEntry.FS, fpath, it, timeline.MetaMergeAppend)
+			if err != nil {
+				opt.Log.Error("extracting metadata from Facebook media",
+					zap.String("file", fpath),
+					zap.Error(err))
+			}
+
+			retKey := retrievalKey(tlDirEntry, fpath)
+			it.Retrieval.SetKey(retKey)
+			it.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+				"data":     timeline.UpdatePolicyPreferIncoming,
+				"metadata": timeline.UpdatePolicyKeepExisting,
+			}
+
+			opt.Pipeline <- &timeline.Graph{Item: it}
+
+			return nil
+		})
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
+		if err != nil {
+			return fmt.Errorf("could not open known post media folder: %w - tried: %s", err, pathToTry)
+		}
+
+		break
+	}
+
+	return nil
+}
+
+func (a Archive) processPhotosOrVideos(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string, unmarshalInto any) error {
+	for _, pathToTry := range pathsToTry {
+		file, err := tlDirEntry.FS.Open(pathToTry)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
+		if err != nil {
+			return fmt.Errorf("could not open known photos/videos folder: %w - tried: %s", err, pathToTry)
+		}
+		defer file.Close()
+
+		if err := json.NewDecoder(file).Decode(&unmarshalInto); err != nil {
+			return err
+		}
+
+		var medias []fbArchiveMedia
+		switch v := unmarshalInto.(type) {
+		case fbYourUncategorizedPhotos:
+			medias = v.OtherPhotosV2
+		case fbYourVideos:
+			medias = v.VideosV2
+		}
+
+		for _, media := range medias {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			item := &timeline.Item{
+				Owner:          a.owner,
+				Classification: timeline.ClassMedia,
+			}
+
+			media.fillItem(item, tlDirEntry, "", opt.Log)
+
+			opt.Pipeline <- &timeline.Graph{Item: item}
+		}
+
+		break
+	}
+
+	return nil
+}
+
+func (a Archive) processTaggedPlaces(ctx context.Context, tlDirEntry timeline.DirEntry, params timeline.ImportParams, pathsToTry []string) error {
+	for _, pathToTry := range pathsToTry {
+		file, err := tlDirEntry.FS.Open(pathToTry)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
+		if err != nil {
+			return fmt.Errorf("could not open known tagged places folder: %w - tried: %s", err, pathToTry)
 		}
 		defer file.Close()
 
@@ -548,14 +532,14 @@ func (a Archive) processTaggedPlaces(ctx context.Context, d timeline.DirEntry, p
 	return nil
 }
 
-func (a Archive) processCheckins(ctx context.Context, d timeline.DirEntry, params timeline.ImportParams, pathsToTry []string) error {
-	for i, pathToTry := range pathsToTry {
-		file, err := d.Open(pathToTry)
+func (a Archive) processCheckins(ctx context.Context, tlDirEntry timeline.DirEntry, params timeline.ImportParams, pathsToTry []string) error {
+	for _, pathToTry := range pathsToTry {
+		file, err := tlDirEntry.FS.Open(pathToTry)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
 		if err != nil {
-			if i == len(pathsToTry)-1 {
-				return fmt.Errorf("could not open any known check-ins file: %w - tried: %v", err, pathsToTry)
-			}
-			continue
+			return fmt.Errorf("could not open known check-ins folder: %w - tried: %s", err, pathToTry)
 		}
 		defer file.Close()
 
@@ -565,7 +549,7 @@ func (a Archive) processCheckins(ctx context.Context, d timeline.DirEntry, param
 		if err := json.NewDecoder(file).Decode(&checkIns); err != nil {
 			// wasn't an array, try the single-object decode
 			file.Close()
-			file, err = d.Open(pathToTry)
+			file, err = tlDirEntry.Open(pathToTry)
 			if err != nil {
 				return fmt.Errorf("reopening check-in file to try alternate decoding target: %s: %w", pathToTry, err)
 			}
@@ -640,25 +624,51 @@ func (a Archive) processCheckins(ctx context.Context, d timeline.DirEntry, param
 	return nil
 }
 
-func (Archive) loadProfileInfo(d timeline.DirEntry) (profileInfo, error) {
-	file, err := d.Open(pre2024ProfileInfoPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		// try another archive version
-		file, err = d.Open(year2024ProfileInfoPath)
-	}
-	if err != nil {
-		return profileInfo{}, err
-	}
-	defer file.Close()
+// loadProfileInfo loads the profile info found within the DirEntry.
+// It is possible for there to be none, in which case an empty profileInfo
+// will be returned with no error (because no error occurred while looking
+// for it; it is valid for multi-archive exports to not contain any except
+// in just one of the archives).
+func (Archive) loadProfileInfo(tlDirEntry timeline.DirEntry) (profileInfo, error) {
+	for _, pathToTry := range []string{
+		year2024ProfileInfoPath,
+		pre2024ProfileInfoPath,
+	} {
+		file, err := tlDirEntry.FS.Open(pathToTry)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return profileInfo{}, fmt.Errorf("could not open known places for the profile info: %w", err)
+		}
+		defer file.Close()
 
-	var profileInfo profileInfo
-	err = json.NewDecoder(file).Decode(&profileInfo)
-	return profileInfo, err
+		var profileInfo profileInfo
+		err = json.NewDecoder(file).Decode(&profileInfo)
+		return profileInfo, err
+	}
+	return profileInfo{}, nil
 }
 
-func (a *Archive) setOwnerEntity(d timeline.DirEntry, options *Options) error {
+func (a *Archive) setOwnerEntity(ctx context.Context, d timeline.DirEntry, options *Options) error {
+	// we might need to get the username from the data source options, since one is not available to us in the data
+	if options.Username == "" {
+		if repoOwner, ok := ctx.Value(timeline.RepoOwnerCtxKey).(timeline.Entity); ok {
+			if accountUsername, ok := repoOwner.AttributeValue("facebook_username").(string); ok {
+				options.Username = accountUsername
+			}
+		}
+	}
+
 	profileInfo, err := a.loadProfileInfo(d)
-	if errors.Is(err, fs.ErrNotExist) {
+	if err != nil {
+		return err
+	}
+	if profileInfo.ProfileV2.Username == "" {
+		if options.Username == "" {
+			return errors.New("account username is needed, and cannot be empty")
+		}
+
 		// this archive doesn't contain profile info; that's expected with multi-archive exports
 		// for all the archives but one; so use the user-supplied username
 		a.owner = timeline.Entity{
@@ -672,14 +682,11 @@ func (a *Archive) setOwnerEntity(d timeline.DirEntry, options *Options) error {
 		}
 		return nil
 	}
-	if err != nil {
-		return err
-	}
 
 	// these have to match to ensure the imported data is attributed consistently to the correct owner entity
 	if profileInfo.ProfileV2.Username != options.Username {
-		return fmt.Errorf("configured username (%q) does not match what is in the profile manifest: %q",
-			profileInfo.ProfileV2.Username, options.Username)
+		return fmt.Errorf("configured username (%s) does not match what is in the profile manifest: %q",
+			options.Username, profileInfo.ProfileV2.Username)
 	}
 
 	name := FixString(profileInfo.ProfileV2.Name.FullName)
@@ -715,9 +722,8 @@ func (a *Archive) setOwnerEntity(d timeline.DirEntry, options *Options) error {
 			profileInfo.ProfileV2.Birthday.Day,
 			0, 0, 0, 0, time.Local)
 		a.owner.Attributes = append(a.owner.Attributes, timeline.Attribute{
-			Name:        "birth_date",
-			Value:       bdate,
-			Identifying: true,
+			Name:  "birth_date",
+			Value: bdate,
 		})
 	}
 
