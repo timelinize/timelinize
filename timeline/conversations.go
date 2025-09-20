@@ -562,7 +562,7 @@ JOIN entities ON from_ea.entity_id = entities.id`)
 
 	if len(params.classificationIDs) > 0 {
 		if !hasWhere {
-			sb.WriteString("\nWHERE ")
+			sb.WriteString("\nWHERE (")
 			hasWhere = true
 		} else {
 			sb.WriteString(" AND (")
@@ -578,7 +578,7 @@ JOIN entities ON from_ea.entity_id = entities.id`)
 	}
 	if len(params.DataSourceName) > 0 {
 		if !hasWhere {
-			sb.WriteString("\nWHERE ")
+			sb.WriteString("\nWHERE (")
 			hasWhere = true
 		} else {
 			sb.WriteString(" AND (")
@@ -594,7 +594,7 @@ JOIN entities ON from_ea.entity_id = entities.id`)
 	}
 	if len(params.DataText) > 0 {
 		if !hasWhere {
-			sb.WriteString("\nWHERE ")
+			sb.WriteString("\nWHERE (")
 			hasWhere = true
 		} else {
 			sb.WriteString(" AND (")
