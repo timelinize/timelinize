@@ -184,7 +184,6 @@ async function renderConversations() {
 		let tooltipNames = [];
 		const maxRenderNames = 3;
 		const maxTooltipNames = 10;
-		console.log("CONVO:", convo);
 		for (const entity of convo.entities) {
 			const display = entity.name || entity.attributes[0].value;
 			const displayTooltip = entity.name ? entity.attributes[0].value : "";
@@ -223,7 +222,7 @@ async function renderConversations() {
 				</span>`;
 			entitiesWithAvatars = convo.entities.slice(0, maxAvatars);
 		}
-		const avatars = entitiesWithAvatars.map((e)=>`<a href="/entities/${e.id}" title="${e.name || e.attributes[0].value}">${avatar(true, e, "avatar-sm avatar-rounded")}</a>`).join("");
+		const avatars = entitiesWithAvatars.map((e)=>`<a href="/entities/${tlz.openRepos[0].instance_id}/${e.id}" title="${e.name || e.attributes[0].value}">${avatar(true, e, "avatar-sm avatar-rounded")}</a>`).join("");
 		$('.avatar-list', elem).innerHTML = avatars+more;
 
 		// attach the conversation info to the card so we can fill out the filter when clicked

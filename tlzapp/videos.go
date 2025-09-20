@@ -83,7 +83,7 @@ func (a *App) Transcode(ctx context.Context, inputPath string, inputStream io.Re
 		if runtime.GOOS == "darwin" {
 			args = append(args,
 				"-c:v", "hevc_videotoolbox",
-				"-b:v", "256k",
+				"-b:v", "512k",
 				"-maxrate", "2000k",
 				"-bufsize", "4000k",
 				"-f", "matroska",

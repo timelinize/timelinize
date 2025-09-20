@@ -281,10 +281,17 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 
 				// if we're not supposed to regenerate every thumbnail, see if thumbnail already exists; we might
 				// still regenerate it if it's from before when the item was last stored or manually updated
+				// (this query is optimized to use indexes, which is crucial to make the job faster, especially
+				// the size estimation/precount phase)
+				q := `
+					SELECT generated FROM (
+						SELECT generated FROM thumbnails WHERE data_file = ?
+						UNION ALL
+						SELECT generated FROM thumbnails WHERE item_data_id = ?
+					)
+					LIMIT 1`
 				var thumbGenerated int64
-				err := thumbsTx.QueryRowContext(job.ctx,
-					`SELECT generated FROM thumbnails WHERE (data_file=? OR item_data_id=?) LIMIT 1`,
-					task.DataFile, task.DataID).Scan(&thumbGenerated)
+				err := thumbsTx.QueryRowContext(job.ctx, q, task.DataFile, task.DataID).Scan(&thumbGenerated)
 				if errors.Is(err, sql.ErrNoRows) {
 					// no existing thumbnail; carry on
 					continue
