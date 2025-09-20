@@ -76,7 +76,7 @@ async function loadAndRenderMapData() {
 		// them so we can compute actual timeframe bounds for step colors and legend;
 
 		// prepare map data: associate each coordinate with its information & color
-		let newMapData = { items: [], params: params, totalDistance: 0 };
+		let newMapData = { items: [], params: params, totalDistance: 0, totalTravelTime: 0 };
 		for (let i = 0; i < results.items?.length; i++) {
 			const item = results.items[i];
 			
@@ -98,19 +98,32 @@ async function loadAndRenderMapData() {
 			latStr = latStr.substring(0, latDigits+coordPrecision+1);
 			const coordsStr = `${lonStr}, ${latStr}`;
 
-			// use setZone: true so that the time displays in the item's time zone
 			const mapItem = {
 				item,
 				coords: [item.longitude, item.latitude],
 				coordsStr: coordsStr,
+				// use setZone: true so that the time displays in the item's time zone
 				timestamp: DateTime.fromISO(item.timestamp, {setZone: true})
 			};
 			if (item.timespan) {
 				mapItem.timespan = DateTime.fromISO(item.timespan, {setZone: true})
 			}
 
+			// Count how much time was spent between points (as opposed to total time from
+			// start to end), and add up distance traveled between points. This is needed
+			// for proper marker and path gradient coloring. The path's gradient stops are
+			// set by distance, not by time; but the color represents the passage of time,
+			// so we need to make sure marker color and gradient stops both use the same
+			// points of reference from start to end. If we simply calculated end-start,
+			// clusters (or any points that span time) would throw off the coloring, since
+			// they don't cover any distance. For our purposes, we need the duration to
+			// cover distance, OR we need multiple gradient stops on top of each other at
+			// points spanning time. I think it's better to just count time and distance
+			// traveled.
 			if (newMapData.items.length > 0) {
 				const prev = newMapData.items[newMapData.items.length-1];
+				newMapData.totalTravelTime += Math.abs(mapItem.timestamp.diff(prev.timespan || prev.timestamp).toFormat('s'));
+
 				const distanceFromPrev = haversineDistance(prev.coords, mapItem.coords);
 				newMapData.totalDistance += distanceFromPrev;
 				mapItem.distanceFromStart = newMapData.totalDistance;
@@ -124,8 +137,9 @@ async function loadAndRenderMapData() {
 		// compute actual time range (time between first and last item)
 		let actualTimeframeSeconds = 0, firstItemTimestamp, lastItemTimestamp;
 		if (newMapData.items.length > 0) {
-			firstItemTimestamp = newMapData.items[0].timespan ? newMapData.items[0].timespan : newMapData.items[0].timestamp;
-			lastItemTimestamp = newMapData.items[newMapData.items.length - 1].timestamp;
+			// the first item may have started before the selected timeframe, so only count its end time ('timespan') if set
+			firstItemTimestamp = newMapData.items[0].timespan || newMapData.items[0].timestamp;
+			lastItemTimestamp = newMapData.items[newMapData.items.length-1].timestamp;
 			actualTimeframeSeconds = Math.abs(firstItemTimestamp.diff(lastItemTimestamp).toFormat('s'));
 		}
 
@@ -134,7 +148,8 @@ async function loadAndRenderMapData() {
 
 			// we compute the number of seconds into the actual timeframe of the map
 			// so that we can get the color scaled correctly
-			const itemSecondsIntoActualTimeframe = Number(mapItem.timestamp.diff(firstItemTimestamp).toFormat('s'));
+			const base = i == newMapData.items.length-1 ? mapItem.timestamp : (mapItem.timespan || mapItem.timestamp);
+			const itemSecondsIntoActualTimeframe = Number(base.diff(firstItemTimestamp).toFormat('s'));
 
 			// Hue calculation is based on simple linear y = mx+b formula,
 			// where y is the hue, m is the step size (hue change rate; this is
@@ -155,7 +170,7 @@ async function loadAndRenderMapData() {
 			const maxHue = 360;
 			const endHue = 240;
 			const hueRange = startHue + (maxHue - endHue); // distance traveled from startHue to 0/360, then from 0/360 to endHue
-			const scaledProgress = ((hueRange / actualTimeframeSeconds) * itemSecondsIntoActualTimeframe)
+			const scaledProgress = ((hueRange / newMapData.totalTravelTime) * itemSecondsIntoActualTimeframe)
 			const unboundedHue = maxHue - scaledProgress + startHue;
 			const hue = unboundedHue % maxHue;
 			const color = `hsl(${hue}deg, 100%, 55%)`;
@@ -167,8 +182,8 @@ async function loadAndRenderMapData() {
 		// update legend labels
 		if (newMapData.items.length > 0) {
 			// setZone: true makes the time display in the timestamp's local timezone, rather than the user's local time zone
-			$('.color-legend-start').innerText = DateTime.fromISO(newMapData.items[0].item.timestamp, { setZone: true }).toLocaleString(DateTime.DATETIME_FULL);
-			$('.color-legend-end').innerText = DateTime.fromISO(newMapData.items[newMapData.items.length-1].item.timestamp, { setZone: true }).toLocaleString(DateTime.DATETIME_FULL);
+			$('.color-legend-start').innerText = (newMapData.items[0].timespan || newMapData.items[0].timestamp).toLocaleString(DateTime.DATETIME_FULL);
+			$('.color-legend-end').innerText = newMapData.items[newMapData.items.length-1].timestamp.toLocaleString(DateTime.DATETIME_FULL);
 		}
 
 		// TODO: I don't think this will work cleanly if there's more than 1 open repo
