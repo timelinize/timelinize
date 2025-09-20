@@ -91,8 +91,10 @@ func (p *processor) sanitizeAndEnhance(g *Graph) error {
 			if !g.Item.Timestamp.IsZero() &&
 				(timeZone == time.Local || timeZone == time.UTC) &&
 				g.Item.Location.Latitude != nil && g.Item.Location.Longitude != nil {
+				start := time.Now()
 				tzName := p.tzFinder.GetTimezoneName(*g.Item.Location.Longitude, *g.Item.Location.Latitude)
 				loc, err := time.LoadLocation(tzName)
+				duration := time.Since(start)
 				if err == nil {
 					if timeZone == time.Local {
 						// the time value is "wall time", or the time local to whenever it was recorded;
@@ -118,7 +120,8 @@ func (p *processor) sanitizeAndEnhance(g *Graph) error {
 					p.log.Debug("assigned time zone from coordinates",
 						zap.Float64p("latitude", g.Item.Location.Latitude),
 						zap.Float64p("longitude", g.Item.Location.Longitude),
-						zap.String("time_zone", tzName))
+						zap.String("time_zone", tzName),
+						zap.Duration("duration", duration))
 				}
 				if err != nil {
 					p.log.Error("could not load inferred location based on coordinates",

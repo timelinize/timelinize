@@ -103,7 +103,10 @@ async function loadAndRenderMapData() {
 				coords: [item.longitude, item.latitude],
 				coordsStr: coordsStr,
 				// use setZone: true so that the time displays in the item's time zone
-				timestamp: DateTime.fromISO(item.timestamp, {setZone: true})
+				timestamp: DateTime.fromISO(item.timestamp, {setZone: true}),
+				// we'll calculate the non-zero value for these (if it's not the first point) in a moment
+				travelTimeSoFar: 0,
+				distanceFromStart: 0
 			};
 			if (item.timespan) {
 				mapItem.timespan = DateTime.fromISO(item.timespan, {setZone: true})
@@ -122,34 +125,22 @@ async function loadAndRenderMapData() {
 			// traveled.
 			if (newMapData.items.length > 0) {
 				const prev = newMapData.items[newMapData.items.length-1];
-				newMapData.totalTravelTime += Math.abs(mapItem.timestamp.diff(prev.timespan || prev.timestamp).toFormat('s'));
+				
+				const base = newMapData.items.length == 0 ? (mapItem.timespan || mapItem.timestamp) : mapItem.timestamp;
+				const timeSincePrev = Math.abs(base.diff(prev.timespan || prev.timestamp).toFormat('s'));
+				newMapData.totalTravelTime += timeSincePrev;
+				mapItem.travelTimeSoFar = newMapData.totalTravelTime;
 
 				const distanceFromPrev = haversineDistance(prev.coords, mapItem.coords);
 				newMapData.totalDistance += distanceFromPrev;
 				mapItem.distanceFromStart = newMapData.totalDistance;
-			} else {
-				mapItem.distanceFromStart = 0;
 			}
 
 			newMapData.items.push(mapItem);
 		}
 
-		// compute actual time range (time between first and last item)
-		let actualTimeframeSeconds = 0, firstItemTimestamp, lastItemTimestamp;
-		if (newMapData.items.length > 0) {
-			// the first item may have started before the selected timeframe, so only count its end time ('timespan') if set
-			firstItemTimestamp = newMapData.items[0].timespan || newMapData.items[0].timestamp;
-			lastItemTimestamp = newMapData.items[newMapData.items.length-1].timestamp;
-			actualTimeframeSeconds = Math.abs(firstItemTimestamp.diff(lastItemTimestamp).toFormat('s'));
-		}
-
 		for (let i = 0; i < newMapData.items.length; i++) {
 			const mapItem = newMapData.items[i];
-
-			// we compute the number of seconds into the actual timeframe of the map
-			// so that we can get the color scaled correctly
-			const base = i == newMapData.items.length-1 ? mapItem.timestamp : (mapItem.timespan || mapItem.timestamp);
-			const itemSecondsIntoActualTimeframe = Number(base.diff(firstItemTimestamp).toFormat('s'));
 
 			// Hue calculation is based on simple linear y = mx+b formula,
 			// where y is the hue, m is the step size (hue change rate; this is
@@ -170,7 +161,7 @@ async function loadAndRenderMapData() {
 			const maxHue = 360;
 			const endHue = 240;
 			const hueRange = startHue + (maxHue - endHue); // distance traveled from startHue to 0/360, then from 0/360 to endHue
-			const scaledProgress = ((hueRange / newMapData.totalTravelTime) * itemSecondsIntoActualTimeframe)
+			const scaledProgress = (hueRange / newMapData.totalTravelTime) * mapItem.travelTimeSoFar
 			const unboundedHue = maxHue - scaledProgress + startHue;
 			const hue = unboundedHue % maxHue;
 			const color = `hsl(${hue}deg, 100%, 55%)`;
@@ -223,8 +214,8 @@ function makeMarker(repo, mapItem) {
 		const markerElem = document.createElement('div');
 		markerElem.innerHTML = `<svg
 			class="location-dot"
-			width="13"
-			height="13"
+			width="15"
+			height="15"
 			viewBox="0 0 100 100"
 			version="1.1"
 			xmlns="http://www.w3.org/2000/svg">
