@@ -277,14 +277,18 @@ async function itemPageMain() {
 	}
 
 	// For images, see if there is a motion photo associated with it
-	// (TODO: sidecar files should probably be noted with a relationship)
 	if (item.data_type?.startsWith("image/")) {
 
 		function renderMotionPhoto(videoSrc) {
 			const video = document.createElement('video');
 			video.classList.add('invisible','position-absolute'); // prevent empty space that gets shifted around during load
 
-			video.addEventListener('loadeddata', e => {
+			// apparently canplay/canplaythrough fire multiple times if the video loops or we change the currentTime property
+			let canPlay = false;
+			video.addEventListener('canplay', e => {
+				if (canPlay) return;
+				canPlay = true;
+
 				$('#item-content .thumbhash-container')?.classList?.add('d-none');
 				$$('#item-content .content').forEach(elem => elem.classList.add('d-none')); // multiple .content elems? yes, in case a thumbhash is used with an image
 				video.classList.remove('invisible', 'position-absolute');
@@ -292,15 +296,17 @@ async function itemPageMain() {
 				setTimeout(function() {
 					video.classList.remove('fade-in');
 				}, 1000);
-
 				const tpl = cloneTemplate('#tpl-motionpicture');
 				$('#item-content').append(tpl);
+				video.muted = true; // for some reason, Chrome ignores the "muted" attribute, might be a bug: https://stackoverflow.com/a/51189390
+				video.play();
 			});
 			video.addEventListener('error', (event, err) => {
 				console.error("loading video:", event, err);
 				video.remove();
 			});
 
+			video.setAttribute("controls", "");
 			video.setAttribute("loop", "");
 			video.setAttribute("autoplay", "");
 			video.setAttribute("muted", "");

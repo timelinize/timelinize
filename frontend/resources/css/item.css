@@ -10,7 +10,7 @@
 	font-display: swap; */
 	/* src: url('/resources/fonts/Inter-Regular.woff2?v=3.19') format("woff2"); */
 	src: url("/resources/fonts/Lora-VariableFont_wght.woff2") format("woff2-variations");
-  }
+}
 
 .item-content-text {
 	font-family: Lora;
