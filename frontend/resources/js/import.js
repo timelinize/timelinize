@@ -528,6 +528,7 @@ async function dataSourceOptions(ds) {
 		if (simplification) {
 			dsOpt.simplification = Number(simplification);
 		}
+		dsOpt.clustering_coefficient = Number($('.google_location-clustering-coeff').value || 1.0);
 	}
 	if (ds.name == "gpx") {
 		dsOpt = {};

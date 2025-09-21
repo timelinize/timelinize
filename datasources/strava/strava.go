@@ -27,6 +27,7 @@ import (
 	"io"
 	"io/fs"
 
+	"github.com/timelinize/timelinize/datasources/googlelocation"
 	"github.com/timelinize/timelinize/datasources/gpx"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -48,7 +49,8 @@ func init() {
 
 // Options configures the data source.
 type Options struct {
-	Simplification float64 `json:"simplification,omitempty"`
+	// Options specific to the location processor.
+	googlelocation.LocationProcessingOptions
 }
 
 // FileImporter implements the timeline.FileImporter interface.
@@ -255,7 +257,7 @@ func (FileImporter) processActivity(ctx context.Context, fsys fs.FS, filename st
 	}
 	defer file.Close()
 
-	proc, err := gpx.NewProcessor(file, owner, opt, dsOpt.Simplification)
+	proc, err := gpx.NewProcessor(file, owner, opt, dsOpt.LocationProcessingOptions)
 	if err != nil {
 		return err
 	}

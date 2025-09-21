@@ -38,42 +38,59 @@ type LocationSource interface {
 	NextLocation(ctx context.Context) (*Location, error)
 }
 
+type LocationProcessingOptions struct {
+	// Set to a value 1-10 to enable path simplification.
+	// 10 means very aggressive simplification (skip many
+	// points, leave practically only clusters or endpoints)
+	// and 1 means to only drop points on the straightest paths.
+	// (My preferred is ~2 when scaled to between 1000 and 50000; i.e. about epsilon=6-7k)
+	Simplification float64 `json:"simplification,omitempty"`
+
+	// Points are clustered together if the mean change of the centroid of
+	// points in a sliding window is less than the standard deviation of
+	// the points times some coefficient based on the size of the window.
+	// This coefficient can be scaled up or down to make clustering more
+	// or less aggressive. Must be a non-negative value. Zero disables
+	// clustering; the default behavior is enabled with a value of 1.0.
+	// TODO: Experimental. Clustering algorithm WIP. Likely to change.
+	ClusteringCoefficient float64 `json:"clustering_coefficient,omitempty"`
+}
+
 // NewLocationProcessor returns a new location source that filters, refines, clusters,
 // and possibly simplifies the locations it reads from source.
-//
-// To enable simplification, set to a value 1-10. 10 means very aggressive
-// simplification (skip many points, leave practically only clusters or endpoints)
-// and 1 means to only drop points on the straightest paths. (My preferred is ~2
-// when scaled to between 1000 and 50000; i.e. about epsilon=6-7k).
 //
 // The returned locations may have new or different values/information from what
 // the input values were. The fields on the outputted locations should be preferred
 // over the inputted locations for filling in item structs. Of special note are
 // timespan and metadata fields: timespan and metadata will be set if the point
 // represents a cluster, so those fields should be added to the resulting item.
-func NewLocationProcessor(source LocationSource, simplificationLevel float64) (LocationSource, error) {
-	if simplificationLevel < 0 || simplificationLevel > 10 {
-		return nil, fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", simplificationLevel)
+func NewLocationProcessor(source LocationSource, options LocationProcessingOptions) (LocationSource, error) {
+	if options.Simplification < 0 || options.Simplification > 10 {
+		return nil, fmt.Errorf("invalid simplification factor; must be in [1,10]: %f", options.Simplification)
+	}
+	if options.ClusteringCoefficient < 0 {
+		return nil, fmt.Errorf("invalid clustering coefficient; must be >= 0: %f", options.ClusteringCoefficient)
 	}
 
 	locProc := &locationProcessor{
-		source:           source,
-		clusteringBuffer: make([]*Location, 0, clusterBufferSize),
+		source:               source,
+		clusteringBuffer:     make([]*Location, 0, clusterBufferSize),
+		clusteringCoeffScale: options.ClusteringCoefficient,
 	}
 
-	if simplificationLevel != 0 {
+	if options.Simplification != 0 {
 		// To scale a number x into range [a,b]:
 		// x_scaled = (b-a) * ((x - x_min) / (x_max - x_min)) + a
 		//
 		// 10,000 is quite a high epsilon and, indeed, it does thin out the path quite significantly,
 		// but the algorithm is quite amazing in that it does preserve the essence of the path.
 		// I recommend no higher than ~1000 for a default epsilon, for most data sets. That'd be
-		// an input simplificationLevel of ~1.0. Users can set this lower if they want more points
+		// an input simplification of ~1.0. Users can set this lower if they want more points
 		// or higher if they want less. The high range is somewhat necessary to accommodate
 		// different spreads of data.
 		const xMin, xMax = 0.0, 10.0
 		const epsMin, epsMax = 10.0, 10000.0
-		locProc.epsilon = (epsMax-epsMin)*((simplificationLevel-xMin)/(xMax-xMin)) + epsMin
+		locProc.epsilon = (epsMax-epsMin)*((options.Simplification-xMin)/(xMax-xMin)) + epsMin
 	}
 
 	return locProc, nil
@@ -99,8 +116,9 @@ type locationProcessor struct {
 	denoiseWindow []*Location
 
 	// clustering
-	clusteringBuffer []*Location
-	startOfNextTrack *Location
+	clusteringBuffer     []*Location
+	startOfNextTrack     *Location
+	clusteringCoeffScale float64
 
 	// simplifiying
 	epsilon float64 // enables RDP path simplification (https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm)
@@ -332,6 +350,7 @@ func (lp *locationProcessor) clusterBatch(ctx context.Context, batch []*Location
 			default:
 				coefficient = 1.15 // 1.15 seems good for most driving+destination data
 			}
+			coefficient *= lp.clusteringCoeffScale
 
 			// it's important that we're at least a window-size into the buffer, because the oldest
 			// point in the window is appended to the cluster; if we did this before we were one full

@@ -64,13 +64,14 @@ type Options struct {
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
 	OwnerEntityID uint64 `json:"owner_entity_id"`
 
-	Simplification float64 `json:"simplification,omitempty"`
-
 	// The year representing the century any ambiguous dates are in.
 	// If not set, the default is the current year. NMEA dates don't
 	// have 4-digit years, so the first two digits are taken from
 	// this reference year.
 	ReferenceYear int `json:"reference_year,omitempty"`
+
+	// Options specific to the location processor.
+	googlelocation.LocationProcessingOptions
 }
 
 // FileImporter implements the timeline.FileImporter interface.
@@ -130,7 +131,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		}
 		defer file.Close()
 
-		proc, err := NewProcessor(file, owner, params, dsOpt.Simplification, dsOpt.ReferenceYear, params.Log.Named("nmea_processor"))
+		proc, err := NewProcessor(file, owner, params, dsOpt.LocationProcessingOptions, dsOpt.ReferenceYear, params.Log.Named("nmea_processor"))
 		if err != nil {
 			return err
 		}
@@ -161,7 +162,7 @@ type Processor struct {
 
 // NewProcessor returns a new file processor.
 func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportParams,
-	simplification float64, refYear int, logger *zap.Logger) (*Processor, error) {
+	locProcOpt googlelocation.LocationProcessingOptions, refYear int, logger *zap.Logger) (*Processor, error) {
 	if refYear >= 0 {
 		refYear = time.Now().UTC().Year()
 	}
@@ -173,7 +174,7 @@ func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportPara
 	dec.scanner.Split(scanLines)
 
 	// create location processor to clean up any noisy raw data
-	locProc, err := googlelocation.NewLocationProcessor(dec, simplification)
+	locProc, err := googlelocation.NewLocationProcessor(dec, locProcOpt)
 	if err != nil {
 		return nil, err
 	}

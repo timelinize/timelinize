@@ -84,7 +84,7 @@ func (fi *FileImporter) decodeOnDevice2024iOSFormat(ctx context.Context, dirEntr
 	}
 
 	onDevDec := &onDeviceiOS2024Decoder{Decoder: dec}
-	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.Simplification)
+	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.LocationProcessingOptions)
 	if err != nil {
 		return true, err
 	}
@@ -162,7 +162,7 @@ func (fi *FileImporter) decodeOnDevice2025AndroidFormat(ctx context.Context, dir
 
 	// we've arrived at the location data; from here, we can stream-decode the objects in the array
 	onDevDec := &onDeviceAndroid2025Decoder{Decoder: dec}
-	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.Simplification)
+	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.LocationProcessingOptions)
 	if err != nil {
 		return true, err
 	}

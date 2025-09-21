@@ -55,7 +55,8 @@ type Options struct {
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
 	OwnerEntityID uint64 `json:"owner_entity_id"`
 
-	Simplification float64 `json:"simplification,omitempty"`
+	// Options specific to the location processor.
+	googlelocation.LocationProcessingOptions
 }
 
 // FileImporter implements the timeline.FileImporter interface.
@@ -115,7 +116,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		}
 		defer file.Close()
 
-		proc, err := NewProcessor(file, owner, params, dsOpt.Simplification)
+		proc, err := NewProcessor(file, owner, params, dsOpt.LocationProcessingOptions)
 		if err != nil {
 			return err
 		}
@@ -144,12 +145,12 @@ type Processor struct {
 }
 
 // NewProcessor returns a new GPX processor.
-func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportParams, simplification float64) (*Processor, error) {
+func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportParams, locOpt googlelocation.LocationProcessingOptions) (*Processor, error) {
 	// create XML decoder (wrapped to track some state as it decodes)
 	xmlDec := &decoder{Decoder: xml.NewDecoder(file)}
 
 	// create location processor to clean up any noisy raw data
-	locProc, err := googlelocation.NewLocationProcessor(xmlDec, simplification)
+	locProc, err := googlelocation.NewLocationProcessor(xmlDec, locOpt)
 	if err != nil {
 		return nil, err
 	}

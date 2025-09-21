@@ -60,7 +60,8 @@ type Options struct {
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
 	OwnerEntityID uint64 `json:"owner_entity_id"`
 
-	Simplification float64 `json:"simplification,omitempty"`
+	// Options specific to the location processor.
+	googlelocation.LocationProcessingOptions
 }
 
 // FileImporter implements the timeline.FileImporter interface.
@@ -132,7 +133,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		}
 
 		// create location processor to clean up any noisy raw data
-		locProc, err := googlelocation.NewLocationProcessor(&doc, dsOpt.Simplification)
+		locProc, err := googlelocation.NewLocationProcessor(&doc, dsOpt.LocationProcessingOptions)
 		if err != nil {
 			return err
 		}
