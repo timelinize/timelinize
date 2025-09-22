@@ -36,6 +36,7 @@ import (
 	_ "github.com/timelinize/timelinize/datasources/github"
 	_ "github.com/timelinize/timelinize/datasources/googlelocation"
 	_ "github.com/timelinize/timelinize/datasources/googlephotos"
+	_ "github.com/timelinize/timelinize/datasources/googlevoice"
 	_ "github.com/timelinize/timelinize/datasources/gpx"
 	_ "github.com/timelinize/timelinize/datasources/icloud"
 	_ "github.com/timelinize/timelinize/datasources/instagram"

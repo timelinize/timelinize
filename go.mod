@@ -6,6 +6,7 @@ replace github.com/cozy/goexif2 => github.com/mholt/goexif2 v0.0.0-2025091203484
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
+	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/abema/go-mp4 v1.4.1
 	github.com/adrianmo/go-nmea v1.10.0
 	github.com/apognu/gocal v0.9.1
@@ -44,6 +45,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.0 // indirect
 	github.com/STARRY-S/zip v0.2.3 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/aryann/difflib v0.0.0-20210328193216-ff5ff6dc229b // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
