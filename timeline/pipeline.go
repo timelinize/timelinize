@@ -270,13 +270,21 @@ func (p *processor) downloadItemData(ctx context.Context, it *Item) error {
 		}()
 
 		n, err := io.ReadFull(source, buf)
-		if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-			return fmt.Errorf("buffering item's data stream to peek size/content-type: %w", err)
+		if err == io.EOF { // no content
+			p.log.Debug("empty data stream",
+				zap.String("original_id", it.ID),
+				zap.String("data_file_path", it.dataFilePath),
+				zap.String("filename", it.Content.Filename),
+				zap.String("intermediate_path", it.IntermediateLocation))
+			return nil
+		}
+		if err != nil && err != io.ErrUnexpectedEOF { // it's OK if the buffer wasn't filled, it just means the item is smaller
+			return fmt.Errorf("buffering item's data stream to peek size and content-type: %w", err)
 		}
 
-		// We carefully use only the first n bytes of the buffer, since beyond
-		// that is likely data from another item that this pooled buffer was
-		// previously used with
+		// In case the size of the data is less than the peek buffer, we carefully use only
+		// the first n bytes of the buffer, since beyond that is likely data from another
+		// item that this pooled buffer was previously used with
 		bufferedContent := buf[:n]
 
 		// now that we have a sample of the data (or possibly all of it),
@@ -285,37 +293,31 @@ func (p *processor) downloadItemData(ctx context.Context, it *Item) error {
 			detectContentType(bufferedContent, it)
 		}
 
-		if n == len(buf) {
-			// content is at least as large as our buffer, so it probably belongs outside
-			// of the items table; wrap the reader so that we can recover the bytes we
-			// already buffered when we read the data later
-			source = io.NopCloser(io.MultiReader(bytes.NewReader(bufferedContent), source))
-		} else if n > 0 && it.Content.isPlainTextOrMarkdown() {
-			// this item's data is text and will be stored in the items table,
-			// so store it with the item so we can put back the buffer.
-			// trim leading/trailing spaces for this because it can be hard for
-			// some data sources to strip them, and I don't think we need them,
-			// especially for short text content stored in the DB
+		if n < len(buf) && it.Content.isPlainTextOrMarkdown() {
+			// item's content is smaller than the buffer and is plaintext, so
+			// we can store this comfortably in the items table; move a string
+			// copy of it to the item and return
 			dataTextStr := strings.TrimSpace(string(bufferedContent))
 			it.dataText = &dataTextStr
-			source = nil
+			return nil
 		}
+
+		// content is either binary, or too large to fit comfortably in the
+		// items table, so we'll need to finish downloading and processing
+		// the data file; we ensure the data stream first reads from our
+		// buffer before it finishes reading from the source stream
+		source = io.NopCloser(io.MultiReader(bytes.NewReader(bufferedContent), source))
 	}
 
-	// if the item classification is missing, but the item is clearly
-	// a common media type, we can probably classify the item anyway
-	// TODO: not sure if a good idea... ho hum.
+	// this might be a naive assumption, but if the item classification is
+	// missing, but the item is clearly a common media type, we can probably
+	// classify the item anyway
 	if it.Classification.Name == "" {
 		if strings.HasPrefix(it.Content.MediaType, "image/") ||
 			strings.HasPrefix(it.Content.MediaType, "video/") ||
 			strings.HasPrefix(it.Content.MediaType, "audio/") {
 			it.Classification = ClassMedia
 		}
-	}
-
-	// if we don't need a data file (e.g. short text), we can just return now
-	if source == nil {
-		return nil
 	}
 
 	// open the output file and copy the data
@@ -531,7 +533,7 @@ func (p *processor) downloadAndHashDataFile(source io.Reader, destination *os.Fi
 		}
 	}
 
-	p.log.Debug("downloaded data file",
+	p.log.Debug("downloaded data file: "+destination.Name(),
 		zap.String("filename", destination.Name()),
 		zap.Int64("size", n),
 	)

@@ -1304,7 +1304,7 @@ func detectContentType(peekedBytes []byte, it *Item) {
 	// (last checked Q1 2024: Go's standard lib doesn't support HEIC or
 	// quicktime---a specific kind of .mv/.mp4 video---files,
 	// which are common with Apple devices)
-	if contentType == defaultContentType || contentType == "" {
+	if len(peekedBytes) > 16 && (contentType == defaultContentType || contentType == "") {
 		if bytes.Contains(peekedBytes[:16], []byte("ftypheic")) {
 			contentType = "image/heic"
 		} else if bytes.Contains(peekedBytes[:16], []byte("ftypqt")) {
