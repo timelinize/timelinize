@@ -630,6 +630,7 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		"twitter",
 		"instagram",
 		"iphone",
+		"google_voice", // at the end of this group since every conversation is a different file, so it's actually really slow
 
 		// the remaining ones are mostly I/O heavy, but can still have lots of items
 		"media",
