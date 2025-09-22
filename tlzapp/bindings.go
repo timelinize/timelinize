@@ -610,11 +610,6 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 	// it's super slow!). This way, the user can browse potentially hundreds of thousands of items while
 	// waiting for the slower data sources to finish and have thumbnails generated.
 	dsPriorities := []string{
-		// contact lists are an excellent first import since they can give names to entities right off the bat
-		"vcard",
-		"contact_list",
-		"apple_contacts",
-
 		// then we prioritize data sources with large amounts of small items; when the DB is
 		// small, imports are fastest, so putting data sources with the most small items up
 		// first makes imports faster
@@ -624,9 +619,9 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		"kml",
 		"nmea0183",
 		"strava",
-		"sms_backup_restore",
 
 		// these next ones are a blend of lots of items and I/O heavy
+		"sms_backup_restore",
 		"whatsapp",
 		"telegram",
 		"facebook",
@@ -641,6 +636,11 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 		"icloud",
 		"apple_photos",
 		"google_photos",
+
+		// contact lists can be slow because of downloading profile pictures
+		"vcard",
+		"contact_list",
+		"apple_contacts",
 	}
 	slices.SortStableFunc(plan.Files, func(a, b timeline.ProposedFileImport) int {
 		if len(a.DataSources) == 0 || len(b.DataSources) == 0 {
