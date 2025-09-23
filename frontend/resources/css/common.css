@@ -7,9 +7,14 @@
 
 /*
 
-MY OWN TABLER (BETA 19, 20, 21, 22, and v1.1.1) FIXES
+MY OWN TABLER (BETA 19, 20, 21, 22, and v1.1.1, and v1.4.0) FIXES
 
 */
+
+/* scrollbar styling broke by adding a left margin... see https://github.com/tabler/tabler/issues/2271 -- this might not be the right fix: */
+:root {
+	margin-left: 0;
+}
 
 /* that single-story "a" looks terrible IMO, so disable cv11. See all Inter font features here: https://rsms.me/inter/#features */
 body {
