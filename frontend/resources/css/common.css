@@ -172,6 +172,7 @@ body {
 	height: 100%;
 	overflow: hidden; /* mainly for rounded corners, so the sharp corners don't stick out */
 	place-items: center;
+	object-fit: cover;
 }
 
 .loader-supercontainer > * {
@@ -620,13 +621,8 @@ styles. But it took hours to figure them out!
 	align-content: stretch;
 }
 
-.minidisp-media:not(.minidisp-media-nocrop) > a {
-	display: flex;
-}
-
 .minidisp-media > a {
 	flex: 1;
-	align-content: stretch;
 }
 
 .minidisp-media .thumbhash-container,
@@ -636,22 +632,16 @@ styles. But it took hours to figure them out!
 	max-width: 100%;
 	object-fit: cover;
 	align-self: stretch;
+	flex: 1;
 }
 
 .minidisp-media .thumbhash-container .content {
 	width: 100%;
 	height: 100%;
-	flex: 1;
 	object-fit: cover;
 	flex-basis: content;
 }
 
-.minidisp-media-nocrop > a > * {
-	flex: 0;
-}
-.minidisp-media-nocrop .content {
-	object-fit: inherit;
-}
 .minidisp-media-xl .thumbhash-container,
 .minidisp-media-xl .content {
 	max-height: 500px;

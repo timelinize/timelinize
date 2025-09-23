@@ -24,10 +24,10 @@ const Interval = luxon.Interval;
 const Duration = luxon.Duration;
 
 
-// // Tabler 1.2.0 moved/hid the bootstrap variable and the prior tabler variable into a new global... see https://github.com/tabler/tabler/issues/2273#issuecomment-2816833153
-// // It broke quite a few things, so I'm holding out on Tabler 1.2 until some things are sorted out.
-// var bootstrap = tabler.bootstrap;
-// var tabler = tabler.tabler;
+// Tabler 1.2.0 moved/hid the bootstrap variable and the prior tabler variable into a new global... see https://github.com/tabler/tabler/issues/2273#issuecomment-2816833153
+// It broke quite a few things, so here's a quick shim...
+const bootstrap = tabler.bootstrap;
+var tabler = tabler.tabler;
 
 
 
@@ -1667,6 +1667,7 @@ function miniDisplayMedia(items, options) {
 
 	for (const item of items) {
 		const a = document.createElement('a');
+		a.classList.add('d-flex');
 		a.href = `/items/${item.repo_id}/${item.id}`;
 		const elem = itemContentElement(item, { options, thumbnail: true });
 		a.append(elem);
@@ -1674,11 +1675,11 @@ function miniDisplayMedia(items, options) {
 	}
 
 	if (items.length == 1) {
-		container.classList.add('minidisp-media-xl', 'minidisp-media-nocrop');
+		container.classList.add('minidisp-media-xl');
 	} else if (items.length <= 3) {
-		container.classList.add('minidisp-media-l', 'minidisp-media-nocrop');
+		container.classList.add('minidisp-media-l');
 	} else if (items.length >= 4 && items.length < 7) {
-		container.classList.add('minidisp-media-m', 'minidisp-media-nocrop');
+		container.classList.add('minidisp-media-m');
 	}
 
 	return {
