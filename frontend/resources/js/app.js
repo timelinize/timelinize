@@ -392,8 +392,8 @@ function baseFilename(filepath) {
 async function openRepository(repoPath, createIfNotExist) {
 	const repo = await app.OpenRepository(repoPath, createIfNotExist);
 	tlz.openRepos.push(repo);
-	await updateRepoOwners();
-	await updateItemClasses();
+	await updateRepoOwners(true);
+	await updateItemClasses(true);
 	return repo;
 }
 

@@ -848,16 +848,21 @@ func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	}
 	defer tx.Rollback()
 
-	err = tx.QueryRowContext(tl.ctx, `SELECT entity_types.name, entities.type_id, entities.name, entities.picture_file
+	var stored int64
+
+	err = tx.QueryRowContext(tl.ctx, `SELECT entity_types.name, entities.type_id, entities.stored, entities.name, entities.picture_file
 		FROM entities, entity_types
 		WHERE entities.id=? AND entity_types.id = entities.type_id
-		LIMIT 1`, id).Scan(&p.Type, &p.typeID, &p.name, &p.Picture)
+		LIMIT 1`, id).Scan(&p.Type, &p.typeID, &stored, &p.name, &p.Picture)
 	if err != nil {
 		return p, err
 	}
 
 	if p.name != nil {
 		p.Name = *p.name
+	}
+	if stored != 0 {
+		p.Stored = time.Unix(stored, 0)
 	}
 
 	rows, err := tx.QueryContext(tl.ctx, `SELECT attributes.name, attributes.value, attributes.alt_value, attributes.metadata, entity_attributes.data_source_id
