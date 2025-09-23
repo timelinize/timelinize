@@ -46,7 +46,10 @@ a parent div. this takes care of that by removing the >. */
 	border-bottom-left-radius: 0;
 }
 
-
+/* broke in v1.4 (clicking on items in Map view) */
+.btn-actions {
+	align-items: center;
+}
 
 /* broke sometime between Beta 22 and v1.1.1 */
 .ts-wrapper.multi .ts-control > div {
@@ -72,7 +75,7 @@ a parent div. this takes care of that by removing the >. */
 /* the tabler-defined height of 1.25rem shifts alignment to be off when inputs are in a row - removing it equalizes heights and alignment of form elements */
 .dropdown-item-indicator {
 	height: inherit;
-	margin-left: 0; /* this fixes the -.25rem value that causes images to be cut off
+	margin-left: 0; /* this fixes the -.25rem value that causes images to be cut off */
 }
 
 
@@ -83,20 +86,6 @@ a parent div. this takes care of that by removing the >. */
 
 
 
-
-
-html,
-body {
-	font-family: Inter, sans-serif;
-	/* height: 100%; */
-}
-
-/* The conversations page needs this, I think (along with the height:100% above), but it breaks the dropdown menu for the mobile navbar */
-/* body {
-	overflow: hidden;
-	display: flex;
-	flex-flow: column;
-} */
 
 .page::-webkit-scrollbar-track {
 	margin-top: 56px !important;

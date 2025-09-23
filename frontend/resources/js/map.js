@@ -780,7 +780,7 @@ on('click', '#bbox-toggle', event => {
 // 	hideMapPageInfoCard();
 // });
 
-on('click', '#map-page #infocard .btn-close', e => {
+on('click', '#map-page #infocard .btn-action.close', e => {
 	hideMapPageInfoCard();
 });
 
