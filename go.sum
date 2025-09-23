@@ -438,8 +438,8 @@ github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d h1:5PJl274Y63IEHC+7izoQ
 github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d/go.mod h1:01TrycV0kFyexm33Z7vhZRXopbI8J3TDReVlkTgMUxE=
 github.com/mholt/acmez/v3 v3.1.1 h1:Jh+9uKHkPxUJdxM16q5mOr+G2V0aqkuFtNA28ihCxhQ=
 github.com/mholt/acmez/v3 v3.1.1/go.mod h1:L1wOU06KKvq7tswuMDwKdcHeKpFFgkppZy/y0DFxagQ=
-github.com/mholt/archives v0.1.4 h1:sU+/lLNgafUontWFv3AVwO8VUWye3rrtN6hgC2dU11c=
-github.com/mholt/archives v0.1.4/go.mod h1:I2ia+SQTtQHej9w1GZM/mz7qfdgQv+BHr3hEKqDcGuk=
+github.com/mholt/archives v0.1.5-0.20250923193103-71b922ebb93b h1:fn/ONnmJsQvU7gvkAKjvV73HgDgerzWleTUNv2BCR0s=
+github.com/mholt/archives v0.1.5-0.20250923193103-71b922ebb93b/go.mod h1:I2ia+SQTtQHej9w1GZM/mz7qfdgQv+BHr3hEKqDcGuk=
 github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e h1:CBeXdWbR9AtA/dNjOYHeBcPoKtwk6vYrrhsDF5uJMtE=
 github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e/go.mod h1:ZkxDnKt0fFWF34piA4kQm6PO4y207oLNxceKj2iOc8o=
 github.com/mholt/goexif2 v0.0.0-20250912034845-8dfb3070976a h1:XRuOUerxzh3jcWK6sMGKXBiloYfcb6fhyRF+buCBdc0=

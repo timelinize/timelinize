@@ -22,7 +22,7 @@ require (
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/maruel/natural v1.1.1
 	github.com/mattn/go-sqlite3 v1.14.32
-	github.com/mholt/archives v0.1.4
+	github.com/mholt/archives v0.1.5-0.20250923193103-71b922ebb93b
 	github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e
 	github.com/ringsaturn/tzf v1.0.0
 	github.com/signal-golang/go-vcard v0.1.2
