@@ -328,7 +328,7 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 	// of the media file within the archive (if we're on the media file, it's just that
 	// path, but if we're on the sidecar JSON file, we have to construct it with heuristics
 	// since Google's naming convention isn't documented)
-	archiveName := fimp.archiveFilenameWithoutPositionPart()
+	archiveName := fimp.exportIDFromArchiveFilename()
 	retKey := fmt.Sprintf("%s::%s::%s", dataSourceName, archiveName, mediaFilePath)
 	item.Retrieval.SetKey(retKey)
 
@@ -381,22 +381,36 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 	return ig
 }
 
-// archiveFilenameWithoutPositionPart returns the name of the archive without the
-// positional index and without the extension. It assumes a Takeout archive filename
-// that has not been renamed, for example: "takeout-20240516T230250Z-003.zip", this
-// returns "takeout-20240516T230250Z". This is useful for identifying which export
-// an archive belongs to. (The filename is not strictly parsed; it quite naively
-// just uses the name up to the last dash, as long as whatever is before the last dash
+// exportIDFromArchiveFilename returns the name of the archive without the positional
+// index(es) and without the extension. It assumes a Takeout archive filename that has
+// NOT been renamed.
+//
+// A couple examples: given an import filepath of
+// "/foo/takeout-20240516T230250Z-003.zip/Takeout/Google Photos", this returns
+// "takeout-20240516T230250Z", which seems to be a unique identifier for the particular
+// export this archive is a part of. For newer/larger (~Q3 2025) takeouts, an import
+// filepath of "/foo/takeout-20250921T1994402Z-3-009.zip/Takeout/Google Photos" (notice
+// this has another component in the archive filename) returns "takeout-20250921T1994402Z",
+// which is the export ID.
+//
+// The archive name is extracted from the import path, trimming the Google Photos subpath
+// ("Takeout/Google Photos"). The archive filename is not strictly parsed; it quite naively
+// just uses the name up to the second "-", as long as whatever is before the second "-"
 // is the same for all archives in the group.)
-func (fimp *FileImporter) archiveFilenameWithoutPositionPart() string {
+func (fimp *FileImporter) exportIDFromArchiveFilename() string {
 	// For "/foo/takeout-20240516T230250Z-003.zip/Takeout/Google Photos", strip the
 	// "Takeout/Google Photos" suffix to terminate the path at the root of the archive
 	base := filepath.Base(strings.TrimSuffix(fimp.filename, googlePhotosPath))
-	lastDashPos := strings.LastIndex(base, "-")
-	if lastDashPos <= 0 {
+	firstDashPos := strings.Index(base, "-")
+	if firstDashPos < 0 {
 		return base
 	}
-	return base[:lastDashPos]
+	secondDashPosRelative := strings.Index(base[firstDashPos+1:], "-")
+	if secondDashPosRelative <= 0 {
+		return base
+	}
+	absoluteSecondDashPos := firstDashPos + 1 + secondDashPosRelative
+	return base[:absoluteSecondDashPos]
 }
 
 func (fimp *FileImporter) readAlbumMetadata(d timeline.DirEntry, albumFolderPath string) (albumArchiveMetadata, error) {
