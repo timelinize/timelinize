@@ -389,10 +389,10 @@ on('click', '#start-import', async event => {
 			},
 			processing_options: {
 				infer_time_zone: $('#infer-time-zones').checked,
-				integrity: $('#integrity-checks').checked,
-				overwrite_local_changes: $('#overwrite-local-changes').checked,
+				integrity: page.integrityChecks,
+				overwrite_local_changes: page.overwriteLocalChanges,
 				item_unique_constraints: page.itemUniqueConstraints,
-				interactive: $('#interactive').checked ? {} : null,
+				// interactive: $('#interactive').checked ? {} : null,
 				thumbnails: $('#generate-thumbnails').checked
 			},
 			estimate_total: $('#estimate-total').checked
@@ -669,6 +669,8 @@ on('show.bs.modal', '#modal-advanced-settings', () => {
 			});
 		}
 	}
+	$('#integrity-checks').checked = page.integrityChecks;
+	$('#overwrite-local-changes').checked = page.overwriteLocalChanges;
 });
 
 // save settings when button is clicked (only saved for duration of page load; that's probably best tbh)
@@ -708,6 +710,8 @@ function saveAdvancedSettings() {
 		page.itemUniqueConstraints["data"] = true;
 	}
 	saveItemUpdatePreferences();
+	page.integrityChecks = $('#integrity-checks').checked;
+	page.overwriteLocalChanges = $('#overwrite-local-changes').checked;
 }
 
 function saveItemUpdatePreferences() {

@@ -1,10 +1,12 @@
 .accordion-button {
 	cursor: pointer;
+	--tblr-accordion-btn-padding-y: .5rem;
+	--tblr-accordion-btn-padding-x: .75rem;
 }
 
 .accordion-button:hover {
 	/* border-color: var(--tblr-body-color); */
-	border-color: rgba(var(--tblr-primary-rgb), .5);
+	/* border-color: rgba(var(--tblr-primary-rgb), .5); */
 	background-color: rgba(var(--tblr-primary-rgb), .04);
 }
 

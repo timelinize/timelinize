@@ -76,7 +76,7 @@
 
 			<div class="col-md-3">
 				<div class="sticky-top">
-					<div class="form-label">Interactive</div>
+					<!-- <div class="form-label">Interactive</div>
 					<div class="mb-4">
 						<label class="form-check form-switch">
 							<input id="interactive" class="form-check-input" type="checkbox">
@@ -84,17 +84,7 @@
 							<span class="form-check-label form-check-label-off">No</span>
 						</label>
 						<div class="small text-secondary">Manually review and edit each incoming item one by one.</div>
-					</div>
-
-					<div class="form-label">Estimate total</div>
-					<div class="mb-4">
-						<label class="form-check form-switch">
-							<input id="estimate-total" class="form-check-input" type="checkbox">
-							<span class="form-check-label form-check-label-on">Yes</span>
-							<span class="form-check-label form-check-label-off">No</span>
-						</label>
-						<div class="small text-secondary">Take extra time up front to estimate total size of the import, solely for progress updates.</div>
-					</div>
+					</div> -->
 
 					<div class="form-label">Infer time zones</div>
 					<div class="mb-4">
@@ -106,24 +96,14 @@
 						<div class="small text-secondary">If timestamp lacks time zone, use geocoordinate, if available, to infer local time offset.</div>
 					</div>
 
-					<div class="form-label">Integrity checks</div>
+					<div class="form-label">Estimate total</div>
 					<div class="mb-4">
 						<label class="form-check form-switch">
-							<input id="integrity-checks" class="form-check-input" type="checkbox">
-							<span class="form-check-label form-check-label-on">On</span>
-							<span class="form-check-label form-check-label-off">Off</span>
-						</label>
-						<div class="small text-secondary">Items already in the timeline will be re-imported if their checksums no longer match. (Slow.)</div>
-					</div>
-
-					<div class="form-label">Overwrite manual changes</div>
-					<div class="mb-4">
-						<label class="form-check form-switch">
-							<input id="overwrite-local-changes" class="form-check-input" type="checkbox">
+							<input id="estimate-total" class="form-check-input" type="checkbox">
 							<span class="form-check-label form-check-label-on">Yes</span>
 							<span class="form-check-label form-check-label-off">No</span>
 						</label>
-						<div class="small text-secondary">Items modified manually after being imported will be updated to conform to the data in this import.</div>
+						<div class="small text-secondary">Take extra time up front to estimate total size of the import, solely for progress updates.</div>
 					</div>
 
 					<div class="form-label">Thumbnail generation</div>
@@ -344,6 +324,35 @@
 				</div>
 
 			</div>
+
+			<div class="modal-body">
+				<div class="row">
+					<div class="col">
+						<div class="form-label">Integrity checks</div>
+						<div class="mb-4">
+							<label class="form-check form-switch">
+								<input id="integrity-checks" class="form-check-input" type="checkbox">
+								<span class="form-check-label form-check-label-on">On</span>
+								<span class="form-check-label form-check-label-off">Off</span>
+							</label>
+							<div class="small text-secondary">Items already in the timeline will be re-imported if their checksums no longer match. Slower.</div>
+						</div>
+					</div>
+					<div class="col">
+						<div class="form-label">Overwrite manual changes</div>
+						<div class="mb-4">
+							<label class="form-check form-switch">
+								<input id="overwrite-local-changes" class="form-check-input" type="checkbox">
+								<span class="form-check-label form-check-label-on">Yes</span>
+								<span class="form-check-label form-check-label-off">No</span>
+							</label>
+							<div class="small text-secondary">Items modified manually after being imported will be updated to conform to the data in this import.</div>
+						</div>
+					</div>
+				</div>
+
+			</div>
+
 			<div class="modal-footer">
 				<button type="button" class="btn me-auto" data-bs-dismiss="modal">Cancel</button>
 				<button type="button" class="btn btn-primary" data-bs-dismiss="modal" id="save-settings">Save settings</button>
@@ -394,7 +403,7 @@
 				</div>
 			</div>
 			<div class="col">
-				<div class="card-body ps-0">
+				<div class="card-body p-0">
 					
 					<div class="row align-items-center">
 						<div class="col">
@@ -439,7 +448,7 @@
 								</div>
 							</div>
 						</div>
-						<div class="col-auto">
+						<div class="col-auto d-flex align-items-center">
 							<div class="btn-list">
 								<!-- I set the data-bs-* attributes this way to disable button from acting for the accordion; see https://stackoverflow.com/a/70664716/1048862 -->
 								<button class="btn import-dsgroup-opt-button" data-bs-toggle="collapse" data-bs-target>
@@ -467,6 +476,11 @@
 									</svg>
 									Remove all
 								</button>
+							</div>
+							<div class="ms-3 accordion-button-toggle">
+								<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-1">
+									<path d="M6 9l6 6l6 -6"></path>
+								</svg>
 							</div>
 						</div>
 					</div>
@@ -506,7 +520,7 @@
 		</td>
 		<td class="sort-filename"></td>
 		<td class="sort-confidence text-secondary small"></td>
-		<td>
+		<td class="text-center">
 			<a class="btn-action dsgroup-remove-row" title="Remove">
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
