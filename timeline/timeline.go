@@ -849,11 +849,18 @@ func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	defer tx.Rollback()
 
 	var stored int64
+	var modified *int64
+	var metadata *string
 
-	err = tx.QueryRowContext(tl.ctx, `SELECT entity_types.name, entities.type_id, entities.stored, entities.name, entities.picture_file
+	err = tx.QueryRowContext(tl.ctx, `
+		SELECT
+			entity_types.name, entities.type_id,
+			entities.stored, entities.modified,
+			entities.name, entities.picture_file,
+			entities.metadata
 		FROM entities, entity_types
 		WHERE entities.id=? AND entity_types.id = entities.type_id
-		LIMIT 1`, id).Scan(&p.Type, &p.typeID, &stored, &p.name, &p.Picture)
+		LIMIT 1`, id).Scan(&p.Type, &p.typeID, &stored, &modified, &p.name, &p.Picture, &metadata)
 	if err != nil {
 		return p, err
 	}
@@ -864,44 +871,80 @@ func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	if stored != 0 {
 		p.Stored = time.Unix(stored, 0)
 	}
+	if modified != nil {
+		modTime := time.Unix(*modified, 0)
+		p.Modified = &modTime
+	}
+	if metadata != nil {
+		err := json.Unmarshal([]byte(*metadata), &p.Metadata)
+		if err != nil {
+			return p, fmt.Errorf("unmarshaling entity metadata: %w", err)
+		}
+	}
 
-	rows, err := tx.QueryContext(tl.ctx, `SELECT attributes.name, attributes.value, attributes.alt_value, attributes.metadata, entity_attributes.data_source_id
-		FROM attributes, entity_attributes
-		WHERE entity_attributes.entity_id=?
-			AND attributes.id = entity_attributes.attribute_id`, id)
+	rows, err := tx.QueryContext(tl.ctx, `
+		SELECT
+			attributes.id, attributes.name, attributes.value, attributes.alt_value,
+			attributes.longitude, attributes.latitude, attributes.altitude,
+			attributes.metadata, data_sources.name
+		FROM entity_attributes
+		JOIN attributes ON attributes.id = entity_attributes.attribute_id
+		LEFT JOIN data_sources ON data_sources.id = entity_attributes.data_source_id
+		WHERE entity_attributes.entity_id=?`, id)
 	if err != nil {
 		return p, fmt.Errorf("querying attributes: %w", err)
 	}
 	defer rows.Close()
 
+	var attr Attribute
 	for rows.Next() {
-		var attr Attribute
-		var dsID *int64
-		var altValue, meta *string
+		var rowID uint64
+		var rowName string
+		var rowValue any
+		var rowAlternateValue, rowMeta, rowDSName *string
+		var rowLat, rowLon, rowAlt *float64
 
-		err := rows.Scan(&attr.Name, &attr.Value, &altValue, &meta, &dsID)
-		if dsID != nil {
-			attr.Identity = true
-			attr.Identifying = true
-		}
+		err := rows.Scan(&rowID, &rowName, &rowValue, &rowAlternateValue, &rowLon, &rowLat, &rowAlt, &rowMeta, &rowDSName)
 		if err != nil {
 			return p, fmt.Errorf("scanning: %w", err)
 		}
 
-		if altValue != nil {
-			attr.AltValue = *altValue
-		}
-		if meta != nil {
-			err := json.Unmarshal([]byte(*meta), &attr.Metadata)
-			if err != nil {
-				return p, fmt.Errorf("loading metadata: %w", err)
+		// if this is the first attribute row, or this row is a different attribute than previous row
+		if attr.ID == 0 || (attr.ID != 0 && attr.ID != rowID) {
+			if attr.ID > 0 {
+				p.Attributes = append(p.Attributes, attr)
+			}
+			attr = Attribute{
+				ID:        rowID,
+				Name:      rowName,
+				Value:     rowValue,
+				Latitude:  rowLat,
+				Longitude: rowLon,
+				Altitude:  rowAlt,
+			}
+			if rowAlternateValue != nil {
+				attr.AltValue = *rowAlternateValue
+			}
+			if rowMeta != nil {
+				err := json.Unmarshal([]byte(*rowMeta), &attr.Metadata)
+				if err != nil {
+					return p, fmt.Errorf("unmarshaling attribute metadata: %w", err)
+				}
+			}
+			if rowDSName != nil {
+				attr.IdentityOn = append(attr.IdentityOn, *rowDSName)
+				attr.Identity = true
+				attr.Identifying = true
 			}
 		}
-
-		p.Attributes = append(p.Attributes, attr)
 	}
 	if err := rows.Err(); err != nil {
 		return p, fmt.Errorf("iterating attribute rows: %w", err)
+	}
+
+	// don't forget the last one
+	if attr.ID != 0 {
+		p.Attributes = append(p.Attributes, attr)
 	}
 
 	// TODO: why would we need to commit a read-only tx?

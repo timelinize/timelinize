@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS "entities" (
 	"type_id" INTEGER NOT NULL,
 	"job_id" INTEGER, -- import that originally created this entity, if via a data import
 	"stored" INTEGER NOT NULL DEFAULT (unixepoch()),
-	"modified" INTEGER, -- timestamp when entity was locally/manually modified (may include attributes)
+	"modified" INTEGER, -- timestamp when entity was locally/manually modified (may include linked attributes)
 	"name" TEXT COLLATE NOCASE,
 	"picture_file" TEXT,
 	"metadata" TEXT, -- optional extra information, encoded as JSON (should almost never be used! use attributes instead)
@@ -119,18 +119,14 @@ CREATE TABLE IF NOT EXISTS "entity_attributes" (
 	"entity_id" INTEGER NOT NULL,
 	"attribute_id" INTEGER NOT NULL,
 	"data_source_id" INTEGER, -- if set, the attribute defines the entity's identity on this data source (a row of a certain entity_id and attribute_id can be duplicated if they are identities on different data sources)
-	"job_id" INTEGER, -- the ID of the import that originated this row (originated the linkage between entity and attribute)
-	-- these next two fields explain how the row came into being, by inferring the association from another attribute
-	"autolink_job_id" INTEGER,    -- if set, the import that motivated linking this attribute as the entity's ID on the data source
-	"autolink_attribute_id" INTEGER, -- if set, the other attribute by which this attribute was automatically linked as the entity's ID on the data source
+	"job_id" INTEGER, -- the ID of the import that originated this row
 	"start" INTEGER, -- when the attribute started applying to the entity
-	"end" INTEGER,   -- when the attribute stopped applyiing to the entity
+	"end" INTEGER,   -- when the attribute stopped applying to the entity
 	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL,
-	FOREIGN KEY ("autolink_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL,
-	FOREIGN KEY ("autolink_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE SET NULL
+	UNIQUE("entity_id", "attribute_id", "data_source_id")
 ) STRICT;
 
 -- These indexes make loading entities by attributes faster, especially during import jobs, when it's in the hot path.
@@ -389,7 +385,7 @@ CREATE TRIGGER IF NOT EXISTS prevent_stray_attributes
 	FOR EACH ROW
 	WHEN
 		(SELECT count(1) FROM
-			(SELECT id FROM entity_attributes WHERE attribute_id=OLD.attribute_id OR autolink_attribute_id=OLD.attribute_id LIMIT 1)) = 0
+			(SELECT id FROM entity_attributes WHERE attribute_id=OLD.attribute_id LIMIT 1)) = 0
 	BEGIN
 		DELETE FROM attributes WHERE id=OLD.attribute_id;
 	END;

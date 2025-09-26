@@ -165,7 +165,7 @@ type ItemSearchParams struct {
 type SearchResults struct {
 	// If enabled, the total count of items matching the search query
 	// without regard for limit and offset.
-	Total int `json:"total,omitempty"`
+	Total *int `json:"total,omitempty"`
 
 	// The items of the search result.
 	Items []*SearchResult `json:"items,omitempty"`
@@ -204,7 +204,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		if err != nil {
 			return SearchResults{}, err
 		}
-		return SearchResults{Total: count}, nil
+		return SearchResults{Total: &count}, nil
 	}
 
 	// run query and scan results
@@ -301,7 +301,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	// in GeoJSON mode, we can be done early by wrapping up our document
 	if params.GeoJSON {
 		sb.WriteString(`]}}`)
-		return SearchResults{GeoJSON: sb.String(), Total: totalCount}, nil
+		return SearchResults{GeoJSON: sb.String(), Total: &totalCount}, nil
 	}
 
 	// TODO: this needs tuning
@@ -369,7 +369,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		}
 	}
 
-	return SearchResults{Total: totalCount, Items: results}, nil
+	return SearchResults{Total: &totalCount, Items: results}, nil
 }
 
 // TODO: favorites? or maybe a more flexible albums/lists feature? what to call it... "scrapbooks" or "curations"?

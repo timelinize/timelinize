@@ -31,8 +31,12 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph) error {
 	// I repeated twice, it would take 30 minutes to import without ANALYZE.
 	// But when running ANALYZE every so often, it only took 23 minutes.
 	// (This was before the DB indexes in the import process were optimized.)
+	// We optimize more frequently at the beginning of large imports, and
+	// less often thereafter.
+	const optimizeFrequencyThreshold = 5000
 	p.rootGraphCount += len(batch)
-	if p.rootGraphCount%15000 < len(batch) {
+	if (p.rootGraphCount <= optimizeFrequencyThreshold && p.rootGraphCount%2000 < len(batch)) ||
+		(p.rootGraphCount > optimizeFrequencyThreshold && p.rootGraphCount%50000 < len(batch)) {
 		p.tl.optimizeDB(p.log.Named("optimizer"))
 	}
 

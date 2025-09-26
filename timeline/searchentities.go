@@ -20,6 +20,7 @@ package timeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -85,13 +86,14 @@ func (tl *Timeline) SearchEntities(ctx context.Context, params EntitySearchParam
 
 	for rows.Next() {
 		var ent Entity
-		var identDS, autolinkImportID, autolinkAttributeID *int64 // TODO: we don't use these... yet
+		var metadata *string
+		var modified, identDS, hidden, deleted *int64
 		var nattr nullableAttribute
 		var itemCount, stored int64
 
 		var dests = []any{
-			&ent.ID, &ent.typeID, &ent.Type, &ent.JobID, &stored, &ent.name,
-			&ent.Picture, &identDS, &autolinkImportID, &autolinkAttributeID,
+			&ent.ID, &ent.typeID, &ent.Type, &ent.JobID, &stored, &modified,
+			&ent.name, &ent.Picture, &metadata, &identDS, &hidden, &deleted,
 			&nattr.ID, &nattr.Name, &nattr.Value,
 			&nattr.Longitude, &nattr.Latitude, &nattr.Altitude}
 
@@ -109,7 +111,16 @@ func (tl *Timeline) SearchEntities(ctx context.Context, params EntitySearchParam
 			ent.Name = *ent.name
 		}
 		ent.Stored = time.Unix(stored, 0)
-
+		if modified != nil {
+			modTime := time.Unix(*modified, 0)
+			ent.Modified = &modTime
+		}
+		if metadata != nil {
+			err := json.Unmarshal([]byte(*metadata), &ent.Metadata)
+			if err != nil {
+				return nil, fmt.Errorf("unmarshaling entity metadata: %w", err)
+			}
+		}
 		if identDS != nil {
 			attr.Identity = true
 		}
@@ -157,11 +168,13 @@ func (tl *Timeline) prepareEntitySearchQuery(params EntitySearchParams) (string,
 		entity_types.name,
 		entities.job_id,
 		entities.stored,
+		entities.modified,
 		entities.name,
 		entities.picture_file,
+		entities.metadata,
+		entities.hidden,
+		entities.deleted,
 		all_entity_attributes.data_source_id,
-		all_entity_attributes.autolink_job_id,
-		all_entity_attributes.autolink_attribute_id,
 		attributes.id,
 		attributes.name,
 		attributes.value,

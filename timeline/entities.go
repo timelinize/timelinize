@@ -41,6 +41,7 @@ import (
 
 	"github.com/ttacon/libphonenumber"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // Entity represents a person. All these fields go into the persons table,
@@ -75,8 +76,9 @@ type Entity struct {
 	Picture *string `json:"picture,omitempty"`
 
 	// Fields below are only for use with search or JSON serialization
-	JobID  *int64    `json:"job_id,omitempty"`
-	Stored time.Time `json:"stored,omitempty"`
+	JobID    *int64     `json:"job_id,omitempty"`
+	Stored   time.Time  `json:"stored,omitempty"`
+	Modified *time.Time `json:"modified,omitempty"`
 }
 
 func (e Entity) String() string {
@@ -261,6 +263,11 @@ type Attribute struct {
 
 	// NOT FOR USE BY DATA SOURCES. For search results only.
 	ItemCount int64 `json:"item_count,omitempty"`
+
+	// NOT FOR USE BY DATA SOURCES. For search results only.
+	// This indicates which data source(s) the attribute identifies
+	// an entity on.
+	IdentityOn []string `json:"identity_on,omitempty"`
 }
 
 // Empty returns true if the name or value is empty or only whitespace.
@@ -481,21 +488,22 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 	// copy of the incoming entity
 	inCopy := in
 	inCopy.ID = 0
-	entities, entityAutolinkAttrs, err := p.loadEntities(ctx, tx, &inCopy)
+	entities, err := p.loadEntities(ctx, tx, &inCopy)
 	if err != nil {
 		return latentID{}, fmt.Errorf("searching entities by attributes: %w", err)
 	}
 
 	// then only if that didn't yield any results, try ID next
 	if len(entities) == 0 && in.ID > 0 {
-		entities, entityAutolinkAttrs, err = p.loadEntities(ctx, tx, &in)
+		entities, err = p.loadEntities(ctx, tx, &in)
 		if err != nil {
 			return latentID{}, fmt.Errorf("searching entities by ID: %w", err)
 		}
 	}
 
 	// if our searches yielded 0 results, we can insert the entity; if 1, we can update it
-	if len(entities) == 0 {
+	switch len(entities) {
+	case 0:
 		// don't create a new entity if *only* an entity ID was provided (it must have been
 		// erroneous?) with no other attributes, as that implies the entity should already
 		// exist but it does not... creating a new one is wrong
@@ -537,7 +545,7 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 		entities = append(entities, in)
 
 		atomic.AddInt64(p.ij.newEntityCount, 1)
-	} else if len(entities) == 1 {
+	case 1:
 		// if the identity attribute(s) matched exactly 1 entity, update its info in the DB
 		// (if it matched more than 1 entity, we don't update multiple of them, because we only
 		// get 1 entity at a time from data sources and we'd end up making the two look alike...
@@ -588,6 +596,59 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 				return latentID{}, fmt.Errorf("updating person %d (%+v): %w", entity.ID, in, err)
 			}
 		}
+
+	default:
+		// There's multiple entities with this attribute -- could either be
+		// because there was not enough information before to combine them
+		// together automatically, or they are genuinely separate entities
+		// that share an attribute.
+		//
+		// Example of the former: two messaging datasets are imported, one
+		// uses an old phone number for someone and the other uses the
+		// person's newer phone number, but only the old one has the person's
+		// name. Two entities are created since we have no way of knowing it
+		// is the same person. Then later, a contact list is imported which
+		// has both phone numbers in a single entity. In that case, the
+		// incoming entity will match both entities in the database because
+		// it looks up with both phone number attributes. Their names are
+		// compatible since one is non-empty, and the other is empty; it
+		// should be no harm to merge the two.
+		//
+		// Example of the latter: a husband and wife share an email address,
+		// like JoeAndJane@example.com. Obviously, these entities should
+		// not be combined, as one is named Jane and the other is named
+		// Joe! But if one of the entities is essentially empty (unnamed),
+		// there's no harm in combining since that existing empty entity
+		// could be either of them.
+		//
+		// Anyway, it's generally not safe to always merge duplicate entities,
+		// but it should be okay as long as their names are "compatible."
+		// (If it WAS always safe to do so, entities could never share
+		// identifying attributes, and we would have a different, less
+		// powerful schema design.
+		entityName, compatible := entityNamesCompatible(entities)
+		if compatible {
+			// not really sure which one to keep; but it doesn't really matter,
+			// any information missing on the one to keep that exists on the
+			// others (name, profile picture, etc.) will cascade over to it
+			entityToKeep := entities[0]
+			mergeEntities := entities[1:]
+
+			if err := p.tl.mergeEntities(ctx, tx, entityToKeep, mergeEntities); err != nil {
+				return latentID{}, fmt.Errorf("failed merging entities: %w", err)
+			}
+			if checkedLog := p.log.Check(zapcore.InfoLevel, "merged entities based on new information"); checkedLog != nil {
+				entityIDs := make([]uint64, 0, len(mergeEntities))
+				for _, ent := range mergeEntities {
+					entityIDs = append(entityIDs, ent.ID)
+				}
+				checkedLog.Write(
+					zap.String("unified_entity_name", entityName),
+					zap.Uint64("kept_entity_id", entityToKeep.ID),
+					zap.Uint64s("merged_entity_ids", entityIDs),
+				)
+			}
+		}
 	}
 
 	// now store each attribute+value/coords combo if we don't have it yet,
@@ -635,31 +696,24 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 				return latentID{}, fmt.Errorf("checking for existing link of entity to attribute: %w (entity_id=%d attribute_id=%d)", err, entity.ID, attrID)
 			}
 
-			// autolink fields tell us about how an attribute was linked to an entity automatically
-			var autolinkImportID, autolinkAttrIDPtr *uint64
-			if autolinkAttrID, ok := entityAutolinkAttrs[entity.ID]; ok {
-				autolinkAttrIDPtr = &autolinkAttrID
-				autolinkImportID = &p.ij.job.id
-			}
-
 			if noRows {
 				// the entity and attribute are not yet related in the DB; insert
 
 				_, err = tx.ExecContext(ctx,
 					`INSERT INTO entity_attributes
-						(entity_id, attribute_id, data_source_id, job_id, autolink_job_id, autolink_attribute_id)
-					VALUES (?, ?, ?, ?, ?, ?)`,
-					entity.ID, attrID, linkedDataSourceID, p.ij.job.id, autolinkImportID, autolinkAttrIDPtr)
+						(entity_id, attribute_id, data_source_id, job_id)
+					VALUES (?, ?, ?, ?)`,
+					entity.ID, attrID, linkedDataSourceID, p.ij.job.id)
 				if err != nil {
-					return latentID{}, fmt.Errorf("linking entity %d to attribute %d: %w (data_source_id=%#v job_id=%d autolink_job_id=%#v autolink_attribute_id=%#v)",
-						entity.ID, attrID, err, linkedDataSourceID, p.ij.job.id, autolinkImportID, autolinkAttrIDPtr)
+					return latentID{}, fmt.Errorf("linking entity %d to attribute %d: %w (data_source_id=%#v job_id=%d)",
+						entity.ID, attrID, err, linkedDataSourceID, p.ij.job.id)
 				}
 			} else if eaID > 0 && existingDataSourceID == nil {
 				// the entity and attribute are already related in the DB but not as an ID on any data source; update
 
 				_, err = tx.ExecContext(ctx,
-					`UPDATE entity_attributes SET data_source_id=?, job_id=?, autolink_job_id=?, autolink_attribute_id=? WHERE id=?`, // TODO: LIMIT 1 would be nice...
-					linkedDataSourceID, p.ij.job.id, autolinkImportID, autolinkAttrIDPtr, eaID)
+					`UPDATE entity_attributes SET data_source_id=?, job_id=? WHERE id=?`, // TODO: LIMIT 1 would be nice...
+					linkedDataSourceID, p.ij.job.id, eaID)
 				if err != nil {
 					return latentID{}, fmt.Errorf("updating entity %d link to attribute %d: %w", entity.ID, attrID, err)
 				}
@@ -673,61 +727,72 @@ func (p *processor) processEntity(ctx context.Context, tx *sql.Tx, in Entity) (l
 	}, nil
 }
 
-func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([]Entity, map[uint64]uint64, error) {
+func (p *processor) loadEntities(ctx context.Context, tx *sql.Tx, in *Entity) ([]Entity, error) {
 	var sb strings.Builder
 	var args []any
 
-	sb.WriteString(`
-SELECT
+	// we use DISTINCT here to avoid duplicate rows in the output,
+	// since multiple attributes could match the same entity, for
+	// example -- note that UNION which we perform when there are
+	// multiple entities also de-duplicates, and we don't need
+	// DISTINCT in that case; but to avoid complexity with building
+	// the query, I tested query plans that use both DISTINCT and
+	// UNION, and found that they were identical (the DB isn't
+	// doing extra work when both DISTINCT and UNION are used).
+	const selectClause = `
+SELECT DISTINCT
 	entities.id,
 	entities.name,
 	entities.picture_file,
-	ea.attribute_id
+	entities.metadata
 FROM entities
-JOIN entity_types ON entity_types.id = entities.type_id
-LEFT JOIN entity_attributes AS ea ON ea.entity_id = entities.id
-`)
+`
+
+	sb.WriteString(selectClause)
 
 	if in.ID > 0 {
 		// in some cases, the entity ID may be specified manually; load that entity directly by ID instead of trying to find it
-		sb.WriteString("WHERE entities.id=?")
+		sb.WriteString("WHERE entities.id=? AND deleted IS NULL")
 		args = append(args, in.ID)
 	} else {
-		sb.WriteString("WHERE entity_types.name=? AND entities.name=?")
-		args = append(args, EntityPlace, in.Name)
+		if in.Type == EntityPlace {
+			// place entities can be retrieved by name
+			sb.WriteString("JOIN entity_types ON entity_types.id = entities.type_id\n")
+			sb.WriteString("WHERE entity_types.name=? AND entities.name=?")
+			args = append(args, EntityPlace, in.Name)
+		}
 
 		for _, attr := range in.Attributes {
 			// skip non-identifying attributes as those are not likely to be unique enough
-			if attr.Identifying || attr.Identity {
+			if !attr.Identifying && !attr.Identity {
+				continue
+			}
+
+			if len(args) > 0 {
 				sb.WriteString("\n\nUNION\n\n-- match by attribute ")
 				sb.WriteString(attr.Name)
-				sb.WriteString(`
-SELECT
-	entities.id,
-	entities.name,
-	entities.picture_file,
-	ea.attribute_id
-FROM entities
-JOIN entity_attributes AS ea ON ea.entity_id = entities.id
+				sb.WriteString(selectClause)
+			}
+			sb.WriteString(`JOIN entity_attributes AS ea ON ea.entity_id = entities.id
 JOIN attributes ON attributes.id = ea.attribute_id
-WHERE attributes.name=? AND (`)
-				args = append(args, attr.Name)
+WHERE deleted IS NULL AND attributes.name=? AND (`)
+			args = append(args, attr.Name)
 
-				const decPrecisionAt, decPrecisionNear = 4, 3
-				lowLonAt, highLonAt, lonDecAt := latLonBounds(attr.Longitude, decPrecisionAt)
-				lowLatAt, highLatAt, latDecAt := latLonBounds(attr.Latitude, decPrecisionAt)
-				lowLonNear, highLonNear, lonDecNear := latLonBounds(attr.Longitude, decPrecisionNear)
-				lowLatNear, highLatNear, latDecNear := latLonBounds(attr.Latitude, decPrecisionNear)
+			const decPrecisionAt, decPrecisionNear = 4, 3
+			lowLonAt, highLonAt, lonDecAt := latLonBounds(attr.Longitude, decPrecisionAt)
+			lowLatAt, highLatAt, latDecAt := latLonBounds(attr.Latitude, decPrecisionAt)
+			lowLonNear, highLonNear, lonDecNear := latLonBounds(attr.Longitude, decPrecisionNear)
+			lowLatNear, highLatNear, latDecNear := latLonBounds(attr.Latitude, decPrecisionNear)
 
+			if attr.Value != nil {
+				sb.WriteString("attributes.value=?")
+				args = append(args, attr.valueForDB())
+			}
+			if attr.Latitude != nil && attr.Longitude != nil {
 				if attr.Value != nil {
-					sb.WriteString("attributes.value=?")
-					args = append(args, attr.valueForDB())
+					sb.WriteString(" OR ")
 				}
-				if attr.Latitude != nil && attr.Longitude != nil {
-					if attr.Value != nil {
-						sb.WriteString(" OR ")
-					}
-					sb.WriteString(`
+				sb.WriteString(`
 (
 	-- entity name is different, but coordinate is really close to same spot as an existing attribute
 	entities.name!=?
@@ -740,59 +805,59 @@ OR (
 	AND round(attributes.longitude, ?) BETWEEN ? AND ?
 	AND round(attributes.latitude, ?) BETWEEN ? AND ?
 )`)
-					args = append(args,
-						in.Name,
-						lonDecAt, lowLonAt, highLonAt,
-						latDecAt, lowLatAt, highLatAt,
-						in.Name,
-						lonDecNear, lowLonNear, highLonNear,
-						latDecNear, lowLatNear, highLatNear)
-				}
-				sb.WriteString(")")
+				args = append(args,
+					in.Name,
+					lonDecAt, lowLonAt, highLonAt,
+					latDecAt, lowLatAt, highLatAt,
+					in.Name,
+					lonDecNear, lowLonNear, highLonNear,
+					latDecNear, lowLatNear, highLatNear)
 			}
+			sb.WriteString(")")
 		}
 	}
 
 	var entities []Entity
-	entityAutolinkAttrs := make(map[uint64]uint64) // map of entity ID to attribute ID that linked it
 
 	// only perform query if there are any qualifiers; otherwise this query returns
 	// all rows which is obviously wrong; if there's no ID or identifying attributes,
 	// there's no way for us to know who this entity is anyway
 	if len(args) > 0 {
-		sb.WriteString("\n\nGROUP BY entities.id")
 		q := sb.String()
 
 		// run the query to get the entity/entities (note there may be multiple; e.g. if multiple people
 		// share an account or the account has attributes spanning nultiple positively-ID'ed people)
 		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {
-			return nil, nil, fmt.Errorf("querying entity attributes: %w", err)
+			return nil, fmt.Errorf("querying entity attributes: %w", err)
 		}
 		defer rows.Close()
 
 		for rows.Next() {
 			var ent Entity
 			var name *string
-			var attrID *uint64
-			err := rows.Scan(&ent.ID, &name, &ent.Picture, &attrID)
+			var metadata *string
+			err := rows.Scan(&ent.ID, &name, &ent.Picture, &metadata)
 			if err != nil {
-				return nil, nil, fmt.Errorf("scanning entity ID: %w", err)
+				return nil, fmt.Errorf("scanning entity ID: %w", err)
 			}
 			if name != nil {
 				ent.Name = *name
 			}
-			if in.ID == 0 && attrID != nil {
-				entityAutolinkAttrs[ent.ID] = *attrID
+			if metadata != nil {
+				err := json.Unmarshal([]byte(*metadata), &ent.Metadata)
+				if err != nil {
+					return nil, fmt.Errorf("unmarshaling entity metadata: %w", err)
+				}
 			}
 			entities = append(entities, ent)
 		}
 		if err := rows.Err(); err != nil {
-			return nil, nil, fmt.Errorf("iterating entity rows: %w", err)
+			return nil, fmt.Errorf("iterating entity rows: %w", err)
 		}
 	}
 
-	return entities, entityAutolinkAttrs, nil
+	return entities, nil
 }
 
 func storeAttribute(ctx context.Context, tx *sql.Tx, attr Attribute) (uint64, error) {
@@ -895,6 +960,14 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 	}
 	defer tx.Rollback()
 
+	if err = tl.mergeEntities(ctx, tx, entKeep, entitiesToMerge); err != nil {
+		return fmt.Errorf("merging entities: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (tl *Timeline) mergeEntities(ctx context.Context, tx *sql.Tx, entKeep Entity, entitiesToMerge []Entity) error {
 	for _, entMerge := range entitiesToMerge {
 		// bring over any information on the entity to merge that's missing on the entity to keep
 		if entMerge.Name != "" && entKeep.Name == "" {
@@ -920,29 +993,51 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 
 		// update the entity to keep with any info that was transferred over from the entity to merge
 		_, err = tx.ExecContext(ctx, `UPDATE entities SET name=?, picture_file=?, metadata=? WHERE id=?`,
-			entKeep.Name, entKeep.Picture, metadata, entityIDToKeep)
+			entKeep.Name, entKeep.Picture, metadata, entKeep.ID)
 		if err != nil {
 			return fmt.Errorf("updating entity row: %w", err)
 		}
 
-		// replace entity IDs in the database
-		if _, err := tx.ExecContext(ctx, `UPDATE entity_attributes SET entity_id=? WHERE entity_id=?`, entityIDToKeep, entMerge.ID); err != nil {
+		// replace entity IDs in the entity_attributes table, but if a row update will cause a
+		// duplicate on entity_id, attribute_id, and data_source_id fields, delete the row instead
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM entity_attributes AS ea
+				WHERE entity_id=?
+				AND EXISTS (
+					SELECT 1
+					FROM entity_attributes AS ea_old
+					WHERE ea_old.entity_id=?
+						AND ea_old.attribute_id = ea.attribute_id
+						AND ea_old.data_source_id IS ea.data_source_id
+				)
+		`, entKeep.ID, entMerge.ID); err != nil {
+			return fmt.Errorf("deleting rows that would violate unique constraints after imminent update in entity_attributes: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE entity_attributes SET entity_id=? WHERE entity_id=?`, entKeep.ID, entMerge.ID); err != nil {
 			return fmt.Errorf("replacing entity ID in entity_attributes: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE tagged SET entity_id=? WHERE entity_id=?`, entityIDToKeep, entMerge.ID); err != nil {
+
+		// replace entity IDs elsewhere in the database (TODO: we might need to employ similar deletion logic above since we could cause duplicate rows, but these tables are manually populated so it's less likely to make duplicates here)
+		if _, err := tx.ExecContext(ctx, `UPDATE tagged SET entity_id=? WHERE entity_id=?`, entKeep.ID, entMerge.ID); err != nil {
 			return fmt.Errorf("replacing entity ID in tagged: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE story_elements SET entity_id=? WHERE entity_id=?`, entKeep.ID, entMerge.ID); err != nil {
+			return fmt.Errorf("replacing entity ID in story_elements: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE notes SET entity_id=? WHERE entity_id=?`, entKeep.ID, entMerge.ID); err != nil {
+			return fmt.Errorf("replacing entity ID in notes: %w", err)
 		}
 
 		// handle pass-through attribute for the entity being merged (start by seeing if there's one for the entity to keep)
 		var passThruAttrIDKeep int64
-		if err = tx.QueryRowContext(ctx, `SELECT id FROM attributes WHERE name=? AND value=? LIMIT 1`, passThruAttribute, entityIDToKeep).Scan(&passThruAttrIDKeep); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err = tx.QueryRowContext(ctx, `SELECT id FROM attributes WHERE name=? AND value=? LIMIT 1`, passThruAttribute, entKeep.ID).Scan(&passThruAttrIDKeep); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("selecting pass-thru attribute for entity to keep: %w", err)
 		}
 		if passThruAttrIDKeep == 0 {
 			// a pass-thru attribute doesn't exist for the entity to keep, so we can safely
 			// just update the pass-thru attribute (if any) for the one to merge to point to
 			// the one to keep
-			if _, err := tx.ExecContext(ctx, `UPDATE attributes SET value=? WHERE name=? AND value=?`, entityIDToKeep, passThruAttribute, entMerge.ID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE attributes SET value=? WHERE name=? AND value=?`, entKeep.ID, passThruAttribute, entMerge.ID); err != nil {
 				return fmt.Errorf("updating pass-thru attribute to point to entity to keep: %w", err)
 			}
 		} else {
@@ -983,7 +1078,25 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 		}
 	}
 
-	return tx.Commit()
+	return nil
+}
+
+// entityNamesCompatible returns the singular name of these entities and true
+// if they are compatible, meaning that all the entities with a non-empty Name
+// have the same name.
+func entityNamesCompatible(entities []Entity) (string, bool) {
+	var entityName string
+	for _, e := range entities {
+		if e.Name == "" {
+			continue
+		}
+		if entityName == "" {
+			entityName = e.Name
+		} else if !strings.EqualFold(e.Name, entityName) {
+			return "", false
+		}
+	}
+	return entityName, true
 }
 
 // latentID is a type that holds either the ID of an item
