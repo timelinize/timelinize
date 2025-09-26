@@ -14,6 +14,7 @@ import (
 	"github.com/signal-golang/go-vcard"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
+	"golang.org/x/net/html"
 )
 
 func init() {
@@ -243,7 +244,7 @@ func (fimp *FileImporter) processConversationFile(_ context.Context, dirEntry ti
 	doc.Find(".hChatLog .message").Each(func(_ int, s *goquery.Selection) {
 		when := s.Find(".dt").AttrOr("title", "")
 		from := s.Find(".sender .tel").AttrOr("href", "")
-		msg := s.Find("q").Text()
+		msg := extractTextWithNewlines(s.Find("q"))
 
 		ts, err := time.Parse(time.RFC3339, when)
 		if err != nil {
@@ -387,6 +388,34 @@ func isShortPhoneNum(s string) bool {
 		}
 	}
 	return true
+}
+
+// extractTextWithNewlines is like calling .Text(), but it
+// inserts '\n' where <br> are, or "\n\n" where </p> tags are.
+func extractTextWithNewlines(sel *goquery.Selection) string {
+	var sb strings.Builder
+
+	sel.Contents().Each(func(_ int, s *goquery.Selection) {
+		node := s.Get(0)
+		switch node.Type {
+		case html.TextNode:
+			sb.WriteString(strings.TrimSpace(node.Data))
+		case html.ElementNode:
+			tag := node.Data
+			switch tag {
+			case "br":
+				sb.WriteString("\n")
+			case "p":
+				// Recurse for children
+				sb.WriteString(extractTextWithNewlines(s))
+				sb.WriteString("\n\n") // paragraph break
+			default:
+				sb.WriteString(extractTextWithNewlines(s))
+			}
+		}
+	})
+
+	return sb.String()
 }
 
 // Phone numbers are prefixed with this in the data
