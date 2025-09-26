@@ -609,7 +609,7 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 	var mimeType string
 
 	switch {
-	case strings.HasPrefix(task.DataType, "image/"):
+	case strings.HasPrefix(task.DataType, "image/") || task.DataType == "application/pdf":
 		inputImage, err := loadImageVips(inputFilename, inputBuf)
 		if err != nil {
 			return nil, "", fmt.Errorf("opening source file: %w", err)
@@ -1037,7 +1037,7 @@ func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension 
 }
 
 func thumbnailType(inputDataType string, onlyImage bool) string {
-	if strings.HasPrefix(inputDataType, "image/") {
+	if strings.HasPrefix(inputDataType, "image/") || inputDataType == "application/pdf" {
 		return ImageAVIF
 	}
 	if strings.HasPrefix(inputDataType, "video/") {

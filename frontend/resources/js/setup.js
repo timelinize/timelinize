@@ -132,7 +132,7 @@ on('click', '#continue', async () => {
 			name: $('[name=name]').value,
 			attributes: attributes
 		});
-		await updateRepoOwners();
+		await updateRepoOwners(true);
 
 		// configure repo with repo-specific settings
 		const timelineSettings = {};

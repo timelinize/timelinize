@@ -147,6 +147,7 @@ function updateFilterResults() {
 		await tlz.currentPageController?.render();
 
 		// I find it's generally expected to start at the top of the results after updating filters
+		// TODO: Not true on the conversation page, this can be a little racey with that
 		window.scrollTo({
 			top: 0,
 			left: 0,

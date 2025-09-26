@@ -1551,6 +1551,19 @@ function itemContentElement(item, opts) {
 			audioTag.src = `/repo/${item.repo_id}/${item.data_file}`;
 			return audioTag;
 		}
+		else if (item.data_type == "application/pdf")
+		{
+			const objectTag = document.createElement('object');
+			objectTag.type = item.data_type;
+			objectTag.data = `/repo/${item.repo_id}/${item.data_file}#zoom=FitH`;
+			objectTag.innerHTML = "<p>Could not render PDF.</p>";
+
+			const divContainer = document.createElement('div');
+			divContainer.classList.add('ratio', 'ratio-4x3');
+			divContainer.append(objectTag);
+
+			return divContainer;
+		}
 		else
 		{
 			const elem = noContentElem();

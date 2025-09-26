@@ -244,13 +244,13 @@ async function renderDataSourceOptionsModal(ds) {
 	// these can't be set up until after they're displayed
 	if (ds.name == "calendar") {
 		const entitySelect = newEntitySelect($('.calendar-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 	}
 	if (ds.name == "google_location") {
 		const entitySelect = newEntitySelect($('.google_location-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 
@@ -266,7 +266,7 @@ async function renderDataSourceOptionsModal(ds) {
 	}
 	if (ds.name == "gpx") {
 		const entitySelect = newEntitySelect($('.gpx-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 
@@ -282,7 +282,7 @@ async function renderDataSourceOptionsModal(ds) {
 	}
 	if (ds.name == "geojson") {
 		const entitySelect = newEntitySelect($('.geojson-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 
@@ -305,19 +305,19 @@ async function renderDataSourceOptionsModal(ds) {
 	}
 	if (ds.name == "icloud") {
 		const entitySelect = newEntitySelect($('.icloud-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 	}
 	if (ds.name == "media") {
 		const entitySelect = newEntitySelect($('.media-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 	}
 	if (ds.name == "nmea0183") {
 		const entitySelect = newEntitySelect($('.nmea0183-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 
@@ -483,7 +483,7 @@ async function dataSourceOptions(ds) {
 		} else {
 			// this DS requires we input the phone number of the phone that created the data,
 			// so if the input field was left empty, ensure the repo owner has a phone number
-			const owner = await getOwner(tlz.openRepos[0]);
+			const owner = await getOwner();
 			if (getEntityAttribute(owner, 'phone_number').length == 0) {
 				ownerPhoneInput.classList.add('is-invalid');
 				ownerPhoneInput.classList.remove('is-valid');
@@ -505,7 +505,7 @@ async function dataSourceOptions(ds) {
 		} else {
 			// this DS requires we input the username of the account that created the data,
 			// so if the input field was left empty, ensure the repo owner has a username
-			const owner = await getOwner(tlz.openRepos[0]);
+			const owner = await getOwner();
 			if (getEntityAttribute(owner, 'facebook_username').length == 0) {
 				ownerUsername.classList.add('is-invalid');
 				ownerUsername.classList.remove('is-valid');
