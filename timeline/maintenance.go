@@ -85,11 +85,10 @@ func (tl *Timeline) optimizeDB(logger *zap.Logger) {
 	if !atomic.CompareAndSwapInt64(tl.optimizing, 0, 1) {
 		return
 	}
-	defer atomic.StoreInt64(tl.optimizing, 0)
+	defer atomic.CompareAndSwapInt64(tl.optimizing, 1, 0)
 
-	// TODO: I assume a read lock is all we need for ANALYZE...
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
+	tl.dbMu.Lock()
+	defer tl.dbMu.Unlock()
 	logger.Info("optimizing database for performance")
 	start := time.Now()
 	_, err := tl.db.ExecContext(tl.ctx, "ANALYZE")
