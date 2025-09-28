@@ -263,8 +263,8 @@ func (s server) servePreviewImage(w http.ResponseWriter, r *http.Request, tl ope
 		return fmt.Errorf("item %d does not have a data file recorded, so no preview image is possible", itemID)
 	}
 	if itemRow.DataType != nil {
-		switch *itemRow.DataType {
-		case "image/gif", "image/x-icon":
+		if *itemRow.DataType == "image/x-icon" {
+			// icons won't get obfuscated, but last time I checked we had trouble decoding these
 			r.URL.Path = "/" + path.Join("repo", tl.ID().String(), *itemRow.DataFile)
 			return s.serveDataFile(w, r, tl, *itemRow.DataFile)
 		}
