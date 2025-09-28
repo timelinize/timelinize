@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -134,7 +135,9 @@ func (tj thumbnailJob) Run(job *ActiveJob, checkpoint []byte) error {
 // (and thumbhashes). If precountMode is true, only the counting will occur, and the total number of
 // tasks to be expected will be returned. Note that this return value may be invalid if the import job
 // is still running or if any items associated with the import job are changing while this job is running.
-// If that happens, the final completion percentage may not be exactly 100%.
+// If that happens, the final completion percentage may not be exactly 100%. This could be fixed if we
+// do all the counting in a single DB lock and then keep the results in memory to then work on them, but
+// I haven't seen a need for this yet, and current method uses a little less memory.
 func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precountMode bool) (int, error) {
 	// the query that is used to page through rows.
 	// get the items in reverse timestamp order since the
@@ -174,6 +177,7 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 	)
 
 	for {
+		log.Println("NEXT PAGE OF ITEMS...")
 		var pageResults []thumbnailTask
 
 		// prevent duplicates within a page; when we load a page, we do check
@@ -189,6 +193,7 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 		pageDataFiles, pageDataIDs := make(map[string]struct{}), make(map[int64]struct{})
 
 		job.tl.dbMu.RLock()
+		log.Println("QUERYING DB:", lastTimestamp, lastItemID, taskCount)
 		rows, err := job.tl.db.QueryContext(job.ctx, thumbnailJobQuery,
 			tj.TasksFromImportJob, tj.TasksFromImportJob,
 			lastTimestamp, lastTimestamp, lastItemID, thumbnailJobPageSize)
@@ -198,7 +203,7 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 		}
 
 		var hadRows bool
-		for rows.Next() {
+		for rows.Next() { // <-- TODO: THIS CAUSES THE EXCEPTION
 			hadRows = true
 
 			var rowID, stored int64
@@ -207,7 +212,8 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 
 			err := rows.Scan(&rowID, &stored, &modified, &timestamp, &dataID, &dataType, &dataFile, &modJobEnded)
 			if err != nil {
-				defer rows.Close()
+				log.Println("ERROR A:", err)
+				rows.Close()
 				job.tl.dbMu.RUnlock()
 				return 0, fmt.Errorf("failed to scan row from database page: %w", err)
 			}
@@ -249,11 +255,13 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 		}
 		rows.Close()
 		job.tl.dbMu.RUnlock()
+		log.Println("CLOSED ROWS, PAGE RESULTS:", len(pageResults), "TASKS SO FAR:", taskCount)
 		if err = rows.Err(); err != nil {
 			return 0, fmt.Errorf("iterating rows for researching thumbnails failed: %w", err)
 		}
 
 		if !hadRows {
+			log.Println("ALL DONE")
 			break // all done!
 		}
 
@@ -272,6 +280,7 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 			job.tl.thumbsMu.RLock()
 			thumbsTx, err := job.tl.thumbs.BeginTx(job.ctx, nil)
 			if err != nil {
+				job.tl.thumbsMu.RUnlock()
 				return 0, fmt.Errorf("starting tx for checking for existing thumbnails: %w", err)
 			}
 
@@ -330,8 +339,10 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 			}
 
 			// rollback should be OK since we didn't mutate anything, should even be slightly more efficient than a commit?
+			log.Println("ROLLING BACK")
 			thumbsTx.Rollback()
 			job.tl.thumbsMu.RUnlock()
+			log.Println("DONE ROLLING BACK")
 		}
 
 		// if all we needed to do was count, we did that for this page, so move on to the next page
@@ -349,6 +360,8 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 			return 0, fmt.Errorf("processing page of thumbnail tasks: %w", err)
 		}
 	}
+
+	log.Println("THUMBNAIL JOB SIZE:", taskCount)
 
 	return taskCount, nil
 }

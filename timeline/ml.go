@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -142,6 +143,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 		// and which actually have data, and which do not yet have embeddings (OR the embedding is outdated
 		// and the item was updated more recently than the embedding), and which are on this page of results
 		job.tl.dbMu.RLock()
+		log.Println("ML: QUERYING PAGE...")
 		rows, err := job.tl.db.QueryContext(job.ctx, `
 			SELECT items.id, items.stored, items.data_type
 			`+mostOfQuery+`
@@ -162,7 +164,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 			err := rows.Scan(&rowID, &stored, &dataType)
 			if err != nil {
-				defer rows.Close()
+				rows.Close() //nolint:sqlclosecheck
 				job.tl.dbMu.RUnlock()
 				return fmt.Errorf("failed to scan row from database page: %w", err)
 			}
@@ -175,6 +177,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 			}
 		}
 		rows.Close()
+		log.Println("ML: CLOSED ROWS", len(pageResults), hadRow)
 		job.tl.dbMu.RUnlock()
 		if err = rows.Err(); err != nil {
 			return fmt.Errorf("iterating rows for researching embeddings failed: %w", err)
@@ -260,12 +263,14 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 	// from the DB); only 1 of those should be non-nil, so we set the "data" variable to whichever
 	// one it is, to be sure we send it in for an embedding
 	job.tl.dbMu.RLock()
+	log.Println("ML: querying to start embedding")
 	err := job.tl.db.QueryRowContext(ctx,
 		`SELECT items.data_file, items.data_text, items.data_type, item_data.content
 		FROM items
 		LEFT JOIN item_data ON item_data.id = items.data_id
 		WHERE items.id=?
 		LIMIT 1`, itemID).Scan(&dataFile, &dataText, &dataType, &data)
+	log.Println("ML: querying to start embedding - DONE", err, dataFile, dataType)
 	job.tl.dbMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("querying item for which to generate embedding: %w", err)
@@ -292,10 +297,12 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 	job.tl.dbMu.Lock()
 	defer job.tl.dbMu.Unlock()
 
+	log.Println("ML: saving embedding")
 	_, err = job.tl.db.ExecContext(ctx, "INSERT INTO embeddings (item_id, embedding) VALUES (?, ?)", itemID, v)
 	if err != nil {
 		return fmt.Errorf("storing embedding for item %d: %w", itemID, err)
 	}
+	log.Println("ML: saving embedding - DONE")
 
 	return nil
 }

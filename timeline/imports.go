@@ -503,8 +503,8 @@ func (ij ImportJob) deleteEmptyItems() error {
 		var rowID int64
 		err := rows.Scan(&rowID)
 		if err != nil {
-			defer ij.job.tl.dbMu.RUnlock()
-			defer rows.Close()
+			rows.Close() //nolint:sqlclosecheck
+			ij.job.tl.dbMu.RUnlock()
 			return fmt.Errorf("scanning item: %w", err)
 		}
 		emptyItems = append(emptyItems, rowID)
