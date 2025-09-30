@@ -74,11 +74,10 @@ type Timeline struct {
 	dataFileWorkingDirsMu sync.Mutex
 
 	// The database handle
-	db         *sqliteDB
+	db         sqliteDB
 	optimizing *int64 // accessed atomically; drops overlapping ANALYZE calls
 
-	thumbs   *sql.DB
-	thumbsMu sync.RWMutex
+	thumbs sqliteDB
 }
 
 func (tl *Timeline) String() string { return fmt.Sprintf("%s:%s", tl.id, tl.repoDir) }
@@ -328,14 +327,14 @@ func Open(ctx context.Context, repo, cache string) (*Timeline, error) {
 }
 
 func openAndProvisionTimeline(ctx context.Context, repoDir, cacheDir string) (*Timeline, error) {
-	db, err := openAndProvisionDB(ctx, repoDir)
+	db, err := openAndProvisionTimelineDB(ctx, repoDir)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 	return openTimeline(ctx, repoDir, cacheDir, db)
 }
 
-func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sqliteDB) (*Timeline, error) {
+func openTimeline(ctx context.Context, repoDir, cacheDir string, db sqliteDB) (*Timeline, error) {
 	repoMarkerFile := filepath.Join(repoDir, MarkerFilename)
 
 	var err error
@@ -520,7 +519,7 @@ func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB *sql.DB, deleteD
 	return nil
 }
 
-func mapNamesToIDs(ctx context.Context, db *sqliteDB, table string) (map[string]uint64, error) {
+func mapNamesToIDs(ctx context.Context, db sqliteDB, table string) (map[string]uint64, error) {
 	nameCol := "name"
 	if table == "relations" {
 		nameCol = "label" // TODO: this is annoying... right?
@@ -561,14 +560,8 @@ func (tl *Timeline) Close() error {
 		delete(tl.rateLimiters, key) // TODO: maybe racey?
 	}
 	tl.cancel() // cancel this timeline's context, so anything waiting on it knows we're closing
-	if tl.thumbs != nil {
-		tl.thumbsMu.Lock()
-		defer tl.thumbsMu.Unlock()
-		_ = tl.thumbs.Close()
-	}
-	if tl.db != nil {
-		return tl.db.Close()
-	}
+	tl.db.Close()
+	tl.thumbs.Close()
 	return nil
 }
 

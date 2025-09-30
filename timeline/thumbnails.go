@@ -265,8 +265,7 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 		// the thumbnail; if so, we need to regenerate it anyway
 		if !tj.RegenerateAll {
 			// read-only tx, but should be faster than individual queries as we iterate items
-			job.tl.thumbsMu.RLock()
-			thumbsTx, err := job.tl.thumbs.BeginTx(job.ctx, nil)
+			thumbsTx, err := job.tl.thumbs.ReadPool.BeginTx(job.ctx, nil)
 			if err != nil {
 				return 0, fmt.Errorf("starting tx for checking for existing thumbnails: %w", err)
 			}
@@ -294,7 +293,6 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 				} else if err != nil {
 					// DB error; probably shouldn't continue
 					thumbsTx.Rollback()
-					job.tl.thumbsMu.RUnlock()
 					return 0, fmt.Errorf("checking for existing thumbnail: %w", err)
 				}
 
@@ -327,7 +325,6 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 
 			// rollback should be OK since we didn't mutate anything, should even be slightly more efficient than a commit?
 			thumbsTx.Rollback()
-			job.tl.thumbsMu.RUnlock()
 		}
 
 		// if all we needed to do was count, we did that for this page, so move on to the next page
@@ -548,10 +545,7 @@ func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context) (Thumbn
 	}
 	now := time.Now()
 
-	task.tl.thumbsMu.Lock()
-	defer task.tl.thumbsMu.Unlock()
-
-	_, err = task.tl.thumbs.ExecContext(ctx, `
+	_, err = task.tl.thumbs.WritePool.ExecContext(ctx, `
 		INSERT INTO thumbnails (data_file, item_data_id, mime_type, content)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT DO UPDATE
@@ -854,14 +848,12 @@ func (tl *Timeline) loadThumbnail(ctx context.Context, dataID int64, dataFile, t
 		itemDataIDToQuery = &dataID
 	}
 
-	tl.thumbsMu.RLock()
-	err := tl.thumbs.QueryRowContext(ctx,
+	err := tl.thumbs.ReadPool.QueryRowContext(ctx,
 		`SELECT generated, mime_type, content
 			FROM thumbnails
 			WHERE (item_data_id=? OR data_file=?) AND mime_type=?
 			LIMIT 1`,
 		itemDataIDToQuery, dataFileToQuery, thumbType).Scan(&modTimeUnix, &mimeType, &thumbnail)
-	tl.thumbsMu.RUnlock()
 	if err != nil {
 		return Thumbnail{}, err
 	}

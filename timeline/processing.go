@@ -285,9 +285,7 @@ func (tl *Timeline) deleteDataFileAndThumbnailIfUnreferenced(ctx context.Context
 	if err := tl.deleteRepoFile(dataFilePath); err != nil {
 		return fmt.Errorf("deleting unused data file: %w", err)
 	}
-	tl.thumbsMu.Lock()
-	_, err = tl.thumbs.ExecContext(ctx, "DELETE FROM thumbnails WHERE data_file=?", dataFilePath)
-	tl.thumbsMu.Unlock()
+	_, err = tl.thumbs.WritePool.ExecContext(ctx, "DELETE FROM thumbnails WHERE data_file=?", dataFilePath)
 	if err != nil {
 		return fmt.Errorf("deleting unused data file's thumbnail: %w", err)
 	}

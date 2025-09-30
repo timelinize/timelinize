@@ -1035,9 +1035,7 @@ func (p *processor) renameDataFile(ctx context.Context, tx *sql.Tx, incoming *It
 	}
 
 	// also update thumbnails DB in case any thumbnails were already generated for the item
-	p.tl.thumbsMu.Lock()
-	_, err = p.tl.thumbs.ExecContext(ctx, "UPDATE thumbnails SET data_file=? WHERE data_file=?", newDataFilePath, oldDataFilePath)
-	p.tl.thumbsMu.Unlock()
+	_, err = p.tl.thumbs.WritePool.ExecContext(ctx, "UPDATE thumbnails SET data_file=? WHERE data_file=?", newDataFilePath, oldDataFilePath)
 	if err != nil {
 		logger.Error("renamed data file, but failed to update thumbnail database", zap.Error(err))
 	}

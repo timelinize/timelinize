@@ -75,7 +75,10 @@ func (*Timeline) readProperty(valStr, valType *string) (any, error) {
 func (tl *Timeline) LoadProperty(ctx context.Context, key string) (any, error) {
 	var valStr, valType *string
 	err := tl.db.ReadPool.QueryRowContext(ctx, "SELECT value, type FROM repo WHERE key=? LIMIT 1", key).Scan(&valStr, &valType)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("querying for property %s: %w", key, err)
 	}
 	value, err := tl.readProperty(valStr, valType)

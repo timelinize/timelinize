@@ -52,14 +52,14 @@ var createDB string
 //go:embed thumbnails.sql
 var createThumbsDB string
 
-func openAndProvisionDB(ctx context.Context, repoDir string) (*sqliteDB, error) {
+func openAndProvisionTimelineDB(ctx context.Context, repoDir string) (sqliteDB, error) {
 	db, err := openTimelineDB(ctx, repoDir)
 	if err != nil {
-		return nil, err
+		return db, err
 	}
-	if err = provisionDB(ctx, db); err != nil {
+	if err = provisionTimelineDB(ctx, db); err != nil {
 		db.Close()
-		return nil, err
+		return db, err
 	}
 	return db, nil
 }
@@ -81,7 +81,7 @@ type sqliteDB struct {
 	WritePool, ReadPool *sql.DB
 }
 
-func (db *sqliteDB) Close() error {
+func (db sqliteDB) Close() error {
 	var errR, errW error
 	if db.ReadPool != nil {
 		errR = db.ReadPool.Close()
@@ -95,8 +95,8 @@ func (db *sqliteDB) Close() error {
 	return nil
 }
 
-func openTimelineDB(ctx context.Context, repoDir string) (*sqliteDB, error) {
-	db := new(sqliteDB)
+func openSqliteDB(ctx context.Context, dbPath string) (sqliteDB, error) {
+	var db sqliteDB
 
 	var err error
 	defer func() {
@@ -107,7 +107,7 @@ func openTimelineDB(ctx context.Context, repoDir string) (*sqliteDB, error) {
 
 	dsn := url.URL{
 		Scheme: "file",
-		Path:   filepath.Join(repoDir, DBFilename),
+		Path:   dbPath,
 	}
 	qs := url.Values{
 		"mode":          {"rwc"},
@@ -145,11 +145,15 @@ func openTimelineDB(ctx context.Context, repoDir string) (*sqliteDB, error) {
 	// should prevent database corruption and exceptions. Hopefully.
 	// See https://github.com/mattn/go-sqlite3/issues/1355.
 	if runtime.GOOS == "darwin" {
-		fsType, err := getFileSystemType(repoDir)
+		dbDir := filepath.Dir(dbPath)
+		fsType, err := getFileSystemType(dbDir)
 		if err != nil {
-			Log.Error("checking file system type", zap.Error(err))
+			Log.Error("checking file system type",
+				zap.String("filepath", dbDir),
+				zap.Error(err))
 		} else if fsType == "exfat" {
 			Log.Warn("file system instability makes WAL mode unsafe; database performance will be degraded to avoid corruption (to avoid this, don't store timeline on exfat)",
+				zap.String("filepath", dbDir),
 				zap.String("file_system_type", fsType))
 			qs.Set("_journal_mode", "TRUNCATE")
 		}
@@ -160,7 +164,7 @@ func openTimelineDB(ctx context.Context, repoDir string) (*sqliteDB, error) {
 	Log.Info("opening DB write pool", zap.String("dsn", dsn.String()))
 	db.WritePool, err = sql.Open("sqlite3", dsn.String())
 	if err != nil {
-		return nil, fmt.Errorf("opening database write pool: %w", err)
+		return db, fmt.Errorf("opening database write pool: %w", err)
 	}
 	db.WritePool.SetMaxOpenConns(1) // sqlite doesn't support concurrent writers
 
@@ -171,14 +175,21 @@ func openTimelineDB(ctx context.Context, repoDir string) (*sqliteDB, error) {
 	Log.Info("opening DB read pool", zap.String("dsn", dsn.String()))
 	db.ReadPool, err = sql.Open("sqlite3", dsn.String())
 	if err != nil {
-		return nil, fmt.Errorf("opening database read pool: %w", err)
+		return db, fmt.Errorf("opening database read pool: %w", err)
 	}
-	// db.ReadPool.SetMaxOpenConns(50)
-	// db.ReadPool.SetMaxIdleConns(25)
 
 	// ensure DB file exists before we try querying it with a read-only connection
 	if err := db.WritePool.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("pinging database file: %w", err)
+		return db, fmt.Errorf("pinging database file: %w", err)
+	}
+
+	return db, nil
+}
+
+func openTimelineDB(ctx context.Context, repoDir string) (sqliteDB, error) {
+	db, err := openSqliteDB(ctx, filepath.Join(repoDir, DBFilename))
+	if err != nil {
+		return db, err
 	}
 
 	// print version, because I keep losing track of it :)
@@ -191,7 +202,7 @@ func openTimelineDB(ctx context.Context, repoDir string) (*sqliteDB, error) {
 	return db, nil
 }
 
-func provisionDB(ctx context.Context, db *sqliteDB) error {
+func provisionTimelineDB(ctx context.Context, db sqliteDB) error {
 	_, err := db.WritePool.ExecContext(ctx, createDB)
 	if err != nil {
 		return fmt.Errorf("setting up database: %w", err)
@@ -229,7 +240,7 @@ func provisionDB(ctx context.Context, db *sqliteDB) error {
 	return nil
 }
 
-func saveAllDataSources(ctx context.Context, db *sqliteDB) error {
+func saveAllDataSources(ctx context.Context, db sqliteDB) error {
 	if len(dataSources) == 0 {
 		return nil
 	}
@@ -287,7 +298,7 @@ func saveAllDataSources(ctx context.Context, db *sqliteDB) error {
 	return nil
 }
 
-func saveAllStandardEntityTypes(ctx context.Context, db *sqliteDB) error {
+func saveAllStandardEntityTypes(ctx context.Context, db sqliteDB) error {
 	entityTypes := []string{
 		EntityPerson,
 		EntityCreature, // pets, animals, insects, fish, etc...
@@ -318,7 +329,7 @@ func saveAllStandardEntityTypes(ctx context.Context, db *sqliteDB) error {
 	return nil
 }
 
-func saveAllStandardClassifications(ctx context.Context, db *sqliteDB) error {
+func saveAllStandardClassifications(ctx context.Context, db sqliteDB) error {
 	query := `INSERT INTO "classifications" ("standard", "name", "labels", "description") VALUES`
 
 	vals := make([]any, 0, len(classifications)*4) //nolint:mnd
@@ -343,7 +354,7 @@ func saveAllStandardClassifications(ctx context.Context, db *sqliteDB) error {
 	return nil
 }
 
-func loadRepoID(ctx context.Context, db *sqliteDB) (uuid.UUID, error) {
+func loadRepoID(ctx context.Context, db sqliteDB) (uuid.UUID, error) {
 	var idStr string
 	err := db.WritePool.QueryRowContext(ctx, `SELECT value FROM repo WHERE key='id' LIMIT 1`).Scan(&idStr)
 	if err != nil {
@@ -356,50 +367,38 @@ func loadRepoID(ctx context.Context, db *sqliteDB) (uuid.UUID, error) {
 	return id, nil
 }
 
-func openAndProvisionThumbsDB(ctx context.Context, repoDir string, repoID uuid.UUID) (*sql.DB, error) {
+func openAndProvisionThumbsDB(ctx context.Context, repoDir string, repoID uuid.UUID) (sqliteDB, error) {
 	db, err := openThumbsDB(ctx, repoDir)
 	if err != nil {
-		return nil, err
+		return db, err
 	}
 	if err = provisionThumbsDB(ctx, db, repoID); err != nil {
 		db.Close()
-		return nil, err
+		return db, err
 	}
 	return db, nil
 }
 
-func openThumbsDB(ctx context.Context, repoDir string) (*sql.DB, error) {
-	var db *sql.DB
-	var err error
-	defer func() {
-		if err != nil && db != nil {
-			db.Close()
-		}
-	}()
-
-	dbPath := filepath.Join(repoDir, ThumbsDBFilename)
-
-	db, err = sql.Open("sqlite3", dbPath+"?_foreign_keys=on&_journal_mode=WAL")
+func openThumbsDB(ctx context.Context, repoDir string) (sqliteDB, error) {
+	db, err := openSqliteDB(ctx, filepath.Join(repoDir, ThumbsDBFilename))
 	if err != nil {
-		return nil, fmt.Errorf("opening thumbnail database: %w", err)
+		return db, err
 	}
-
-	_, err = db.ExecContext(ctx, `PRAGMA optimize=0x10002`)
+	_, err = db.WritePool.ExecContext(ctx, `PRAGMA optimize=0x10002`)
 	if err != nil {
 		Log.Error("optimizing database: %w", zap.Error(err))
 	}
-
 	return db, nil
 }
 
-func provisionThumbsDB(ctx context.Context, thumbsDB *sql.DB, repoID uuid.UUID) error {
-	_, err := thumbsDB.ExecContext(ctx, createThumbsDB)
+func provisionThumbsDB(ctx context.Context, thumbsDB sqliteDB, repoID uuid.UUID) error {
+	_, err := thumbsDB.WritePool.ExecContext(ctx, createThumbsDB)
 	if err != nil {
 		return fmt.Errorf("setting up thumbnail database: %w", err)
 	}
 
 	// link this database to the repo
-	_, err = thumbsDB.ExecContext(ctx, `INSERT OR IGNORE INTO repo_link (repo_id) VALUES (?)`, repoID.String())
+	_, err = thumbsDB.WritePool.ExecContext(ctx, `INSERT OR IGNORE INTO repo_link (repo_id) VALUES (?)`, repoID.String())
 	if err != nil {
 		return fmt.Errorf("linking repo UUID: %w", err)
 	}

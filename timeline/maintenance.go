@@ -147,10 +147,7 @@ func (tl *Timeline) deleteExpiredItems(logger *zap.Logger) error {
 }
 
 func (tl *Timeline) deleteThumbnails(ctx context.Context, itemRowIDs []uint64, dataFiles []string) error {
-	tl.thumbsMu.Lock()
-	defer tl.thumbsMu.Unlock()
-
-	thumbsTx, err := tl.thumbs.BeginTx(ctx, nil)
+	thumbsTx, err := tl.thumbs.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning thumbnail transaction: %w", err)
 	}
