@@ -185,13 +185,9 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		return SearchResults{}, err
 	}
 
-	// lock DB for entirety of this operation, as it may involve many queries
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	// open DB transaction to hopefully make it more efficient
+	// open DB transaction to hopefully make it more efficient; may involve many queries
 	// (TODO: we don't currently commit this tx, because we didn't make changes - that's OK, right?)
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.ReadPool.BeginTx(ctx, nil)
 	if err != nil {
 		return SearchResults{}, err
 	}

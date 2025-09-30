@@ -87,11 +87,9 @@ func (tl *Timeline) optimizeDB(logger *zap.Logger) {
 	}
 	defer atomic.CompareAndSwapInt64(tl.optimizing, 1, 0)
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
 	logger.Info("optimizing database for performance")
 	start := time.Now()
-	_, err := tl.db.ExecContext(tl.ctx, "ANALYZE")
+	_, err := tl.db.WritePool.ExecContext(tl.ctx, "ANALYZE")
 	if err != nil {
 		logger.Error("analyzing database: %w", zap.Error(err))
 	}
@@ -101,10 +99,7 @@ func (tl *Timeline) optimizeDB(logger *zap.Logger) {
 // deleteExpiredItems finds items marked as deleted that have passed their retention period
 // and actually erases them.
 func (tl *Timeline) deleteExpiredItems(logger *zap.Logger) error {
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(tl.ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(tl.ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}

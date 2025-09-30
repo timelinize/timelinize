@@ -481,8 +481,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 	// they have a retrieval key, which implies that they will be completed later
 	// (bookmark items are also a special case: they may be empty, to later be populated
 	// by a snapshot, as long as they have metadata)
-	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.QueryContext(ij.job.ctx, `SELECT id FROM extended_items
+	rows, err := ij.job.tl.db.ReadPool.QueryContext(ij.job.ctx, `SELECT id FROM extended_items
 		WHERE job_id=?
 		AND (data_text IS NULL OR data_text='')
 			AND (classification_name != ? OR metadata IS NULL)
@@ -494,7 +493,6 @@ func (ij ImportJob) deleteEmptyItems() error {
 			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL OR to_attribute_id IS NOT NULL)`,
 		ij.job.id, ClassBookmark.Name) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
 	if err != nil {
-		ij.job.tl.dbMu.RUnlock()
 		return fmt.Errorf("querying empty items: %w", err)
 	}
 
@@ -503,14 +501,12 @@ func (ij ImportJob) deleteEmptyItems() error {
 		var rowID int64
 		err := rows.Scan(&rowID)
 		if err != nil {
-			defer ij.job.tl.dbMu.RUnlock()
-			defer rows.Close()
+			rows.Close() //nolint:sqlclosecheck
 			return fmt.Errorf("scanning item: %w", err)
 		}
 		emptyItems = append(emptyItems, rowID)
 	}
 	rows.Close()
-	ij.job.tl.dbMu.RUnlock()
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("iterating item rows: %w", err)
 	}

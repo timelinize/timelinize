@@ -54,10 +54,7 @@ outer:
 
 // RecentConversations loads recent conversations from the DB. It honors a select number of ItemSearchParams fields.
 func (tl *Timeline) RecentConversations(ctx context.Context, params ItemSearchParams) ([]*Conversation, error) {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.ReadPool.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -376,10 +373,7 @@ func (tl *Timeline) LoadConversation(ctx context.Context, params ItemSearchParam
 		return SearchResults{}, errors.New("lookup by both entity and attribute not currently supported")
 	}
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.ReadPool.BeginTx(ctx, nil)
 	if err != nil {
 		return SearchResults{}, err
 	}

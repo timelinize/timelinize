@@ -67,12 +67,8 @@ func (tl *Timeline) SearchEntities(ctx context.Context, params EntitySearchParam
 		return nil, err
 	}
 
-	// lock DB for entirety of this operation, as it may involve many queries
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
 	// run query and scan results
-	rows, err := tl.db.QueryContext(ctx, q, args...)
+	rows, err := tl.db.ReadPool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying db for people: %w", err)
 	}

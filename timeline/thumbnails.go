@@ -188,12 +188,10 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 		// to de-duplicate in memory across all pages
 		pageDataFiles, pageDataIDs := make(map[string]struct{}), make(map[int64]struct{})
 
-		job.tl.dbMu.RLock()
-		rows, err := job.tl.db.QueryContext(job.ctx, thumbnailJobQuery,
+		rows, err := job.tl.db.ReadPool.QueryContext(job.ctx, thumbnailJobQuery,
 			tj.TasksFromImportJob, tj.TasksFromImportJob,
 			lastTimestamp, lastTimestamp, lastItemID, thumbnailJobPageSize)
 		if err != nil {
-			job.tl.dbMu.RUnlock()
 			return 0, fmt.Errorf("failed querying page of database table: %w", err)
 		}
 
@@ -208,7 +206,6 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 			err := rows.Scan(&rowID, &stored, &modified, &timestamp, &dataID, &dataType, &dataFile, &modJobEnded)
 			if err != nil {
 				defer rows.Close()
-				job.tl.dbMu.RUnlock()
 				return 0, fmt.Errorf("failed to scan row from database page: %w", err)
 			}
 
@@ -248,7 +245,6 @@ func (tj thumbnailJob) iteratePagesOfTasksFromImportJob(job *ActiveJob, precount
 			}
 		}
 		rows.Close()
-		job.tl.dbMu.RUnlock()
 		if err = rows.Err(); err != nil {
 			return 0, fmt.Errorf("iterating rows for researching thumbnails failed: %w", err)
 		}
@@ -515,13 +511,11 @@ func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context) (Thumbn
 		// thumbnail already exists, which implies that there's a row in the DB with a thumbhash for it,
 		// so copy that thumbhash to all other rows that use that data file
 		thumb.alreadyExisted = true
-		task.tl.dbMu.Lock()
-		defer task.tl.dbMu.Unlock()
 		var err error
 		if task.DataID != 0 {
-			_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=(SELECT thumb_hash FROM items WHERE data_id=? AND thumb_hash IS NOT NULL LIMIT 1) WHERE data_id=?`, task.DataID, task.DataID)
+			_, err = task.tl.db.WritePool.ExecContext(ctx, `UPDATE items SET thumb_hash=(SELECT thumb_hash FROM items WHERE data_id=? AND thumb_hash IS NOT NULL LIMIT 1) WHERE data_id=?`, task.DataID, task.DataID)
 		} else {
-			_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=(SELECT thumb_hash FROM items WHERE data_file=? AND thumb_hash IS NOT NULL LIMIT 1) WHERE data_file=?`, task.DataFile, task.DataFile)
+			_, err = task.tl.db.WritePool.ExecContext(ctx, `UPDATE items SET thumb_hash=(SELECT thumb_hash FROM items WHERE data_file=? AND thumb_hash IS NOT NULL LIMIT 1) WHERE data_file=?`, task.DataFile, task.DataFile)
 		}
 		return thumb, err
 	}
@@ -534,10 +528,8 @@ func (task thumbnailTask) generateAndStoreThumbnail(ctx context.Context) (Thumbn
 	if task.DataFile != "" {
 		inputFilename = task.tl.FullPath(task.DataFile)
 	} else if task.DataID > 0 {
-		task.tl.dbMu.RLock()
-		err := task.tl.db.QueryRowContext(ctx,
+		err := task.tl.db.ReadPool.QueryRowContext(ctx,
 			`SELECT content FROM item_data WHERE id=? LIMIT 1`, task.DataID).Scan(&inputBuf)
-		task.tl.dbMu.RUnlock()
 		if err != nil {
 			return Thumbnail{}, fmt.Errorf("querying item data content: %w", err)
 		}
@@ -765,14 +757,11 @@ func (task thumbnailTask) generateAndStoreThumbhash(ctx context.Context, thumb [
 }
 
 func (task thumbnailTask) storeThumbhash(ctx context.Context, thash []byte) error {
-	task.tl.dbMu.Lock()
-	defer task.tl.dbMu.Unlock()
-
 	var err error
 	if task.DataID != 0 {
-		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_id=?`, thash, task.DataID)
+		_, err = task.tl.db.WritePool.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_id=?`, thash, task.DataID)
 	} else {
-		_, err = task.tl.db.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_file=?`, thash, task.DataFile)
+		_, err = task.tl.db.WritePool.ExecContext(ctx, `UPDATE items SET thumb_hash=? WHERE data_file=?`, thash, task.DataFile)
 	}
 	return err
 }
@@ -815,9 +804,7 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 		// found existing thumbnail! get thumbhash real quick, if it's an image
 		if strings.HasPrefix(dataType, "image/") {
 			var thash []byte
-			tl.dbMu.RLock()
-			err2 := tl.db.QueryRowContext(ctx, "SELECT thumb_hash FROM items WHERE (data_file=? OR data_id=?) AND thumb_hash IS NOT NULL LIMIT 1", dataFile, itemDataID).Scan(&thash)
-			tl.dbMu.RUnlock()
+			err2 := tl.db.ReadPool.QueryRowContext(ctx, "SELECT thumb_hash FROM items WHERE (data_file=? OR data_id=?) AND thumb_hash IS NOT NULL LIMIT 1", dataFile, itemDataID).Scan(&thash)
 			if err2 == nil {
 				return thumb, thash, nil
 			}
@@ -937,10 +924,8 @@ func (tl *Timeline) GeneratePreviewImage(ctx context.Context, itemRow ItemRow, e
 	if itemRow.DataFile != nil {
 		inputFilePath = filepath.Join(tl.repoDir, filepath.FromSlash(*itemRow.DataFile))
 	} else if itemRow.DataID != nil {
-		tl.dbMu.RLock()
-		err := tl.db.QueryRowContext(ctx,
+		err := tl.db.ReadPool.QueryRowContext(ctx,
 			`SELECT content FROM item_data WHERE id=? LIMIT 1`, *itemRow.DataID).Scan(&inputBuf)
-		tl.dbMu.RUnlock()
 		if err != nil {
 			return nil, fmt.Errorf("loading content from database: %w", err)
 		}

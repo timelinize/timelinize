@@ -91,10 +91,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 		ParentJobID: parentJobIDPtr,
 	}
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(tl.ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(tl.ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -200,7 +197,7 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID uint64, paren
 	var rows *sql.Rows
 	var err error
 	if tx == nil {
-		rows, err = tl.db.QueryContext(ctx, q, vals...)
+		rows, err = tl.db.ReadPool.QueryContext(ctx, q, vals...)
 	} else {
 		rows, err = tx.QueryContext(ctx, q, vals...)
 	}
@@ -322,12 +319,9 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID uint64) erro
 			case <-ctx.Done():
 				return
 			case <-time.After(time.Until(scheduledStart)):
-				tl.dbMu.Lock()
-				defer tl.dbMu.Unlock()
-
 				logger := Log.Named("job")
 
-				tx, err := tl.db.BeginTx(ctx, nil)
+				tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 				if err != nil {
 					logger.Error("could not start transaction to start job", zap.Error(err))
 					return
@@ -496,10 +490,7 @@ func (tl *Timeline) runJob(row Job) error {
 		}
 
 		// sync to the DB, and dequeue the next job
-		tl.dbMu.Lock()
-		defer tl.dbMu.Unlock()
-
-		tx, err := tl.db.BeginTx(tl.ctx, nil) // don't use the job's context, it might have been canceled!
+		tx, err := tl.db.WritePool.BeginTx(tl.ctx, nil) // don't use the job's context, it might have been canceled!
 		if err != nil {
 			logger.Error("beginning transaction for ended job", zap.Error(err))
 			return
@@ -799,9 +790,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 
 	var err error
 	if tx == nil {
-		j.tl.dbMu.Lock()
-		_, err = j.tl.db.ExecContext(j.tl.ctx, q, vals...)
-		j.tl.dbMu.Unlock()
+		_, err = j.tl.db.WritePool.ExecContext(j.tl.ctx, q, vals...)
 	} else {
 		_, err = tx.ExecContext(j.tl.ctx, q, vals...)
 	}
@@ -832,7 +821,7 @@ func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []uint64, mostRecent int
 
 		var rows *sql.Rows
 		var err error
-		rows, err = tl.db.QueryContext(ctx, q, mostRecent)
+		rows, err = tl.db.ReadPool.QueryContext(ctx, q, mostRecent)
 		if err != nil {
 			return nil, err
 		}
@@ -857,9 +846,7 @@ func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []uint64, mostRecent int
 
 	// load specific jobs by ID
 	for _, id := range jobIDs {
-		tl.dbMu.RLock()
 		job, err := tl.loadJob(ctx, nil, id, true)
-		tl.dbMu.RUnlock()
 		if err != nil {
 			return nil, fmt.Errorf("loading job %d: %w", id, err)
 		}
@@ -913,10 +900,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID uint64) error {
 	// it is still queued and they just want to prevent it from
 	// running; etc, let's check the DB
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -934,7 +918,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID uint64) error {
 		// its context), and we should resume interrupted jobs at startup,
 		// but might as well allow them here since it's no matter
 		job.State = JobAborted
-		_, err = tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE id=?`, job.State, jobID) // TODO: LIMIT 1
+		_, err = tl.db.WritePool.ExecContext(ctx, `UPDATE jobs SET state=? WHERE id=?`, job.State, jobID) // TODO: LIMIT 1
 		if err != nil {
 			return fmt.Errorf("updating job state: %w", err)
 		}
@@ -987,9 +971,7 @@ func (tl *Timeline) PauseJob(ctx context.Context, jobID uint64) error {
 	// 3. Update the UI's state to "paused" so that controls appear to allow resumption.
 
 	// step 1. update the DB with the authoritative job state
-	tl.dbMu.Lock()
-	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobPaused, JobStarted, job.id) // TODO: LIMIT 1
-	tl.dbMu.Unlock()
+	_, err := tl.db.WritePool.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobPaused, JobStarted, job.id) // TODO: LIMIT 1
 	if err != nil {
 		return fmt.Errorf("job paused, but error updating job state in DB: %w", err)
 	}
@@ -1022,9 +1004,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 	if !ok {
 		// not active; see if it's in the DB... if so, it's the same as starting the job
 		var state JobState
-		tl.dbMu.Lock()
-		err := tl.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id=? LIMIT 1`, jobID).Scan(&state)
-		tl.dbMu.Unlock()
+		err := tl.db.ReadPool.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id=? LIMIT 1`, jobID).Scan(&state)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("job %d not found", jobID)
 		}
@@ -1038,9 +1018,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 	}
 
 	// update the DB first because it's authoritative for the job's state
-	tl.dbMu.Lock()
-	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
-	tl.dbMu.Unlock()
+	_, err := tl.db.WritePool.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
 	if err != nil {
 		return fmt.Errorf("job resumed, but error updating job state in DB: %w", err)
 	}
@@ -1064,10 +1042,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 }
 
 func (tl *Timeline) StartJob(ctx context.Context, jobID uint64, startOver bool) error {
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

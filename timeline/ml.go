@@ -103,13 +103,11 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 				OR embeddings.generated <= jobs.start/1000
 				OR embeddings.generated <= items.modified)`
 
-	job.tl.dbMu.RLock()
 	var jobSize int
-	err := job.tl.db.QueryRowContext(job.ctx, `
+	err := job.tl.db.ReadPool.QueryRowContext(job.ctx, `
 		SELECT count()
 			`+mostOfQuery,
 		ej.ItemsFromImportJob, ej.ItemsFromImportJob).Scan(&jobSize)
-	job.tl.dbMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed counting size of job: %w", err)
 	}
@@ -141,8 +139,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 		// select items from the configured import job that have a data type we can generate embeddings for,
 		// and which actually have data, and which do not yet have embeddings (OR the embedding is outdated
 		// and the item was updated more recently than the embedding), and which are on this page of results
-		job.tl.dbMu.RLock()
-		rows, err := job.tl.db.QueryContext(job.ctx, `
+		rows, err := job.tl.db.ReadPool.QueryContext(job.ctx, `
 			SELECT items.id, items.stored, items.data_type
 			`+mostOfQuery+`
 				AND items.id > ?
@@ -150,7 +147,6 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 			LIMIT ?
 			`, ej.ItemsFromImportJob, ej.ItemsFromImportJob, lastItemID, pageSize)
 		if err != nil {
-			job.tl.dbMu.RUnlock()
 			return fmt.Errorf("failed querying page of database table: %w", err)
 		}
 		var hadRow bool
@@ -163,7 +159,6 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 			err := rows.Scan(&rowID, &stored, &dataType)
 			if err != nil {
 				defer rows.Close()
-				job.tl.dbMu.RUnlock()
 				return fmt.Errorf("failed to scan row from database page: %w", err)
 			}
 
@@ -175,7 +170,6 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 			}
 		}
 		rows.Close()
-		job.tl.dbMu.RUnlock()
 		if err = rows.Err(); err != nil {
 			return fmt.Errorf("iterating rows for researching embeddings failed: %w", err)
 		}
@@ -259,14 +253,12 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 	// text (read the text directly from the DB), and a separate data table (read the blob directly
 	// from the DB); only 1 of those should be non-nil, so we set the "data" variable to whichever
 	// one it is, to be sure we send it in for an embedding
-	job.tl.dbMu.RLock()
-	err := job.tl.db.QueryRowContext(ctx,
+	err := job.tl.db.ReadPool.QueryRowContext(ctx,
 		`SELECT items.data_file, items.data_text, items.data_type, item_data.content
 		FROM items
 		LEFT JOIN item_data ON item_data.id = items.data_id
 		WHERE items.id=?
 		LIMIT 1`, itemID).Scan(&dataFile, &dataText, &dataType, &data)
-	job.tl.dbMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("querying item for which to generate embedding: %w", err)
 	}
@@ -289,10 +281,7 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 		return err
 	}
 
-	job.tl.dbMu.Lock()
-	defer job.tl.dbMu.Unlock()
-
-	_, err = job.tl.db.ExecContext(ctx, "INSERT INTO embeddings (item_id, embedding) VALUES (?, ?)", itemID, v)
+	_, err = job.tl.db.WritePool.ExecContext(ctx, "INSERT INTO embeddings (item_id, embedding) VALUES (?, ?)", itemID, v)
 	if err != nil {
 		return fmt.Errorf("storing embedding for item %d: %w", itemID, err)
 	}

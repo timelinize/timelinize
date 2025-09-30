@@ -14,10 +14,7 @@ import (
 func (tl *Timeline) GetProperties(ctx context.Context) (map[string]any, error) {
 	properties := make(map[string]any)
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	rows, err := tl.db.QueryContext(ctx, "SELECT key, value, type FROM repo")
+	rows, err := tl.db.ReadPool.QueryContext(ctx, "SELECT key, value, type FROM repo")
 	if err != nil {
 		return nil, fmt.Errorf("querying properties: %w", err)
 	}
@@ -77,9 +74,7 @@ func (*Timeline) readProperty(valStr, valType *string) (any, error) {
 
 func (tl *Timeline) LoadProperty(ctx context.Context, key string) (any, error) {
 	var valStr, valType *string
-	tl.dbMu.RLock()
-	err := tl.db.QueryRowContext(ctx, "SELECT value, type FROM repo WHERE key=? LIMIT 1", key).Scan(&valStr, &valType)
-	defer tl.dbMu.RUnlock()
+	err := tl.db.ReadPool.QueryRowContext(ctx, "SELECT value, type FROM repo WHERE key=? LIMIT 1", key).Scan(&valStr, &valType)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("querying for property %s: %w", key, err)
 	}
@@ -102,10 +97,7 @@ func (tl *Timeline) GetProperty(ctx context.Context, key string) any {
 }
 
 func (tl *Timeline) SetProperties(ctx context.Context, properties map[string]any) error {
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("starting tx: %w", err)
 	}

@@ -950,11 +950,7 @@ func (tl *Timeline) MergeEntities(ctx context.Context, entityIDToKeep uint64, en
 		return fmt.Errorf("loading entity to keep: %w", err)
 	}
 
-	// lock DB and start transaction
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

@@ -73,16 +73,8 @@ type Timeline struct {
 	dataFileWorkingDirs   map[string]int
 	dataFileWorkingDirsMu sync.Mutex
 
-	// The database handle and its mutex. Why a mutex for a DB handle? Because
-	// high-volume imports can sometimes yield "database is locked" errors,
-	// presumably because of scanning rows (`for rows.Next()`) while trying
-	// to do a write from another query at the same time:
-	// https://github.com/mattn/go-sqlite3/issues/607#issuecomment-808739698
-	// and this is totally possible since we run our DB ops concurrently.
-	// It's unfortunate that DB locking doesn't handle this for us, but by
-	// wrapping DB calls in this mutex I've noticed the problem disappear.
-	db         *sql.DB
-	dbMu       sync.RWMutex
+	// The database handle
+	db         *sqliteDB
 	optimizing *int64 // accessed atomically; drops overlapping ANALYZE calls
 
 	thumbs   *sql.DB
@@ -343,7 +335,7 @@ func openAndProvisionTimeline(ctx context.Context, repoDir, cacheDir string) (*T
 	return openTimeline(ctx, repoDir, cacheDir, db)
 }
 
-func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*Timeline, error) {
+func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sqliteDB) (*Timeline, error) {
 	repoMarkerFile := filepath.Join(repoDir, MarkerFilename)
 
 	var err error
@@ -388,7 +380,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 
 	// in case of unclean shutdown last time, set all jobs that are on "started" status to "aborted"
 	// (no jobs can be currently running, since we haven't even finished opening the timeline yet)
-	_, err = db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=?`, JobInterrupted, JobStarted)
+	_, err = db.WritePool.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=?`, JobInterrupted, JobStarted)
 	if err != nil {
 		return nil, fmt.Errorf("resetting all uncleanly-stopped jobs to 'interrupted' state: %w", err)
 	}
@@ -437,8 +429,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	if err != nil {
 		Log.Error("unable to lookup hostname for resuming jobs", zap.Error(err))
 	}
-	tl.dbMu.RLock()
-	rows, err := db.QueryContext(ctx,
+	rows, err := db.ReadPool.QueryContext(ctx,
 		`SELECT id
 		FROM jobs
 		WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
@@ -447,7 +438,6 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	if err != nil {
 		return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
 	}
-	tl.dbMu.RUnlock()
 	if err != nil {
 		return nil, fmt.Errorf("could not query jobs to resume: %w", err)
 	}
@@ -530,12 +520,12 @@ func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB *sql.DB, deleteD
 	return nil
 }
 
-func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]uint64, error) {
+func mapNamesToIDs(ctx context.Context, db *sqliteDB, table string) (map[string]uint64, error) {
 	nameCol := "name"
 	if table == "relations" {
 		nameCol = "label" // TODO: this is annoying... right?
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, `+nameCol+` FROM `+table) //nolint:gosec
+	rows, err := db.ReadPool.QueryContext(ctx, `SELECT id, `+nameCol+` FROM `+table) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("querying %s table: %w", table, err)
 	}
@@ -577,8 +567,6 @@ func (tl *Timeline) Close() error {
 		_ = tl.thumbs.Close()
 	}
 	if tl.db != nil {
-		tl.dbMu.Lock()
-		defer tl.dbMu.Unlock()
 		return tl.db.Close()
 	}
 	return nil
@@ -586,9 +574,7 @@ func (tl *Timeline) Close() error {
 
 // Empty returns true if there are no entities in the timeline. (TODO: Can we remember once it's not empty, to avoid repeated queries?)
 func (tl *Timeline) Empty() bool {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-	err := tl.db.QueryRowContext(tl.ctx, "SELECT id FROM entities LIMIT 1").Scan()
+	err := tl.db.ReadPool.QueryRowContext(tl.ctx, "SELECT id FROM entities LIMIT 1").Scan()
 	return err == sql.ErrNoRows
 }
 
@@ -704,9 +690,7 @@ func (tl *Timeline) entityTypeNameToID(name string) (uint64, error) {
 	}
 
 	// might be new or one we haven't seen yet
-	tl.dbMu.RLock()
-	err := tl.db.QueryRowContext(tl.ctx, `SELECT id FROM entity_types WHERE name=? LIMIT 1`, name).Scan(&id)
-	tl.dbMu.RUnlock()
+	err := tl.db.ReadPool.QueryRowContext(tl.ctx, `SELECT id FROM entity_types WHERE name=? LIMIT 1`, name).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -727,9 +711,7 @@ func (tl *Timeline) classificationNameToID(name string) (uint64, error) {
 	}
 
 	// might be new or one we haven't seen yet
-	tl.dbMu.RLock()
-	err := tl.db.QueryRowContext(tl.ctx, `SELECT id FROM classifications WHERE name=? LIMIT 1`, name).Scan(&id)
-	tl.dbMu.RUnlock()
+	err := tl.db.ReadPool.QueryRowContext(tl.ctx, `SELECT id FROM classifications WHERE name=? LIMIT 1`, name).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -742,10 +724,7 @@ func (tl *Timeline) classificationNameToID(name string) (uint64, error) {
 }
 
 func (tl *Timeline) ItemClassifications() ([]Classification, error) {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	rows, err := tl.db.QueryContext(tl.ctx, "SELECT id, standard, name, labels, description FROM classifications")
+	rows, err := tl.db.ReadPool.QueryContext(tl.ctx, "SELECT id, standard, name, labels, description FROM classifications")
 	if err != nil {
 		return nil, fmt.Errorf("querying classifications: %w", err)
 	}
@@ -779,10 +758,7 @@ func (tl *Timeline) StoreEntity(ctx context.Context, entity Entity) error {
 		return err
 	}
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -839,10 +815,7 @@ func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, en
 func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	p := Entity{ID: id}
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	tx, err := tl.db.BeginTx(tl.ctx, nil)
+	tx, err := tl.db.ReadPool.BeginTx(tl.ctx, nil)
 	if err != nil {
 		return p, err
 	}
@@ -1046,10 +1019,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, option
 		return fmt.Errorf("invalid retention period: %s", retention)
 	}
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -1170,10 +1140,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 		zap.Bool("remember", remember),
 		zap.Durationp("retention", retention))
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.BeginTx(ctx, nil)
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -1344,7 +1311,7 @@ func sqlArray(rowIDs []uint64) (string, []any) {
 // file existence, and a table and value within the database.It returns an
 // error only if it is unable to assess whether a valid timeline exists.
 func Valid(ctx context.Context, repo string) (bool, error) {
-	db, err := openDB(ctx, repo)
+	db, err := openTimelineDB(ctx, repo)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil

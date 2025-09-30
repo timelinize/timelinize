@@ -127,7 +127,7 @@ func (ps *persistedTokenSource) Token() (*oauth2.Token, error) {
 			return nil, fmt.Errorf("gob-encoding new OAuth2 token: %w", err)
 		}
 
-		_, err = ps.tl.db.ExecContext(context.TODO(), `UPDATE accounts SET authorization=? WHERE id=?`, authBytes, ps.accountID)
+		_, err = ps.tl.db.WritePool.ExecContext(context.TODO(), `UPDATE accounts SET authorization=? WHERE id=?`, authBytes, ps.accountID)
 		if err != nil {
 			return nil, fmt.Errorf("storing refreshed OAuth2 token: %w", err)
 		}

@@ -859,7 +859,6 @@ type sqlScanner interface {
 
 // scanItemRow reads an item from row and returns the structured ItemRow.
 // The item must have been queried to select all of itemDBColumns.
-// It must be called inside a lock on the database (such as Timeline.dbMu).
 // It scans columns defined by itemDBColumns.
 func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	var ir ItemRow
