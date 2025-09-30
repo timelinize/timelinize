@@ -22,7 +22,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func getFilesystemType(path string) (string, error) {
+func getFileSystemType(path string) (string, error) {
 	pathPtr, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return "", err

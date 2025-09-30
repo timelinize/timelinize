@@ -20,7 +20,7 @@ package timeline
 
 import "syscall"
 
-func getFilesystemType(path string) (string, error) {
+func getFileSystemType(path string) (string, error) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return "", err
