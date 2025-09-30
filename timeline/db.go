@@ -145,12 +145,12 @@ func openTimelineDB(ctx context.Context, repoDir string) (*sqliteDB, error) {
 	// should prevent database corruption and exceptions. Hopefully.
 	// See https://github.com/mattn/go-sqlite3/issues/1355.
 	if runtime.GOOS == "darwin" {
-		fsType, err := getFileSystemType(dsn.Path)
+		fsType, err := getFileSystemType(repoDir)
 		if err != nil {
 			Log.Error("checking file system type", zap.Error(err))
 		} else if fsType == "exfat" {
-			Log.Warn("known file system instability makes WAL mode unsafe; database performance will be degraded to avoid corruption",
-				zap.String("fs_type", fsType))
+			Log.Warn("file system instability makes WAL mode unsafe; database performance will be degraded to avoid corruption (to avoid this, don't store timeline on exfat)",
+				zap.String("file_system_type", fsType))
 			qs.Set("_journal_mode", "TRUNCATE")
 		}
 	}

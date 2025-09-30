@@ -18,14 +18,15 @@
 
 package timeline
 
-import "syscall"
+import (
+	"syscall"
+)
 
 func getFileSystemType(path string) (string, error) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return "", err
 	}
-
 	switch stat.Type {
 	case 0x2011BAB0:
 		return "exfat", nil
