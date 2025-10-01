@@ -148,35 +148,30 @@ func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
 
 // directoryEmpty returns true if dirPath is an empty directory except for some
 // common, but non-critical, OS files. If false, the name of the first discovered
-// file is returned. If deletePointlessFiles is true, then those implicit OS files
+// file is returned. If deleteUnintentionalFiles is true, then those implicit OS files
 // (like .DS_Store) will be deleted while considering whether a dir is empty.
 // (It is not required to delete the file to still consider it empty, but if
 // preparing an empty dir for deletion, emptying the dir of pointless files will
 // come in handy.)
-func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, error) {
+func directoryEmpty(dirPath string, deleteUnintentionalFiles bool) (bool, string, error) {
 	dir, err := os.Open(dirPath)
 	if err != nil {
 		return false, "", fmt.Errorf("opening folder: %w", err)
 	}
 	defer dir.Close()
 
-	// no need to read whole listing; all we need to do is find one non-intentional file
-	// (reading 2 allows for 1 pointless file)
-	fileList, err := dir.Readdirnames(2) //nolint:mnd
+	// no need to read whole listing; all we need to do is find one intentional file
+	// (read more than the list of unintentional files is long, to ensure if multiple
+	// of them exist, we can be sure if the folder is "empty")
+	fileList, err := dir.Readdirnames(len(unintentionalFiles) + 1)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, "", fmt.Errorf("reading folder contents: %w", err)
 	}
 
-	pointlessFiles := map[string]struct{}{
-		".DS_Store":       {},
-		".Spotlight-V100": {},
-		"Thumbs.db":       {},
-	}
-
 	for _, f := range fileList {
 		// ignore, and possibly delete, pointless files
-		if _, ok := pointlessFiles[f]; ok {
-			if deletePointlessFiles {
+		if _, ok := unintentionalFiles[f]; ok {
+			if deleteUnintentionalFiles {
 				err := os.Remove(filepath.Join(dirPath, f))
 				if err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return false, f, fmt.Errorf("unable to delete pointless file: %w", err)
@@ -188,6 +183,15 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 	}
 
 	return true, "", nil
+}
+
+// unintentionalFiles is a map of common file a user did not intentionally create.
+var unintentionalFiles = map[string]struct{}{
+	".DS_Store":       {},
+	".Spotlight-V100": {},
+	".Trash-1000":     {},
+	".Trashes":        {},
+	"Thumbs.db":       {},
 }
 
 // FolderAssessment returns the analysis of a folder related to
