@@ -18,13 +18,11 @@
 
 package timeline
 
-import (
-	"syscall"
-)
+import "golang.org/x/sys/unix"
 
 func getFileSystemType(path string) (string, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(path, &stat); err != nil {
 		return "", err
 	}
 	switch stat.Type {

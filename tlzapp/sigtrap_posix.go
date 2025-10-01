@@ -23,35 +23,35 @@ package tlzapp
 import (
 	"os"
 	"os/signal"
-	"syscall"
 
 	"github.com/timelinize/timelinize/timeline"
+	"golang.org/x/sys/unix"
 )
 
 // trapSignalsPosix captures POSIX-only signals.
 func trapSignalsPosix() {
 	go func() {
 		sigchan := make(chan os.Signal, 1)
-		signal.Notify(sigchan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGUSR1, syscall.SIGUSR2)
+		signal.Notify(sigchan, unix.SIGTERM, unix.SIGHUP, unix.SIGQUIT, unix.SIGUSR1, unix.SIGUSR2)
 
 		// TODO: implement these...
 		for sig := range sigchan {
 			switch sig {
-			case syscall.SIGQUIT:
+			case unix.SIGQUIT:
 				timeline.Log.Warn("SIGQUIT: quitting process immediately")
 				os.Exit(2) //nolint:mnd
 
-			case syscall.SIGTERM:
+			case unix.SIGTERM:
 				timeline.Log.Warn("SIGTERM: cleaning up resources, then terminating")
 				shutdown(1)
 
-			case syscall.SIGUSR1:
+			case unix.SIGUSR1:
 				timeline.Log.Warn("SIGUSR1: reload not implemented")
 
-			case syscall.SIGUSR2:
+			case unix.SIGUSR2:
 				timeline.Log.Warn("SIGUSR2: upgrade not implemented")
 
-			case syscall.SIGHUP:
+			case unix.SIGHUP:
 				timeline.Log.Warn("SIGHUP: not implemented")
 			}
 		}

@@ -21,7 +21,8 @@ package tlzapp
 import (
 	"fmt"
 	"path/filepath"
-	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 // getFileSelectorRoots gets the platform-specific filepath roots,
@@ -52,42 +53,43 @@ func getFileSelectorRoots() ([]fileSelectorRoot, error) {
 	return roots, nil
 }
 
-// getLocalLogicalDrives makes a Windows system call to get the local
-// logical drives assigned a drive letter, and returns the list of
-// drive letters only. From:
-// https://stackoverflow.com/questions/23128148/how-can-i-get-a-listing-of-all-drives-on-windows-using-golang
+// getLocalLogicalDrives calls the Windows API GetLogicalDrives and returns
+// a slice of drive letters.
 func getLocalLogicalDrives() ([]string, error) {
-	kernel32, _ := syscall.LoadLibrary("kernel32.dll")
-	getLogicalDrivesHandle, _ := syscall.GetProcAddress(kernel32, "GetLogicalDrives")
-	ret, _, callErr := syscall.Syscall(uintptr(getLogicalDrivesHandle), 0, 0, 0, 0)
-	if callErr != 0 {
-		return nil, callErr
+	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+	procGetLogicalDrives := kernel32.NewProc("GetLogicalDrives")
+	ret, _, err := procGetLogicalDrives.Call()
+	if err != windows.ERROR_SUCCESS && err != nil {
+		return nil, err
 	}
 	return bitsToDrives(uint32(ret)), nil
 }
 
-func bitsToDrives(bitMap uint32) (drives []string) {
-	availableDrives := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
+// bitsToDrives converts a bitmask from GetLogicalDrives into a list of drive letters.
+func bitsToDrives(bitMap uint32) []string {
+	letters := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
 		"L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"}
-	for i := range availableDrives {
+
+	var drives []string
+	for _, letter := range letters {
 		if bitMap&1 == 1 {
-			drives = append(drives, availableDrives[i])
+			drives = append(drives, letter)
 		}
 		bitMap >>= 1
 	}
-	return
+	return drives
 }
 
 func fileHidden(filename string) bool {
 	// TODO: hide dot-files anyway? if strings.HasPrefix(filename, ".")...
 
-	pointer, err := syscall.UTF16PtrFromString(filename)
+	pointer, err := windows.UTF16PtrFromString(filename)
 	if err != nil {
 		return false
 	}
-	attributes, err := syscall.GetFileAttributes(pointer)
+	attributes, err := windows.GetFileAttributes(pointer)
 	if err != nil {
 		return false
 	}
-	return attributes&syscall.FILE_ATTRIBUTE_HIDDEN != 0
+	return attributes&windows.FILE_ATTRIBUTE_HIDDEN != 0
 }
