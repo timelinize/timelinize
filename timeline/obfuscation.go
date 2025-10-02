@@ -424,7 +424,12 @@ func consistentFakeEntityName(realName string) string {
 		}
 		nameSrc := weakrand.NewPCG(dumbHash(name), 0)
 		nameFaker := gofakeit.NewFaker(nameSrc, false)
-		if fakeName == "" { //nolint:gocritic
+		if len(name) == 1 { //nolint:gocritic
+			if len(fakeName) > 0 {
+				fakeName += " "
+			}
+			fakeName += strings.ToUpper(nameFaker.Letter()) // name len 1 is likely an initial; generate a random initial in turn
+		} else if fakeName == "" {
 			fakeName = nameFaker.FirstName()
 		} else if i < len(names)-1 {
 			fakeName += " " + nameFaker.MiddleName()
