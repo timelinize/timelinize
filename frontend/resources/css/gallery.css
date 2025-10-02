@@ -6,12 +6,15 @@
 	flex-grow: 1;
 }
 
+:root {
+	--min-card-width: 250px;
+}
+
 .filter-results {
-	display: flex;
-	flex-wrap: wrap;
-	justify-content: space-between;
-	gap: .75rem;
 	padding: 1em 0;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(var(--min-card-width), 1fr));
+	gap: .75rem;
 }
 
 .filter-results > .card {
@@ -22,19 +25,10 @@
 	transition: transform .2s ease;
 }
 
-.page-body .card .thumbhash-container,
-.page-body .card .content {
-	height: 100%;
-	max-height: 250px;
-}
-
-#modal-preview-content .thumbhash-container,
-#modal-preview-content video {
-	width: 100%;
-}
-
-#modal-preview-content video {
-	max-height: 1000px;
+.page-body .card .card-img-top,
+.page-body .card .card-img-top > * {
+	height: 250px;
+	object-fit: cover; /* needed for images when obfuscation mode is enabled, to prevent distortion of the thumbhash */
 }
 
 .card-link:hover {
@@ -42,8 +36,8 @@
 }
 
 @media (min-width: 2000px) {
-	.filter-results > .card {
-		min-width: 350px;
+	:root {
+		--min-card-width: 350px;
 	}
 }
 
@@ -72,14 +66,13 @@
 	--tblr-btn-disabled-border-color: lightgray;
 }
 
-#modal-preview img,
-#modal-preview canvas {
-	max-height: 1000px;
-	max-width: 100%;
-}
-
 #modal-preview-nav {
 	gap: 1em;
+}
+
+#modal-preview-content {
+	max-height: 1000px;
+	max-width: 100%;
 }
 
 

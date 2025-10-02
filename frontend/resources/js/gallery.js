@@ -81,8 +81,7 @@ async function galleryPageMain() {
 		elem.id = `item-${item.id}`;
 
 		let mediaElem = itemContentElement(item, { thumbnail: true });
-		mediaElem.classList.add('w-100', 'h-100', 'object-cover', 'card-img-top');
-		mediaElem.classList.remove('rounded');
+		mediaElem.classList.add('card-img-top');
 
 		/*
 			TODO: I kind of like this dreamy glow effect around each video (maybe image too?) -- maybe just on hover though?

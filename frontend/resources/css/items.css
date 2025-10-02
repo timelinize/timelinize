@@ -25,10 +25,9 @@
 	margin-left: calc(var(--tl-clickable-padding-x) * -1);
 }
 
-.item-content video {
-	width: 100%;
+.item-content > * {
+	margin: 0 auto;
 }
-
 
 .entity {
 	border: 0;

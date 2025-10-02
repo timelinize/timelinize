@@ -164,6 +164,7 @@ async function itemsMain() {
 		$('.class-icon', tpl).innerHTML = tlz.itemClassIconAndLabel(item).icon;
 
 		const itemContentEl = itemContentElement(item, { thumbnail: true });
+		itemContentEl.classList.add('rounded');
 		if (itemContentEl.dataset.contentType == "audio")
 		{
 			// show title & artist if available

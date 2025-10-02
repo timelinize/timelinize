@@ -1418,6 +1418,8 @@ function itemContentElement(item, opts) {
 
 			// if a thumbhash is available, render it while we load the full image/thumbnail
 			if (item.thumb_hash) {
+				container.classList.add('thumbhash-container');
+				
 				const thumbHashWithAspectRatio = decodeBase64ToBytes(item.thumb_hash);
 				const aspectRatioBytes = thumbHashWithAspectRatio.subarray(0, 4);
 				const thumbHash = thumbHashWithAspectRatio.subarray(4);
@@ -1427,22 +1429,20 @@ function itemContentElement(item, opts) {
 
 				const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
 				thumbhashImgTag.classList.add('thumbhash');
+				thumbhashImgTag.classList.remove('content');
 				if (!obfuscate) {
 					thumbhashImgTag.classList.add('breathing'); // this indicates it's loading, which it's really not when in demo mode
 				}
+				
+				container.style.aspectRatio = aspectRatio;
 				thumbhashImgTag.style.aspectRatio = aspectRatio;
-
-				container.classList.add('thumbhash-container', 'rounded');
-
+				
 				container.append(thumbhashImgTag);
 
 				if (imgTag && !obfuscate) {
 					// getting the encoded image will take some time: hide the img tag until it's
 					// done loading, and when it's done, swap the placeholder for, or show, the image
 					imgTag.classList.add('invisible');
-
-					// make final image appear directly over the thumbhash image
-					imgTag.classList.add('absolute');
 
 					// when the image has loaded, fade in the picture over the thumbhash
 					imgTag.addEventListener('load', function() {
@@ -1469,7 +1469,7 @@ function itemContentElement(item, opts) {
 			const makeVideoTag = function(sources) {
 				const videoTag = document.createElement('video');
 				videoTag.dataset.contentType = "video";
-				videoTag.classList.add('content', 'rounded');
+				videoTag.classList.add('content', 'w-100');
 				if (opts?.thumbnail) {
 					videoTag.classList.add('video-thumbnail');
 				}
@@ -1680,9 +1680,9 @@ function miniDisplayMedia(items, options) {
 
 	for (const item of items) {
 		const a = document.createElement('a');
-		a.classList.add('d-flex');
 		a.href = `/items/${item.repo_id}/${item.id}`;
 		const elem = itemContentElement(item, { options, thumbnail: true });
+		elem.classList.add('h-100', 'rounded');
 		a.append(elem);
 		container.append(a);
 	}
@@ -2232,6 +2232,7 @@ const PreviewModal = (function() {
 			$('#modal-preview .subheader').innerText = `# ${item.id}`;
 
 			const mediaElem = itemContentElement(item);
+			mediaElem.classList.add('rounded');
 			$('#modal-preview-content').append(mediaElem);
 
 			// toggle prev/next buttons

@@ -102,7 +102,7 @@ a parent div. this takes care of that by removing the >. */
 }
 
 .translucent:not([data-bs-theme=dark]) {
-	--tblr-navbar-bg: rgba(255, 255, 255, .6);
+	--tblr-navbar-bg: rgba(255, 255, 255, .75);
 }
 
 .container-xl {
@@ -121,8 +121,19 @@ a parent div. this takes care of that by removing the >. */
 }
 
 .thumbhash-container {
-	position: relative;
-	overflow: hidden;
+	display: grid;
+	margin: 0 auto;
+	max-height: inherit;
+}
+
+.thumbhash-container > * {
+	grid-column: 1;
+	grid-row: 1;
+}
+
+.thumbhash {
+	width: 100%;
+	background: black; /* when animated with "breathing" (the "radiate" keyframes), Chrome renders strange fade-to-white on bottom and right edges, unless bg is black */
 }
 
 /* Used to indicate something is loading/processing */
@@ -134,16 +145,8 @@ a parent div. this takes care of that by removing the >. */
 }
 
 .thumbhash-container .content {
+	object-fit: contain;
 	width: 100%;
-	max-height: 100%;
-	object-fit: cover;
-}
-
-.thumbhash-container .absolute {
-	position: absolute;
-	top: 0;
-	left: 0;
-	background: white; /* TODO: Obviously, this is not always correct; it should be 'inherit', but this doesn't work for some reason */
 }
 
 .fade-in {
@@ -589,13 +592,18 @@ styles. But it took hours to figure them out!
 
 
 .content {
-	border-radius: var(--tblr-border-radius);
+	display: block;
+}
+
+.card,
+.rounded {
+	overflow: hidden; /* prevent pointy corners from sticking out past the border-radius; IMO tabler should do this, but they use simple background-image */
 }
 
 .card-img-top .content, /* images */
 .card-img-top.content { /* videos */
-	border-bottom-left-radius: 0;
-	border-bottom-right-radius: 0;
+	object-fit: cover;
+	width: 100%;
 }
 
 
@@ -619,21 +627,24 @@ styles. But it took hours to figure them out!
 	flex: 1;
 }
 
-.minidisp-media .thumbhash-container,
-.minidisp-media .content {
-	max-height: 150px;
+.minidisp-media > a > * {
 	min-width: 180px;
 	max-width: 100%;
+	width: 100%;
+}
+
+.minidisp-media video {
 	object-fit: cover;
-	align-self: stretch;
-	flex: 1;
+}
+
+.minidisp-media .thumbhash {
+	max-height: inherit;
+	height: 100%;
 }
 
 .minidisp-media .thumbhash-container .content {
-	width: 100%;
 	height: 100%;
 	object-fit: cover;
-	flex-basis: content;
 }
 
 .minidisp-media-xl .thumbhash-container,
