@@ -642,6 +642,10 @@ styles. But it took hours to figure them out!
 	height: 100%;
 }
 
+.minidisp-media .thumbhash-container {
+	margin: 0;
+}
+
 .minidisp-media .thumbhash-container .content {
 	height: 100%;
 	object-fit: cover;
@@ -650,6 +654,9 @@ styles. But it took hours to figure them out!
 .minidisp-media-xl .thumbhash-container,
 .minidisp-media-xl .content {
 	max-height: 500px;
+}
+.minidisp-media-xl > a > * {
+	width: auto;
 }
 .minidisp-media-l .thumbhash-container,
 .minidisp-media-l .content {
