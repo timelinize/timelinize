@@ -395,11 +395,14 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 
 	videoDataFile := r.FormValue("hint")    // data file of the related motion item -- confidently the motion picture
 	imgDataFile := r.FormValue("data_file") // item's data file -- may or may not have a motion picture embedded in it
+	var imgType string
 
-	// if client wasn't able to give us both file paths, we have to query the DB because we'll need
-	// to verify that no related motion photo exists, and also get the image data file so we can
-	// try extracting from it if no related motion item exists
-	if videoDataFile == "" || imgDataFile == "" {
+	// if client wasn't able to give us both file paths, or if the image's data file doesn't have an extension,
+	// (either because that's just how it is, or because we haven't finished importing the rest of the item yet),
+	// we have to query the DB because we'll need to verify that no related motion photo exists, and also get
+	// the image data file so we can try extracting from it if no related motion item exists -- and if there's
+	// no extension, we'll need that too!
+	if videoDataFile == "" || imgDataFile == "" || path.Ext(imgDataFile) == "" {
 		itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 		if err != nil {
 			return Error{
@@ -430,10 +433,14 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 			// we might still use the original image file if there's no related motion item
 			imgDataFile = *results.Items[0].DataFile
 		}
+		if results.Items[0].DataType != nil {
+			imgType = *results.Items[0].DataType // useful if filename doesn't have an extension
+		}
 		for _, rel := range results.Items[0].Related {
 			if rel.Label == media.RelMotionPhoto.Label && rel.ToItem != nil && rel.ToItem.DataFile != nil {
 				// great, we found a related motion item!
 				videoDataFile = *rel.ToItem.DataFile
+				break
 			}
 		}
 	}
@@ -479,7 +486,7 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 	isGoogleMP := path.Ext(strings.ToLower(videoDataFile)) == ".mp" ||
 		path.Ext(strings.ToLower(strings.TrimSuffix(imgDataFile, imgExt))) == ".mp"
 	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
-	if videoDataFile == "" || imgExt == ".heif" || imgExt == ".heic" || isGoogleMP || obfuscate {
+	if videoDataFile == "" || imgExt == ".heif" || imgExt == ".heic" || imgType == "image/heic" || imgType == "image/heif" || isGoogleMP || obfuscate {
 		return s.transcodeVideo(r.Context(), w, inputFile, nil, obfuscate)
 	}
 
@@ -675,7 +682,7 @@ func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, input
 	// TODO: Safari sends "Range: bytes=0-1" before it requests the whole video, I think it expects a Content-Range header. can we use ServeContent to make it work on Safari?
 
 	if err := s.app.Transcode(ctx, inputVideoFilePath, inputVideoStream, format, w, obfuscate); err != nil {
-		return fmt.Errorf("video transcode error: %#w", err)
+		return fmt.Errorf("video transcode error: %w", err)
 	}
 
 	return nil

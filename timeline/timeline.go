@@ -466,45 +466,45 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db sqliteDB) (*
 // wipeRepo is used only for development purposes.
 //
 //nolint:unused
-func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB *sql.DB, deleteDataFilesAndAssets bool) error {
+func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB sqliteDB, deleteDataFilesAndAssets bool) error {
 	Log.Warn("WIPING REPO...", zap.String("dir", repoDir), zap.Bool("data_files", deleteDataFilesAndAssets))
-	_, err := db.ExecContext(ctx, `DELETE FROM embeddings`)
+	_, err := db.WritePool.ExecContext(ctx, `DELETE FROM embeddings`)
 	if err != nil {
 		return fmt.Errorf("resetting embeddings: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM relationships`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM relationships`)
 	if err != nil {
 		return fmt.Errorf("resetting relationships: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM relations`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM relations`)
 	if err != nil {
 		return fmt.Errorf("resetting relations: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM items`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM items`)
 	if err != nil {
 		return fmt.Errorf("resetting items: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM item_data`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM item_data`)
 	if err != nil {
 		return fmt.Errorf("resetting item_data: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id > 1`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM entities WHERE id > 1`)
 	if err != nil {
 		return fmt.Errorf("resetting entities: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM attributes WHERE id NOT IN (SELECT attribute_id FROM entity_attributes WHERE entity_id = 1)`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM attributes WHERE id NOT IN (SELECT attribute_id FROM entity_attributes WHERE entity_id = 1)`)
 	if err != nil {
 		return fmt.Errorf("resetting attributes: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM entity_attributes WHERE entity_id > 1`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM entity_attributes WHERE entity_id > 1`)
 	if err != nil {
 		return fmt.Errorf("resetting entity_attributes: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `DELETE FROM jobs`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM jobs`)
 	if err != nil {
 		return fmt.Errorf("resetting jobs: %w", err)
 	}
-	_, err = thumbsDB.ExecContext(ctx, `DELETE FROM thumbnails`)
+	_, err = thumbsDB.WritePool.ExecContext(ctx, `DELETE FROM thumbnails`)
 	if err != nil {
 		return fmt.Errorf("resetting thumbnails: %w", err)
 	}

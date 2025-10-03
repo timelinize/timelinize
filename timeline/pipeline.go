@@ -350,6 +350,11 @@ func (p *processor) downloadItemData(ctx context.Context, it *Item) error {
 	}
 	defer destination.Close()
 
+	p.log.Debug("opened canonical data file for writing",
+		zap.String("filename", it.Content.Filename),
+		zap.String("intermediate_path", it.IntermediateLocation),
+		zap.String("data_file", it.dataFilePath))
+
 	if err := p.downloadDataFile(it, source, destination); err != nil {
 		return err
 	}
@@ -555,10 +560,9 @@ func (p *processor) downloadAndHashDataFile(source io.Reader, destination *os.Fi
 		}
 	}
 
-	p.log.Debug("downloaded data file: "+destination.Name(),
+	p.log.Debug("downloaded data file",
 		zap.String("filename", destination.Name()),
-		zap.Int64("size", n),
-	)
+		zap.Int64("size", n))
 
 	return n, nil
 }

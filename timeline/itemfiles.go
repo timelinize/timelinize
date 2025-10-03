@@ -125,11 +125,11 @@ func (tl *Timeline) openUniqueCanonicalItemDataFile(ctx context.Context, logger 
 // generate different names that end up conflicting on case-insensitive
 // file systems.
 func (tl *Timeline) canonicalItemDataFileName(it *Item) string {
-	// this is stupid, but I really don't want to see .jfif at the end of my JPEGs ever again
+	// this is stupid, but I really don't want to see .jfif at the end of my JPEGs ever again (or .moov on my MOVs)
 	extensionByType := func(mediaType string) string {
 		if exts, err := mime.ExtensionsByType(mediaType); err == nil && len(exts) > 0 {
 			sort.Slice(exts, func(a, _ int) bool {
-				if exts[a] == ".jpg" || exts[a] == ".jpeg" {
+				if exts[a] == ".jpg" || exts[a] == ".jpeg" || exts[a] == ".mov" {
 					return true
 				}
 				return false
