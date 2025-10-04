@@ -442,7 +442,7 @@ func consistentFakeEntityName(realName string) string {
 
 func dumbHash(input string) uint64 {
 	var checksum uint64
-	for i, ch := range input {
+	for i, ch := range strings.ToLower(input) {
 		checksum += uint64(int(ch) * (i + 1)) //nolint:gosec
 	}
 	return checksum

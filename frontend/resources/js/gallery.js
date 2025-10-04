@@ -81,7 +81,7 @@ async function galleryPageMain() {
 		elem.id = `item-${item.id}`;
 
 		let mediaElem = itemContentElement(item, { thumbnail: true });
-		mediaElem.classList.add('card-img-top');
+		mediaElem.classList.add('card-img-top', 'overflow-hidden'); // overflow-hidden is needed for obfuscation mode...
 
 		/*
 			TODO: I kind of like this dreamy glow effect around each video (maybe image too?) -- maybe just on hover though?

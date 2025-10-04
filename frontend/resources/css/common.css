@@ -595,13 +595,12 @@ styles. But it took hours to figure them out!
 	display: block;
 }
 
-.card,
 .rounded {
 	overflow: hidden; /* prevent pointy corners from sticking out past the border-radius; IMO tabler should do this, but they use simple background-image */
 }
 
-.card-img-top .content, /* images */
-.card-img-top.content { /* videos */
+.card-img-top .content, .card-img-bottom .content, /* images */
+.card-img-top.content, .card-img-bottom.content { /* videos */
 	object-fit: cover;
 	width: 100%;
 }
