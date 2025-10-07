@@ -35,6 +35,7 @@ import (
 
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
+	"golang.org/x/net/html/charset"
 )
 
 func init() {
@@ -169,6 +170,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 	// processing messages concurrently is not faster, based on my testing
 
 	dec := xml.NewDecoder(xmlFile)
+	dec.CharsetReader = charset.NewReaderLabel // handle non-UTF-8 encodings
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
