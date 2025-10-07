@@ -1162,6 +1162,11 @@ var classifications = []Classification{
 		Labels:      []string{"Web", "URL"},
 		Description: "A visit to a web page",
 	},
+	{
+		Name:        "event",
+		Labels:      []string{"Event", "Calendar item"},
+		Description: "An event or item on a calendar",
+	},
 }
 
 // Item classifications!

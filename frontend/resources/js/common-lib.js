@@ -63,6 +63,14 @@ const tlz = {
 			<path d="M19 4v16h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12z" />
 			<path d="M19 16h-12a2 2 0 0 0 -2 2" />
 			<path d="M9 8h6" />`,
+		event: `
+			<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+			<path d="M4 5m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z" />
+			<path d="M16 3l0 4" />
+			<path d="M8 3l0 4" />
+			<path d="M4 11l16 0" />
+			<path d="M8 15h2v2h-2z" />
+		`,
 		"": `
 			<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
 			<path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
@@ -102,9 +110,9 @@ const tlz = {
 	},
 
 	itemClassIconAndLabel(item, pathOnly) {
-		const info = classInfo(item.classification);
+		const info = classInfo(item?.classification);
 		const iconMap = pathOnly ? tlz.itemClassIconPaths : tlz.itemClassIcons;
-		if (item.classification == "media") {
+		if (item?.classification == "media") {
 			if (item?.data_type?.startsWith("image/")) {
 				return {
 					icon: iconMap.media_image,
@@ -124,7 +132,7 @@ const tlz = {
 		}
 
 		return {
-			icon: iconMap[item.classification],
+			icon: iconMap[item?.classification || ""],
 			label: info.labels[0]
 		};
 	},
@@ -238,6 +246,10 @@ tlz.itemClassIcons = {
 		<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-book-2">
 			${tlz.itemClassIconPaths.collection}
 		</svg>`,
+	event: `
+		<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-calendar-event">
+			${tlz.itemClassIconPaths.event}
+		</svg>`,
 	"": `
 		<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-file-unknown" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
 			${tlz.itemClassIconPaths[""]}
@@ -245,7 +257,8 @@ tlz.itemClassIcons = {
 
 	// because the "media" classification is so broad, we can show a more specific
 	// icon based on the data_type column (mime type) of the item
-	media_image: `<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-photo" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+	media_image: `
+		<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-photo" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
 			${tlz.itemClassIconPaths.media_image}
 		</svg>`,
 	media_video: `
@@ -253,7 +266,7 @@ tlz.itemClassIcons = {
 			${tlz.itemClassIconPaths.media_video}
 		</svg>`,
 	media_audio: `
-	  <svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="currentColor"  class="icon icon-tabler icons-tabler-filled icon-tabler-bookmark">
+		<svg xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="currentColor"  class="icon icon-tabler icons-tabler-filled icon-tabler-bookmark">
 			${tlz.itemClassIconPaths.media_audio}
 		</svg>`,
 
@@ -261,18 +274,18 @@ tlz.itemClassIcons = {
 	// since cameras can do pictures, videos, and audio
 	media: `
 		<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-camera" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-		${tlz.itemClassIconPaths.media}
-	</svg>`,
+			${tlz.itemClassIconPaths.media}
+		</svg>`,
 
 	bookmark: `
 		<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-camera" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-		${tlz.itemClassIconPaths.bookmark}
-	</svg>`,
+			${tlz.itemClassIconPaths.bookmark}
+		</svg>`,
 
 	page_view: `
-	  <svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-history">
-		${tlz.itemClassIconPaths.page_view}
-	</svg>`
+		<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-history">
+			${tlz.itemClassIconPaths.page_view}
+		</svg>`
 };
 
 // set all the predefined intervals
@@ -1408,7 +1421,10 @@ function itemContentElement(item, opts) {
 			// if the image has been cached or already loaded recently, it might already
 			// be available; if so, skip the complicated stuff
 			if (imgTag && ((imgTag.src && imgTag.complete) || opts?.avatar)) {
-				return imgTag;
+				const container = document.createElement('div');
+				container.classList.add('thumbhash-container');
+				container.append(imgTag);
+				return container;
 			}
 
 			// the container will hold either the thumbhash and the final image, or
@@ -1619,7 +1635,9 @@ function itemMiniDisplay(items, options) {
 		case 'bookmark':
 			return miniDisplayBookmark(items);
 		case 'page_view':
-				return miniDisplayPageView(items);
+			return miniDisplayPageView(items);
+		case 'event':
+			return miniDisplayEvent(items);
 		default:
 			console.warn("TODO: UNSUPPORTED ITEM CLASS:", representative.classification, items);
 			return miniDisplayMisc(items);
@@ -1800,6 +1818,20 @@ function renderPaperItem(item) {
 	return el;
 }
 
+function miniDisplayEvent(items) {
+	const container = document.createElement('div');
+	for (const item of items) {
+		container.append(itemContentElement(item, {
+			maxLength: 1024,
+		}));
+	}
+	return {
+		icon: `<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="currentColor"  class="icon icon-tabler icons-tabler-filled icon-tabler-calendar-week"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M16 2c.183 0 .355 .05 .502 .135l.033 .02c.28 .177 .465 .49 .465 .845v1h1a3 3 0 0 1 2.995 2.824l.005 .176v12a3 3 0 0 1 -2.824 2.995l-.176 .005h-12a3 3 0 0 1 -2.995 -2.824l-.005 -.176v-12a3 3 0 0 1 2.824 -2.995l.176 -.005h1v-1a1 1 0 0 1 .514 -.874l.093 -.046l.066 -.025l.1 -.029l.107 -.019l.12 -.007q .083 0 .161 .013l.122 .029l.04 .012l.06 .023c.328 .135 .568 .44 .61 .806l.007 .117v1h6v-1a1 1 0 0 1 1 -1m3 7h-14v9.625c0 .705 .386 1.286 .883 1.366l.117 .009h12c.513 0 .936 -.53 .993 -1.215l.007 -.16z" /><path d="M9.015 13a1 1 0 0 1 -1 1a1.001 1.001 0 1 1 -.005 -2c.557 0 1.005 .448 1.005 1" /><path d="M13.015 13a1 1 0 0 1 -1 1a1.001 1.001 0 1 1 -.005 -2c.557 0 1.005 .448 1.005 1" /><path d="M17.02 13a1 1 0 0 1 -1 1a1.001 1.001 0 1 1 -.005 -2c.557 0 1.005 .448 1.005 1" /><path d="M12.02 15a1 1 0 0 1 0 2a1.001 1.001 0 1 1 -.005 -2z" /><path d="M9.015 16a1 1 0 0 1 -1 1a1.001 1.001 0 1 1 -.005 -2c.557 0 1.005 .448 1.005 1" /></svg>`,
+		iconColor: 'red',
+		element: container,
+	};
+}
+
 
 function miniDisplayMisc(items) {
 	const container = document.createElement('div');
@@ -1809,16 +1841,7 @@ function miniDisplayMisc(items) {
 		}));
 	}
 	return {
-		icon: `
-			<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-					class="icon icon-tabler icons-tabler-outline icon-tabler-file-unknown">
-				<path stroke="none" d="M0 0h24v24H0z" fill="none" />
-				<path d="M14 3v4a1 1 0 0 0 1 1h4" />
-				<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
-				<path d="M12 17v.01" />
-				<path d="M12 14a1.5 1.5 0 1 0 -1.14 -2.474" />
-			</svg>`,
+		icon: tlz.itemClassIconAndLabel().icon,
 		iconColor: 'gray',
 		element: container,
 	};
