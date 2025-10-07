@@ -544,6 +544,8 @@ func (p *processor) downloadAndHashDataFile(source io.Reader, destination *os.Fi
 	// give the hasher a copy of the file bytes
 	tr := io.TeeReader(source, h)
 
+	start := time.Now()
+
 	n, err := io.Copy(destination, tr)
 	if err != nil {
 		// TODO: The error should be highlighted as a notification of some sort. Ideally, keep what we have, but somehow indicate in the DB that it's corrupt/incomplete (like not filling out a data_hash)
@@ -562,6 +564,7 @@ func (p *processor) downloadAndHashDataFile(source io.Reader, destination *os.Fi
 
 	p.log.Debug("downloaded data file",
 		zap.String("filename", destination.Name()),
+		zap.Duration("duration", time.Since(start)),
 		zap.Int64("size", n))
 
 	return n, nil
