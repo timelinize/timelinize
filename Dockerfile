@@ -1,53 +1,43 @@
-# ---- Builder ----
-FROM golang:1.25-bookworm AS builder
+# Use Arch Linux as the base image
+FROM menci/archlinuxarm:latest AS builder
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+# Install necessary dependencies
+RUN pacman -Syu --noconfirm \
+    base-devel \
     git \
-    curl \
-    libvips-dev \
-    libheif-dev \
+    go \
+    libvips \
     ffmpeg \
-    bash \
-    && rm -rf /var/lib/apt/lists/*
+    libheif
 
+# Set the working directory inside the container
 WORKDIR /app
 COPY . .
 
-# Enable CGO for Go packages using C libraries (libvips, sqlite-vec)
 ENV CGO_ENABLED=1
-
-# Use Go module and build cache mounts
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go mod download && \
-    go build -o /app/timelinize
+RUN go env -w GOCACHE=/go/cache
+RUN go env -w GOMODCACHE=/go/modcache
+RUN --mount=type=cache,target=/go/modcache go mod download
+RUN --mount=type=cache,target=/go/modcache --mount=type=cache,target=/go/cache go build -o /app/timelinize
 
 
 
-# ---- Runtime ----
-FROM debian:bookworm-slim AS final
+FROM menci/archlinuxarm:latest AS final
 
 WORKDIR /app
 
-# Install only runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libvips-dev \
-    libheif-dev \
+RUN pacman -Syu --noconfirm \
+    libvips \
     ffmpeg \
-    bash \
-    && rm -rf /var/lib/apt/lists/*
+    libheif
 
-# Create non-root user and directories
 RUN useradd -u 1000 -m -s /bin/bash -d /app timelinize
 RUN mkdir -p /app/.config/timelinize /repo
-RUN chown -R timelinize /app /repo
+RUN chown -R timelinize /app
+RUN chown -R timelinize /repo
 
-# Copy built binary
 COPY --from=builder /app/timelinize /app/timelinize
 
-# Runtime config
 ENV TLZ_ADMIN_ADDR="0.0.0.0:12002"
 EXPOSE 12002
 
