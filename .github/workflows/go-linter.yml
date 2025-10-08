@@ -23,7 +23,6 @@ jobs:
           go-version: stable
           check-latest: true
 
-
       - name: Get latest libvips version
         id: libvips-version
         run: |
@@ -40,6 +39,18 @@ jobs:
             /usr/local/include
             /usr/local/bin
           key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+      # # the official instructions refer to a PPA that was archived just a few days ago at time of writing this comment,
+      # # so build from soure instead
+      # - name: Build and install cgif
+      #   if: steps.cache-libvips.outputs.cache-hit != 'true'
+      #   run: |
+      #     git clone https://github.com/dloebl/cgif.git
+      #     cd cgif
+      #     meson setup build --prefix=/usr/local --buildtype=release
+      #     cd build
+      #     meson compile
+      #     sudo meson install
 
       # from instrations at: https://github.com/libvips/libvips/wiki/Build-for-Ubuntu#building-from-source
       - name: Install libvips dependencies
@@ -77,13 +88,12 @@ jobs:
         if: steps.cache-libvips.outputs.cache-hit != 'true'
         run: |
           VERSION=${{ steps.libvips-version.outputs.version }}
-          wget https://github.com/libvips/libvips/releases/download/v${VERSION}/vips-${VERSION}.tar.gz
-          tar xf vips-${VERSION}.tar.gz
-          cd vips-${VERSION}
+          wget https://github.com/libvips/libvips/archive/refs/tags/v${VERSION}.tar.gz
+          tar xf v${VERSION}.tar.gz
+          cd libvips-${VERSION}
           meson setup build --libdir=lib --buildtype=release -Dintrospection=false
           cd build
           meson compile
-          meson test
           sudo meson install
 
       - name: Update library cache
