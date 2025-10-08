@@ -51,25 +51,26 @@ runs:
       shell: bash
       run: |
         sudo apt install \
-          libfftw3-dev \
-          libopenexr-dev \
-          libgsf-1-dev \
-          libglib2.0-dev \
-          liborc-dev \
-          libopenslide-dev \
-          libmatio-dev \
-          libwebp-dev \
-          libjpeg-turbo8-dev \
-          libexpat1-dev \
-          libexif-dev \
-          libtiff5-dev \
           libcfitsio-dev \
+          libexif-dev \
+          libexpat1-dev \
+          libfftw3-dev \
+          libglib2.0-dev \
+          libgsf-1-dev \
+          libheif-dev \
+          libimagequant-dev \
+          libjpeg-turbo8-dev \
+          liblcms2-dev \
+          libmatio-dev \
+          libopenexr-dev \
+          libopenjp2-7-dev \
+          libopenslide-dev \
+          liborc-dev \
+          libpango1.0-dev \
           libpoppler-glib-dev \
           librsvg2-dev \
-          libpango1.0-dev \
-          libopenjp2-7-dev \
-          liblcms2-dev \
-          libimagequant-dev
+          libtiff5-dev \
+          libwebp-dev
 
     - name: Build and install libvips
       if: steps.cache-libvips.outputs.cache-hit != 'true'
