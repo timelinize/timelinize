@@ -29,7 +29,7 @@ RUN rm -rf /var/lib/apt/lists/*
 RUN --mount=type=cache,target=/tmp/libvips-cache \
     git clone --depth 1 https://github.com/libvips/libvips.git /tmp/libvips && \
     cd /tmp/libvips && \
-    meson setup build --reconfigure --buildtype=release --wrap-mode=forcefallback --backend=ninja -Dprefix=/usr -Dlibdir=/usr/lib && \
+    meson setup build --buildtype=release --wrap-mode=forcefallback --backend=ninja -Dprefix=/usr -Dlibdir=/usr/lib && \
     ninja -C build && \
     ninja -C build install && \
     rm -rf /tmp/libvips && \
