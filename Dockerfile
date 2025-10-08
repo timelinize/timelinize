@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liborc-0.4-dev \
     libgsf-1-dev \
     libheif-dev \
+    libsqlite3-dev \
     ffmpeg \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
