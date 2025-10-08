@@ -90,7 +90,8 @@ runs:
     - name: Configure libvips
       shell: bash
       run: |
-        echo "PKG_CONFIG_PATH=/opt/libvips/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        #echo "PKG_CONFIG_PATH=/opt/libvips/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=/opt/libvips/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/libvips/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
         echo "CGO_CFLAGS=-I/opt/libvips/include" >> $GITHUB_ENV
         echo "CGO_LDFLAGS=-L/opt/libvips/lib -Wl,-rpath,/opt/libvips/lib" >> $GITHUB_ENV
