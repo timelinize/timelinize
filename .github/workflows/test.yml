@@ -1,4 +1,4 @@
-name: Run tests
+name: Program tests
 
 on:
   push:
@@ -23,7 +23,5 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/compile-libvips-linux
 
-      - name: Build
-        run: go build -v ./...
-      - name: Test with the Go CLI
+      - name: Tests
         run: go test ./...
