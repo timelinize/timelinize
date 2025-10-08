@@ -1,5 +1,5 @@
 # ---- Builder ----
-FROM golang:1.25-bullseye AS builder
+FROM golang:1.25-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 
 # ---- Runtime ----
-FROM debian:bullseye-slim AS final
+FROM debian:bookworm-slim AS final
 
 WORKDIR /app
 
