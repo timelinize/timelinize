@@ -27,11 +27,12 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt install \
+        sudo apt install -y \
           build-essential \
+          pkg-config \
           bc \
           meson \
-          ninja-build \
+          ninja-build
 
     # the official instructions refer to a PPA that was archived just a few days
     # ago at time of writing this comment, so build cgif from soure instead
@@ -51,7 +52,7 @@ runs:
       if: steps.cache-libvips.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        sudo apt install \
+        sudo apt install -y \
           libcfitsio-dev \
           libexif-dev \
           libexpat1-dev \
