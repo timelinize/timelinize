@@ -30,15 +30,12 @@ jobs:
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
           echo "Latest libvips version: $LATEST_VERSION"
 
-      - name: Cache libvips
-        id: cache-libvips
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/lib
-            /usr/local/include
-            /usr/local/bin
-          key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+      # - name: Cache libvips
+      #   id: cache-libvips
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ~/libvips-install
+      #     key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
 
       # # the official instructions refer to a PPA that was archived just a few days ago at time of writing this comment,
       # # so build from soure instead
@@ -95,6 +92,12 @@ jobs:
           cd build
           meson compile
           sudo meson install
+
+      # - name: Set up libvips environment
+      #   run: |
+      #     echo "PKG_CONFIG_PATH=$HOME/libvips-install/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+      #     echo "LD_LIBRARY_PATH=$HOME/libvips-install/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+      #     echo "$HOME/libvips-install/bin" >> $GITHUB_PATH
 
       - name: Update library cache
         run: sudo ldconfig
