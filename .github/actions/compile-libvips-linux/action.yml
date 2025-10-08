@@ -1,5 +1,5 @@
 name: 'Set up libvips'
-description: 'Build and cache libvips from source'
+description: 'Build and cache libvips from source (useful because Ubuntu package is often too old)'
 runs:
   using: 'composite'
   steps:
@@ -15,10 +15,7 @@ runs:
       id: cache-libvips
       uses: actions/cache@v4
       with:
-        path: |
-          /opt/libvips
-          /var/cache/apt/archives
-          /var/lib/apt/lists
+        path: /opt/libvips
         key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}
 
     # The next few steps are derived from instrations at:
@@ -35,7 +32,9 @@ runs:
           meson \
           ninja-build \
 
-    # the official instructions refer to a PPA that was archived just a few days ago at time of writing this comment, so build cgif from soure instead
+    # the official instructions refer to a PPA that was archived just a few days
+    # ago at time of writing this comment, so build cgif from soure instead
+    # (this isn't strictly required, only if rendering animated gifs at runtime)
     - name: Build and install cgif
       if: steps.cache-libvips.outputs.cache-hit != 'true'
       shell: bash
@@ -84,12 +83,6 @@ runs:
         cd build
         meson compile
         sudo meson install
-
-    # - name: Set up libvips environment
-    #   run: |
-    #     echo "PKG_CONFIG_PATH=$HOME/libvips-install/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-    #     echo "LD_LIBRARY_PATH=$HOME/libvips-install/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
-    #     echo "$HOME/libvips-install/bin" >> $GITHUB_PATH
 
     - name: Configure libvips
       shell: bash
