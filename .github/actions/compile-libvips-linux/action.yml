@@ -5,6 +5,7 @@ runs:
   steps:
     - name: Get latest libvips version
       id: libvips-version
+      shell: bash
       run: |
         LATEST_VERSION=$(curl -s https://api.github.com/repos/libvips/libvips/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
         echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
@@ -25,6 +26,7 @@ runs:
 
     - name: Set up build environment
       if: steps.cache-libvips.outputs.cache-hit != 'true'
+      shell: bash
       run: |
         sudo apt-get update
         sudo apt install \
@@ -36,6 +38,7 @@ runs:
     # the official instructions refer to a PPA that was archived just a few days ago at time of writing this comment, so build cgif from soure instead
     - name: Build and install cgif
       if: steps.cache-libvips.outputs.cache-hit != 'true'
+      shell: bash
       run: |
         git clone https://github.com/dloebl/cgif.git
         cd cgif
@@ -46,6 +49,7 @@ runs:
 
     - name: Install libvips dependencies
       if: steps.cache-libvips.outputs.cache-hit != 'true'
+      shell: bash
       run: |
         sudo apt install \
           libfftw3-dev \
@@ -70,6 +74,7 @@ runs:
 
     - name: Build and install libvips
       if: steps.cache-libvips.outputs.cache-hit != 'true'
+      shell: bash
       run: |
         VERSION=${{ steps.libvips-version.outputs.version }}
         wget https://github.com/libvips/libvips/archive/refs/tags/v${VERSION}.tar.gz
@@ -87,6 +92,7 @@ runs:
     #     echo "$HOME/libvips-install/bin" >> $GITHUB_PATH
 
     - name: Configure libvips
+      shell: bash
       run: |
         echo "PKG_CONFIG_PATH=/opt/libvips/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/libvips/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV

@@ -23,7 +23,8 @@ jobs:
           go-version: stable
           check-latest: true
 
-      - uses: ./.github/actions/compile-libvips
+      - uses: ./.github/actions/compile-libvips-linux
+        if: runner.os == 'Linux'
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
