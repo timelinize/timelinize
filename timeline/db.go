@@ -105,15 +105,17 @@ func openSqliteDB(ctx context.Context, dbPath string) (sqliteDB, error) {
 		}
 	}()
 
-	dsn := url.URL{
-		Scheme: "file",
-		Path:   dbPath,
-	}
+	// prepare the query string for the DSN
 	qs := url.Values{
 		"mode":          {"rwc"},
 		"_journal_mode": {"wal"},       // significant performance improvement, but requires modern file systems
 		"_foreign_keys": {"on"},        // to help enforce correctness in case of bugs in program
 		"_txlock":       {"immediate"}, // avoid potential "database is locked" errors
+	}
+
+	// the query string will change, so make this reusable
+	makeDSN := func() string {
+		return fmt.Sprintf("file:%s?%s", url.PathEscape(filepath.ToSlash(dbPath)), qs.Encode())
 	}
 
 	// This took a week to debug: the final boss before I was ready
@@ -159,21 +161,22 @@ func openSqliteDB(ctx context.Context, dbPath string) (sqliteDB, error) {
 		}
 	}
 
-	dsn.RawQuery = qs.Encode()
+	dsn := makeDSN()
 
-	Log.Info("opening DB write pool", zap.String("dsn", dsn.String()))
-	db.WritePool, err = sql.Open("sqlite3", dsn.String())
+	Log.Info("opening DB write pool", zap.String("dsn", dsn))
+	db.WritePool, err = sql.Open("sqlite3", dsn)
 	if err != nil {
 		return db, fmt.Errorf("opening database write pool: %w", err)
 	}
 	db.WritePool.SetMaxOpenConns(1) // sqlite doesn't support concurrent writers
 
+	// adjust the query string for read-only
 	qs.Set("mode", "ro")
 	qs.Del("_txlock")
-	dsn.RawQuery = qs.Encode()
+	dsn = makeDSN()
 
-	Log.Info("opening DB read pool", zap.String("dsn", dsn.String()))
-	db.ReadPool, err = sql.Open("sqlite3", dsn.String())
+	Log.Info("opening DB read pool", zap.String("dsn", dsn))
+	db.ReadPool, err = sql.Open("sqlite3", dsn)
 	if err != nil {
 		return db, fmt.Errorf("opening database read pool: %w", err)
 	}
