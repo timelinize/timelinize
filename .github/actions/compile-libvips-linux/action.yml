@@ -23,13 +23,13 @@ runs:
     # https://github.com/libvips/libvips/wiki/Build-for-Ubuntu#building-from-source
 
     - name: Set up build environment
-      if: steps.cache-libvips.outputs.cache-hit != 'true'
       shell: bash
       run: |
         sudo apt-get update
         sudo apt install -y \
           build-essential \
           pkg-config \
+          libglib2.0-dev \
           bc \
           meson \
           ninja-build
@@ -57,7 +57,6 @@ runs:
           libexif-dev \
           libexpat1-dev \
           libfftw3-dev \
-          libglib2.0-dev \
           libgsf-1-dev \
           libheif-dev \
           libimagequant-dev \
@@ -90,8 +89,7 @@ runs:
     - name: Configure libvips
       shell: bash
       run: |
-        #echo "PKG_CONFIG_PATH=/opt/libvips/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
-        echo "PKG_CONFIG_PATH=/opt/libvips/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        echo "PKG_CONFIG_PATH=/opt/libvips/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/libvips/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
         echo "CGO_CFLAGS=-I/opt/libvips/include" >> $GITHUB_ENV
         echo "CGO_LDFLAGS=-L/opt/libvips/lib -Wl,-rpath,/opt/libvips/lib" >> $GITHUB_ENV
