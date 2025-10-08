@@ -91,7 +91,7 @@ jobs:
           wget https://github.com/libvips/libvips/archive/refs/tags/v${VERSION}.tar.gz
           tar xf v${VERSION}.tar.gz
           cd libvips-${VERSION}
-          meson setup build --libdir=lib --buildtype=release -Dintrospection=false
+          meson setup build --libdir=lib --buildtype=release -Dintrospection=disabled
           cd build
           meson compile
           sudo meson install
