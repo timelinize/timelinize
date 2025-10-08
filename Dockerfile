@@ -23,12 +23,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-dev \
     ffmpeg \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN rm -rf /var/lib/apt/lists/*
 
-# Build latest libvips from source
-RUN git clone --depth 1 https://github.com/libvips/libvips.git /tmp/libvips && \
+# Build latest libvips from source with caching
+RUN --mount=type=cache,target=/tmp/libvips-cache \
+    git clone --depth 1 https://github.com/libvips/libvips.git /tmp/libvips && \
     cd /tmp/libvips && \
-    meson setup build --prefix=/usr && \
+    meson setup build --prefix=/usr --reconfigure --buildtype=release --wrap-mode=forcefallback --backend=ninja -Dprefix=/usr -Dlibdir=/usr/lib && \
     ninja -C build && \
     ninja -C build install && \
     rm -rf /tmp/libvips && \
@@ -38,7 +39,6 @@ RUN git clone --depth 1 https://github.com/libvips/libvips.git /tmp/libvips && \
 WORKDIR /app
 COPY . .
 
-# Enable CGO for Go packages using libvips
 ENV CGO_ENABLED=1
 
 # Use Go module and build cache mounts
@@ -65,10 +65,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     bash \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN rm -rf /var/lib/apt/lists/*
 
 # Copy libvips libraries from builder stage
-COPY --from=builder /usr/lib/x86_64-linux-gnu/ /usr/lib/x86_64-linux-gnu/
+COPY --from=builder /usr/lib/ /usr/lib/
 COPY --from=builder /usr/include/ /usr/include/
 COPY --from=builder /usr/lib/pkgconfig/ /usr/lib/pkgconfig/
 RUN ldconfig
