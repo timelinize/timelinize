@@ -45,10 +45,7 @@ jobs:
       - name: Install libvips dependencies
         if: steps.cache-libvips.outputs.cache-hit != 'true'
         run: |
-          sudo add-apt-repository ppa:lovell/cgif
           sudo apt-get update
-          sudo apt-get install libcgif-dev
-
           sudo apt install \
             build-essential \
             bc \
