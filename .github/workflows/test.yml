@@ -20,7 +20,7 @@ jobs:
           go-version: stable
 
       - name: Install libraries (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         uses: ./.github/actions/compile-libvips-linux
 
       - name: Build
