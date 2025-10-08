@@ -16,18 +16,15 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-go@v5
         with:
           go-version: stable
           check-latest: true
 
-      - name: Install libraries (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libvips-dev
-          sudo ldconfig
+      - uses: ./.github/actions/compile-libvips-linux
+        if: runner.os == 'Linux'
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8

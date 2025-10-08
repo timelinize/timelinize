@@ -1,0 +1,95 @@
+name: 'Set up libvips'
+description: 'Build and cache libvips from source (useful because Ubuntu package is often too old)'
+runs:
+  using: 'composite'
+  steps:
+    - name: Get latest libvips version
+      id: libvips-version
+      shell: bash
+      # sometimes this step spuriously fails; just kick it (restart the job) and it should work again
+      run: |
+        LATEST_VERSION=$(curl -s https://api.github.com/repos/libvips/libvips/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+        echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+        echo "Latest libvips version: $LATEST_VERSION"
+
+    - name: Cache libvips
+      id: cache-libvips
+      uses: actions/cache@v4
+      with:
+        path: /opt/libvips
+        key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}
+
+    # The next few steps are derived from instrations at:
+    # https://github.com/libvips/libvips/wiki/Build-for-Ubuntu#building-from-source
+
+    - name: Set up build environment
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt install -y \
+          build-essential \
+          pkg-config \
+          libglib2.0-dev \
+          bc \
+          meson \
+          ninja-build
+
+    - name: Install libvips dependencies
+      shell: bash
+      run: |
+        sudo apt install -y \
+          libcfitsio-dev \
+          libexif-dev \
+          libexpat1-dev \
+          libfftw3-dev \
+          libgsf-1-dev \
+          libheif-dev \
+          libimagequant-dev \
+          libjpeg-turbo8-dev \
+          liblcms2-dev \
+          libmatio-dev \
+          libopenexr-dev \
+          libopenjp2-7-dev \
+          libopenslide-dev \
+          liborc-dev \
+          libpango1.0-dev \
+          libpoppler-glib-dev \
+          librsvg2-dev \
+          libtiff5-dev \
+          libwebp-dev
+
+    # the official instructions refer to a PPA that was archived just a few days
+    # ago at time of writing this comment, so build cgif from soure instead
+    # (this isn't strictly required, only if rendering animated gifs at runtime)
+    - name: Build and install cgif (optional libvips dependency)
+      if: steps.cache-libvips.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        git clone https://github.com/dloebl/cgif.git
+        cd cgif
+        meson setup build --prefix=/opt/libvips --buildtype=release
+        cd build
+        meson compile
+        sudo meson install
+
+    - name: Build and install libvips
+      if: steps.cache-libvips.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        VERSION=${{ steps.libvips-version.outputs.version }}
+        wget https://github.com/libvips/libvips/archive/refs/tags/v${VERSION}.tar.gz
+        tar xf v${VERSION}.tar.gz
+        cd libvips-${VERSION}
+        meson setup build --prefix=/opt/libvips --libdir=lib --buildtype=release -Dintrospection=disabled
+        cd build
+        meson compile
+        sudo meson install
+
+    - name: Configure libvips
+      shell: bash
+      run: |
+        echo "PKG_CONFIG_PATH=/opt/libvips/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/libvips/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+        echo "CGO_CFLAGS=-I/opt/libvips/include" >> $GITHUB_ENV
+        echo "CGO_LDFLAGS=-L/opt/libvips/lib -Wl,-rpath,/opt/libvips/lib" >> $GITHUB_ENV
+        sudo ldconfig /opt/libvips/lib
