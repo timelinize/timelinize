@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libheif-dev \
     libsqlite3-dev \
     ffmpeg \
-    ca-certificates \
+    ca-certificates
 RUN rm -rf /var/lib/apt/lists/*
 
 # Build latest libvips from source with caching
@@ -64,7 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libheif1 \
     ffmpeg \
     bash \
-    ca-certificates \
+    ca-certificates
 RUN rm -rf /var/lib/apt/lists/*
 
 # Copy libvips libraries from builder stage
