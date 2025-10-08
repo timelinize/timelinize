@@ -23,11 +23,55 @@ jobs:
           go-version: stable
           check-latest: true
 
-      - name: Install libraries (Linux)
+
+      - name: Get latest libvips version
+        id: libvips-version
+        run: |
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/libvips/libvips/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest libvips version: $LATEST_VERSION"
+
+      - name: Cache libvips
+        id: cache-libvips
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib
+            /usr/local/include
+            /usr/local/bin
+          key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install libvips dependencies
+        if: steps.cache-libvips.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvips-dev
-          sudo ldconfig
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libglib2.0-dev \
+            libexpat1-dev \
+            libjpeg-dev \
+            libpng-dev \
+            libwebp-dev \
+            libtiff5-dev \
+            libgiflib-dev \
+            librsvg2-dev \
+            meson \
+            ninja-build
+
+      - name: Build and install libvips
+        if: steps.cache-libvips.outputs.cache-hit != 'true'
+        run: |
+          VERSION=${{ steps.libvips-version.outputs.version }}
+          wget https://github.com/libvips/libvips/releases/download/v${VERSION}/vips-${VERSION}.tar.xz
+          tar xf vips-${VERSION}.tar.xz
+          cd vips-${VERSION}
+          meson setup build --prefix=/usr/local --buildtype=release
+          ninja -C build
+          sudo ninja -C build install
+
+      - name: Update library cache
+        run: sudo ldconfig
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
