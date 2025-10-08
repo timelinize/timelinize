@@ -1,8 +1,13 @@
 # Use Arch Linux as the base image
 FROM menci/archlinuxarm:latest AS builder
 
+# Initialize pacman keys and sync repos
+RUN pacman-key --init
+RUN pacman-key --populate archlinuxarm
+RUN pacman -Syu --noconfirm --noprogressbar
+
 # Install necessary dependencies
-RUN pacman -Syu --noconfirm \
+RUN pacman -Syu --noconfirm --needed \
     base-devel \
     git \
     go \
@@ -26,7 +31,7 @@ FROM menci/archlinuxarm:latest AS final
 
 WORKDIR /app
 
-RUN pacman -Syu --noconfirm \
+RUN pacman -Syu --noconfirm --needed \
     libvips \
     ffmpeg \
     libheif
