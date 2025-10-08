@@ -41,7 +41,7 @@ runs:
       run: |
         git clone https://github.com/dloebl/cgif.git
         cd cgif
-        meson setup build --prefix=/usr/local --buildtype=release
+        meson setup build --prefix=/opt/libvips --buildtype=release
         cd build
         meson compile
         sudo meson install
@@ -80,7 +80,7 @@ runs:
         wget https://github.com/libvips/libvips/archive/refs/tags/v${VERSION}.tar.gz
         tar xf v${VERSION}.tar.gz
         cd libvips-${VERSION}
-        meson setup build --libdir=lib --buildtype=release -Dintrospection=disabled
+        meson setup build --prefix=/opt/libvips --libdir=lib --buildtype=release -Dintrospection=disabled
         cd build
         meson compile
         sudo meson install
