@@ -91,7 +91,7 @@ allow = [
   'github.com/brianvoe/gofakeit/v7',
   'github.com/caddyserver/caddy/v2',
   'github.com/cozy/goexif2/',
-  'github.com/davidbyttow/govips/v2/vips',
+  'github.com/cshum/vipsgen/',
   'github.com/gen2brain/avif',
   'github.com/google/uuid',
   'github.com/gorilla/websocket',

@@ -23,7 +23,7 @@ import (
 	"os/signal"
 	"sync/atomic"
 
-	"github.com/davidbyttow/govips/v2/vips"
+	"github.com/cshum/vipsgen/vips"
 	"github.com/timelinize/timelinize/timeline"
 )
 

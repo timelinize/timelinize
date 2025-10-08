@@ -42,17 +42,12 @@ import (
 	// as our AVIF decoder, since that is what we used earlier during development
 	// but now I just get a distorted green mess:
 	// https://x.com/mholt6/status/1864894439061381393
-	"github.com/davidbyttow/govips/v2/vips"
+	"github.com/cshum/vipsgen/vips"
 	_ "github.com/gen2brain/avif" // register AVIF image decoder
 	"go.n16f.net/thumbhash"
 	"go.uber.org/zap"
 	_ "golang.org/x/image/webp" // register WEBP image decoder
 )
-
-func init() {
-	vips.LoggingSettings(nil, vips.LogLevelError)
-	vips.Startup(nil) // Shutdown() is called in a sigtrap for clean shutdowns
-}
 
 /*
 	TODO: A short preview/thumbnail of a video could be made with ffmpeg like this:
@@ -603,8 +598,12 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 		defer inputImage.Close()
 
 		// scale down to a thumbnail size
-		// TODO: Make the algorithm configurable
-		if err := inputImage.Thumbnail(maxThumbnailDimension, maxThumbnailDimension, vips.InterestingNone); err != nil {
+		if err := inputImage.ThumbnailImage(maxThumbnailDimension, &vips.ThumbnailImageOptions{
+			Height: maxThumbnailDimension,
+			Size:   vips.SizeDown,
+			// TODO: play with other settings like Interesting or Intent for more useful/relevant thumbnails
+
+		}); err != nil {
 			return nil, "", fmt.Errorf("thumbnailing image: %w", err)
 		}
 
@@ -617,28 +616,30 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 		// encode the resized image as the proper output format
 		switch task.ThumbType {
 		case ImageJPEG:
-			ep := vips.NewJpegExportParams()
-			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-			ep.Quality = 40
-			ep.Interlace = true
-			ep.SubsampleMode = vips.VipsForeignSubsampleAuto
-			ep.TrellisQuant = true
-			ep.QuantTable = 3
-			thumbnail, _, err = inputImage.ExportJpeg(ep)
+			thumbnail, err = inputImage.JpegsaveBuffer(&vips.JpegsaveBufferOptions{
+				Keep:          vips.KeepNone, // this strips rotation, which is needed if autorotate was not used when loading the image
+				Q:             40,
+				Interlace:     true,
+				SubsampleMode: vips.SubsampleAuto,
+				TrellisQuant:  true,
+				QuantTable:    3,
+			})
 		case ImageAVIF:
 			// fun fact: AVIF supports animation, but I can't get ffmpeg to generate it faster than 0.0016x speed
 			// (vips is fast enough for stills though, as long as we tune down the parameters sufficiently)
-			ep := vips.NewAvifExportParams()
-			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-			ep.Quality = 45
-			ep.Bitdepth = bitDepth
-			ep.Effort = 1
-			thumbnail, _, err = inputImage.ExportAvif(ep)
+			thumbnail, err = inputImage.HeifsaveBuffer(&vips.HeifsaveBufferOptions{
+				Keep:        vips.KeepNone, // this strips rotation info, which is needed if autorotate was not used when loading the image
+				Compression: vips.HeifCompressionAv1,
+				Q:           45,
+				Bitdepth:    bitDepth,
+				Effort:      1,
+			})
 		case ImageWebP:
-			ep := vips.NewWebpExportParams()
-			ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-			ep.Quality = 50
-			thumbnail, _, err = inputImage.ExportWebp(ep)
+			thumbnail, err = inputImage.WebpsaveBuffer(&vips.WebpsaveBufferOptions{
+				Keep:   vips.KeepNone, // this strips rotation info, which is needed if autorotate was not used when loading the image
+				Q:      50,
+				Effort: 1,
+			})
 		default:
 			panic("unsupported thumbnail MIME type: " + task.ThumbType)
 		}
@@ -948,7 +949,7 @@ func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension 
 		// this ends up being about 8-10; for larger preview images of 1400px, we get more like 30, which
 		// is helpful for obscuruing sensitive features like faces (higher sigma = more blur)
 		sigma := math.Sqrt(float64(maxDimension) * .9) //nolint:mnd
-		if err := inputImage.GaussianBlur(sigma); err != nil {
+		if err := inputImage.Gaussblur(sigma, nil); err != nil {
 			return nil, fmt.Errorf("applying guassian blur to image for obfuscation: %w", err)
 		}
 	}
@@ -962,32 +963,33 @@ func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension 
 	var imageBytes []byte
 	switch desiredExtension {
 	case extJpg, extJpeg:
-		ep := vips.NewJpegExportParams()
-		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-		ep.Quality = 50
-		ep.Interlace = true
-		ep.SubsampleMode = vips.VipsForeignSubsampleAuto
-		ep.TrellisQuant = true
-		ep.QuantTable = 3
-		imageBytes, _, err = inputImage.ExportJpeg(ep)
+		imageBytes, err = inputImage.JpegsaveBuffer(&vips.JpegsaveBufferOptions{
+			Keep:          vips.KeepNone, // this strips rotation, which is needed if autorotate was not used when loading the image
+			Q:             50,
+			Interlace:     true,
+			SubsampleMode: vips.SubsampleAuto,
+			TrellisQuant:  true,
+			QuantTable:    3,
+		})
 	case extPng:
-		ep := vips.NewPngExportParams()
-		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-		ep.Quality = 50
-		ep.Interlace = true
-		imageBytes, _, err = inputImage.ExportPng(ep)
+		imageBytes, err = inputImage.PngsaveBuffer(&vips.PngsaveBufferOptions{
+			Keep:      vips.KeepNone, // this strips rotation, which is needed if autorotate was not used when loading the image
+			Q:         50,
+			Interlace: true,
+		})
 	case extWebp:
-		ep := vips.NewWebpExportParams()
-		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-		ep.Quality = 50
-		imageBytes, _, err = inputImage.ExportWebp(ep)
+		imageBytes, err = inputImage.WebpsaveBuffer(&vips.WebpsaveBufferOptions{
+			Keep: vips.KeepNone, // this strips rotation, which is needed if autorotate was not used when loading the image
+			Q:    50,
+		})
 	case extAvif:
-		ep := vips.NewAvifExportParams()
-		ep.StripMetadata = true // (note: this strips rotation info, which is needed if rotation is not applied manually)
-		ep.Quality = 65
-		ep.Effort = 1
-		ep.Bitdepth = bitDepth
-		imageBytes, _, err = inputImage.ExportAvif(ep)
+		imageBytes, err = inputImage.HeifsaveBuffer(&vips.HeifsaveBufferOptions{
+			Keep:        vips.KeepNone, // this strips rotation info, which is needed if autorotate was not used when loading the image
+			Compression: vips.HeifCompressionAv1,
+			Q:           65,
+			Bitdepth:    bitDepth,
+			Effort:      1,
+		})
 	}
 	if err != nil {
 		// don't attempt a fallback if obfuscation is enabled, so we don't leak the unobfuscated image
@@ -1034,7 +1036,7 @@ func float32ToByte(f float32) []byte {
 
 // loadImageVips loads an image for vips to work with from either a file path or
 // a buffer of bytes directly; precisely one must be non-nil.
-func loadImageVips(inputFilePath string, inputBytes []byte) (*vips.ImageRef, error) {
+func loadImageVips(inputFilePath string, inputBytes []byte) (*vips.Image, error) {
 	if inputFilePath != "" && inputBytes != nil {
 		panic("load image with vips: input cannot be both a filename and a buffer")
 	}
@@ -1042,42 +1044,42 @@ func loadImageVips(inputFilePath string, inputBytes []byte) (*vips.ImageRef, err
 		panic("load image with vips: input must be either a filename or a buffer")
 	}
 
-	importParams := vips.NewImportParams()
+	loadOptions := &vips.LoadOptions{
+		// if rotation info is encoded into EXIF metadata, this can orient the image properly for us
+		// (or we can do a separate call to AutoRotate)
+		Autorotate: true,
 
-	// I have seen "VipsJpeg: Corrupt JPEG data: N extraneous bytes before marker 0xdb" for some N,
-	// even though my computer can show the image just fine. We can ignore these errors, apparently,
-	// and I have found that it works ¯\_(ツ)_/¯
-	importParams.FailOnError.Set(false)
-
-	// if rotation info is encoded into EXIF metadata, this can orient the image properly for us
-	// (or we can do a separate call to AutoRotate)
-	importParams.AutoRotate.Set(true)
+		// I have seen "VipsJpeg: Corrupt JPEG data: N extraneous bytes before marker 0xdb" for some N,
+		// even though my computer can show the image just fine. We can ignore these errors, apparently,
+		// and I have found that it works ¯\_(ツ)_/¯
+		FailOnError: true,
+	}
 
 	if inputFilePath != "" {
-		return vips.LoadImageFromFile(inputFilePath, importParams)
+		return vips.NewImageFromFile(inputFilePath, loadOptions)
 	}
-	return vips.LoadImageFromBuffer(inputBytes, importParams)
+	return vips.NewImageFromBuffer(inputBytes, loadOptions)
 }
 
 // scaleDownImage resizes the image to fit within the maxDimension
 // if either side is larger than maxDimension; otherwise it does
 // nothing to the image.
-func scaleDownImage(inputImage *vips.ImageRef, maxDimension int) error {
-	meta := inputImage.Metadata()
+func scaleDownImage(inputImage *vips.Image, maxDimension int) error {
+	width, height := inputImage.Width(), inputImage.Height()
 
 	// if image is already within constraints, no-op
-	if meta.Width < maxDimension && meta.Height < maxDimension {
+	if width < maxDimension && height < maxDimension {
 		return nil
 	}
 
 	var scale float64
-	if meta.Width > meta.Height {
-		scale = float64(maxDimension) / float64(meta.Width)
+	if width > height {
+		scale = float64(maxDimension) / float64(width)
 	} else {
-		scale = float64(maxDimension) / float64(meta.Height)
+		scale = float64(maxDimension) / float64(height)
 	}
 
-	err := inputImage.Resize(scale, vips.KernelAuto) // Nearest is fast, but Auto looks slightly better
+	err := inputImage.Resize(scale, vips.DefaultResizeOptions()) // Nearest is fast, but Auto looks slightly better
 	if err != nil {
 		return fmt.Errorf("scaling image: %w", err)
 	}

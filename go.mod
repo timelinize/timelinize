@@ -14,7 +14,7 @@ require (
 	github.com/brianvoe/gofakeit/v7 v7.7.3
 	github.com/caddyserver/caddy/v2 v2.10.2
 	github.com/cozy/goexif2 v1.3.1
-	github.com/davidbyttow/govips/v2 v2.16.0
+	github.com/cshum/vipsgen v1.1.2
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/gen2brain/avif v0.4.4
 	github.com/google/uuid v1.6.0
