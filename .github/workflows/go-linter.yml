@@ -25,7 +25,6 @@ jobs:
 
       - name: Install libraries (Linux)
         run: |
-          sudo add-apt-repository ppa:libvips/latest
           sudo apt-get update
           sudo apt-get install -y libvips-dev
           sudo ldconfig
