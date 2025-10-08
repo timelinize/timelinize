@@ -1,48 +1,89 @@
-# Use Arch Linux as the base image
-FROM menci/archlinuxarm:latest AS builder
+# ---- Builder ----
+FROM golang:1.25-bookworm AS builder
 
-# Initialize pacman keys and sync repos
-RUN pacman-key --init
-RUN pacman-key --populate archlinuxarm
-RUN pacman -Syu --noconfirm --noprogressbar
-
-# Install necessary dependencies
-RUN pacman -Syu --noconfirm --needed \
-    base-devel \
+# Install build dependencies for libvips and Go modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     git \
-    go \
-    libvips \
+    curl \
+    bash \
+    meson \
+    ninja-build \
+    pkg-config \
+    libglib2.0-dev \
+    libexpat1-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libgif-dev \
+    libwebp-dev \
+    liborc-0.4-dev \
+    libgsf-1-dev \
+    libheif-dev \
     ffmpeg \
-    libheif
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory inside the container
+# Build latest libvips from source
+RUN git clone --depth 1 https://github.com/libvips/libvips.git /tmp/libvips && \
+    cd /tmp/libvips && \
+    meson setup build --prefix=/usr && \
+    ninja -C build && \
+    ninja -C build install && \
+    rm -rf /tmp/libvips && \
+    ldconfig
+
+# Set working directory and copy app
 WORKDIR /app
 COPY . .
 
+# Enable CGO for Go packages using libvips
 ENV CGO_ENABLED=1
-RUN go env -w GOCACHE=/go/cache
-RUN go env -w GOMODCACHE=/go/modcache
-RUN --mount=type=cache,target=/go/modcache go mod download
-RUN --mount=type=cache,target=/go/modcache --mount=type=cache,target=/go/cache go build -o /app/timelinize
 
+# Use Go module and build cache mounts
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download && \
+    go build -o /app/timelinize
 
+# ---- Runtime ----
+FROM debian:bookworm-slim AS final
 
-FROM menci/archlinuxarm:latest AS final
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 \
+    libexpat1 \
+    libjpeg62-turbo \
+    libpng16-16 \
+    libtiff5 \
+    libgif7 \
+    libwebp7 \
+    liborc-0.4-0 \
+    libgsf-1-114 \
+    libheif1 \
+    ffmpeg \
+    bash \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
+# Copy libvips libraries from builder stage
+COPY --from=builder /usr/lib/x86_64-linux-gnu/ /usr/lib/x86_64-linux-gnu/
+COPY --from=builder /usr/include/ /usr/include/
+COPY --from=builder /usr/lib/pkgconfig/ /usr/lib/pkgconfig/
+RUN ldconfig
+
+# Set working directory
 WORKDIR /app
 
-RUN pacman -Syu --noconfirm --needed \
-    libvips \
-    ffmpeg \
-    libheif
+# Create non-root user and directories
+RUN useradd -u 1000 -m -s /bin/bash -d /app timelinize && \
+    mkdir -p /app/.config/timelinize /repo && \
+    chown -R timelinize /app /repo
 
-RUN useradd -u 1000 -m -s /bin/bash -d /app timelinize
-RUN mkdir -p /app/.config/timelinize /repo
-RUN chown -R timelinize /app
-RUN chown -R timelinize /repo
-
+# Copy built binary
 COPY --from=builder /app/timelinize /app/timelinize
 
+# Runtime config
 ENV TLZ_ADMIN_ADDR="0.0.0.0:12002"
 EXPOSE 12002
 
