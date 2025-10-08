@@ -1,4 +1,4 @@
-name: Program tests
+name: Tests
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  build:
+  test:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
@@ -23,5 +23,5 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/compile-libvips-linux
 
-      - name: Tests
+      - name: Run tests
         run: go test ./...
