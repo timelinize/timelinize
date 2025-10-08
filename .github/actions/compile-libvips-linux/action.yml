@@ -34,22 +34,7 @@ runs:
           meson \
           ninja-build
 
-    # the official instructions refer to a PPA that was archived just a few days
-    # ago at time of writing this comment, so build cgif from soure instead
-    # (this isn't strictly required, only if rendering animated gifs at runtime)
-    - name: Build and install cgif
-      if: steps.cache-libvips.outputs.cache-hit != 'true'
-      shell: bash
-      run: |
-        git clone https://github.com/dloebl/cgif.git
-        cd cgif
-        meson setup build --prefix=/opt/libvips --buildtype=release
-        cd build
-        meson compile
-        sudo meson install
-
     - name: Install libvips dependencies
-      if: steps.cache-libvips.outputs.cache-hit != 'true'
       shell: bash
       run: |
         sudo apt install -y \
@@ -72,6 +57,20 @@ runs:
           librsvg2-dev \
           libtiff5-dev \
           libwebp-dev
+
+    # the official instructions refer to a PPA that was archived just a few days
+    # ago at time of writing this comment, so build cgif from soure instead
+    # (this isn't strictly required, only if rendering animated gifs at runtime)
+    - name: Build and install cgif (optional libvips dependency)
+      if: steps.cache-libvips.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        git clone https://github.com/dloebl/cgif.git
+        cd cgif
+        meson setup build --prefix=/opt/libvips --buildtype=release
+        cd build
+        meson compile
+        sudo meson install
 
     - name: Build and install libvips
       if: steps.cache-libvips.outputs.cache-hit != 'true'
