@@ -55,7 +55,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libexpat1 \
     libjpeg62-turbo \
     libpng16-16 \
-    libtiff5 \
+    libtiff6 \
     libgif7 \
     libwebp7 \
     liborc-0.4-0 \
