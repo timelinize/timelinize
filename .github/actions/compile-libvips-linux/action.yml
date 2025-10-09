@@ -17,7 +17,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: /opt/libvips
-        key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}
+        key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
 
     # The next few steps are derived from instrations at:
     # https://github.com/libvips/libvips/wiki/Build-for-Ubuntu#building-from-source

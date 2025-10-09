@@ -8,7 +8,7 @@ jobs:
       APP_NAME: timelinize
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-13, ubuntu-24.04-arm]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -34,7 +34,7 @@ jobs:
              mingw-w64-x86_64-libvips
 
       - name: Install libraries (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu-')
         uses: ./.github/actions/compile-libvips-linux
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
@@ -75,9 +75,10 @@ jobs:
       # use conventional archive formats for each platform
 
       - name: Compress build (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu-')
         run: |
-          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_linux_x64.tar.gz"
+          ARCH=${{ matrix.os == 'ubuntu-latest' && 'x64' || 'arm64' }}
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_linux_${ARCH}.tar.gz"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           tar -czvf "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
