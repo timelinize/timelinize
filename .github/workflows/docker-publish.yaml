@@ -1,7 +1,6 @@
 name: Docker image
 
 on:
-  pull_request:
   push:
     tags:
       - '*'
