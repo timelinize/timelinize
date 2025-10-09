@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -827,13 +828,20 @@ OR (
 
 		// run the query to get the entity/entities (note there may be multiple; e.g. if multiple people
 		// share an account or the account has attributes spanning nultiple positively-ID'ed people)
+		p.tl.explainQueryPlan(ctx, tx, q, args...)
 		rows, err := tx.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("querying entity attributes: %w", err)
 		}
 		defer rows.Close()
 
+		i, start := 0, time.Now()
 		for rows.Next() {
+			if i == 0 {
+				log.Println("ENTITY QUERY DURATION:", time.Since(start))
+			}
+			i++
+
 			var ent Entity
 			var name *string
 			var metadata *string

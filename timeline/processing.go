@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log"
 	"math"
 	"mime"
 	"net/http"
@@ -1081,7 +1082,11 @@ SELECT * FROM (
 
 	sb.WriteString("\n)\nLIMIT 1")
 
+	tl.explainQueryPlan(ctx, tx, sb.String(), args...)
+
+	start := time.Now()
 	row := tx.QueryRowContext(ctx, sb.String(), args...)
+	log.Println("ITEM QUERY DURATION:", time.Since(start))
 
 	return scanItemRow(row, nil)
 }
