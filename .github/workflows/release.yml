@@ -19,26 +19,19 @@ jobs:
         with:
           go-version: stable
 
-      - name: Install libraries (Windows)
+      # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
+      # but I haven't looked into using it. We'd have to install the packages using
+      # its shell, but I'm not sure how to do that.
+      - name: Install MSYS2 (Windows)
         if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
-          /c/msys64/usr/bin/pacman -S --noconfirm --needed mingw-w64-x86_64-libvips
-
-      # # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
-      # # but I haven't looked into using it. We'd have to install the packages using
-      # # its shell, but I'm not sure how to do that.
-      # - name: Install MSYS2 (Windows)
-      #   if: matrix.os == 'windows-latest'
-      #   uses: msys2/setup-msys2@v2
-      #   with:
-      #     # TODO: Enable this for more current packages, I guess? But it takes longer.
-      #     # update: true
-      #     install: >-
-      #        base-devel
-      #        mingw-w64-x86_64-toolchain
-      #        mingw-w64-x86_64-libvips
+        uses: msys2/setup-msys2@v2
+        with:
+          # TODO: Enable this for more current packages, I guess? But it takes longer.
+          # update: true
+          install: >-
+             base-devel
+             mingw-w64-x86_64-toolchain
+             mingw-w64-x86_64-libvips
 
       - name: Install libraries (Linux)
         if: startsWith(matrix.os, 'ubuntu-')
@@ -52,15 +45,15 @@ jobs:
         run: |
           brew install vips
 
-      # # It is crucial to use our gcc compiler instead of the preinstalled gcc,
-      # # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is in $RUNNER_TEMP.
-      # # (Took me months to figure out that the temp dir sometimes is on c:\ and other
-      # # times it's on d:\! gah.)
-      # # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
-      # - name: Update PATH (Windows)
-      #   if: matrix.os == 'windows-latest'
-      #   shell: bash
-      #   run: echo "$RUNNER_TEMP\msys64\mingw64\bin" >> $GITHUB_PATH
+      # It is crucial to use our gcc compiler instead of the preinstalled gcc,
+      # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is in $RUNNER_TEMP.
+      # (Took me months to figure out that the temp dir sometimes is on c:\ and other
+      # times it's on d:\! gah.)
+      # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
+      - name: Update PATH (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: echo "$RUNNER_TEMP\msys64\mingw64\bin" >> $GITHUB_PATH
 
       # As of May 2025, The CGO_LDFLAGS env var is necessary on macOS since it can't find gio-2.0 otherwise.
       # LLMs also suggested adding:
