@@ -21,8 +21,10 @@ jobs:
 
       - name: Install libraries (Windows)
         if: matrix.os == 'windows-latest'
-        shell: msys2 {0}
-        run: pacman -S --noconfirm --needed base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-libvips
+        shell: bash
+        run: |
+          echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
+          /c/msys64/usr/bin/pacman -S --noconfirm --needed mingw-w64-x86_64-libvips
 
       # # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
       # # but I haven't looked into using it. We'd have to install the packages using
