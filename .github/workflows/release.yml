@@ -8,7 +8,7 @@ jobs:
       APP_NAME: timelinize
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-13, ubuntu-24.04-arm]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -19,22 +19,27 @@ jobs:
         with:
           go-version: stable
 
-      # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
-      # but I haven't looked into using it. We'd have to install the packages using
-      # its shell, but I'm not sure how to do that.
-      - name: Install MSYS2 (Windows)
+      - name: Install libraries (Windows)
         if: matrix.os == 'windows-latest'
-        uses: msys2/setup-msys2@v2
-        with:
-          # TODO: Enable this for more current packages, I guess? But it takes longer.
-          # update: true
-          install: >-
-             base-devel
-             mingw-w64-x86_64-toolchain
-             mingw-w64-x86_64-libvips
+        shell: msys2 {0}
+        run: pacman -S --noconfirm --needed base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-libvips
+
+      # # TODO: The Windows Server 2022 runner apparently comes with msys2 installed
+      # # but I haven't looked into using it. We'd have to install the packages using
+      # # its shell, but I'm not sure how to do that.
+      # - name: Install MSYS2 (Windows)
+      #   if: matrix.os == 'windows-latest'
+      #   uses: msys2/setup-msys2@v2
+      #   with:
+      #     # TODO: Enable this for more current packages, I guess? But it takes longer.
+      #     # update: true
+      #     install: >-
+      #        base-devel
+      #        mingw-w64-x86_64-toolchain
+      #        mingw-w64-x86_64-libvips
 
       - name: Install libraries (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu-')
         uses: ./.github/actions/compile-libvips-linux
 
       # On April 22, 2025, we had to separately install glib -- didn't work in the same install command as vips. Compilation fails otherwise. Yes, annotations say it is already installed. Shrug.
@@ -45,15 +50,15 @@ jobs:
         run: |
           brew install vips
 
-      # It is crucial to use our gcc compiler instead of the preinstalled gcc,
-      # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is in $RUNNER_TEMP.
-      # (Took me months to figure out that the temp dir sometimes is on c:\ and other
-      # times it's on d:\! gah.)
-      # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
-      - name: Update PATH (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: echo "$RUNNER_TEMP\msys64\mingw64\bin" >> $GITHUB_PATH
+      # # It is crucial to use our gcc compiler instead of the preinstalled gcc,
+      # # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is in $RUNNER_TEMP.
+      # # (Took me months to figure out that the temp dir sometimes is on c:\ and other
+      # # times it's on d:\! gah.)
+      # # (Setting `CC` env var is not enough! You MUST *prepend* the PATH env var!)
+      # - name: Update PATH (Windows)
+      #   if: matrix.os == 'windows-latest'
+      #   shell: bash
+      #   run: echo "$RUNNER_TEMP\msys64\mingw64\bin" >> $GITHUB_PATH
 
       # As of May 2025, The CGO_LDFLAGS env var is necessary on macOS since it can't find gio-2.0 otherwise.
       # LLMs also suggested adding:
@@ -75,9 +80,10 @@ jobs:
       # use conventional archive formats for each platform
 
       - name: Compress build (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu-')
         run: |
-          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_linux_x64.tar.gz"
+          ARCH=${{ matrix.os == 'ubuntu-latest' && 'x64' || 'arm64' }}
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_linux_${ARCH}.tar.gz"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           tar -czvf "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
