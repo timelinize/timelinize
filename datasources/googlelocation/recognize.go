@@ -8,11 +8,36 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-// TODO: These names seem to depend on locale (see issue #111) -- we may need to either ask that international users rename their files (sigh) or do deeper inspection of contents for recognition
-const (
-	filenameFromLegacyTakeout     = "Records.json"
-	filenameFromiOSDeviceContains = "location-history"
-	filenameFromAndroidDevice     = "Timeline.json"
+const filenameFromLegacyTakeout = "Records.json"
+
+// Apparently, filenames exported from Google Maps depend on locale (see issue #111).
+// It would be nice if we don't have to open and read from every single JSON file we
+// come across in a walk. So for now, we can start making a codex of international
+// translations for "Timeline" and other known export filenames. Note: In #111 it
+// was reported that the file might be named something different on different devices,
+// like "Chronologie.json" on one device, and "Vos trajets.json" on another, despite
+// both being set to French. This might be a futile effort, we'll see.
+var (
+	filenameFromiOSDeviceContains = []string{
+		"location-history", // English (confirmed)
+	}
+	filenameFromAndroidDeviceContains = []string{
+		"Timeline",       // English (confirmed)
+		"Cronología",     // Spanish
+		"Linha do tempo", // Portuguese
+		"Chronologie",    // French (confirmed)
+		"Vos trajets",    // French again! issue #111 (confirmed)
+		"Zeitleiste",     // German
+		"Tijdlijn",       // Dutch
+		"الجدول الزمني",  // Arabic
+		"时间线",            //nolint:gosmopolitan // Chinese
+		"ไทม์ไลน์",       // Thai
+		"समय",            // Hindi
+		"タイムライン",         // Japanese
+		"타임라인",           // Korean (confirmed)
+		"Хронологія",     // Ukrainian
+		"Хронология",     // Russian
+	}
 )
 
 func (FileImporter) recognizeLegacyTakeoutFormat(dirEntry timeline.DirEntry) timeline.Recognition {
@@ -26,8 +51,8 @@ func (FileImporter) recognizeLegacyTakeoutFormat(dirEntry timeline.DirEntry) tim
 }
 
 func (FileImporter) recognizeOnDevice2024iOSFormat(dirEntry timeline.DirEntry) (timeline.Recognition, error) {
-	// avoid opening all JSON files  (can be slow esp. in archives)... just possibly known ones
-	if !filenameLooksLikeiOSOnDeviceFile(dirEntry.Name()) {
+	// avoid opening all JSON files  (can be slow especially in archives)...
+	if !filenameHasJSONExtAndContains(dirEntry.Name(), filenameFromiOSDeviceContains) {
 		return timeline.Recognition{}, nil
 	}
 
@@ -53,8 +78,8 @@ func (FileImporter) recognizeOnDevice2024iOSFormat(dirEntry timeline.DirEntry) (
 }
 
 func (FileImporter) recognizeOnDevice2025AndroidFormat(dirEntry timeline.DirEntry) (timeline.Recognition, error) {
-	// avoid opening all JSON files  (can be slow esp. in archives)... just possibly known ones
-	if dirEntry.Name() != filenameFromAndroidDevice {
+	// avoid opening all JSON files (can be slow especially in archives)...
+	if !filenameHasJSONExtAndContains(dirEntry.Name(), filenameFromAndroidDeviceContains) {
 		return timeline.Recognition{}, nil
 	}
 
@@ -102,10 +127,16 @@ func (FileImporter) recognizeOnDevice2025AndroidFormat(dirEntry timeline.DirEntr
 	return timeline.Recognition{}, nil
 }
 
-// I could see people renaming this file to be more descriptive (like I did, heh),
-// but I don't want to try to open every JSON file we encounter, if possible...
-// so we presume that the filename still has "location-history" in it, but it
-// doesn't have to be exactly "location-history.json".
-func filenameLooksLikeiOSOnDeviceFile(filename string) bool {
-	return strings.Contains(filename, filenameFromiOSDeviceContains) && path.Ext(filename) == ".json"
+// filenameHasJSONExtAndContains returns true if filename has a ".json" extension
+// and contains one of the strings in the list.
+func filenameHasJSONExtAndContains(filename string, list []string) bool {
+	if path.Ext(filename) != ".json" {
+		return false
+	}
+	for _, s := range list {
+		if strings.Contains(filename, s) {
+			return true
+		}
+	}
+	return false
 }
