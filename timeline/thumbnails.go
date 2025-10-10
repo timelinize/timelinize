@@ -435,7 +435,8 @@ func (thumbnailJob) processInBatches(job *ActiveJob, tasks []thumbnailTask, star
 
 // thumbnailTask represents a thumbnail that needs to be generated.
 type thumbnailTask struct {
-	tl *Timeline
+	tl     *Timeline
+	logger *zap.Logger
 
 	// set only ONE of these, DataID if the content to be thumbnailed
 	// is in the database, or dataFile if the content is in a file
@@ -591,9 +592,9 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 
 	switch {
 	case strings.HasPrefix(task.DataType, "image/") || task.DataType == "application/pdf":
-		inputImage, err := loadImageVips(inputFilename, inputBuf)
+		inputImage, err := loadImageVips(task.logger, inputFilename, inputBuf)
 		if err != nil {
-			return nil, "", fmt.Errorf("opening source file: %w", err)
+			return nil, "", fmt.Errorf("opening source file with vips: %w", err)
 		}
 		defer inputImage.Close()
 
@@ -814,6 +815,7 @@ func (tl *Timeline) Thumbnail(ctx context.Context, itemDataID int64, dataFile, d
 		// no existing thumbnail; generate it and return it
 		task := thumbnailTask{
 			tl:        tl,
+			logger:    Log.Named("thumbnail"),
 			DataID:    itemDataID,
 			DataFile:  dataFile,
 			DataType:  dataType,
@@ -895,7 +897,7 @@ func (tl *Timeline) AssetImage(_ context.Context, assetPath string, obfuscate bo
 	if obfuscate {
 		size = 120
 	}
-	imageBytes, err := loadAndEncodeImage(tl.FullPath(assetPath), nil, ".jpg", size, obfuscate)
+	imageBytes, err := loadAndEncodeImage(Log.Named("assets"), tl.FullPath(assetPath), nil, ".jpg", size, obfuscate)
 	if err != nil {
 		return nil, fmt.Errorf("opening source file %s: %w", assetPath, err)
 	}
@@ -924,7 +926,7 @@ func (tl *Timeline) GeneratePreviewImage(ctx context.Context, itemRow ItemRow, e
 		}
 	}
 
-	imageBytes, err := loadAndEncodeImage(inputFilePath, inputBuf, ext, maxPreviewImageDimension, obfuscate)
+	imageBytes, err := loadAndEncodeImage(Log.Named("previewer"), inputFilePath, inputBuf, ext, maxPreviewImageDimension, obfuscate)
 	if err != nil {
 		return nil, fmt.Errorf("opening source file from item %d: %s: %w", itemRow.ID, inputFilePath, err)
 	}
@@ -932,8 +934,8 @@ func (tl *Timeline) GeneratePreviewImage(ctx context.Context, itemRow ItemRow, e
 	return imageBytes, nil
 }
 
-func loadAndEncodeImage(inputFilePath string, inputBuf []byte, desiredExtension string, maxDimension int, obfuscate bool) ([]byte, error) {
-	inputImage, err := loadImageVips(inputFilePath, inputBuf)
+func loadAndEncodeImage(logger *zap.Logger, inputFilePath string, inputBuf []byte, desiredExtension string, maxDimension int, obfuscate bool) ([]byte, error) {
+	inputImage, err := loadImageVips(logger, inputFilePath, inputBuf)
 	if err != nil {
 		return nil, fmt.Errorf("loading image: %w", err)
 	}
@@ -1036,7 +1038,7 @@ func float32ToByte(f float32) []byte {
 
 // loadImageVips loads an image for vips to work with from either a file path or
 // a buffer of bytes directly; precisely one must be non-nil.
-func loadImageVips(inputFilePath string, inputBytes []byte) (*vips.Image, error) {
+func loadImageVips(logger *zap.Logger, inputFilePath string, inputBytes []byte) (*vips.Image, error) {
 	if inputFilePath != "" && inputBytes != nil {
 		panic("load image with vips: input cannot be both a filename and a buffer")
 	}
@@ -1044,21 +1046,41 @@ func loadImageVips(inputFilePath string, inputBytes []byte) (*vips.Image, error)
 		panic("load image with vips: input must be either a filename or a buffer")
 	}
 
-	loadOptions := &vips.LoadOptions{
-		// if rotation info is encoded into EXIF metadata, this can orient the image properly for us
-		// (or we can do a separate call to AutoRotate)
-		Autorotate: true,
-
-		// I have seen "VipsJpeg: Corrupt JPEG data: N extraneous bytes before marker 0xdb" for some N,
-		// even though my computer can show the image just fine. We can ignore these errors, apparently,
-		// and I have found that it works ¯\_(ツ)_/¯
-		FailOnError: true,
-	}
-
+	// load the image; right now I don't have any reason to set load parameters; Autorotate: true is
+	// the only thing I think we need, but setting it there causes errors for loaders that don't
+	// support it, like PNG images, so we do that separately after loading it, and the only other
+	// thing would be FailOnError, but I have seen "VipsJpeg: Corrupt JPEG data: N extraneous bytes
+	// before marker 0xdb" for some N, even though my computer can show the image just fine with
+	// other tools, so I've found that just leaving it false works for the million images I've tested...
+	var img *vips.Image
+	var err error
 	if inputFilePath != "" {
-		return vips.NewImageFromFile(inputFilePath, loadOptions)
+		img, err = vips.NewImageFromFile(inputFilePath, nil)
+		if err != nil {
+			return nil, fmt.Errorf("new image from file: %s: %w", inputFilePath, err)
+		}
+	} else if len(inputBytes) > 0 {
+		img, err = vips.NewImageFromBuffer(inputBytes, nil)
+		if err != nil {
+			return nil, fmt.Errorf("new image from buffer, size %d: %w", len(inputBytes), err)
+		}
 	}
-	return vips.NewImageFromBuffer(inputBytes, loadOptions)
+	if img == nil {
+		return nil, errors.New("no image loaded")
+	}
+
+	// If rotation info is encoded into EXIF metadata, this can orient the image properly.
+	// We do autorotate this way, rather than setting it in the LoadOptions parameter, because
+	// that returns errors for loaders that don't support it (like pngload), even with
+	// FailOnError set to false; but this apparently works anyway, I suppose since it bypasses
+	// the loader.
+	if err := img.Autorot(); err != nil {
+		logger.Warn("autorotate failed",
+			zap.String("input_file_path", inputFilePath),
+			zap.Int("input_buffer_len", len(inputBytes)),
+			zap.Error(err))
+	}
+	return img, nil
 }
 
 // scaleDownImage resizes the image to fit within the maxDimension

@@ -443,7 +443,7 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 
 	var existingDataFilePath *string
 
-	// we can reuse the existing thumbhash (if there is one) for itZems that share the same data file
+	// we can reuse the existing thumbhash (if there is one) for items that share the same data file
 	// (the "data_text IS NULL" condition is necessary to use the "idx_items_data_text_hash" index,
 	// and has been observed to yield a much faster query plan, but is not strictly needed for correctness;
 	// it should be fine since we don't set data_text when there's a data_file)
@@ -458,7 +458,7 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 
 	// file is a duplicate! by the time this function returns (if successful),
 	// it.dataFileName should not exist anymore and should be reassigned to
-	// *existingDatafileName instead.
+	// *existingDataFilePath instead.
 
 	p.log.Info("data file is a duplicate",
 		zap.String("duplicate_data_file", it.dataFilePath),
