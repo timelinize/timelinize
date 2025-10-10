@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -78,6 +79,15 @@ type Options struct {
 func (fi FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	dsOpt := params.DataSourceOptions.(*Options)
 
+	// load prior checkpoint, if set
+	var chkpt checkpoint
+	if params.Checkpoint != nil {
+		err := json.Unmarshal(params.Checkpoint, &chkpt)
+		if err != nil {
+			return fmt.Errorf("decoding checkpoint: %w", err)
+		}
+	}
+
 	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(fpath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -102,6 +112,15 @@ func (fi FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntr
 			return nil
 		}
 
+		// catch up to checkpoint
+		if chkpt.File != "" {
+			if fpath != chkpt.File {
+				return nil
+			}
+			// at checkpointed file; clear checkpoint file so we don't skip remaining files
+			chkpt.File = ""
+		}
+
 		file, err := dirEntry.FS.Open(fpath)
 		if err != nil {
 			return err
@@ -110,7 +129,7 @@ func (fi FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntr
 
 		// .eml files are easy: should be just a single message in them
 		if ext == extEml {
-			msg := message{mboxName: d.Name()}
+			msg := message{mboxPath: fpath}
 			fi.processMessage(file, msg, params, dsOpt)
 			return nil
 		}
@@ -121,7 +140,7 @@ func (fi FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntr
 		// we gradually fill buf with every line we read,
 		// and we'll keep current message state in msg
 		buf := new(bytes.Buffer)
-		msg := message{mboxName: d.Name()}
+		msg := message{mboxPath: fpath}
 
 		// read each line of the mbox file, looking for boundary/separator
 		// lines that start with "From ", and fill the buffer up to each one
@@ -151,9 +170,13 @@ func (fi FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntr
 
 			// process buffered message and reset for next one
 			if buf.Len() > 0 {
-				fi.processMessage(buf, msg, params, dsOpt)
+				// only process the message if we've caught up to the checkpoint (if any)
+				if chkpt.MessageIndex == 0 || msg.index >= chkpt.MessageIndex {
+					fi.processMessage(buf, msg, params, dsOpt)
+					chkpt.MessageIndex = 0 // clear checkpoint so we don't skip remaining messages
+				}
 				buf.Reset()
-				msg = message{mboxName: d.Name(), index: msg.index + 1}
+				msg = message{mboxPath: fpath, index: msg.index + 1}
 			}
 
 			// boundary lines are anything goes, but generally we see a gibberish email address followed by a timestamp
@@ -306,6 +329,11 @@ func itemGraphFromEnvelope(m message, opt timeline.ImportParams, dsOpt *Options)
 		ig.ToItem(timeline.RelAttachment, item)
 	}
 
+	ig.Checkpoint = checkpoint{
+		File:         m.mboxPath,
+		MessageIndex: m.index,
+	}
+
 	return ig, nil
 }
 
@@ -321,7 +349,7 @@ func isBoundary(line []byte, buf *bytes.Buffer) bool {
 
 // message holds information about a single message/entry in a mailbox (.mbox) file.
 type message struct {
-	mboxName string // the name of the mbox file
+	mboxPath string // the path to the mbox file
 	index    int    // the position of the message in the mbox file (starting at 0)
 
 	FromLineEmail     string    // first field of the "From " separator line
@@ -414,6 +442,11 @@ func (m message) to(fieldName string) []timeline.Entity {
 		}
 	}
 	return persons
+}
+
+type checkpoint struct {
+	File         string `json:"file"`
+	MessageIndex int    `json:"message_index,omitempty"`
 }
 
 var (
