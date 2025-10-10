@@ -28,6 +28,7 @@ import (
 	"hash"
 	"io"
 	"io/fs"
+	"log"
 	"maps"
 	"os"
 	"path"
@@ -443,8 +444,11 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 
 	var existingDataFilePath *string
 	// we can reuse the existing thumbhash (if there is one) for itZems that share the same data file
+	p.tl.explainQueryPlan(ctx, tx, `SELECT data_file, thumb_hash FROM items WHERE data_hash=? AND data_file!=? LIMIT 1`, it.dataFileHash, it.dataFilePath)
+	start := time.Now()
 	err := tx.QueryRowContext(ctx, `SELECT data_file, thumb_hash FROM items WHERE data_hash=? AND data_file!=? LIMIT 1`,
 		it.dataFileHash, it.dataFilePath).Scan(&existingDataFilePath, &it.thumbhash)
+	log.Println("DUPLICATE ITEM QUERY DURATION:", time.Since(start))
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // file is unique; carry on
 	}
@@ -881,8 +885,11 @@ func (p *processor) storeItem(ctx context.Context, tx *sql.Tx, it *Item) (uint64
 		// query the DB for a data_file that matches case-insensitively (data_file is defined to be COLLATE NOCASE)
 		// and doesn't match exactly ("COLLATE BINARY")
 		var count int
+		start := time.Now()
+		p.tl.explainQueryPlan(ctx, tx, `SELECT count() FROM items WHERE data_file=? AND data_file!=? COLLATE BINARY LIMIT 1`, it.dataFilePath, it.dataFilePath)
 		err = tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE data_file=? AND data_file!=? COLLATE BINARY LIMIT 1`,
 			it.dataFilePath, it.dataFilePath).Scan(&count)
+		log.Println("COLLATE BINARY QUERY DURATION:", time.Since(start))
 		if err != nil {
 			return 0, fmt.Errorf("checking DB for case-insensitive filename uniqueness: %w", err)
 		}
