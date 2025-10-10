@@ -442,8 +442,12 @@ func (p *processor) handleDuplicateItemDataFile(ctx context.Context, tx *sql.Tx,
 	}
 
 	var existingDataFilePath *string
+
 	// we can reuse the existing thumbhash (if there is one) for itZems that share the same data file
-	err := tx.QueryRowContext(ctx, `SELECT data_file, thumb_hash FROM items WHERE data_hash=? AND data_file!=? LIMIT 1`,
+	// (the "data_text IS NULL" condition is necessary to use the "idx_items_data_text_hash" index,
+	// and has been observed to yield a much faster query plan, but is not strictly needed for correctness;
+	// it should be fine since we don't set data_text when there's a data_file)
+	err := tx.QueryRowContext(ctx, `SELECT data_file, thumb_hash FROM items WHERE data_text IS NULL AND data_hash=? AND data_file!=? LIMIT 1`,
 		it.dataFileHash, it.dataFilePath).Scan(&existingDataFilePath, &it.thumbhash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil // file is unique; carry on
