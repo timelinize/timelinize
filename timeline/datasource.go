@@ -187,6 +187,7 @@ func (tl *Timeline) DataSourceImage(ctx context.Context, dsName string) ([]byte,
 
 // TODO: WIP...
 type RecognizeParams struct {
+	// TODO: Possible FastMode, which might result in less confident matches, but can go faster?
 }
 
 // DataSourceRecognition stores the result of whether a data source recognizes an input.

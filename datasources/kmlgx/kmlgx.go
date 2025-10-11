@@ -76,9 +76,22 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 		return rec, nil
 	}
 
-	// recognize by file extension
+	// recognize by file extension, then verify by decoding the file
+	// (TODO: If a recognize FastMode is created, opening and decoding the file should not happen in FastMode)
 	if strings.ToLower(path.Ext(dirEntry.Name())) == ".kml" {
-		rec.Confidence = 1
+		file, err := dirEntry.Open(dirEntry.Filename)
+		if err != nil {
+			return rec, err
+		}
+		defer file.Close()
+		var doc document
+		err = xml.NewDecoder(file).Decode(&doc)
+		if err != nil {
+			return rec, nil
+		}
+		if strings.HasPrefix(doc.XMLNSGX, "http://www.google.com/kml/ext/2") {
+			rec.Confidence = 1.0
+		}
 	}
 
 	return rec, nil
