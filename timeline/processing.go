@@ -409,10 +409,14 @@ func (p *processor) shouldProcessExistingItem(it *Item, dbItem ItemRow, dataFile
 					delete(it.fieldUpdatePolicies, field)
 				}
 			case "time_offset":
-				_, offsetSec := it.Timestamp.Zone()
-				if (dbItem.TimeOffset == nil && offsetSec == 0) || // both empty
-					(dbItem.TimeOffset != nil && *dbItem.TimeOffset == offsetSec) || // both the same
-					(offsetSec == 0 && policy != UpdatePolicyOverwriteExisting) { // update would no-op
+				var timeOffset *int
+				if it.Timestamp.Location() != time.Local { // time.Local indicates an unknown time zone, or wall time
+					_, offsetSec := it.Timestamp.Zone()
+					timeOffset = &offsetSec
+				}
+				if (dbItem.TimeOffset == nil && timeOffset == nil) || // both empty
+					(dbItem.TimeOffset != nil && timeOffset != nil && *dbItem.TimeOffset == *timeOffset) || // both the same
+					(timeOffset == nil && policy != UpdatePolicyOverwriteExisting) { // update would no-op
 					delete(it.fieldUpdatePolicies, field)
 				}
 			case "time_uncertainty":
@@ -978,6 +982,30 @@ SELECT * FROM (
 
 			// TODO: should we take into account time_uncertainty and coordinate_uncertainty and allow any value in that range to be a match?
 			switch field {
+			case "timestamp":
+				// it's debatable whether we want to bundle time_offset in with timestamp; it seems reasonable
+				// that a certain timestamp is just that, and that's what most people would expect, but I would
+				// be curious if we get any requests for them to be separate unique constraints, like, "this
+				// dataset doesn't have time zone information, but all these UTC timestamps are correct, it's
+				// just that the time zone information is unknown" -- that would be a compelling reason to
+				// split these two unique constraints (but could also be an annoying footgun for users if they
+				// forget to configure them both properly, if changing the defaults)
+				if !strictNull && it.Timestamp.IsZero() {
+					break
+				}
+				and()
+				timestamp := nullableUnixMilli(&it.Timestamp)
+				var timeOffset *int
+				if it.Timestamp.Location() != time.Local {
+					_, offsetSec := it.Timestamp.Zone()
+					timeOffset = &offsetSec
+				}
+				sb.WriteString("(timestamp")
+				sb.WriteString(eq(timestamp))
+				sb.WriteString("? AND time_offset")
+				sb.WriteString(eq(timeOffset))
+				sb.WriteString("?)")
+				args = append(args, timestamp, timeOffset)
 			case "data":
 				if !strictNull && it.Content.Data == nil {
 					break
@@ -1050,12 +1078,12 @@ SELECT * FROM (
 					if it.Content.Filename != "" {
 						arg = &it.Content.Filename
 					}
-				case "timestamp":
-					arg = nullableUnixMilli(&it.Timestamp)
 				case "timespan":
 					arg = nullableUnixMilli(&it.Timespan)
 				case "timeframe":
 					arg = nullableUnixMilli(&it.Timeframe)
+				case "time_offset":
+					return ItemRow{}, errors.New("cannot select on time offset individually; use 'timestamp' instead") // we could separate timestamp and time_offset unique constraints; see comment above
 				case "data_type", "data_text", "data_hash":
 					return ItemRow{}, errors.New("cannot select on specific components of item data such as text or file hash; specify 'data' instead")
 				case "longitude", "latitude", "coordinate_system", "coordinate_uncertainty":

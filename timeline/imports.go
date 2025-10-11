@@ -154,6 +154,8 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 	// two iterations of the phase loop: first to estimate size if enabled, then to actually import items
 	for {
+		start := time.Now()
+
 		// this should be cumulative across all the files
 		var totalSizeEstimate *int64
 		if estimating {
@@ -375,7 +377,9 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 			total := atomic.LoadInt64(totalSizeEstimate)
 			job.SetTotal(int(total))
 			job.FlushProgress()
-			job.Logger().Info("done with size estimation", zap.Int64("estimated_size", total))
+			job.Logger().Info("done with size estimation",
+				zap.Int64("estimated_size", total),
+				zap.Duration("duration", time.Since(start)))
 
 			// loop once more to import items (don't estimate again); and make sure we start the
 			// next phase from the beginning of the outer list (even if we resumed a checkpoint
