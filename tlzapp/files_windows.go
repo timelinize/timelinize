@@ -20,6 +20,7 @@ package tlzapp
 
 import (
 	"fmt"
+	"io/fs"
 	"path/filepath"
 
 	"golang.org/x/sys/windows"
@@ -81,8 +82,6 @@ func bitsToDrives(bitMap uint32) []string {
 }
 
 func fileHidden(filename string) bool {
-	// TODO: hide dot-files anyway? if strings.HasPrefix(filename, ".")...
-
 	pointer, err := windows.UTF16PtrFromString(filename)
 	if err != nil {
 		return false
@@ -92,4 +91,15 @@ func fileHidden(filename string) bool {
 		return false
 	}
 	return attributes&windows.FILE_ATTRIBUTE_HIDDEN != 0
+}
+
+func dirEntryHidden(d fs.DirEntry) (bool, error) {
+	fileInfo, err := d.Info()
+	if err != nil {
+		return false, err
+	}
+	if stat, ok := fileInfo.Sys().(*windows.Win32FileAttributeData); ok {
+		return stat.FileAttributes&windows.FILE_ATTRIBUTE_HIDDEN != 0, nil
+	}
+	return false, nil
 }

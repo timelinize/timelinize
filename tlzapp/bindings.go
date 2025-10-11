@@ -326,6 +326,13 @@ type PlannerOptions struct {
 	Path             string `json:"path"` // file system path (with OS separators)
 	Recursive        bool   `json:"recursive"`
 	TraverseArchives bool   `json:"traverse_archives"`
+
+	// Skip files and folders starting with a dot (.) regardless of platform
+	SkipDotFiles bool `json:"skip_dot_files"`
+
+	// Skip files and folders considered hidden by OS convention
+	SkipHiddenFiles bool `json:"skip_hidden_files"`
+
 	timeline.RecognizeParams
 }
 
@@ -484,12 +491,26 @@ func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.
 			return nil
 		}
 
-		// skip hidden files and folders
-		if strings.HasPrefix(path.Base(d.Name()), ".") {
-			if d.IsDir() {
-				return fs.SkipDir
+		// skip files and folders as configured, except for the file the user explicitly selected (".")
+		if fpath != "." {
+			if options.SkipDotFiles && strings.HasPrefix(path.Base(d.Name()), ".") {
+				if d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
 			}
-			return nil
+			if options.SkipHiddenFiles {
+				hidden, err := dirEntryHidden(d)
+				if err != nil {
+					logger.Warn("could not determine if file is hidden", zap.String("path", fpath), zap.Error(err))
+				}
+				if hidden {
+					if d.IsDir() {
+						return fs.SkipDir
+					}
+					return nil
+				}
+			}
 		}
 
 		// check if we've entered a new directory, and if so,

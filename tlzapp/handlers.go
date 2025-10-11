@@ -479,7 +479,7 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 		if listingReq.OnlyDirs && !info.IsDir() {
 			continue
 		}
-		if !listingReq.ShowHidden && fileHidden(name) {
+		if !listingReq.ShowHidden && fileHidden(filepath.Join(result.Dir, name)) {
 			continue
 		}
 
