@@ -240,7 +240,12 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		coll.Metadata.StringsToSpecificType()
 
 		err = fi.processActivity(ctx, dirEntry.FS, rec[fields["Filename"]], owner, coll, params)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Strava is known to write some filenames as "#error#", indicating a bug in their export process: see issue #137
+			params.Log.Error("could not open activity file; likely Strava bug causing export corruption",
+				zap.String("filename", rec[fields["Filename"]]),
+				zap.Error(err))
+		} else if err != nil {
 			return err
 		}
 	}
