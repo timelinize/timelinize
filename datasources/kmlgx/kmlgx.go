@@ -79,7 +79,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	// recognize by file extension, then verify by decoding the file
 	// (TODO: If a recognize FastMode is created, opening and decoding the file should not happen in FastMode)
 	if strings.ToLower(path.Ext(dirEntry.Name())) == ".kml" {
-		file, err := dirEntry.Open(dirEntry.Filename)
+		file, err := dirEntry.Open(".")
 		if err != nil {
 			return rec, err
 		}
