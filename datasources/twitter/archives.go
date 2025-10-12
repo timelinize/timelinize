@@ -92,6 +92,9 @@ func (c *Client) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 
 func (c *Client) processArchive(ctx context.Context, fsys fs.FS, params timeline.ImportParams, processFunc archiveProcessFn, opt Options) error {
 	file, err := fsys.Open(tweetsFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		file, err = fsys.Open(tweetsFile2022)
+	}
 	if err != nil {
 		return err
 	}
@@ -397,7 +400,8 @@ func stripPreface(f io.Reader) error {
 type archiveProcessFn func(ctx context.Context, params timeline.ImportParams, t tweet, fsys fs.FS, opt Options) (*timeline.Graph, error)
 
 const (
-	manifestFile = "data/manifest.js"
-	dmsFile      = "data/direct-messages.js"
-	tweetsFile   = "data/tweets.js"
+	manifestFile   = "data/manifest.js"
+	dmsFile        = "data/direct-messages.js"
+	tweetsFile2022 = "data/tweet.js" // seen in an archive from 2022
+	tweetsFile     = "data/tweets.js"
 )
