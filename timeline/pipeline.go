@@ -104,6 +104,14 @@ func (p *processor) sanitizeAndEnhance(g *Graph) error {
 		// other time values are in the same zone as Timestamp. (If not,
 		// change them to that zone?)
 
+		// resolve reports of bad location data (#145) -- extremely unlikely a to actually be at (0, 0)
+		if g.Item.Location.Latitude != nil && *g.Item.Location.Latitude == 0 {
+			g.Item.Location.Latitude = nil
+		}
+		if g.Item.Location.Longitude != nil && *g.Item.Location.Longitude == 0 {
+			g.Item.Location.Longitude = nil
+		}
+
 		// before we know whether we need to skip an item, we may need to fill
 		// out its time zone so our calculations are accurate
 		// augment timestamp with time zone if enabled, and time zone is missing
