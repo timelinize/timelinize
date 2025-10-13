@@ -37,6 +37,7 @@ var (
 		"타임라인",           // Korean (confirmed)
 		"Хронологія",     // Ukrainian
 		"Хронология",     // Russian
+		"Oś czasu",       // Polish
 	}
 )
 
