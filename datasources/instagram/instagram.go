@@ -51,8 +51,15 @@ type Client struct{}
 
 // Recognize returns whether the file or folder is recognized.
 func (Client) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
-	if dirEntry.FileExists(personalInformationPath) {
-		return timeline.Recognition{Confidence: .9}, nil
+	if dirEntry.FileExists("personal_information/personal_information/instagram_profile_information.json") &&
+		dirEntry.FileExists("your_instagram_activity") {
+		return timeline.Recognition{Confidence: 1.0}, nil
+	}
+	if dirEntry.FileExists("media") &&
+		(dirEntry.FileExists(personalInformationPath2025) ||
+			dirEntry.FileExists(personalInformationPathPre2025) ||
+			dirEntry.FileExists(personalInformation2021)) {
+		return timeline.Recognition{Confidence: .95}, nil
 	}
 	return timeline.Recognition{}, nil
 }
@@ -191,7 +198,13 @@ func (c *Client) FileImport(_ context.Context, dirEntry timeline.DirEntry, param
 func (c *Client) getPersonalInfo(fsys fs.FS) (instaPersonalInformation, error) {
 	var pi instaPersonalInformation
 
-	file, err := fsys.Open(personalInformationPath)
+	file, err := fsys.Open(personalInformationPathPre2025)
+	if errors.Is(err, fs.ErrNotExist) {
+		file, err = fsys.Open(personalInformationPath2025)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		file, err = fsys.Open(personalInformation2021)
+	}
 	if err != nil {
 		return pi, err
 	}
@@ -207,12 +220,20 @@ func (c *Client) getPersonalInfo(fsys fs.FS) (instaPersonalInformation, error) {
 func (c *Client) getPostsIndex(fsys fs.FS) (instaPostsIndex, error) {
 	var all instaPostsIndex
 
-	for i := 1; i < 10000; i++ {
-		postsFilename := fmt.Sprintf("%s%d.json", instaPostsIndexPrefix, i)
+	makePostsFilename := func(prefix string, i int) string {
+		return fmt.Sprintf("%s%d.json", prefix, i)
+	}
 
+	for i := 1; i < 10000; i++ {
+		// try different paths until we get the one that exists (the archive layout changed over the years)
+		postsFilename := makePostsFilename(instaPostsIndexPrefix2025, i)
 		file, err := fsys.Open(postsFilename)
 		if errors.Is(err, fs.ErrNotExist) {
-			break
+			postsFilename = makePostsFilename(instaPostsIndexPrefixPre2025, i)
+			file, err = fsys.Open(postsFilename)
+			if errors.Is(err, fs.ErrNotExist) {
+				break
+			}
 		}
 		if err != nil {
 			return nil, err
@@ -236,7 +257,10 @@ func (c *Client) getPostsIndex(fsys fs.FS) (instaPostsIndex, error) {
 }
 
 func (c *Client) getStoryIndex(fsys fs.FS) (instaStories, error) {
-	file, err := fsys.Open(instaStoryIndex)
+	file, err := fsys.Open(instaStoryIndex2025)
+	if errors.Is(err, fs.ErrNotExist) {
+		file, err = fsys.Open(instaStoryIndexPre2025)
+	}
 	if err != nil {
 		return instaStories{}, err
 	}
@@ -252,7 +276,13 @@ func (c *Client) getStoryIndex(fsys fs.FS) (instaStories, error) {
 }
 
 const (
-	personalInformationPath = "personal_information/personal_information.json"
-	instaPostsIndexPrefix   = "content/posts_"
-	instaStoryIndex         = "content/stories.json"
+	personalInformation2021        = "account_information/personal_information.json"
+	personalInformationPathPre2025 = "personal_information/personal_information.json"
+	personalInformationPath2025    = "personal_information/personal_information/personal_information.json"
+
+	instaPostsIndexPrefixPre2025 = "content/posts_"
+	instaPostsIndexPrefix2025    = "your_instagram_activity/media/posts_"
+
+	instaStoryIndexPre2025 = "content/stories.json"
+	instaStoryIndex2025    = "your_instagram_activity/media/stories.json"
 )

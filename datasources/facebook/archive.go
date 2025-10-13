@@ -43,6 +43,7 @@ const (
 	pre2024YourVideosPath              = "posts/your_videos.json"
 	pre2024YourPostsPrefix             = "posts/your_posts_"
 	pre2024MessagesPrefix              = "messages"
+	messagesPrefix2025                 = "your_instagram_activity/messages"
 )
 
 const (

@@ -32,9 +32,12 @@ import (
 
 func GetMessages(dsName string, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	// figure out which archive version we're working with
-	messagesInboxPrefix := pre2024MessagesPrefix
+	messagesInboxPrefix := messagesPrefix2025
 	if _, err := fs.Stat(dirEntry.FS, messagesInboxPrefix); errors.Is(err, fs.ErrNotExist) {
 		messagesInboxPrefix = year2024MessagesPrefix
+	}
+	if _, err := fs.Stat(dirEntry.FS, messagesInboxPrefix); errors.Is(err, fs.ErrNotExist) {
+		messagesInboxPrefix = pre2024MessagesPrefix
 	}
 
 	for _, messageSubfolder := range []string{
