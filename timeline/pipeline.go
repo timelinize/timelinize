@@ -104,12 +104,19 @@ func (p *processor) sanitizeAndEnhance(g *Graph) error {
 		// other time values are in the same zone as Timestamp. (If not,
 		// change them to that zone?)
 
-		// resolve reports of bad location data (#145) -- extremely unlikely a to actually be at (0, 0)
+		// resolve reports of bad location data (#144) -- extremely unlikely a to actually be at (0, 0)
 		if g.Item.Location.Latitude != nil && *g.Item.Location.Latitude == 0 {
 			g.Item.Location.Latitude = nil
 		}
 		if g.Item.Location.Longitude != nil && *g.Item.Location.Longitude == 0 {
 			g.Item.Location.Longitude = nil
+		}
+
+		// yeah, right; no way 1-1-4193 is an intentional timestamp (as of 2025) (see #145)
+		const maxYearsFuture = 500
+		if g.Item.Timestamp.Year() >= time.Now().Year()+maxYearsFuture && g.Item.Timestamp.Month() == time.January && g.Item.Timestamp.Day() == 1 {
+			g.Item.Timestamp, g.Item.Timespan, g.Item.Timeframe = time.Time{}, time.Time{}, time.Time{}
+			p.log.Warn("sanitized timestamp", zap.Time("timestamp", g.Item.Timestamp))
 		}
 
 		// before we know whether we need to skip an item, we may need to fill
