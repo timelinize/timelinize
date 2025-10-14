@@ -163,7 +163,7 @@ func (c *Client) FileImport(_ context.Context, dirEntry timeline.DirEntry, param
 
 	// stories
 	// TODO: Maybe stories should go into a collection
-	storyIdx, err := c.getStoryIndex(dirEntry.FS)
+	storyIdx, err := c.getStoryIndex(dirEntry.FS, params.Log)
 	if err != nil {
 		return err
 	}
@@ -256,10 +256,13 @@ func (c *Client) getPostsIndex(fsys fs.FS) (instaPostsIndex, error) {
 	return all, nil
 }
 
-func (c *Client) getStoryIndex(fsys fs.FS) (instaStories, error) {
+func (c *Client) getStoryIndex(fsys fs.FS, logger *zap.Logger) (instaStories, error) {
 	file, err := fsys.Open(instaStoryIndex2025)
 	if errors.Is(err, fs.ErrNotExist) {
 		file, err = fsys.Open(instaStoryIndexPre2025)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		logger.Warn("no Instagram stories found")
 	}
 	if err != nil {
 		return instaStories{}, err
