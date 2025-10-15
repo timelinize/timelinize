@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends -t trixie-backp
     libheif-dev \
     libheif-plugins-all \
     libsqlite3-dev \
+    libraw-dev \
     ffmpeg \
     ca-certificates
 RUN rm -rf /var/lib/apt/lists/*
@@ -68,6 +69,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends -t trixie-backp
     libgsf-1-114 \
     libheif1 \
     libheif-plugins-all \
+    libraw23t64 \
     ffmpeg \
     bash \
     curl \
