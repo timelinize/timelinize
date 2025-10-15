@@ -93,14 +93,16 @@ jobs:
       - name: Compress build (macOS arm64)
         if: matrix.os == 'macos-latest'
         run: |
-          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_mac_arm64.zip"
+          REF_NAME=$(echo ${{ github.ref_name }} | sed 's|/|-|g')
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${REF_NAME}_mac_arm64.zip"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
       - name: Compress build (macOS x64)
         if: matrix.os == 'macos-13'
         run: |
-          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_mac_x64.zip"
+          REF_NAME=$(echo ${{ github.ref_name }} | sed 's|/|-|g')
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${REF_NAME}_mac_x64.zip"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
     
