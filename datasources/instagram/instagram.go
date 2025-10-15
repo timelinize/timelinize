@@ -263,6 +263,7 @@ func (c *Client) getStoryIndex(fsys fs.FS, logger *zap.Logger) (instaStories, er
 	}
 	if errors.Is(err, fs.ErrNotExist) {
 		logger.Warn("no Instagram stories found")
+		return instaStories{}, nil
 	}
 	if err != nil {
 		return instaStories{}, err
