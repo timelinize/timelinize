@@ -78,7 +78,8 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu-')
         run: |
           ARCH=${{ matrix.os == 'ubuntu-latest' && 'x64' || 'arm64' }}
-          export ARTIFACT_NAME="${{ env.APP_NAME }}_${{ github.ref_name }}_linux_${ARCH}.tar.gz"
+          REF_NAME=$(echo ${{ github.ref_name }} | sed 's|/|-|g')
+          export ARTIFACT_NAME="${{ env.APP_NAME }}_${REF_NAME}_linux_${ARCH}.tar.gz"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           tar -czvf "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
