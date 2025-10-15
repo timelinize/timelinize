@@ -2,7 +2,7 @@
 name = "python-server"
 version = "0.1.0"
 description = "Facilitates functionality better provided by Python libraries"
-requires-python = ">=3.12"
+requires-python = "~=3.13.0"
 dependencies = [
     "accelerate>=1.10.1",
     "flask>=3.0.3",
