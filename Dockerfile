@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends -t trixie-backp
     liborc-0.4-dev \
     libgsf-1-dev \
     libheif-dev \
+    libheif-plugins-all \
     libsqlite3-dev \
     ffmpeg \
     ca-certificates
@@ -66,6 +67,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends -t trixie-backp
     liborc-0.4-0 \
     libgsf-1-114 \
     libheif1 \
+    libheif-plugins-all \
     ffmpeg \
     bash \
     curl \
