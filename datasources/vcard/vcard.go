@@ -74,8 +74,8 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	defer file.Close()
 
 	buf := bufPool.Get().([]byte)
-	//nolint:gofmt,staticcheck
-	defer bufPool.Put(buf[:len(buf)]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice) -- WOW the linters hate this one
+	//nolint:gocritic,staticcheck
+	defer bufPool.Put(buf[:]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice) -- WOW the linters hate this one
 
 	// read the first few bytes to see if it looks like a legit vcard; ignore empty or short files
 	_, err = io.ReadFull(file, buf)
@@ -298,22 +298,26 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 	return nil
 }
 
-// ParseBirthday parses bday in either "--MMDD" or "YYYYMMDD" format.
-// If the former, the year is omitted, and as such, the Unix timestamp
-// of the date will compute to be over 2000 years ago. If the date
-// fails to parse, a nil time is returned.
+// ParseBirthday parses bday in one of these formats:
+//
+// - "--MMDD" (year is omitted, and as such, the Unix timestamp of the date will compute to be over 2000 years ago)
+// - "YYYYMMDD"
+// - "YYYY-MM-DD" (issue #153)
+//
+// If the date fails to parse, a nil time is returned.
 func ParseBirthday(bday string) *time.Time {
-	const fullBdayFormat = "20060102"
-	if len(bday) == 6 && bday[:2] == "--" {
-		monthDay, err := time.Parse("--0102", bday)
-		if err == nil {
-			return &monthDay
-		}
-	} else if len(bday) == len(fullBdayFormat) {
-		fullDate, err := time.Parse(fullBdayFormat, bday)
-		if err == nil {
-			return &fullDate
-		}
+	var date time.Time
+	var err error
+	switch len(bday) {
+	case 6:
+		date, err = time.Parse("--0102", bday)
+	case 8:
+		date, err = time.Parse("20060102", bday)
+	case 10:
+		date, err = time.Parse("2006-01-02", bday)
+	}
+	if err == nil {
+		return &date
 	}
 	return nil
 }
