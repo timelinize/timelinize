@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/timelinize/timelinize/datasources/imessage"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -111,10 +112,13 @@ func (*FileImporter) processAddressBook(ctx context.Context, dirEntry timeline.D
 	}
 	defer db.Close()
 
+	// we cast the ZBIRTHDAY field because it is a timestamp type, which mattn/go-sqlite3 tries to
+	// convert to time.Time, but here's the kicker: it's NOT a unix epoch timestamp! so the time
+	// value is wrong
 	rows, err := db.QueryContext(ctx, `
 		SELECT
 			rec.Z_PK, rec.ZFIRSTNAME, rec.ZMIDDLENAME, rec.ZMAIDENNAME, rec.ZLASTNAME,
-			rec.ZBIRTHDAY, rec.ZBIRTHDAYYEARLESS, rec.ZBIRTHDAYYEAR, rec.ZTHUMBNAILIMAGEDATA,
+			cast(rec.ZBIRTHDAY AS INTEGER), rec.ZBIRTHDAYYEARLESS, rec.ZBIRTHDAYYEAR, rec.ZTHUMBNAILIMAGEDATA,
 			phone.ZFULLNUMBER, email.ZADDRESS, web.ZURL,
 			post.ZSTREET, post.ZCITY, post.ZSUBLOCALITY, post.ZSTATE, post.ZCOUNTRYNAME, post.ZCOUNTRYCODE, post.ZZIPCODE
 		FROM ZABCDRECORD AS rec
@@ -182,8 +186,8 @@ type contact struct {
 	thumbnail []byte
 
 	id, birthdayYear *int64
-	birthday         *time.Time
-	birthdayYearless *float64
+	birthday         *float64 // cocoa core data timestamp (the "Apple epoch")
+	birthdayYearless *float64 // number of seconds into the year of the birthday, UTC time
 
 	phones    []string
 	emails    []string
@@ -196,10 +200,23 @@ func (c contact) entity() *timeline.Entity {
 
 	ent.Name = c.name.String()
 
-	if c.birthdayYear != nil && c.birthday != nil && *c.birthdayYear > 1604 {
+	// prefer full birth date, or use yearless if that's what we have
+	if c.birthday != nil {
 		ent.Attributes = append(ent.Attributes, timeline.Attribute{
 			Name:  "birth_date",
-			Value: c.birthday,
+			Value: imessage.CocoaSecondsToTime(int64(*c.birthday)),
+		})
+	} else if c.birthdayYearless != nil {
+		date := time.Time{}
+		// we may still be able to attach the year, I dunno why it would be like this but whatever
+		if c.birthdayYear != nil && *c.birthdayYear > 0 {
+			date = time.Date(int(*c.birthdayYear), time.January, 1, 0, 0, 0, 0, time.UTC)
+		}
+		// convert seconds to minutes, then hours (add 0.5 to round up)
+		hoursIntoYear := *c.birthdayYearless/60/60 + 0.5 //nolint:mnd
+		ent.Attributes = append(ent.Attributes, timeline.Attribute{
+			Name:  "birth_date",
+			Value: date.Add(time.Duration(hoursIntoYear) * time.Hour),
 		})
 	}
 
