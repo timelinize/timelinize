@@ -310,11 +310,11 @@ func ParseBirthday(bday string) *time.Time {
 	var err error
 	switch len(bday) {
 	case 6:
-		date, err = time.Parse("--0102", bday)
+		date, err = time.ParseInLocation("--0102", bday, time.Local)
 	case 8:
-		date, err = time.Parse("20060102", bday)
+		date, err = time.ParseInLocation("20060102", bday, time.Local)
 	case 10:
-		date, err = time.Parse("2006-01-02", bday)
+		date, err = time.ParseInLocation("2006-01-02", bday, time.Local)
 	}
 	if err == nil {
 		return &date
