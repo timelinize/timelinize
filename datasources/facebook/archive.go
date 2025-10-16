@@ -65,6 +65,14 @@ type Archive struct {
 
 // Recognize returns whether the input file is recognized.
 func (Archive) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	// reject HTML-formatted archives, which we don't support
+	const oneDotHTML = "1.html"
+	if dirEntry.FileExists(pre2024YourPostsPrefix+oneDotHTML) ||
+		dirEntry.FileExists(year2024YourPostsPrefix+oneDotHTML) ||
+		dirEntry.FileExists(path.Join(year2024AlbumPrefix, oneDotHTML)) {
+		return timeline.Recognition{}, nil
+	}
+
 	if dirEntry.FileExists(pre2024ProfileInfoPath) ||
 		dirEntry.FileExists(year2024ProfileInfoPath) {
 		return timeline.Recognition{Confidence: 1}, nil
