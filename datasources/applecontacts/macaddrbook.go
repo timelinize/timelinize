@@ -134,7 +134,7 @@ func (fimp *FileImporter) processAddressBook(ctx context.Context, dirEntry timel
 
 	var sb strings.Builder
 	sb.WriteString("SELECT\n\t")
-	var selectedCols []string
+	var selectedCols []string //nolint:prealloc // linter false positive: we don't know how many we will be selecting
 
 	for _, col := range supportedRecordTableColumns {
 		if !slices.Contains(recordTableColumns, col) {
