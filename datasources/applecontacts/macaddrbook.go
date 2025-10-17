@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -105,31 +106,71 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 		return nil
 	})
 }
-func (*FileImporter) processAddressBook(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
+func (fimp *FileImporter) processAddressBook(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	db, err := sql.Open("sqlite3", dirEntry.FullPath()+"?mode=ro")
 	if err != nil {
 		return fmt.Errorf("opening AddressBook DB at %s: %w", dirEntry.FullPath(), err)
 	}
 	defer db.Close()
 
-	// we cast the ZBIRTHDAY field because it is a timestamp type, which mattn/go-sqlite3 tries to
-	// convert to time.Time, but here's the kicker: it's NOT a unix epoch timestamp! so the time
-	// value is wrong
-	rows, err := db.QueryContext(ctx, `
-		SELECT
-			rec.Z_PK, rec.ZFIRSTNAME, rec.ZMIDDLENAME, rec.ZMAIDENNAME, rec.ZLASTNAME,
-			cast(rec.ZBIRTHDAY AS INTEGER), rec.ZBIRTHDAYYEARLESS, rec.ZBIRTHDAYYEAR, rec.ZTHUMBNAILIMAGEDATA,
-			phone.ZFULLNUMBER, email.ZADDRESS, web.ZURL,
-			post.ZSTREET, post.ZCITY, post.ZSUBLOCALITY, post.ZSTATE, post.ZCOUNTRYNAME, post.ZCOUNTRYCODE, post.ZZIPCODE
-		FROM ZABCDRECORD AS rec
-		LEFT JOIN ZABCDPHONENUMBER AS phone ON phone.ZOWNER = rec.Z_PK
-		LEFT JOIN ZABCDEMAILADDRESS AS email ON email.ZOWNER = rec.Z_PK
-		LEFT JOIN ZABCDURLADDRESS AS web ON web.ZOWNER = rec.Z_PK
-		LEFT JOIN ZABCDPOSTALADDRESS AS post ON post.ZOWNER = rec.Z_PK
-		ORDER BY rec.Z_PK ASC
-	`)
+	// not all databases are the same, unfortunately (issue #153, toward the middle/end)
+	// so we need to build the query so that only the columns that exist are selected
+	// (mainly concerned with the ZABCDRECORD table)
+	supportedRecordTableColumns := []string{
+		"Z_PK",
+		"ZFIRSTNAME",
+		"ZMIDDLENAME",
+		"ZMAIDENNAME",
+		"ZLASTNAME",
+		"ZBIRTHDAY",
+		"ZBIRTHDAYYEARLESS",
+		"ZBIRTHDAYYEAR",
+		"ZTHUMBNAILIMAGEDATA",
+	}
+	recordTableColumns, err := fimp.getColumnNames(ctx, db, "ZABCDRECORD")
 	if err != nil {
-		return err
+		return fmt.Errorf("listing column names: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("SELECT\n\t")
+	var selectedCols []string
+
+	for _, col := range supportedRecordTableColumns {
+		if !slices.Contains(recordTableColumns, col) {
+			params.Log.Warn("address book database does not have column in ZABCDRECORD table", zap.String("column", col))
+			continue
+		}
+		if len(selectedCols) > 0 {
+			sb.WriteString(", ")
+		}
+		if col == "ZBIRTHDAY" {
+			// we cast the ZBIRTHDAY field because it is a timestamp type, which mattn/go-sqlite3 tries to
+			// convert to time.Time, but here's the kicker: it's NOT a unix epoch timestamp! so the time
+			// value is wrong -- we need to read it as an integer then create the time.Time ourselves
+			sb.WriteString("cast(rec.ZBIRTHDAY AS INTEGER)")
+		} else {
+			sb.WriteString("rec.")
+			sb.WriteString(col)
+		}
+		selectedCols = append(selectedCols, col)
+	}
+
+	// remainder of query
+	sb.WriteString(`,
+		phone.ZFULLNUMBER, email.ZADDRESS, web.ZURL,
+		post.ZSTREET, post.ZCITY, post.ZSUBLOCALITY, post.ZSTATE,
+		post.ZCOUNTRYNAME, post.ZCOUNTRYCODE, post.ZZIPCODE
+	FROM ZABCDRECORD AS rec
+	LEFT JOIN ZABCDPHONENUMBER AS phone ON phone.ZOWNER = rec.Z_PK
+	LEFT JOIN ZABCDEMAILADDRESS AS email ON email.ZOWNER = rec.Z_PK
+	LEFT JOIN ZABCDURLADDRESS AS web ON web.ZOWNER = rec.Z_PK
+	LEFT JOIN ZABCDPOSTALADDRESS AS post ON post.ZOWNER = rec.Z_PK
+	ORDER BY rec.Z_PK ASC`)
+
+	rows, err := db.QueryContext(ctx, sb.String())
+	if err != nil {
+		return fmt.Errorf("querying contact records: %w", err)
 	}
 	defer rows.Close()
 
@@ -139,11 +180,40 @@ func (*FileImporter) processAddressBook(ctx context.Context, dirEntry timeline.D
 		var addr postalAddress
 		var email, phone, webpage *string
 
-		err := rows.Scan(
-			&record.id, &record.name.firstName, &record.name.midName, &record.name.maidenName, &record.name.lastName,
-			&record.birthday, &record.birthdayYearless, &record.birthdayYear, &record.thumbnail,
+		// because the select clause is dynamically generated, we also need to
+		// dynamically generate the list of targets...
+		const numJoinedColumns = 10
+		targets := make([]any, 0, len(selectedCols)+numJoinedColumns)
+
+		for _, col := range selectedCols {
+			switch col {
+			case "Z_PK":
+				targets = append(targets, &record.id)
+			case "ZFIRSTNAME":
+				targets = append(targets, &record.name.firstName)
+			case "ZMIDDLENAME":
+				targets = append(targets, &record.name.midName)
+			case "ZMAIDENNAME":
+				targets = append(targets, &record.name.maidenName)
+			case "ZLASTNAME":
+				targets = append(targets, &record.name.lastName)
+			case "ZBIRTHDAY":
+				targets = append(targets, &record.birthday)
+			case "ZBIRTHDAYYEARLESS":
+				targets = append(targets, &record.birthdayYearless)
+			case "ZBIRTHDAYYEAR":
+				targets = append(targets, &record.birthdayYear)
+			case "ZTHUMBNAILIMAGEDATA":
+				targets = append(targets, &record.thumbnail)
+			}
+		}
+		targets = append(targets,
 			&phone, &email, &webpage,
-			&addr.street, &addr.city, &addr.sublocal, &addr.state, &addr.country, &addr.countryCode, &addr.zip)
+			&addr.street, &addr.city, &addr.sublocal, &addr.state,
+			&addr.country, &addr.countryCode, &addr.zip,
+		)
+
+		err := rows.Scan(targets...)
 		if err != nil {
 			return fmt.Errorf("scanning contact row: %w", err)
 		}
@@ -181,6 +251,28 @@ func (*FileImporter) processAddressBook(ctx context.Context, dirEntry timeline.D
 	return nil
 }
 
+func (*FileImporter) getColumnNames(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", tableName)
+	if err != nil {
+		return nil, fmt.Errorf("querying table info: %w", err)
+	}
+	defer rows.Close()
+
+	var cols []string
+	for rows.Next() {
+		var col string
+		if err := rows.Scan(&col); err != nil {
+			return nil, fmt.Errorf("scanning row: %w", err)
+		}
+		cols = append(cols, col)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("next row: %w", err)
+	}
+
+	return cols, nil
+}
+
 type contact struct {
 	name      contactName
 	thumbnail []byte
@@ -200,23 +292,32 @@ func (c contact) entity() *timeline.Entity {
 
 	ent.Name = c.name.String()
 
-	// prefer full birth date, or use yearless if that's what we have
-	if c.birthday != nil {
+	// prefer full birth date if it seems valid; use yearless if that's what we have
+	// (the "yearless" birthday is the number of seconds into the year)
+	// (apparently, values of an extreme magnitude indicate the full birth date is
+	// unknown, and we should use the yearless birthday instead)
+	if c.birthday != nil && *c.birthday > -1e9 {
 		ent.Attributes = append(ent.Attributes, timeline.Attribute{
 			Name:  "birth_date",
 			Value: imessage.CocoaSecondsToTime(int64(*c.birthday)),
 		})
 	} else if c.birthdayYearless != nil {
-		date := time.Time{}
-		// we may still be able to attach the year, I dunno why it would be like this but whatever
-		if c.birthdayYear != nil && *c.birthdayYear > 0 {
+		var date time.Time
+
+		// we may still be able to attach the year... maybe?
+		// apparently Apple uses year 1604 as a sentinel value to
+		// indicate "unknown" -- why they don't just leave it NULL
+		// is beyond me (https://stackoverflow.com/a/14023536)
+		// so we have to watch out for that one
+		const sentinelYearMeaningUnknown = 1604
+		if c.birthdayYear != nil &&
+			*c.birthdayYear > 0 &&
+			*c.birthdayYear != sentinelYearMeaningUnknown {
 			date = time.Date(int(*c.birthdayYear), time.January, 1, 0, 0, 0, 0, time.UTC)
 		}
-		// convert seconds to minutes, then hours (add 0.5 to round up)
-		hoursIntoYear := *c.birthdayYearless/60/60 + 0.5 //nolint:mnd
 		ent.Attributes = append(ent.Attributes, timeline.Attribute{
 			Name:  "birth_date",
-			Value: date.Add(time.Duration(hoursIntoYear) * time.Hour),
+			Value: date.Add(time.Duration(*c.birthdayYearless) * time.Second),
 		})
 	}
 
