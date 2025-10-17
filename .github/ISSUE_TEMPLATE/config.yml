@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/timelinize/timelinize/discussions
+    about: If you have questions (or answers) about using Timelinize, rather than a bug report or feature request
+  - name: Discord chat
+    url: https://discord.com/invite/C9dCnTW6qV
+    about: Come hang out with us and share your Timelinize experience!
