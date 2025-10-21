@@ -706,14 +706,25 @@ const (
 )
 
 // Merge adds the incoming metadata to m according to the specified conflict policy.
-func (m Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
+func (m *Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
 	if len(incoming) == 0 {
 		return
 	}
+	// we want to allow the caller to not have to worry about instantiating the
+	// map m, so we take a pointer receiver and call make() for them, if necessary,
+	// in order to avoid a panic; we have to check for m being both nil or a nil
+	// map, which are different: m is almost never going to actually be nil, but
+	// a map that hasn't had make() called yet is a nil map, and I think we need
+	// reflection to detect that, OR we can just check if it's empty -- replacing
+	// an empty map should be fine (famous last words) (fixes issue #160)
+	if m == nil || len(*m) == 0 {
+		meta := make(Metadata)
+		*m = meta
+	}
 	for key, val := range incoming {
-		if currentVal, ok := m[key]; ok {
-			// nothing to do if the values are the same
-			if val == currentVal {
+		if currentVal, ok := (*m)[key]; ok {
+			// nothing to do if the values are the same (equality op is faster than DeepEqual)
+			if val == currentVal || reflect.DeepEqual(val, currentVal) {
 				continue
 			}
 
@@ -721,23 +732,23 @@ func (m Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
 			case MetaMergeAppend:
 				for i := 2; i < 100; i++ {
 					newKey := fmt.Sprintf("%s %d", key, i)
-					if _, ok := m[newKey]; !ok {
-						m[newKey] = val
+					if _, ok := (*m)[newKey]; !ok {
+						(*m)[newKey] = val
 						break
 					}
 				}
 			case MetaMergeReplace:
-				m[key] = val
+				(*m)[key] = val
 			case MetaMergeReplaceEmpty:
 				if isEmpty(currentVal) {
-					m[key] = val
+					(*m)[key] = val
 				}
 			}
 
 			// skip; don't overwrite existing value
 			continue
 		}
-		m[key] = val
+		(*m)[key] = val
 	}
 }
 
