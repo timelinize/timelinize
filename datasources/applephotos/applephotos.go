@@ -67,15 +67,16 @@ type FileImporter struct {
 
 // Recognize returns whether this file or folder is supported.
 func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
-	var confidence float64
-	if dirEntry.IsDir() && path.Ext(dirEntry.Name()) == ".photoslibrary" {
-		confidence += .2
+	// the Photos.sqlite database file is required (as a file, not a dir)
+	if info, err := dirEntry.Stat("database/Photos.sqlite"); err != nil || info.IsDir() {
+		return timeline.Recognition{}, nil
 	}
-	if info, err := dirEntry.Stat("database/Photos.sqlite"); err == nil && !info.IsDir() {
-		confidence += .6
+	confidence := 0.6
+	if dirEntry.IsDir() && path.Ext(dirEntry.Name()) == ".photoslibrary" {
+		confidence += .3
 	}
 	if info, err := dirEntry.Stat(mediaFilesDir); err == nil && info.IsDir() {
-		confidence += .2
+		confidence += .1
 	}
 	return timeline.Recognition{Confidence: confidence}, nil
 }
