@@ -30,185 +30,185 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-func (a *App) registerCommands() {
+func (app *App) registerCommands() {
 	// TODO: register flags with flag package... and command help... these will probably need to know the payload structure...
 	// TODO: make endpoint URIs consistent with App methods and frontend function names
-	a.commands = map[string]Endpoint{
+	app.commands = map[string]Endpoint{
 		"add-entity": {
-			Handler: a.server.handleAddEntity,
+			Handler: app.server.handleAddEntity,
 			Method:  http.MethodPost,
 			Payload: addEntityPayload{},
 			Help:    "Creates a new entity.",
 		},
 		"build-info": {
-			Handler: a.server.handleBuildInfo,
+			Handler: app.server.handleBuildInfo,
 			Method:  http.MethodGet,
 			Help:    "Displays information about this build.",
 		},
 		"cancel-jobs": {
-			Handler: a.server.handleCancelJobs,
+			Handler: app.server.handleCancelJobs,
 			Method:  http.MethodPost,
 			Payload: jobsPayload{},
 			Help:    "Cancels active jobs.",
 		},
 		"change-settings": {
-			Handler: a.server.handleChangeSettings,
+			Handler: app.server.handleChangeSettings,
 			Method:  http.MethodPost,
 			Payload: changeSettingsPayload{},
 			Help:    "Changes settings.",
 		},
 		"close-repository": {
-			Handler: a.server.handleCloseRepo,
+			Handler: app.server.handleCloseRepo,
 			Method:  http.MethodPost,
 			Payload: "",
 			Help:    "Close a timeline repository.",
 		},
 		"conversation": {
-			Handler: a.server.handleConversation,
+			Handler: app.server.handleConversation,
 			Method:  http.MethodPost,
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Loads a conversation.",
 		},
 		"data-sources": {
-			Handler: a.server.handleGetDataSources,
+			Handler: app.server.handleGetDataSources,
 			Method:  http.MethodGet,
 			Help:    "Returns the supported data sources.",
 		},
 		"delete-items": {
-			Handler: a.server.handleDeleteItems,
+			Handler: app.server.handleDeleteItems,
 			Method:  http.MethodDelete,
 			Payload: deleteItemsPayload{},
 			Help:    "Deletes items from a timeline.",
 		},
 		"file-stat": {
-			Handler: a.server.handleFileStat,
+			Handler: app.server.handleFileStat,
 			Method:  http.MethodPost,
 			Payload: "",
 			Help:    "Returns basic information about a file or directory.",
 		},
 		"file-listing": {
-			Handler: a.server.handleFileListing,
+			Handler: app.server.handleFileListing,
 			Method:  http.MethodPost,
 			Payload: payloadFileListing{},
 			Help:    "Returns the list of files for a given path.",
 		},
 		"file-selector-roots": {
-			Handler: a.server.handleFileSelectorRoots,
+			Handler: app.server.handleFileSelectorRoots,
 			Method:  http.MethodGet,
 			Help:    "Returns a list of root paths for a file picker.",
 		},
 		"get-entity": {
-			Handler: a.server.handleGetEntity,
+			Handler: app.server.handleGetEntity,
 			Method:  http.MethodPost,
 			Payload: getEntityPayload{},
 			Help:    "Returns information about the given entity.",
 		},
 		"import": {
-			Handler: a.server.handleImport,
+			Handler: app.server.handleImport,
 			Method:  http.MethodPost,
 			Payload: ImportParameters{},
 			Help:    "Starts an import job.",
 		},
 		"item-classifications": {
-			Handler: a.server.handleItemClassifications,
+			Handler: app.server.handleItemClassifications,
 			Method:  http.MethodPost,
 			Payload: "",
 			Help:    "Returns the item classifications for the given timeline.",
 		},
 		"jobs": {
-			Handler:     a.server.handleJobs,
+			Handler:     app.server.handleJobs,
 			Method:      methodQuery,
 			Payload:     jobsPayload{},
 			ContentType: JSON,
 			Help:        "Gets current information about jobs.",
 		},
 		"logs": {
-			Handler: a.server.handleLogs,
+			Handler: app.server.handleLogs,
 			Method:  http.MethodGet,
 			Help:    "Initiates a WebSocket connection to send logs.",
 		},
 		"merge-entities": {
-			Handler: a.server.handleMergeEntities,
+			Handler: app.server.handleMergeEntities,
 			Method:  http.MethodPost,
 			Payload: mergeEntitiesPayload{},
 			Help:    "Merge two entities together.",
 		},
 		"next-graph": {
-			Handler: a.server.handleNextGraph,
+			Handler: app.server.handleNextGraph,
 			Method:  http.MethodGet,
 			Help:    "Gets the next graph from an interactive import.",
 		},
 		"open-repositories": {
-			Handler: a.server.handleRepos,
+			Handler: app.server.handleRepos,
 			Method:  http.MethodGet,
 			Help:    "Returns the list of open timelines.",
 		},
 		"open-repository": {
-			Handler: a.server.handleOpenRepo,
+			Handler: app.server.handleOpenRepo,
 			Method:  http.MethodPost,
 			Payload: openRepoPayload{},
 			Help:    "Open a timeline repository.",
 		},
 		"pause-job": {
-			Handler: a.server.handlePauseJob,
+			Handler: app.server.handlePauseJob,
 			Method:  http.MethodPost,
 			Payload: jobPayload{},
 			Help:    "Pauses an active job.",
 		},
 		"plan-import": {
-			Handler: a.server.handlePlanImport,
+			Handler: app.server.handlePlanImport,
 			Method:  http.MethodPost,
 			Payload: PlannerOptions{},
 			Help:    "Proposes an import plan in preparation for performing a data import.",
 		},
 		"recent-conversations": {
-			Handler: a.server.handleRecentConversations,
+			Handler: app.server.handleRecentConversations,
 			Method:  http.MethodPost,
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Loads recent conversations.",
 		},
 		"repository-empty": {
-			Handler: a.server.handleRepositoryEmpty,
+			Handler: app.server.handleRepositoryEmpty,
 			Method:  http.MethodPost,
 			Payload: "",
 			Help:    "Returns whether the repository is empty or not.",
 		},
 		"settings": {
-			Handler: a.server.handleSettings,
+			Handler: app.server.handleSettings,
 			Method:  http.MethodGet,
 			Help:    "Returns settings for the application and opened timelines.",
 		},
 		"submit-graph": {
-			Handler: a.server.handleSubmitGraph,
+			Handler: app.server.handleSubmitGraph,
 			Method:  http.MethodPost,
 			Payload: submitGraphPayload{},
 			Help:    "Submits a graph for processing during an interactive import.",
 		},
 		"search-entities": {
-			Handler: a.server.handleSearchEntities,
+			Handler: app.server.handleSearchEntities,
 			Method:  http.MethodPost,
 			Payload: timeline.EntitySearchParams{},
 			Help:    "Finds and filters entities in a timeline.",
 		},
 		"search-items": {
-			Handler: a.server.handleSearchItems,
+			Handler: app.server.handleSearchItems,
 			Method:  http.MethodPost,
 			Payload: timeline.ItemSearchParams{},
 			Help:    "Finds and filters items in a timeline.",
 		},
 		"start-job": {
-			Handler: a.server.handleStartJob,
+			Handler: app.server.handleStartJob,
 			Method:  http.MethodPost,
 			Payload: jobPayload{},
 			Help:    "Starts a job.",
 		},
 		"charts": {
-			Handler: a.server.handleCharts,
+			Handler: app.server.handleCharts,
 			Method:  http.MethodGet,
 			Help:    "Returns statistics about the timeline for use in charts.",
 		},
 		"unpause-job": {
-			Handler: a.server.handleUnpauseJob,
+			Handler: app.server.handleUnpauseJob,
 			Method:  http.MethodPost,
 			Payload: jobPayload{},
 			Help:    "Unpauses a paused job.",
@@ -265,14 +265,14 @@ func (e Endpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) error {
 	return e.Handler(w, r)
 }
 
-func (a *App) CommandLineHelp() string {
+func (app *App) CommandLineHelp() string {
 	// alphabetize the commands list
 	type commandEndpoint struct {
 		command  string
 		endpoint Endpoint
 	}
-	commands := make([]commandEndpoint, 0, len(a.commands))
-	for command, endpoint := range a.commands {
+	commands := make([]commandEndpoint, 0, len(app.commands))
+	for command, endpoint := range app.commands {
 		commands = append(commands, commandEndpoint{command, endpoint})
 	}
 	sort.Slice(commands, func(i, j int) bool {

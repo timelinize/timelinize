@@ -742,17 +742,17 @@ func tplFuncIntIter(n int) []struct{} {
 // and renders it in place. Note that included files are NOT escaped, so you
 // should only include trusted files. If it is not trusted, be sure to use
 // escaping functions in your template.
-func (a *App) tplFuncInclude(filename string) (string, error) {
+func (app *App) tplFuncInclude(filename string) (string, error) {
 	bodyBuf := bufPool.Get().(*bytes.Buffer)
 	bodyBuf.Reset()
 	defer bufPool.Put(bodyBuf)
 
-	err := readFileToBuffer(http.FS(a.server.frontend), filename, bodyBuf)
+	err := readFileToBuffer(http.FS(app.server.frontend), filename, bodyBuf)
 	if err != nil {
 		return "", err
 	}
 
-	err = executeTemplateInBuffer(filename, bodyBuf, nil, a)
+	err = executeTemplateInBuffer(filename, bodyBuf, nil, app)
 	if err != nil {
 		return "", err
 	}

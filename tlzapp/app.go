@@ -150,16 +150,16 @@ func New(ctx context.Context, cfg *Config, embeddedWebsite fs.FS) (*App, error) 
 	return newApp, nil
 }
 
-func (a *App) Shutdown() { a.cancel() }
+func (app *App) Shutdown() { app.cancel() }
 
-func (a *App) RunCommand(ctx context.Context, args []string) error {
+func (app *App) RunCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("no command specified")
 	}
 
 	commandName := args[0]
 
-	endpoint, ok := a.commands[commandName]
+	endpoint, ok := app.commands[commandName]
 	if !ok {
 		return fmt.Errorf("unrecognized command: %s", commandName)
 	}
@@ -181,7 +181,7 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 	case None:
 	}
 
-	url := "http://" + a.cfg.listenAddr() + apiBasePath + commandName
+	url := "http://" + app.cfg.listenAddr() + apiBasePath + commandName
 
 	req, err := http.NewRequestWithContext(ctx, endpoint.Method, url, body)
 	if err != nil {
@@ -194,14 +194,14 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 	// process already, send the request to it; otherwise send
 	// a virtual request directly to the HTTP handler function
 	var resp *http.Response
-	if a.serverRunning() {
+	if app.serverRunning() {
 		httpClient := &http.Client{Timeout: 1 * time.Minute}
 		resp, err = httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("running command on server: %w", err)
 		}
 	} else {
-		if err := a.openRepos(); err != nil {
+		if err := app.openRepos(); err != nil {
 			return fmt.Errorf("opening repos from last time: %w", err)
 		}
 		vrw := &virtualResponseWriter{body: new(bytes.Buffer), header: make(http.Header)}
@@ -251,30 +251,30 @@ func (a *App) RunCommand(ctx context.Context, args []string) error {
 // Serve serves the application server only if it is not already running
 // (possibly in another process). It returns true if it started the
 // application server, or false if it was already running.
-func (a *App) Serve() (bool, error) {
-	if a.serverRunning() {
+func (app *App) Serve() (bool, error) {
+	if app.serverRunning() {
 		return false, nil
 	}
-	return true, a.serve()
+	return true, app.serve()
 }
 
-func (a *App) MustServe() error {
-	return a.serve()
+func (app *App) MustServe() error {
+	return app.serve()
 }
 
-func (a *App) startPythonServer(host string, port int) error {
+func (app *App) startPythonServer(host string, port int) error {
 	// only start the python server if it isn't already running
-	a.pyServerMu.Lock()
-	serverRunning := a.pyServer != nil
-	a.pyServerMu.Unlock()
+	app.pyServerMu.Lock()
+	serverRunning := app.pyServer != nil
+	app.pyServerMu.Unlock()
 	if serverRunning {
-		a.log.Debug("skipping starting python server since it is already non-nil, so should be running")
+		app.log.Debug("skipping starting python server since it is already non-nil, so should be running")
 		return nil
 	}
 
 	// nothing to do if uv isn't installed
 	if _, err := exec.LookPath("uv"); err != nil {
-		a.log.Warn("uv is not installed in PATH; semantic features will be unavailable (to fix: install uv into PATH, then restart app)", zap.Error(err))
+		app.log.Warn("uv is not installed in PATH; semantic features will be unavailable (to fix: install uv into PATH, then restart app)", zap.Error(err))
 		return nil
 	}
 
@@ -316,12 +316,12 @@ func (a *App) startPythonServer(host string, port int) error {
 		return err
 	}
 
-	a.log.Info("starting python server to enable semantic features", zap.String("dir", projectPath))
+	app.log.Info("starting python server to enable semantic features", zap.String("dir", projectPath))
 
 	// run the python server such that the venv is relocated to its own
 	// folder outside the project folder (but still in the app data dir)
 	//nolint:gosec
-	cmd := exec.CommandContext(a.ctx,
+	cmd := exec.CommandContext(app.ctx,
 		"uv", "run", "server.py",
 		"--host", host,
 		"--port", strconv.Itoa(port))
@@ -329,59 +329,59 @@ func (a *App) startPythonServer(host string, port int) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "UV_PROJECT_ENVIRONMENT="+venvPath)
-	a.pyServerMu.Lock()
-	a.pyServer = cmd
-	a.pyServerMu.Unlock()
+	app.pyServerMu.Lock()
+	app.pyServer = cmd
+	app.pyServerMu.Unlock()
 	return cmd.Start() // TODO: need to be sure this stops when our program stops
 }
 
-func (a *App) stopPythonServer() error {
-	a.pyServerMu.Lock()
-	defer a.pyServerMu.Unlock()
-	if a.pyServer == nil {
+func (app *App) stopPythonServer() error {
+	app.pyServerMu.Lock()
+	defer app.pyServerMu.Unlock()
+	if app.pyServer == nil {
 		return nil
 	}
-	if a.pyServer != nil && a.pyServer.Process != nil {
-		return a.pyServer.Process.Kill()
+	if app.pyServer != nil && app.pyServer.Process != nil {
+		return app.pyServer.Process.Kill()
 	}
 	return nil
 }
 
-func (a *App) serve() error {
-	if err := a.openRepos(); err != nil {
+func (app *App) serve() error {
+	if err := app.openRepos(); err != nil {
 		return fmt.Errorf("opening previously-opened repositories: %w", err)
 	}
 
-	if a.server.adminLn != nil {
-		return fmt.Errorf("server already running on %s", a.server.adminLn.Addr())
+	if app.server.adminLn != nil {
+		return fmt.Errorf("server already running on %s", app.server.adminLn.Addr())
 	}
 
-	adminAddr := a.cfg.listenAddr()
-	a.server.fillAllowedOrigins(a.cfg.AllowedOrigins, adminAddr) // for CORS enforcement
+	adminAddr := app.cfg.listenAddr()
+	app.server.fillAllowedOrigins(app.cfg.AllowedOrigins, adminAddr) // for CORS enforcement
 
-	ln, err := new(net.ListenConfig).Listen(a.ctx, "tcp", adminAddr)
+	ln, err := new(net.ListenConfig).Listen(app.ctx, "tcp", adminAddr)
 	if err != nil {
 		return fmt.Errorf("opening listener: %w", err)
 	}
-	a.server.adminLn = ln
+	app.server.adminLn = ln
 
-	a.server.mux = http.NewServeMux()
+	app.server.mux = http.NewServeMux()
 
 	addRoute := func(uriPath string, endpoint Endpoint) {
-		handler := a.server.enforceHost(endpoint)                           // simple DNS rebinding mitigation
-		handler = a.server.enforceOriginAndMethod(endpoint.Method, handler) // simple cross-origin mitigation
-		a.server.mux.Handle(uriPath, wrapErrorHandler(handler))
+		handler := app.server.enforceHost(endpoint)                           // simple DNS rebinding mitigation
+		handler = app.server.enforceOriginAndMethod(endpoint.Method, handler) // simple cross-origin mitigation
+		app.server.mux.Handle(uriPath, wrapErrorHandler(handler))
 	}
 
 	// static file server
-	a.server.staticFiles = http.FileServer(http.FS(a.server.frontend))
+	app.server.staticFiles = http.FileServer(http.FS(app.server.frontend))
 	addRoute("/", Endpoint{
 		Method:  http.MethodGet,
-		Handler: a.server.serveFrontend,
+		Handler: app.server.serveFrontend,
 	})
 
 	// API endpoints
-	for command, endpoint := range a.commands {
+	for command, endpoint := range app.commands {
 		addRoute(apiBasePath+command, endpoint)
 	}
 
@@ -413,20 +413,20 @@ func (a *App) serve() error {
 
 	// TODO: remote server (with TLS mutual auth)
 
-	a.log.Info("started admin server", zap.String("listener", ln.Addr().String()))
-	a.server.httpServer = &http.Server{
-		Handler:           a.server,
+	app.log.Info("started admin server", zap.String("listener", ln.Addr().String()))
+	app.server.httpServer = &http.Server{
+		Handler:           app.server,
 		ReadHeaderTimeout: 10 * time.Second,
 		MaxHeaderBytes:    1024 * 512,
 	}
 
 	go func() {
-		err := a.server.httpServer.Serve(ln)
+		err := app.server.httpServer.Serve(ln)
 		if errors.Is(err, net.ErrClosed) || errors.Is(err, http.ErrServerClosed) {
 			// normal; the listener or server was deliberately closed
-			a.log.Info("stopped server", zap.String("listener", ln.Addr().String()))
+			app.log.Info("stopped server", zap.String("listener", ln.Addr().String()))
 		} else if err != nil {
-			a.log.Error("server failed", zap.String("listener", ln.Addr().String()), zap.Error(err))
+			app.log.Error("server failed", zap.String("listener", ln.Addr().String()), zap.Error(err))
 		}
 	}()
 
@@ -435,7 +435,7 @@ func (a *App) serve() error {
 	// ensure we don't wait longer than a set amount of time
 	const maxWait = 30 * time.Second
 	var cancel context.CancelFunc
-	ctx, cancel := context.WithTimeout(a.ctx, maxWait)
+	ctx, cancel := context.WithTimeout(app.ctx, maxWait)
 	defer cancel()
 
 	// set up HTTP client and request with short timeout and context cancellation
@@ -469,9 +469,9 @@ func (a *App) serve() error {
 	}
 }
 
-func (a *App) serverRunning() bool {
+func (app *App) serverRunning() bool {
 	// TODO: get URL from config?
-	req, err := http.NewRequestWithContext(a.ctx, http.MethodGet, "http://localhost:12002", nil)
+	req, err := http.NewRequestWithContext(app.ctx, http.MethodGet, "http://localhost:12002", nil)
 	if err != nil {
 		return false
 	}
@@ -484,21 +484,22 @@ func (a *App) serverRunning() bool {
 	return resp.Header.Get("Server") == "Timelinize"
 }
 
-func (a *App) openRepos() error {
+// openRepos opens all timeline repositories in the current configuration.
+func (app *App) openRepos() error {
 	// open designated timelines; copy pointer so we don't have to acquire lock on cfg and create deadlock with OpenRepository()
 	// TODO: use race detector to verify ^
-	lastOpenedRepos := a.cfg.Repositories
+	lastOpenedRepos := app.cfg.Repositories
 	for i, repoDir := range lastOpenedRepos {
-		_, err := a.openRepository(a.ctx, repoDir, false)
+		_, err := app.openRepository(app.ctx, repoDir, false)
 		if err != nil {
-			a.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(a.cfg.Repositories)),
+			app.log.Error(fmt.Sprintf("failed to open timeline %d of %d", i+1, len(app.cfg.Repositories)),
 				zap.Error(err),
 				zap.String("dir", repoDir))
 		}
 	}
 
 	// persist config so it can be used on restart
-	if err := a.cfg.autosave(); err != nil {
+	if err := app.cfg.Save(); err != nil {
 		return fmt.Errorf("persisting config file: %w", err)
 	}
 

@@ -65,7 +65,11 @@ type Config struct {
 
 	// Obfuscation is often used for demonstrating the
 	// software to mask personal data and details.
-	Obfuscation timeline.ObfuscationOptions `json:"obfuscation,omitempty"`
+	Obfuscation timeline.ObfuscationOptions `json:"obfuscation,omitzero"`
+
+	// Automatically resume jobs when opening timelines.
+	// Default: true
+	ResumeJobs *bool `json:"resume_jobs,omitempty"`
 
 	log *zap.Logger
 }
@@ -91,8 +95,8 @@ func (cfg *Config) fillDefaults() {
 	}
 }
 
-// autosave persists the config to disk by obtaining a read lock, so it is safe for concurrent use.
-func (cfg *Config) autosave() error {
+// Save persists the config to disk by obtaining a read lock, so it is safe for concurrent use.
+func (cfg *Config) Save() error {
 	cfg.RLock()
 	defer cfg.RUnlock()
 	if err := cfg.unsyncedSave(); err != nil {
@@ -143,7 +147,7 @@ func (cfg *Config) syncOpenRepos() error {
 	cfg.Unlock()
 
 	if !sameOpenTimelines {
-		if err := cfg.autosave(); err != nil {
+		if err := cfg.Save(); err != nil {
 			return err
 		}
 	}
@@ -169,19 +173,19 @@ func DefaultConfigFilePath() string {
 	return filepath.Join(".timelinize", "config.json")
 }
 
-// DefaultCacheDir returns the file path where
-// a local application cache is persisted.
-func DefaultCacheDir() string {
-	cacheDir, err := os.UserCacheDir()
-	if err == nil {
-		return filepath.Join(cacheDir, "timelinize")
-	}
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		return filepath.Join(homeDir, ".timelinize", "cache")
-	}
-	return filepath.Join(".timelinize", "cache")
-}
+// // DefaultCacheDir returns the file path where
+// // a local application cache is persisted.
+// func DefaultCacheDir() string {
+// 	cacheDir, err := os.UserCacheDir()
+// 	if err == nil {
+// 		return filepath.Join(cacheDir, "timelinize")
+// 	}
+// 	homeDir, err := os.UserHomeDir()
+// 	if err == nil {
+// 		return filepath.Join(homeDir, ".timelinize", "cache")
+// 	}
+// 	return filepath.Join(".timelinize", "cache")
+// }
 
 // AppDataDir returns a directory path that is suitable for storing
 // application data on disk. It uses the environment for finding the

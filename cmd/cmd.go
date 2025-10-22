@@ -155,6 +155,14 @@ func getStandardSubcommand(app *tlzapp.App) (string, func() error) {
 			}
 			select {}
 		},
+		"reset": func() error {
+			cfg, err := loadConfigFile()
+			if err != nil {
+				return err
+			}
+			cfg.Repositories = nil
+			return cfg.Save()
+		},
 		"help": func() error { //nolint:unparam // bug filed: https://github.com/mvdan/unparam/issues/82
 			fmt.Println(app.CommandLineHelp())
 			return nil

@@ -158,8 +158,9 @@ func (p *processor) openInteractiveGraphDataFile(g *Graph) (*os.File, error) {
 }
 
 func (p *processor) tempGraphFolder() string {
-	return filepath.Join(
-		os.TempDir(),
-		"timelinize",
-		fmt.Sprintf("job-%d", p.ij.job.ID()))
+	return filepath.Join(appTempDir(), fmt.Sprintf("job-%d", p.ij.job.ID()))
+}
+
+func appTempDir() string {
+	return filepath.Join(os.TempDir(), "timelinize")
 }

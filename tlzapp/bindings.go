@@ -40,11 +40,11 @@ import (
 	"go.uber.org/zap"
 )
 
-func (a App) fileSelectorRoots() ([]fileSelectorRoot, error) {
+func (app App) fileSelectorRoots() ([]fileSelectorRoot, error) {
 	return getFileSelectorRoots()
 }
 
-func (a App) getOpenRepositories() []openedTimeline {
+func (app App) getOpenRepositories() []openedTimeline {
 	openTimelinesMu.RLock()
 	repos := make([]openedTimeline, 0, len(openTimelines))
 	for _, otl := range openTimelines {
@@ -54,14 +54,14 @@ func (a App) getOpenRepositories() []openedTimeline {
 		if err != nil {
 			// huh, it's either gone or we can't access it...
 			// so close it; this removes it from our list
-			a.log.Error("timeline database no longer found; closing",
+			app.log.Error("timeline database no longer found; closing",
 				zap.String("repo", otl.InstanceID.String()),
 				zap.String("db", dbFile))
 			// defer because it needs a write lock on the openTimelinesMu
 			defer func() {
-				err := a.CloseRepository(otl.InstanceID.String())
+				err := app.CloseRepository(otl.InstanceID.String())
 				if err != nil {
-					a.log.Error("closing repository", zap.Error(err))
+					app.log.Error("closing repository", zap.Error(err))
 				}
 			}()
 		} else {
@@ -75,7 +75,7 @@ func (a App) getOpenRepositories() []openedTimeline {
 
 // openRepository opens the timeline at repoDir as long as it
 // is not already open.
-func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (openedTimeline, error) {
+func (app *App) openRepository(ctx context.Context, repoDir string, create bool) (openedTimeline, error) {
 	absRepo, err := filepath.Abs(repoDir)
 	if err != nil {
 		return openedTimeline{}, fmt.Errorf("forming absolute path to repo at '%s': %w", repoDir, err)
@@ -101,9 +101,10 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 
 	var tl *timeline.Timeline
 	if create {
-		tl, err = timeline.Create(ctx, assessment.TimelinePath, DefaultCacheDir())
+		tl, err = timeline.Create(ctx, assessment.TimelinePath)
 	} else {
-		tl, err = timeline.Open(ctx, assessment.TimelinePath, DefaultCacheDir())
+		resumeJobs := app.cfg == nil || app.cfg.ResumeJobs == nil || *app.cfg.ResumeJobs
+		tl, err = timeline.Open(ctx, assessment.TimelinePath, resumeJobs)
 	}
 	if err != nil {
 		return openedTimeline{}, err
@@ -116,7 +117,7 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 	// whether to obfuscate the output... since the timeline package
 	// cannot import this one, we cheat and invert the dependencies
 	tl.SetObfuscationFunc(func() (timeline.ObfuscationOptions, bool) {
-		return a.ObfuscationMode(tl)
+		return app.ObfuscationMode(tl)
 	})
 
 	// check once more that the timeline is not already open; we only
@@ -125,7 +126,7 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 		if otl.InstanceID == tl.ID() {
 			err = tl.Close()
 			if err != nil {
-				a.log.Error("closing redundantly-opened timeline",
+				app.log.Error("closing redundantly-opened timeline",
 					zap.Error(err),
 					zap.String("timeline", assessment.TimelinePath))
 			}
@@ -152,23 +153,23 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 	if create {
 		action = "created"
 	}
-	a.log.Info(action+" timeline",
+	app.log.Info(action+" timeline",
 		zap.String("repo", assessment.TimelinePath),
 		zap.String("id", tlID))
 
 	// persist newly opened repo so it can be resumed on restart
-	if err := a.cfg.syncOpenRepos(); err != nil {
-		a.log.Error("unable to persist config", zap.Error(err))
+	if err := app.cfg.syncOpenRepos(); err != nil {
+		app.log.Error("unable to persist config", zap.Error(err))
 	}
 
 	// start python server if it hasn't started already, if this timeline enables those features
 	if enabled, ok := tl.GetProperty(ctx, "semantic_features").(bool); ok && enabled {
-		a.pyServerMu.Lock()
-		pyServer := a.pyServer
-		a.pyServerMu.Unlock()
+		app.pyServerMu.Lock()
+		pyServer := app.pyServer
+		app.pyServerMu.Unlock()
 		if pyServer == nil {
-			if err := a.startPythonServer(timeline.PyHost, timeline.PyPort); err != nil {
-				a.log.Error("failed starting Python server", zap.Error(err))
+			if err := app.startPythonServer(timeline.PyHost, timeline.PyPort); err != nil {
+				app.log.Error("failed starting Python server", zap.Error(err))
 			}
 		}
 	}
@@ -176,7 +177,7 @@ func (a *App) openRepository(ctx context.Context, repoDir string, create bool) (
 	return otl, nil
 }
 
-func (a *App) CloseRepository(repoID string) error {
+func (app *App) CloseRepository(repoID string) error {
 	openTimelinesMu.Lock()
 	defer openTimelinesMu.Unlock()
 
@@ -191,19 +192,19 @@ func (a *App) CloseRepository(repoID string) error {
 
 	delete(openTimelines, repoID)
 
-	a.log.Info("closed timeline",
+	app.log.Info("closed timeline",
 		zap.String("repo", repoID),
 		zap.String("id", otl.ID().String()))
 
 	// persist newly closed repo
-	if err := a.cfg.syncOpenRepos(); err != nil {
-		a.log.Error("unable to persist config", zap.Error(err))
+	if err := app.cfg.syncOpenRepos(); err != nil {
+		app.log.Error("unable to persist config", zap.Error(err))
 	}
 
 	return nil
 }
 
-func (a App) AddEntity(repoID string, entity timeline.Entity) error {
+func (app App) AddEntity(repoID string, entity timeline.Entity) error {
 	tl, err := getOpenTimeline(repoID)
 	if err != nil {
 		return err
@@ -211,7 +212,7 @@ func (a App) AddEntity(repoID string, entity timeline.Entity) error {
 	return tl.StoreEntity(context.TODO(), entity)
 }
 
-func (a App) GetEntity(repoID string, entityID uint64) (timeline.Entity, error) {
+func (app App) GetEntity(repoID string, entityID uint64) (timeline.Entity, error) {
 	tl, err := getOpenTimeline(repoID)
 	if err != nil {
 		return timeline.Entity{}, err
@@ -220,7 +221,7 @@ func (a App) GetEntity(repoID string, entityID uint64) (timeline.Entity, error) 
 	if err != nil {
 		return timeline.Entity{}, err
 	}
-	if options, obfuscate := a.ObfuscationMode(tl.Timeline); obfuscate {
+	if options, obfuscate := app.ObfuscationMode(tl.Timeline); obfuscate {
 		ent.Anonymize(options)
 	}
 	return ent, nil
@@ -283,7 +284,7 @@ func (a App) GetEntity(repoID string, entityID uint64) (timeline.Entity, error) 
 // 	return acct, nil
 // }
 
-func (a App) RepositoryIsEmpty(repo string) (bool, error) {
+func (app App) RepositoryIsEmpty(repo string) (bool, error) {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return false, err
@@ -291,13 +292,13 @@ func (a App) RepositoryIsEmpty(repo string) (bool, error) {
 	return tl.Empty(), nil
 }
 
-func (a App) AuthAccount(repo string, accountID int64, dsOpt json.RawMessage) error {
+func (app App) AuthAccount(repo string, accountID int64, dsOpt json.RawMessage) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
 	}
 
-	account, err := tl.LoadAccount(a.ctx, accountID)
+	account, err := tl.LoadAccount(app.ctx, accountID)
 	if err != nil {
 		return err
 	}
@@ -313,7 +314,7 @@ func (a App) AuthAccount(repo string, accountID int64, dsOpt json.RawMessage) er
 
 	apiImporter := account.DataSource.NewAPIImporter()
 
-	err = apiImporter.Authenticate(a.ctx, account, dataSourceOpts)
+	err = apiImporter.Authenticate(app.ctx, account, dataSourceOpts)
 	if err != nil {
 		return err
 	}
@@ -337,10 +338,10 @@ type PlannerOptions struct {
 }
 
 // PlanImport produces an import plan with the given settings.
-func (a *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.ProposedImportPlan, error) {
+func (app *App) PlanImport(ctx context.Context, options PlannerOptions) (timeline.ProposedImportPlan, error) {
 	var plan timeline.ProposedImportPlan
 
-	logger := a.log.Named("import_planner").With(zap.String("root", options.Path))
+	logger := app.log.Named("import_planner").With(zap.String("root", options.Path))
 
 	var fsys fs.FS
 	if options.TraverseArchives {
@@ -738,7 +739,7 @@ type ImportParameters struct {
 	// DataSource timeline.DataSource // required: Name, Title, Icon, Description
 }
 
-func (a App) Import(params ImportParameters) (uint64, error) {
+func (app App) Import(params ImportParameters) (uint64, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
 		return 0, err
@@ -770,16 +771,16 @@ func (App) SubmitGraph(repoID string, jobID uint64, g *timeline.Graph, skip bool
 	return tl.Timeline.SubmitGraph(jobID, g, skip)
 }
 
-func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {
+func (app *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResults, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
 		return timeline.SearchResults{}, err
 	}
-	results, err := tl.Search(a.ctx, params)
+	results, err := tl.Search(app.ctx, params)
 	if err != nil {
 		return timeline.SearchResults{}, err
 	}
-	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
+	if options, ok := app.ObfuscationMode(tl.Timeline); ok {
 		results.Anonymize(options)
 	}
 	return results, nil
@@ -787,16 +788,16 @@ func (a *App) SearchItems(params timeline.ItemSearchParams) (timeline.SearchResu
 
 // TODO: all of these methods should be cancelable by the browser... somehow
 
-func (a *App) SearchEntities(params timeline.EntitySearchParams) ([]timeline.Entity, error) {
+func (app *App) SearchEntities(params timeline.EntitySearchParams) ([]timeline.Entity, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
 		return nil, err
 	}
-	results, err := tl.SearchEntities(a.ctx, params)
+	results, err := tl.SearchEntities(app.ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
+	if options, ok := app.ObfuscationMode(tl.Timeline); ok {
 		for i := range results {
 			results[i].Anonymize(options)
 		}
@@ -804,7 +805,7 @@ func (a *App) SearchEntities(params timeline.EntitySearchParams) ([]timeline.Ent
 	return results, nil
 }
 
-func (a *App) DataSources(ctx context.Context, targetDSName string) ([]timeline.DataSourceRow, error) {
+func (app *App) DataSources(ctx context.Context, targetDSName string) ([]timeline.DataSourceRow, error) {
 	openTimelinesMu.RLock()
 	defer openTimelinesMu.RUnlock()
 
@@ -837,7 +838,7 @@ func (a *App) DataSources(ctx context.Context, targetDSName string) ([]timeline.
 	return all, nil
 }
 
-func (a *App) ItemClassifications(repo string) ([]timeline.Classification, error) {
+func (app *App) ItemClassifications(repo string) ([]timeline.Classification, error) {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return nil, err
@@ -859,7 +860,7 @@ type Settings struct {
 	Timelines   map[string]map[string]any `json:"timelines,omitempty"` // map of repo ID to map of property key to value
 }
 
-func (a *App) GetSettings(ctx context.Context) (Settings, error) {
+func (app *App) GetSettings(ctx context.Context) (Settings, error) {
 	openTimelinesMu.RLock()
 	defer openTimelinesMu.RUnlock()
 
@@ -874,12 +875,12 @@ func (a *App) GetSettings(ctx context.Context) (Settings, error) {
 	}
 
 	return Settings{
-		Application: a.cfg,
+		Application: app.cfg,
 		Timelines:   timelineSettings,
 	}, nil
 }
 
-func (a *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsPayload) error {
+func (app *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsPayload) error {
 	if len(newSettings.Timelines) > 0 {
 		for repoID, properties := range newSettings.Timelines {
 			openTimelinesMu.RLock()
@@ -890,12 +891,12 @@ func (a *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsPay
 					return fmt.Errorf("setting properties for timeline %s: %w", repoID, err)
 				}
 				if semantic, ok := properties["semantic_features"].(bool); ok && semantic {
-					if err := a.startPythonServer(timeline.PyHost, timeline.PyPort); err != nil {
-						a.log.Error("could not start Python server", zap.Error(err))
+					if err := app.startPythonServer(timeline.PyHost, timeline.PyPort); err != nil {
+						app.log.Error("could not start Python server", zap.Error(err))
 					}
 				} else {
-					if err := a.stopPythonServer(); err != nil {
-						a.log.Error("could not stop Python server", zap.Error(err))
+					if err := app.stopPythonServer(); err != nil {
+						app.log.Error("could not stop Python server", zap.Error(err))
 					}
 				}
 			} else {
@@ -905,8 +906,8 @@ func (a *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsPay
 	}
 
 	if len(newSettings.Application) > 0 {
-		a.cfg.Lock()
-		defer a.cfg.Unlock()
+		app.cfg.Lock()
+		defer app.cfg.Unlock()
 
 		// some settings, when changed, may necessitate a restart of the server/app to take effect
 		var restart bool
@@ -915,25 +916,25 @@ func (a *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsPay
 			var err error
 			switch key {
 			case "app.mapbox_api_key":
-				err = json.Unmarshal(val, &a.cfg.MapboxAPIKey)
+				err = json.Unmarshal(val, &app.cfg.MapboxAPIKey)
 			case "app.website_dir":
 				var newVal string
 				err = json.Unmarshal(val, &newVal)
-				restart = restart || newVal != a.cfg.WebsiteDir
-				a.cfg.WebsiteDir = newVal
+				restart = restart || newVal != app.cfg.WebsiteDir
+				app.cfg.WebsiteDir = newVal
 			case "app.obfuscation.enabled":
-				err = json.Unmarshal(val, &a.cfg.Obfuscation.Enabled)
+				err = json.Unmarshal(val, &app.cfg.Obfuscation.Enabled)
 			case "app.obfuscation.locations":
-				err = json.Unmarshal(val, &a.cfg.Obfuscation.Locations)
+				err = json.Unmarshal(val, &app.cfg.Obfuscation.Locations)
 			case "app.obfuscation.data_files":
-				err = json.Unmarshal(val, &a.cfg.Obfuscation.DataFiles)
+				err = json.Unmarshal(val, &app.cfg.Obfuscation.DataFiles)
 			}
 			if err != nil {
 				return fmt.Errorf("saving setting %s: %w (value=%s)", key, err, string(val))
 			}
 		}
 
-		if err := a.cfg.unsyncedSave(); err != nil {
+		if err := app.cfg.unsyncedSave(); err != nil {
 			return fmt.Errorf("saving config: %w", err)
 		}
 
@@ -954,7 +955,7 @@ func (a *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsPay
 				if !started {
 					oldApp.log.Error("server not started; maybe the old listener is still bound (please report this as a bug)")
 				}
-			}(a)
+			}(app)
 		}
 	}
 
@@ -962,7 +963,7 @@ func (a *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsPay
 }
 
 // TODO: very experimental
-func (a *App) LoadRecentConversations(ctx context.Context, params timeline.ItemSearchParams) ([]*timeline.Conversation, error) {
+func (app *App) LoadRecentConversations(ctx context.Context, params timeline.ItemSearchParams) ([]*timeline.Conversation, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
 		return nil, err
@@ -971,7 +972,7 @@ func (a *App) LoadRecentConversations(ctx context.Context, params timeline.ItemS
 	if err != nil {
 		return nil, err
 	}
-	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
+	if options, ok := app.ObfuscationMode(tl.Timeline); ok {
 		for _, convo := range convos {
 			for i := range convo.Entities {
 				convo.Entities[i].Anonymize(options)
@@ -984,7 +985,7 @@ func (a *App) LoadRecentConversations(ctx context.Context, params timeline.ItemS
 	return convos, nil
 }
 
-func (a App) LoadConversation(ctx context.Context, params timeline.ItemSearchParams) (timeline.SearchResults, error) {
+func (app App) LoadConversation(ctx context.Context, params timeline.ItemSearchParams) (timeline.SearchResults, error) {
 	tl, err := getOpenTimeline(params.Repo)
 	if err != nil {
 		return timeline.SearchResults{}, err
@@ -993,40 +994,40 @@ func (a App) LoadConversation(ctx context.Context, params timeline.ItemSearchPar
 	if err != nil {
 		return timeline.SearchResults{}, err
 	}
-	if options, ok := a.ObfuscationMode(tl.Timeline); ok {
+	if options, ok := app.ObfuscationMode(tl.Timeline); ok {
 		convo.Anonymize(options)
 	}
 	return convo, nil
 }
 
-func (a App) MergeEntities(repo string, base uint64, others []uint64) error {
+func (app App) MergeEntities(repo string, base uint64, others []uint64) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
 	}
-	return tl.MergeEntities(a.ctx, base, others)
+	return tl.MergeEntities(app.ctx, base, others)
 }
 
-func (a App) DeleteItems(repo string, itemRowIDs []uint64, options timeline.DeleteOptions) error {
+func (app App) DeleteItems(repo string, itemRowIDs []uint64, options timeline.DeleteOptions) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
 	}
-	return tl.DeleteItems(a.ctx, itemRowIDs, options)
+	return tl.DeleteItems(app.ctx, itemRowIDs, options)
 }
 
-func (a App) Jobs(repo string, jobIDs []uint64, mostRecent int) ([]timeline.Job, error) {
+func (app App) Jobs(repo string, jobIDs []uint64, mostRecent int) ([]timeline.Job, error) {
 	if repo != "" {
 		tl, err := getOpenTimeline(repo)
 		if err != nil {
 			return nil, err
 		}
-		return tl.GetJobs(a.ctx, jobIDs, mostRecent)
+		return tl.GetJobs(app.ctx, jobIDs, mostRecent)
 	}
 	return nil, errors.New("TODO: Getting jobs other than by specific IDs not yet implemented")
 }
 
-func (a App) CancelJob(ctx context.Context, repo string, jobID uint64) error {
+func (app App) CancelJob(ctx context.Context, repo string, jobID uint64) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -1034,7 +1035,7 @@ func (a App) CancelJob(ctx context.Context, repo string, jobID uint64) error {
 	return tl.CancelJob(ctx, jobID)
 }
 
-func (a App) PauseJob(ctx context.Context, repo string, jobID uint64) error {
+func (app App) PauseJob(ctx context.Context, repo string, jobID uint64) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -1042,7 +1043,7 @@ func (a App) PauseJob(ctx context.Context, repo string, jobID uint64) error {
 	return tl.PauseJob(ctx, jobID)
 }
 
-func (a App) UnpauseJob(ctx context.Context, repo string, jobID uint64) error {
+func (app App) UnpauseJob(ctx context.Context, repo string, jobID uint64) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -1050,7 +1051,7 @@ func (a App) UnpauseJob(ctx context.Context, repo string, jobID uint64) error {
 	return tl.UnpauseJob(ctx, jobID)
 }
 
-func (a App) StartJob(ctx context.Context, repo string, jobID uint64, startOver bool) error {
+func (app App) StartJob(ctx context.Context, repo string, jobID uint64, startOver bool) error {
 	tl, err := getOpenTimeline(repo)
 	if err != nil {
 		return err
@@ -1063,15 +1064,15 @@ type BuildInfo struct {
 	GoArch string `json:"go_arch"`
 }
 
-func (a *App) BuildInfo() BuildInfo {
+func (app *App) BuildInfo() BuildInfo {
 	return BuildInfo{
 		GoOS:   runtime.GOOS,
 		GoArch: runtime.GOARCH,
 	}
 }
 
-func (a App) ObfuscationMode(repo *timeline.Timeline) (timeline.ObfuscationOptions, bool) {
-	a.cfg.RLock()
-	defer a.cfg.RUnlock()
-	return a.cfg.Obfuscation, a.cfg.Obfuscation.AppliesTo(repo)
+func (app App) ObfuscationMode(repo *timeline.Timeline) (timeline.ObfuscationOptions, bool) {
+	app.cfg.RLock()
+	defer app.cfg.RUnlock()
+	return app.cfg.Obfuscation, app.cfg.Obfuscation.AppliesTo(repo)
 }

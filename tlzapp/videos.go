@@ -36,7 +36,7 @@ import (
 
 // Transcode transcodes the file at inputPath, or inputStream (but not both), to contentType, and writes it to output.
 // inputStream can only be used on video files that can be streamed (MP4, for example, requires seeking and cannot be streamed in).
-func (a *App) Transcode(ctx context.Context, inputPath string, inputStream io.Reader, contentType string, output io.Writer, blur bool) error {
+func (app *App) Transcode(ctx context.Context, inputPath string, inputStream io.Reader, contentType string, output io.Writer, blur bool) error {
 	if inputPath != "" && inputStream != nil {
 		return errors.New("cannot specify both an input path and an input stream")
 	}
@@ -50,7 +50,7 @@ func (a *App) Transcode(ctx context.Context, inputPath string, inputStream io.Re
 	// stream, but that is incorrect in the case of Google Motion Pictures. So this function is used to select the best stream.
 	videoStreamMapping, err := determineVideoStream(ctx, inputPath)
 	if err != nil {
-		a.log.Error("unable to determine best video stream; using ffmpeg default stream selection", zap.Error(err))
+		app.log.Error("unable to determine best video stream; using ffmpeg default stream selection", zap.Error(err))
 	}
 
 	input := inputPath
@@ -114,26 +114,26 @@ func (a *App) Transcode(ctx context.Context, inputPath string, inputStream io.Re
 		return err
 	}
 
-	a.log.Debug("exec " + cmd.String())
+	app.log.Debug("exec " + cmd.String())
 
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 
-	a.log.Debug("ffmpeg command started", zap.Int("pid", cmd.Process.Pid))
+	app.log.Debug("ffmpeg command started", zap.Int("pid", cmd.Process.Pid))
 
 	n, err := io.Copy(output, stdout)
 	if err != nil {
 		return fmt.Errorf("copy error: %w", err)
 	}
 
-	a.log.Debug("finished streaming transcoded video", zap.Int64("bytes", n))
+	app.log.Debug("finished streaming transcoded video", zap.Int64("bytes", n))
 
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("waiting: %w", err)
 	}
 
-	a.log.Debug("ffmpeg command completed", zap.Int("pid", cmd.Process.Pid))
+	app.log.Debug("ffmpeg command completed", zap.Int("pid", cmd.Process.Pid))
 
 	return nil
 }

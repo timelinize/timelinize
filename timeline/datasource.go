@@ -210,6 +210,8 @@ type Recognition struct {
 
 	// Optional; TODO: used?
 	SnapshotDate *time.Time `json:"snapshot_date,omitempty"`
+
+	// TODO: Add some sort of warning/notice/message if the recognizer has advice/info for the user
 }
 
 // DirEntry is a fs.DirEntry that represents a directory entry (file

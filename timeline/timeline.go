@@ -50,7 +50,6 @@ type Timeline struct {
 	cancel context.CancelFunc // to be called only by the shutdown routine
 
 	repoDir      string              // path of the timeline repository
-	cacheDir     string              // path of the cache folder (not including the repository subfolder); this generally exists outside the timeline
 	rateLimiters map[int64]RateLimit // keyed by account ID
 	id           uuid.UUID
 
@@ -97,7 +96,7 @@ func (tl *Timeline) SetObfuscationFunc(f func() (ObfuscationOptions, bool)) { tl
 // path is already a Timelinize repo, then fs.ErrExist is returned.
 //
 // Timelines should always be Close()'d for a clean shutdown when done.
-func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
+func Create(ctx context.Context, repoPath string) (*Timeline, error) {
 	// ensure the directory exists
 	err := os.MkdirAll(repoPath, 0755)
 	if err != nil {
@@ -143,7 +142,7 @@ func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
 		}
 	}
 
-	return openAndProvisionTimeline(ctx, repoPath, cacheDir)
+	return openAndProvisionTimeline(ctx, repoPath, false)
 }
 
 // directoryEmpty returns true if dirPath is an empty directory except for some
@@ -308,7 +307,7 @@ func AssessFolder(fpath string) FolderAssessment {
 // it does not attempt to create one if it does not already exist.
 // Timelines should always be Close()'d for a clean shutdown when done.
 // TODO: what happens if a timeline folder is (re)moved while it is open?
-func Open(ctx context.Context, repo, cache string) (*Timeline, error) {
+func Open(ctx context.Context, repo string, resumeJobs bool) (*Timeline, error) {
 	// construct filenames within this repo folder specifically
 	repoDBFile := filepath.Join(repo, DBFilename)
 	repoDataFolder := filepath.Join(repo, DataFolderName)
@@ -327,18 +326,18 @@ func Open(ctx context.Context, repo, cache string) (*Timeline, error) {
 		return nil, fmt.Errorf("data folder exists but database is missing within %s - please choose a folder that is either empty or a fully-initialized timeline", repo)
 	}
 
-	return openAndProvisionTimeline(ctx, repo, cache)
+	return openAndProvisionTimeline(ctx, repo, resumeJobs)
 }
 
-func openAndProvisionTimeline(ctx context.Context, repoDir, cacheDir string) (*Timeline, error) {
+func openAndProvisionTimeline(ctx context.Context, repoDir string, resumeJobs bool) (*Timeline, error) {
 	db, err := openAndProvisionTimelineDB(ctx, repoDir)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
-	return openTimeline(ctx, repoDir, cacheDir, db)
+	return openTimeline(ctx, repoDir, db, resumeJobs)
 }
 
-func openTimeline(ctx context.Context, repoDir, cacheDir string, db sqliteDB) (*Timeline, error) {
+func openTimeline(ctx context.Context, repoDir string, db sqliteDB, resumeJobs bool) (*Timeline, error) {
 	repoMarkerFile := filepath.Join(repoDir, MarkerFilename)
 
 	var err error
@@ -394,7 +393,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db sqliteDB) (*
 	}
 
 	// only used for development
-	// if err := wipeRepo(ctx, repoDir, db, thumbsDB, true); err != nil {
+	// if err := wipeRepo(ctx, repoDir, db, thumbsDB, true, true); err != nil {
 	// 	return nil, err
 	// }
 
@@ -404,7 +403,6 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db sqliteDB) (*
 		ctx:                 ctx,
 		cancel:              cancel,
 		repoDir:             repoDir,
-		cacheDir:            cacheDir,
 		rateLimiters:        make(map[int64]RateLimit),
 		id:                  id,
 		db:                  db,
@@ -423,41 +421,43 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db sqliteDB) (*
 	// the DB occasionally
 	go tl.maintenanceLoop()
 
-	// start any jobs that were interrupted or which are queued; import jobs
-	// in particular should only be run if they're on the same machine, since
-	// it's likely that filepaths change or don't exist on different machines
-	// (we use a DB lock now because we've started a maintenance loop, and also
-	// starting jobs involve DB concurrency)
-	hostname, err := os.Hostname()
-	if err != nil {
-		Log.Error("unable to lookup hostname for resuming jobs", zap.Error(err))
-	}
-	rows, err := db.ReadPool.QueryContext(ctx,
-		`SELECT id
+	if resumeJobs {
+		// start any jobs that were interrupted or which are queued; import jobs
+		// in particular should only be run if they're on the same machine, since
+		// it's likely that filepaths change or don't exist on different machines
+		// (we use a DB lock now because we've started a maintenance loop, and also
+		// starting jobs involve DB concurrency)
+		hostname, err := os.Hostname()
+		if err != nil {
+			Log.Error("unable to lookup hostname for resuming jobs", zap.Error(err))
+		}
+		rows, err := db.ReadPool.QueryContext(ctx,
+			`SELECT id
 		FROM jobs
 		WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
 		ORDER BY start, created
 		LIMIT 3`, JobQueued, JobInterrupted, hostname, JobTypeImport)
-	if err != nil {
-		return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("could not query jobs to resume: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var jobID uint64
-		err := rows.Scan(&jobID)
 		if err != nil {
-			return nil, fmt.Errorf("scanning row for resuming job: %w", err)
+			return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
 		}
-		Log.Info("resuming job that was queued or interrupted", zap.Uint64("job_id", jobID))
-		if err = tl.StartJob(ctx, jobID, false); err != nil {
-			return nil, fmt.Errorf("starting job %d from last open: %w", jobID, err)
+		if err != nil {
+			return nil, fmt.Errorf("could not query jobs to resume: %w", err)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating rows for resuming jobs: %w", err)
+		defer rows.Close()
+		for rows.Next() {
+			var jobID uint64
+			err := rows.Scan(&jobID)
+			if err != nil {
+				return nil, fmt.Errorf("scanning row for resuming job: %w", err)
+			}
+			Log.Info("resuming job that was queued or interrupted", zap.Uint64("job_id", jobID))
+			if err = tl.StartJob(ctx, jobID, false); err != nil {
+				return nil, fmt.Errorf("starting job %d from last open: %w", jobID, err)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterating rows for resuming jobs: %w", err)
+		}
 	}
 
 	return tl, nil
@@ -466,7 +466,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db sqliteDB) (*
 // wipeRepo is used only for development purposes.
 //
 //nolint:unused
-func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB sqliteDB, deleteDataFilesAndAssets bool) error {
+func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB sqliteDB, deleteDataFilesAndAssets, deleteAppTempFiles bool) error {
 	Log.Warn("WIPING REPO...", zap.String("dir", repoDir), zap.Bool("data_files", deleteDataFilesAndAssets))
 	_, err := db.WritePool.ExecContext(ctx, `DELETE FROM embeddings`)
 	if err != nil {
@@ -517,6 +517,12 @@ func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB sqliteDB, delete
 		}
 		if err := os.RemoveAll(assetsPath); err != nil {
 			return fmt.Errorf("deleting assets: %w", err)
+		}
+	}
+	if deleteAppTempFiles {
+		tempDir := appTempDir()
+		if err := os.RemoveAll(tempDir); err != nil {
+			return fmt.Errorf("deleting temp files %s: %w", tempDir, err)
 		}
 	}
 	Log.Warn("REPO WIPE COMPLETED.", zap.String("dir", repoDir))

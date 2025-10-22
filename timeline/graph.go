@@ -205,7 +205,7 @@ type Item struct {
 	// For example, we display and think of chat messages very
 	// differently than we do personal notes and social media
 	// posts.
-	Classification Classification `json:"classification,omitempty"`
+	Classification Classification `json:"classification,omitzero"`
 
 	// The timestamp when the item originated. If multiple
 	// timestamps are available, prefer the timestamp when the
@@ -213,43 +213,43 @@ type Item struct {
 	// example, a photograph is captured at one timestamp and
 	// posted online at another; prefer the first timestamp
 	// when it was originally captured.
-	Timestamp time.Time `json:"timestamp,omitempty"`
+	Timestamp time.Time `json:"timestamp,omitzero"`
 
 	// An optional ending timestamp to make this item span
 	// time instead of being a point in time. If set, it must
 	// be a time after Timestamp. This gives an item duration.
-	Timespan time.Time `json:"timespan,omitempty"`
+	Timespan time.Time `json:"timespan,omitzero"`
 
 	// An optional ending timestamp indicating that the item's
 	// actual timestamp is between Timestamp and Timeframe, but
 	// it's not certain exactly when.
-	Timeframe time.Time `json:"timeframe,omitempty"`
+	Timeframe time.Time `json:"timeframe,omitzero"`
 
 	// Approximate error of the time values.
-	TimeUncertainty time.Duration `json:"time_uncertainty,omitempty"`
+	TimeUncertainty time.Duration `json:"time_uncertainty,omitzero"`
 
 	// The coordinates where the item originated.
 	// TODO: Rename to Geolocation or Coordinates?
-	Location Location `json:"location,omitempty"`
+	Location Location `json:"location,omitzero"`
 
 	// The person who owns, created, or originated the item. At
 	// least one attribute is required: an identifying attribute
 	// like a user ID of the person on this data source.
-	Owner Entity `json:"owner,omitempty"`
+	Owner Entity `json:"owner,omitzero"`
 
 	// If applicable, path to the item on the original data
 	// source, including the filename. Note that this can take
 	// on different formats depending on the data source; for
 	// example, iPhone backups provide paths relative to a
 	// domain, so the paths may be in the form "Domain:Path".
-	OriginalLocation string `json:"original_location,omitempty"`
+	OriginalLocation string `json:"original_location,omitzero"`
 
 	// If applicable, path to the item relative to the root of the
 	// import, including the filename.
-	IntermediateLocation string `json:"intermediate_location,omitempty"`
+	IntermediateLocation string `json:"intermediate_location,omitzero"`
 
 	// The actual content of the item.
-	Content ItemData `json:"content,omitempty"`
+	Content ItemData `json:"content,omitzero"`
 
 	// Optional extra information about the item. Keys should
 	// be human-readable and formatted as natural titles or
@@ -273,7 +273,7 @@ type Item struct {
 	// if you know it will be processed in multiple pieces),
 	// since setting a retrieval key forces reprocessing of the
 	// item, which is less efficient than skipping duplicates.
-	Retrieval ItemRetrieval `json:"retrieval,omitempty"`
+	Retrieval ItemRetrieval `json:"retrieval,omitzero"`
 
 	// the following fields are used to store state across
 	// phases of the processing pipeline, data sources
@@ -706,18 +706,19 @@ const (
 )
 
 // Merge adds the incoming metadata to m according to the specified conflict policy.
+// If m is nil (actually nil, not a nil map) or if incoming is empty, this is a no-op.
 func (m *Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
-	if len(incoming) == 0 {
+	if m == nil || len(incoming) == 0 {
 		return
 	}
 	// we want to allow the caller to not have to worry about instantiating the
 	// map m, so we take a pointer receiver and call make() for them, if necessary,
-	// in order to avoid a panic; we have to check for m being both nil or a nil
-	// map, which are different: m is almost never going to actually be nil, but
+	// in order to avoid a panic; we have to check for m being a nil map, which is
+	// different from nil: m is almost never going to actually be nil, but
 	// a map that hasn't had make() called yet is a nil map, and I think we need
 	// reflection to detect that, OR we can just check if it's empty -- replacing
 	// an empty map should be fine (famous last words) (fixes issue #160)
-	if m == nil || len(*m) == 0 {
+	if len(*m) == 0 {
 		meta := make(Metadata)
 		*m = meta
 	}

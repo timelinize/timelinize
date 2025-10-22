@@ -77,7 +77,7 @@ type Entity struct {
 
 	// Fields below are only for use with search or JSON serialization
 	JobID    *int64     `json:"job_id,omitempty"`
-	Stored   time.Time  `json:"stored,omitempty"`
+	Stored   time.Time  `json:"stored,omitzero"`
 	Modified *time.Time `json:"modified,omitempty"`
 }
 
