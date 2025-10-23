@@ -668,7 +668,6 @@ on('click', '.start-job', async e => {
 	// clear any previous stats (issue #158)
 	// (can happen if timeline is cleared between test runs)
 	delete tlz.jobStats[jobID];
-	delete $('#chart-active-job-throughput')?.chart;
 
 	for (const elem of $$(`.start-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
@@ -699,7 +698,6 @@ on('click', '.restart-job', async e => {
 
 	// clear previous stats (issue #158)
 	delete tlz.jobStats[jobID];
-	delete $('#chart-active-job-throughput')?.chart;
 
 	for (const elem of $$(`.restart-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
