@@ -81,6 +81,8 @@ func openAndProvisionTimelineDB(ctx context.Context, repoDir string) (sqliteDB, 
 // This pattern is inspired by the comment by a go-sqlite
 // maintainer here:
 // https://github.com/mattn/go-sqlite3/issues/1022#issuecomment-1067353980
+// and here:
+// https://github.com/mattn/go-sqlite3/issues/1179#issuecomment-1638083995
 type sqliteDB struct {
 	WritePool, ReadPool *sql.DB
 }
@@ -101,6 +103,26 @@ func (db sqliteDB) Close() error {
 
 // openSqliteDB opens a pair of pools to the DB according to the pattern
 // recommended here: https://github.com/mattn/go-sqlite3/issues/1022#issuecomment-1067353980
+//
+// "Note that you need to prefix your connection string with file: for the various options to
+// be interpreted properly. Also, you should not call sql.Open once per worker, as sql.DB
+// itself represents a pool, not an individual connection. My general recommendation is to make
+// two pools (as in two sql.DBs), one with mode=ro and one with mode=rw. Use wal mode
+// (_journal_mode=wal), which will allow reads to happen concurrently with writes. Do not use
+// shared cache mode. Throttle the read/write pool to a single connection using SetMaxOpenConns,
+// as SQLite doesn't support multiple concurrent writers anyway. The read-only pool should be
+// throttled as per your application requirements and system constraints. The read/write pool
+// should also use BEGIN IMMEDITATE when starting transactions (_txlock=immediate), to avoid
+// certain issues that can result in "database is locked" errors." -rittneje
+//
+// The same maintainer explains the reason for the BEGIN IMMEDIATE at
+// https://github.com/mattn/go-sqlite3/issues/1179#issuecomment-1638083995:
+// "Whenever you start a transaction that might write to the database, always use BEGIN IMMEDIATE,
+// not the default (BEGIN DEFERRED). Otherwise, if another connection also writes to the database
+// in the middle of your transaction, you can get SQLITE_BUSY without your busy handler even being
+// triggered, due to SQLite's need to enforce the ACID requirements of a database engine. If your
+// transaction will definitely only read, then you should continue to use BEGIN DEFERRED in order
+// to allow concurrent reads to function."
 func openSqliteDB(ctx context.Context, dbPath string) (sqliteDB, error) {
 	var db sqliteDB
 

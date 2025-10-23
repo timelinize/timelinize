@@ -424,6 +424,15 @@ func (tl *Timeline) runJob(row Job) error {
 					zap.Any("error", r),
 					zap.String("stack", string(debug.Stack())))
 			}
+
+			// apparently it's best-practice to checkpoint at the end of large write operations:
+			// https://github.com/mattn/go-sqlite3/issues/1022#issuecomment-1071755879
+			// "One thing I will suggest is running pragma wal_checkpoint after committing the
+			// insert transaction, as that will merge the WAL file back into the main database file,
+			// which will make subsequent reads faster." -rittneje
+			if _, err := tl.db.WritePool.ExecContext(ctx, "PRAGMA wal_checkpoint"); err != nil {
+				logger.Error("could not create WAL checkpoint", zap.Error(err))
+			}
 		}()
 
 		// when we're done here, clean up our map of active jobs
