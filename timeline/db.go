@@ -37,7 +37,7 @@ import (
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3" // register the sqlite3 driver
+	_ "github.com/mattn/go-sqlite3" // importing registers the sqlite3 driver
 	"github.com/timelinize/timelinize/datasources"
 	"go.uber.org/zap"
 )
@@ -77,6 +77,10 @@ func openAndProvisionTimelineDB(ctx context.Context, repoDir string) (sqliteDB, 
 // (such as INSERT, UPDATE, DELETE, etc); use ReadPool
 // for SELECT, EXPLAIN QUERY PLAN, and other transactions
 // that only do reads.
+//
+// This pattern is inspired by the comment by a go-sqlite
+// maintainer here:
+// https://github.com/mattn/go-sqlite3/issues/1022#issuecomment-1067353980
 type sqliteDB struct {
 	WritePool, ReadPool *sql.DB
 }
@@ -95,6 +99,8 @@ func (db sqliteDB) Close() error {
 	return nil
 }
 
+// openSqliteDB opens a pair of pools to the DB according to the pattern
+// recommended here: https://github.com/mattn/go-sqlite3/issues/1022#issuecomment-1067353980
 func openSqliteDB(ctx context.Context, dbPath string) (sqliteDB, error) {
 	var db sqliteDB
 
@@ -200,6 +206,12 @@ func openTimelineDB(ctx context.Context, repoDir string) (sqliteDB, error) {
 	err = db.ReadPool.QueryRowContext(ctx, "SELECT sqlite_version() AS version").Scan(&version)
 	if err == nil {
 		Log.Info("using sqlite", zap.String("version", version))
+	}
+
+	// configure optimizations according to recommendations in sqlite docs
+	_, err = db.WritePool.ExecContext(ctx, `PRAGMA optimize=0x10002`)
+	if err != nil {
+		return db, fmt.Errorf("setting optimization pragma: %w", err)
 	}
 
 	return db, nil
@@ -389,7 +401,7 @@ func openThumbsDB(ctx context.Context, repoDir string) (sqliteDB, error) {
 	}
 	_, err = db.WritePool.ExecContext(ctx, `PRAGMA optimize=0x10002`)
 	if err != nil {
-		Log.Error("optimizing database: %w", zap.Error(err))
+		return db, fmt.Errorf("setting optimization pragma: %w", err)
 	}
 	return db, nil
 }
@@ -399,7 +411,6 @@ func provisionThumbsDB(ctx context.Context, thumbsDB sqliteDB, repoID uuid.UUID)
 	if err != nil {
 		return fmt.Errorf("setting up thumbnail database: %w", err)
 	}
-
 	// link this database to the repo
 	_, err = thumbsDB.WritePool.ExecContext(ctx, `INSERT OR IGNORE INTO repo_link (repo_id) VALUES (?)`, repoID.String())
 	if err != nil {

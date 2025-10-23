@@ -50,7 +50,8 @@ func (p *processor) pipeline(ctx context.Context, batch []*Graph) error {
 	// But when running ANALYZE every so often, it only took 23 minutes.
 	// (This was before the DB indexes in the import process were optimized.)
 	// We optimize more frequently at the beginning of large imports, and
-	// less often thereafter.
+	// less often thereafter. We actually just run PRAGMA optimize to let
+	// sqlite decide if ANALYZE is needed.
 	const optimizeFrequencyThreshold = 10000
 	p.rootGraphCount += len(batch)
 	if (p.rootGraphCount <= optimizeFrequencyThreshold && p.rootGraphCount%3500 < len(batch)) ||

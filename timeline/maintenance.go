@@ -42,19 +42,37 @@ func (tl *Timeline) maintenanceLoop() {
 	//
 	// "Applications with long-lived database connections should run "PRAGMA
 	// optimize=0x10002" when the database connection first opens, then run
-	// "PRAGMA optimize" again at periodic intervals - perhaps once per day.
-	// All applications should run "PRAGMA optimize" after schema changes,
-	// especially CREATE INDEX."
+	// "PRAGMA optimize" again at periodic intervals - perhaps once per day
+	// or even once per hour. All applications should run "PRAGMA optimize"
+	// after schema changes, especially CREATE INDEX."
 	// - https://www.sqlite.org/pragma.html#pragma_optimize
+	// - https://sqlite.org/lang_analyze.html#autoanalyze
 	//
-	// We stray slightly from this guidance and just run ANALYZE in the
-	// background at startup, and on a ticker or after large imports.
-	// I found occasions where 'PRAGMA optimize' did not fix a slow query
-	// when ANALYZE did. Maybe it was just under a threshold, I dunno.
+	// We used to just run ANALYZE, as it was fast enough for me, but
+	// some users reported extreme slowness (several minutes of blocking
+	// every few minutes), so we're back to following the instructions.
+	// (I'm a stubborn learner.)
+	//
+	// The docs do repeatedly say "per/each connection," and recommend for
+	// connection close, but we don't have control over that with Go's
+	// database/sql APIs, which pools connections. So we just hope the
+	// pooled connection, with its single writer, is sufficient, even
+	// though we have readers in another pool.
 	//
 	// https://x.com/mholt6/status/1865169910940471492
 	// --> https://x.com/carlsverre/status/1865185078067835167 (whole thread)
 	go tl.optimizeDB(logger)
+
+	// also optimize thumbnails DB while we're at it
+	go func() {
+		logger.Info("optimizing thumbnails database for performance")
+		start := time.Now()
+		_, err = tl.thumbs.WritePool.ExecContext(tl.ctx, "PRAGMA optimize")
+		if err != nil {
+			logger.Error("optimizing thumbnails database: %w", zap.Error(err))
+		}
+		logger.Info("finished optimizing thumbnails database", zap.Duration("duration", time.Since(start)))
+	}()
 
 	deletionTicker := time.NewTicker(time.Minute)
 	defer deletionTicker.Stop()
@@ -78,7 +96,7 @@ func (tl *Timeline) maintenanceLoop() {
 	}
 }
 
-// optimizeDB runs ANALYZE on the database. It can be very slow.
+// optimizeDB runs 'PRAGMA optimize' on the database.
 // Recommended to run in a goroutine.
 func (tl *Timeline) optimizeDB(logger *zap.Logger) {
 	// don't overlap if optimization is already running
@@ -89,7 +107,7 @@ func (tl *Timeline) optimizeDB(logger *zap.Logger) {
 
 	logger.Info("optimizing database for performance")
 	start := time.Now()
-	_, err := tl.db.WritePool.ExecContext(tl.ctx, "ANALYZE")
+	_, err := tl.db.WritePool.ExecContext(tl.ctx, "PRAGMA optimize")
 	if err != nil {
 		logger.Error("analyzing database: %w", zap.Error(err))
 	}
