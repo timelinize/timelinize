@@ -450,6 +450,10 @@ on('click', '#start-import', async event => {
 		duration: 2000
 	});
 
+	// clear any previous stats for a job with this ID (issue #158)
+	// (can happen if timeline is cleared between test runs)
+	delete tlz.jobStats[result.job_id];
+
 	if (importParams.job.processing_options.interactive) {
 		// take user to page where they can begin their interactive import
 		navigateSPA(`/input?repo_id=${repoID}&job_id=${result.job_id}`, true);

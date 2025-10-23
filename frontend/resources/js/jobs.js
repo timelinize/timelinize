@@ -665,6 +665,11 @@ on('click', '.start-job', async e => {
 
 	await app.StartJob(tlz.openRepos[0].instance_id, jobID, false);
 
+	// clear any previous stats (issue #158)
+	// (can happen if timeline is cleared between test runs)
+	delete tlz.jobStats[jobID];
+	delete $('#chart-active-job-throughput')?.chart;
+
 	for (const elem of $$(`.start-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
 		let textElem = $('.start-job-text', elem); // for links that have more than just the text in it
@@ -691,6 +696,10 @@ on('click', '.restart-job', async e => {
 	}
 
 	await app.StartJob(tlz.openRepos[0].instance_id, jobID, true);
+
+	// clear previous stats (issue #158)
+	delete tlz.jobStats[jobID];
+	delete $('#chart-active-job-throughput')?.chart;
 
 	for (const elem of $$(`.restart-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
