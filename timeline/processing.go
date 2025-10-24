@@ -1318,8 +1318,8 @@ func (p *processor) insertOrUpdateItem(ctx context.Context, tx *sql.Tx, ir ItemR
 }
 
 // detectContentType strives to detect the media type of the item using the
-// peeked bytes. It sets it.Content.MediaType.
-func detectContentType(peekedBytes []byte, it *Item) {
+// peeked bytes, and if necessary, it will use the file extension.
+func detectContentType(peekedBytes []byte, filename string) string {
 	// the value returned by http.DetectContentType() if it has no answer
 	const defaultContentType = "application/octet-stream"
 
@@ -1339,7 +1339,7 @@ func detectContentType(peekedBytes []byte, it *Item) {
 	}
 
 	// if we still don't know, try the file extension as a last resort
-	ext := path.Ext(it.Content.Filename)
+	ext := path.Ext(filename)
 	if contentType == defaultContentType || contentType == "" {
 		if typeByExt := typeByExtension(ext); typeByExt != "" {
 			contentType = typeByExt
@@ -1359,7 +1359,7 @@ func detectContentType(peekedBytes []byte, it *Item) {
 		}
 	}
 
-	it.Content.MediaType = contentType
+	return contentType
 }
 
 // validTime returns a valid form of the given time, as far as our application is concerned.

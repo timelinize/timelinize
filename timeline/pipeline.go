@@ -328,7 +328,7 @@ func (p *processor) downloadItemData(ctx context.Context, it *Item) error {
 		// now that we have a sample of the data (or possibly all of it),
 		// we can sniff the content-type
 		if it.Content.MediaType == "" {
-			detectContentType(bufferedContent, it)
+			it.Content.MediaType = detectContentType(bufferedContent, it.Content.Filename)
 		}
 
 		if n < len(buf) && it.Content.isPlainTextOrMarkdown() {

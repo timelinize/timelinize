@@ -19,6 +19,7 @@
 package timeline
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,7 +41,6 @@ func (p *processor) interactiveGraph(ctx context.Context, root *Graph, opts *Int
 		return err
 	}
 
-	// download the data from the graph in the background while we present the initial structure to the user
 	if err := p.downloadGraphDataFiles(ctx, root, opts); err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (p *processor) assignGraphIDs(g *Graph) {
 	}
 }
 
-//nolint:unparam // TODO: file bug; opts is definitely used!
+//nolint:unparam // FIXME: linter false positive, bug filed: https://github.com/mvdan/unparam/issues/88
 func (p *processor) downloadGraphDataFiles(ctx context.Context, g *Graph, opts *InteractiveImport) error {
 	if g == nil {
 		return nil
@@ -92,43 +92,70 @@ func (p *processor) downloadGraphDataFiles(ctx context.Context, g *Graph, opts *
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
 	if (g.Item != nil && g.Item.Content.Data != nil) ||
 		(g.Entity != nil && g.Entity.NewPicture != nil) {
-		go func() {
-			// TODO: Use CoW (write to a .tmp or .dl file first, then rename when finished, so we can know if it is complete)
-			file, err := p.openInteractiveGraphDataFile(g)
-			if err != nil {
-				p.log.Error("opening graph data file", zap.Error(err))
-				return
-			}
-			defer file.Close()
+		// TODO: Do CoW (write to a .tmp or .dl file first, then rename when finished, so we know by observation if it is complete
+		file, err := p.openInteractiveGraphDataFile(g)
+		if err != nil {
+			return fmt.Errorf("openin graph data file: %w", err)
+		}
+		// don't defer close, since we need to write to it in a goroutine
 
-			// open the reader for either the item data or the entity picture
-			var dataReader io.ReadCloser
-			if g.Item != nil && g.Item.Content.Data != nil {
-				dataReader, err = g.Item.Content.Data(ctx)
-			} else if g.Entity != nil && g.Entity.NewPicture != nil {
-				dataReader, err = g.Entity.NewPicture(ctx)
-			}
-			if err != nil {
-				p.log.Error("opening data reader from graph", zap.Error(err))
-				return
-			}
-			defer dataReader.Close()
+		var dataFilename string
 
-			// now copy the data to the file
-			if _, err := io.Copy(file, dataReader); err != nil {
-				p.log.Error("copying data to temporary file", zap.Error(err))
-				return
+		// open the reader for either the item data or the entity picture
+		var dataReader io.ReadCloser
+		if g.Item != nil && g.Item.Content.Data != nil {
+			dataFilename = g.Item.Content.Filename
+			dataReader, err = g.Item.Content.Data(ctx)
+		} else if g.Entity != nil && g.Entity.NewPicture != nil {
+			dataReader, err = g.Entity.NewPicture(ctx)
+		}
+		// TODO: download the item owner's profile picture too, if available (though I don't know of anywhere this happens yet)
+		// if g.Item != nil && g.Item.Owner.NewPicture != nil {
+		// }
+		if err != nil {
+			_ = file.Close()
+			return fmt.Errorf("opening data reader from graph: %w", err)
+		}
+		// don't defer close of the data reader, since we need to read from it in a goroutine
+
+		// read a few bytes off the top to detect the media type, if missing (for item files only)
+		dataReader, err = p.fillMediaTypeOfInteractiveGraph(g, dataReader, dataFilename)
+		if err != nil {
+			_ = dataReader.Close()
+			_ = file.Close()
+
+			if rmErr := os.Remove(file.Name()); rmErr != nil {
+				p.log.Info("could not clean up data file",
+					zap.Error(rmErr),
+					zap.String("filename", file.Name()))
 			}
-			if err := file.Sync(); err != nil {
-				p.log.Error("syncing data file", zap.Error(err))
+
+			if errors.Is(err, io.EOF) {
+				p.log.Info("data file had no content", zap.String("filename", dataFilename))
+			} else {
+				return fmt.Errorf("trying to determine media type: %w", err)
 			}
-		}()
+		} else {
+			// only proceed to copy the file contents if we didn't already get an EOF (or any other error)
+			go func() {
+				defer file.Close()
+				defer dataReader.Close()
+
+				if _, err := io.Copy(file, dataReader); err != nil {
+					p.log.Error("copying data to temporary file", zap.Error(err))
+					return
+				}
+
+				if err := file.Sync(); err != nil {
+					p.log.Error("syncing data file", zap.Error(err))
+				}
+			}()
+		}
 	}
-	// TODO: download the item owner's profile picture too, if available (though I don't know of anywhere this happens yet)
-	// if g.Item != nil && g.Item.Owner.NewPicture != nil {
-	// }
+
 	for _, edge := range g.Edges {
 		if err := p.downloadGraphDataFiles(ctx, edge.From, opts); err != nil {
 			return err
@@ -138,6 +165,35 @@ func (p *processor) downloadGraphDataFiles(ctx context.Context, g *Graph, opts *
 		}
 	}
 	return nil
+}
+
+func (p *processor) fillMediaTypeOfInteractiveGraph(g *Graph, dataReader io.ReadCloser, dataFilename string) (io.ReadCloser, error) {
+	// if there is no item data file, or it already has a content-type, no-op
+	if g.Item == nil || g.Item.Content.MediaType != "" {
+		return dataReader, nil
+	}
+
+	const peekSize = 1024
+	buf := make([]byte, peekSize)
+
+	n, err := io.ReadFull(dataReader, buf)
+
+	// ignore ErrUnexpectedEOF, it just means the content is short;
+	// return if there's EOF (caller must handle) -- means no content;
+	// obviously return if there's any other error too
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return dataReader, err
+	}
+
+	// in case the content was short, use only written portion of buffer
+	peekedBytes := buf[:n]
+
+	g.Item.Content.MediaType = detectContentType(peekedBytes, dataFilename)
+
+	// replace the reader with one that re-reads the buffered bytes before resuming reading the source stream
+	dataReader = io.NopCloser(io.MultiReader(bytes.NewReader(peekedBytes), dataReader))
+
+	return dataReader, nil
 }
 
 func (p *processor) openInteractiveGraphDataFile(g *Graph) (*os.File, error) {
