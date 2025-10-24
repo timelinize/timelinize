@@ -358,6 +358,8 @@ CREATE TABLE IF NOT EXISTS "embeddings" (
 	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
+CREATE INDEX IF NOT EXISTS "idx_embeddings_item_id" ON "embeddings"("item_id");
+
 -- TODO: this is convenient -- will probably keep this, because the db-based enums like data sources and classifications
 -- don't get translated earlier; maybe we could, but I still need to think on that... if we do keep this,
 -- I wonder if it'd be useful to loop in the attribute name and value as well? for item de-duplication in loadItemRow()....
