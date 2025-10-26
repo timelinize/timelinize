@@ -91,7 +91,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 
 // FileImport imports data from the given file/folder.
 func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(_ string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(filePath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -109,7 +109,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 			return nil // traverse into subdirectories
 		}
 
-		file, err := dirEntry.Open(".")
+		file, err := dirEntry.FS.Open(filePath)
 		if err != nil {
 			return err
 		}
