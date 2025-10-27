@@ -33,7 +33,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jhillyerd/enmime"
+	"github.com/jhillyerd/enmime/v2"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -73,6 +73,8 @@ func (fi FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, 
 type Options struct {
 	// Gmail labels to skip
 	GmailSkipLabels []string `json:"gmail_skip_labels"`
+
+	// TODO: We can use enmime.NewParser() to set custom options
 }
 
 // FileImport imports data from a file.
