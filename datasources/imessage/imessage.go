@@ -30,6 +30,7 @@ import (
 	"log"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,7 +124,7 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 	var whereClause string
 	var args []any
 
-	// honor configured timeframe to greatly speed up such imports
+	// build WHERE clause: honor configured timeframe to greatly speed up such imports
 	if !opt.Timeframe.IsEmpty() {
 		if opt.Timeframe.Since != nil {
 			appleTsStart := TimeToCocoaNano(*opt.Timeframe.Since)
@@ -142,13 +143,52 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		}
 	}
 
-	//nolint:gosec // string concatenation is done safely
-	rows, err := im.DB.QueryContext(ctx,
-		`SELECT
-			m.ROWID, m.guid, m.text, m.attributedBody, m.service, m.date, m.date_read, m.date_delivered,
-			m.is_from_me, m.is_spam,
-			m.associated_message_guid, m.associated_message_type, m.associated_message_emoji,
-			m.destination_caller_id, m.reply_to_guid, m.thread_originator_guid,
+	// newer versions of iMessage / Mac add columns to the message table which we support,
+	// but we should also support older versions (for example, associated_message_emoji,
+	// which are message reactions, is a newer feature as are threads)
+	supportedMessageTableColumns := []string{
+		"ROWID",
+		"guid",
+		"text",
+		"attributedBody",
+		"service",
+		"date",
+		"date_read",
+		"date_delivered",
+		"is_from_me",
+		"is_spam",
+		"associated_message_guid",
+		"associated_message_type",
+		"associated_message_emoji", // newer column
+		"destination_caller_id",
+		"reply_to_guid",
+		"thread_originator_guid", // newer column
+	}
+	messageTableColumns, err := GetColumnNames(ctx, im.DB, "message")
+	if err != nil {
+		return fmt.Errorf("getting column names: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("SELECT\n\t")
+	var selectedCols []string //nolint:prealloc // linter false positive: we don't know how many we will be selecting
+
+	// select only from columns that exist
+	for _, col := range supportedMessageTableColumns {
+		if !slices.Contains(messageTableColumns, col) {
+			opt.Log.Warn("message database does not have column in message table", zap.String("column", col))
+			continue
+		}
+		if len(selectedCols) > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString("m.")
+		sb.WriteString(col)
+		selectedCols = append(selectedCols, col)
+	}
+
+	// remainder of query
+	sb.WriteString(`,
 			h.id, h.country, h.service,
 			chat_h.id, chat_h.country, chat_h.service,
 			a.guid, a.created_date, a.filename, a.mime_type, a.transfer_name
@@ -159,8 +199,10 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		LEFT JOIN handle       AS h      ON h.ROWID        = m.handle_id    -- handle from message row
 		LEFT JOIN message_attachment_join AS maj ON maj.message_id = m.ROWID
 		LEFT JOIN attachment              AS a   ON a.ROWID        = maj.attachment_id
-		`+whereClause+`
-		ORDER BY m.ROWID ASC`, args...)
+		` + whereClause + `
+		ORDER BY m.ROWID ASC`)
+
+	rows, err := im.DB.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
 		return fmt.Errorf("querying for message rows: %w", err)
 	}
@@ -221,13 +263,55 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		var joinedH handle
 		var attach attachment
 
-		err := rows.Scan(
-			&msg.rowid, &msg.guid, &msg.text, &msg.attributedBody, &msg.service, &msg.date, &msg.dateRead,
-			&msg.dateDelivered, &msg.isFromMe, &msg.isSpam,
-			&msg.associatedMessageGUID, &msg.associatedMessageType, &msg.associatedMessageEmoji,
-			&msg.destinationCallerID, &msg.replyToGUID, &msg.threadOriginatorGUID, &msg.handle.id,
-			&msg.handle.country, &msg.handle.service, &joinedH.id, &joinedH.country, &joinedH.service,
-			&attach.guid, &attach.createdDate, &attach.filename, &attach.mimeType, &attach.transferName)
+		// these go at the end...
+		hardCodedTargets := []any{
+			&msg.handle.id, &msg.handle.country, &msg.handle.service,
+			&joinedH.id, &joinedH.country, &joinedH.service,
+			&attach.guid, &attach.createdDate, &attach.filename, &attach.mimeType, &attach.transferName,
+		}
+
+		// because the select clause is dynamically generated, we also need to
+		// dynamically generate the list of targets...
+		targets := make([]any, 0, len(selectedCols)+len(hardCodedTargets))
+		for _, col := range selectedCols {
+			switch col {
+			case "ROWID":
+				targets = append(targets, &msg.rowid)
+			case "guid":
+				targets = append(targets, &msg.guid)
+			case "text":
+				targets = append(targets, &msg.text)
+			case "attributedBody":
+				targets = append(targets, &msg.attributedBody)
+			case "service":
+				targets = append(targets, &msg.service)
+			case "date":
+				targets = append(targets, &msg.date)
+			case "date_read":
+				targets = append(targets, &msg.dateRead)
+			case "date_delivered":
+				targets = append(targets, &msg.dateDelivered)
+			case "is_from_me":
+				targets = append(targets, &msg.isFromMe)
+			case "is_spam":
+				targets = append(targets, &msg.isSpam)
+			case "associated_message_guid":
+				targets = append(targets, &msg.associatedMessageGUID)
+			case "associated_message_type":
+				targets = append(targets, &msg.associatedMessageType)
+			case "associated_message_emoji":
+				targets = append(targets, &msg.associatedMessageEmoji)
+			case "destination_caller_id":
+				targets = append(targets, &msg.destinationCallerID)
+			case "reply_to_guid":
+				targets = append(targets, &msg.replyToGUID)
+			case "thread_originator_guid":
+				targets = append(targets, &msg.threadOriginatorGUID)
+			}
+		}
+		targets = append(targets, hardCodedTargets...)
+
+		err := rows.Scan(targets...)
 		if err != nil {
 			return fmt.Errorf("scanning row: %w", err)
 		}
@@ -562,6 +646,29 @@ func NormalizePhoneNumber(ctx context.Context, id, country string) string {
 		return id // oh well
 	}
 	return norm
+}
+
+// GetColumnNames returns the names of the columns from the given table name in the given sqlite database.
+func GetColumnNames(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", tableName)
+	if err != nil {
+		return nil, fmt.Errorf("querying table info: %w", err)
+	}
+	defer rows.Close()
+
+	var cols []string
+	for rows.Next() {
+		var col string
+		if err := rows.Scan(&col); err != nil {
+			return nil, fmt.Errorf("scanning row: %w", err)
+		}
+		cols = append(cols, col)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("next row: %w", err)
+	}
+
+	return cols, nil
 }
 
 func entityWithID(id string) timeline.Entity {

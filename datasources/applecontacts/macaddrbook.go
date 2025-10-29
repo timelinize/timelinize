@@ -127,7 +127,7 @@ func (fimp *FileImporter) processAddressBook(ctx context.Context, dirEntry timel
 		"ZBIRTHDAYYEAR",
 		"ZTHUMBNAILIMAGEDATA",
 	}
-	recordTableColumns, err := fimp.getColumnNames(ctx, db, "ZABCDRECORD")
+	recordTableColumns, err := imessage.GetColumnNames(ctx, db, "ZABCDRECORD")
 	if err != nil {
 		return fmt.Errorf("listing column names: %w", err)
 	}
@@ -249,28 +249,6 @@ func (fimp *FileImporter) processAddressBook(ctx context.Context, dirEntry timel
 	}
 
 	return nil
-}
-
-func (*FileImporter) getColumnNames(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", tableName)
-	if err != nil {
-		return nil, fmt.Errorf("querying table info: %w", err)
-	}
-	defer rows.Close()
-
-	var cols []string
-	for rows.Next() {
-		var col string
-		if err := rows.Scan(&col); err != nil {
-			return nil, fmt.Errorf("scanning row: %w", err)
-		}
-		cols = append(cols, col)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("next row: %w", err)
-	}
-
-	return cols, nil
 }
 
 type contact struct {
