@@ -75,7 +75,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	defer file.Close()
 
 	dec := xml.NewDecoder(file)
-
+	dec.CharsetReader = charset.NewReaderLabel // handle non-UTF-8 encodings
 	for {
 		// NOTE: I've seen JSON files successfully get a first token from the XML decoder
 		tkn, err := dec.Token()

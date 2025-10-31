@@ -33,6 +33,7 @@ import (
 	"github.com/timelinize/timelinize/datasources/googlelocation"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
+	"golang.org/x/net/html/charset"
 )
 
 func init() {
@@ -148,6 +149,7 @@ type Processor struct {
 func NewProcessor(file io.Reader, owner timeline.Entity, opt timeline.ImportParams, locOpt googlelocation.LocationProcessingOptions) (*Processor, error) {
 	// create XML decoder (wrapped to track some state as it decodes)
 	xmlDec := &decoder{Decoder: xml.NewDecoder(file)}
+	xmlDec.CharsetReader = charset.NewReaderLabel // handle non-UTF-8 encodings
 
 	// create location processor to clean up any noisy raw data
 	locProc, err := googlelocation.NewLocationProcessor(xmlDec, locOpt)
