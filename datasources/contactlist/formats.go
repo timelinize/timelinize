@@ -58,6 +58,15 @@ var formats = []format{
 			"full_name": {
 				exact{"name"},
 			},
+			"first_name": {
+				exact{"first name"},
+			},
+			"middle_name": {
+				exact{"middle name"},
+			},
+			"last_name": {
+				exact{"last name"},
+			},
 			"birthdate": {
 				exact{"birthday"},
 			},
@@ -84,6 +93,9 @@ var formats = []format{
 			"first_name": {
 				exact{"first name", "given name"},
 			},
+			"middle_name": {
+				exact{"middle name"},
+			},
 			"last_name": {
 				exact{"last name", "surname", "family name", "second name"},
 			},
@@ -106,26 +118,31 @@ var formats = []format{
 	},
 }
 
+// exact matches any of the strings in the slice after normalizing
+// the input (which ironically uses regex).
 type exact []string
 
-// MatchString returns true if s is equal to any in the exact slice
+// MatchString returns true if input is equal to any in the exact slice
 // after being normalized (lowercase, spaces trimmed, parenthetical
 // substrings removed, etc).
-func (e exact) MatchString(s string) bool {
-	clean := noise.ReplaceAllString(s, "")
-	clean = strings.ToLower(strings.TrimSpace(clean))
-
+func (e exact) MatchString(input string) bool {
+	input = noise.ReplaceAllString(input, " ")      // remove noise
+	input = whitespace.ReplaceAllString(input, " ") // collapse whitespace
+	normalized := strings.ToLower(strings.TrimSpace(input))
 	for _, val := range e {
-		if val == clean {
+		if val == normalized {
 			return true
 		}
 	}
-
 	return false
 }
 
-// TODO: verify this matches (*), non-word chars, and multiple whitespace (e.g. after removing "-" from "A - B")
-var noise = regexp.MustCompile(`\(.*\)|\W|_|\s{2,}`)
+// matches paranthesized text "(*)", characters that aren't part of a word
+// and aren't a space, and underscores
+var noise = regexp.MustCompile(`\(.*\)|[^\w ]+|_`)
+
+// used for collapsing whitespace
+var whitespace = regexp.MustCompile(`\s+`)
 
 type stringMatcher interface {
 	MatchString(input string) bool

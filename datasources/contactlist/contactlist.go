@@ -104,9 +104,12 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 		// then, convert each field+values pair to something about the person
 		p := new(timeline.Entity)
 
+		var firstName, midName, lastName string
+
 		for field, values := range mappedValues {
 			for _, value := range values {
-				if strings.TrimSpace(value) == "" {
+				value = strings.TrimSpace(value)
+				if value == "" {
 					// ignore empty values; especially if there are multiple matched columns
 					// for a field (like Name, for some reason), don't overwrite a non-empty
 					// first column with an empty second column
@@ -116,9 +119,11 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 				case "full_name":
 					p.Name = value
 				case "first_name":
-					p.Name = value + " " + p.Name
+					firstName = value
+				case "middle_name":
+					midName = value
 				case "last_name":
-					p.Name += " " + value
+					lastName = value
 				case "birthdate":
 					birthDate := vcard.ParseBirthday(value)
 					if birthDate != nil {
@@ -151,6 +156,24 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 				}
 			}
 		}
+
+		// assemble name, if given in different fields
+		if p.Name == "" {
+			p.Name = firstName
+			if midName != "" {
+				if p.Name != "" {
+					p.Name += " "
+				}
+				p.Name += midName
+			}
+			if lastName != "" {
+				if p.Name != "" {
+					p.Name += " "
+				}
+				p.Name += lastName
+			}
+		}
+
 
 		// I think it's pointless to process a person if there aren't at
 		// least 2 data points about them because we can get single
