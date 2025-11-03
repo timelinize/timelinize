@@ -89,7 +89,14 @@ func (s *server) fillAllowedOrigins(configuredOrigins []string, listenAddr strin
 	}
 	if configuredOrigins == nil {
 		if originEnv := os.Getenv("TLZ_ORIGIN"); originEnv != "" {
-			configuredOrigins = []string{originEnv}
+			// Split comma-separated origins and trim whitespace
+			origins := strings.Split(originEnv, ",")
+			configuredOrigins = make([]string, 0, len(origins))
+			for _, origin := range origins {
+				if trimmed := strings.TrimSpace(origin); trimmed != "" {
+					configuredOrigins = append(configuredOrigins, trimmed)
+				}
+			}
 		}
 	}
 	uniqueOrigins := make(map[string]struct{})
