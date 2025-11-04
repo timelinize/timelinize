@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	"github.com/timelinize/timelinize/datasources/vcard"
@@ -50,7 +51,15 @@ type FileImporter struct{}
 
 // FileImport imports data from a file.
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	file, err := dirEntry.Open(".")
+	// start by assuming the dirEntry points directly to a CSV file
+	pathInFS := "."
+
+	// but if a directory was recognized, alter the path to refer to the CSV file within it
+	if dirEntry.IsDir() {
+		pathInFS = path.Base(dirEntry.Name()) + ".csv"
+	}
+
+	file, err := dirEntry.Open(pathInFS)
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
 	}
@@ -174,6 +183,25 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 			}
 		}
 
+		// contact lists from Google Takeout have profile pictures as sidecar files,
+		// named as a concatenation of their names, or their email address; we can read
+		// those directly for much faster and more reliable imports, if this import is
+		// acting on a directory rather than on a regular file
+		if dirEntry.IsDir() {
+			pfpPathByName := path.Join(dirEntry.Filename, p.Name) + ".jpg"
+			if timeline.FileExistsFS(dirEntry.FS, pfpPathByName) {
+				p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+					return dirEntry.FS.Open(pfpPathByName)
+				}
+			} else if attr, ok := p.Attribute(timeline.AttributeEmail); ok && attr.Value != nil {
+				pfpPathByEmail := path.Join(dirEntry.Filename, attr.Value.(string)) + ".jpg"
+				if timeline.FileExistsFS(dirEntry.FS, pfpPathByEmail) {
+					p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+						return dirEntry.FS.Open(pfpPathByEmail)
+					}
+				}
+			}
+		}
 
 		// I think it's pointless to process a person if there aren't at
 		// least 2 data points about them because we can get single

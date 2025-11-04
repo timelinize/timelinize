@@ -398,6 +398,22 @@ func (app *App) PlanImport(ctx context.Context, options PlannerOptions) (timelin
 		// those with one for the whole dir
 		var consolidatedMatches []timeline.DataSourceRecognition
 		for _, c := range counts {
+			// it's possible for a data source to support matching a directory
+			// both explicitly (usually by inspecting its contents for a specific
+			// structure or name) and implicitly (by specifying a match threshold
+			// for the files within it); in that case, the threshold may be greater
+			// than 0 even if the recognizer matched the dir explicitly, which does
+			// not traverse into it, which results in zero match counts inside the
+			// dir... this ends up being a division by 0, which we need to avoid
+			// (we can fix this by making the increment of dirSizes[dir] below to
+			// not be conditional on not a directory, but it means that percentage
+			// can never reach 100% because the actual dir would be counted as part
+			// of the size, but not as an explicit match... this seems like the
+			// best fix I can think of)
+			if dirSizes[dir] == 0 {
+				continue
+			}
+
 			percentage := float64(c.count) / float64(dirSizes[dir])
 			if percentage > c.dirThreshold {
 				// this data source matched enough entries in the directory to

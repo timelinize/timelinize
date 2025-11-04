@@ -21,26 +21,43 @@ package contactlist
 import (
 	"context"
 	"encoding/csv"
+	"fmt"
 	"path"
 	"strings"
 
 	"github.com/timelinize/timelinize/timeline"
 )
 
-// Recognize returns true if the file is recognized as a contact list.
+// Recognize returns true if the file is recognized as a contact list,
+// or a Google Takeout contact list folder that also contains pictures.
 func (fimp *FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+	pathInFS := "." // start by assuming we'll inspect the current file
 	if dirEntry.IsDir() {
-		return timeline.Recognition{}, nil
+		// if a directory, specifically, a folder for a contact list in a Google Takeout archive,
+		// recognize the whole folder so we can import those profile pictures as well
+		parts := strings.Split(dirEntry.FullPath(), "/")
+		if len(parts) >= 3 && parts[len(parts)-3] == "Takeout" && parts[len(parts)-2] == "Contacts" {
+			if csvFilename := parts[len(parts)-1] + ".csv"; timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, csvFilename)) {
+				pathInFS = csvFilename
+			} else {
+				return timeline.Recognition{}, nil
+			}
+		} else {
+			return timeline.Recognition{}, nil
+		}
+	} else {
+		// only inspect file if it has a relevant extension
+		switch strings.ToLower(path.Ext(dirEntry.Name())) {
+		case ".csv", ".tsv":
+		default:
+			return timeline.Recognition{}, nil
+		}
 	}
-	switch strings.ToLower(path.Ext(dirEntry.Name())) {
-	case ".csv", ".tsv":
-	default:
-		return timeline.Recognition{}, nil
-	}
+
 	for _, delim := range []rune{',', '\t', ';'} {
-		result, err := recognizeCSV(ctx, dirEntry, opts, delim)
+		result, err := recognizeCSV(ctx, dirEntry, pathInFS, opts, delim)
 		if err != nil {
-			return result, err
+			return result, fmt.Errorf("inspecting CSV for contact list: %w", err)
 		}
 		if result.Confidence > 0 {
 			return result, nil
@@ -49,8 +66,8 @@ func (fimp *FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEn
 	return timeline.Recognition{}, nil
 }
 
-func recognizeCSV(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams, delim rune) (timeline.Recognition, error) {
-	file, err := dirEntry.Open(".")
+func recognizeCSV(_ context.Context, dirEntry timeline.DirEntry, pathInFS string, _ timeline.RecognizeParams, delim rune) (timeline.Recognition, error) {
+	file, err := dirEntry.Open(pathInFS)
 	if err != nil {
 		return timeline.Recognition{}, err
 	}
