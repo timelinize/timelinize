@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -177,39 +178,41 @@ func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account
 		return []Account{}, nil
 	}
 
-	q := `
+	var sb strings.Builder
+
+	sb.WriteString(`
 	SELECT
 		accounts.id, accounts.authorization,
 		data_sources.name
 	FROM accounts, data_sources
-	WHERE data_sources.id = accounts.data_source_id`
+	WHERE data_sources.id = accounts.data_source_id`)
 	args := make([]any, 0, len(ids)+len(dataSourceIDs))
 	if len(ids) > 0 || len(dataSourceIDs) > 0 {
-		q += " AND ("
+		sb.WriteString(" AND (")
 	}
 	for i, id := range ids {
 		if i > 0 {
-			q += " OR "
+			sb.WriteString(" OR ")
 		}
-		q += "accounts.id=?"
+		sb.WriteString("accounts.id=?")
 		args = append(args, id)
 	}
 	if len(ids) > 0 && len(dataSourceIDs) > 0 {
-		q += ") AND ("
+		sb.WriteString(") AND (")
 	}
 	for i, dsID := range dataSourceIDs {
 		if i > 0 {
-			q += " OR "
+			sb.WriteString(" OR ")
 		}
-		q += "data_sources.name=?"
+		sb.WriteString("data_sources.name=?")
 		args = append(args, dsID)
 	}
 	if len(ids) > 0 || len(dataSourceIDs) > 0 {
-		q += ")"
+		sb.WriteString(")")
 	}
 
 	accounts := []Account{}
-	rows, err := tl.db.ReadPool.QueryContext(tl.ctx, q, args...)
+	rows, err := tl.db.ReadPool.QueryContext(tl.ctx, sb.String(), args...)
 	if err != nil {
 		return accounts, fmt.Errorf("querying accounts from DB: %w", err)
 	}

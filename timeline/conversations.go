@@ -159,12 +159,13 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 	for len(convosMap) < params.Limit && queries < maxQueries {
 		queries++
 
-		whereClause := `WHERE relationships.to_attribute_id IS NOT NULL`
+		var whereClause strings.Builder
+		whereClause.WriteString(`WHERE relationships.to_attribute_id IS NOT NULL`)
 		var args []any
 
 		// include only conversational items and relations; otherwise we get results like
 		// media where people are depicted, or any other items that point to entities...
-		whereClause += " AND (relationships.relation_id IN (?, ?) OR items.classification_id IN (?, ?, ?))"
+		whereClause.WriteString(" AND (relationships.relation_id IN (?, ?) OR items.classification_id IN (?, ?, ?))")
 		args = append(args,
 			tl.relations[RelSent.Label],
 			tl.relations[RelReply.Label],
@@ -174,69 +175,69 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 		)
 
 		if len(params.classificationIDs) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, classID := range params.classificationIDs {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "items.classification_id=?"
+				whereClause.WriteString("items.classification_id=?")
 				args = append(args, classID)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if len(params.AttributeID) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, attrID := range params.AttributeID {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "items.attribute_id=?"
+				whereClause.WriteString("items.attribute_id=?")
 				args = append(args, attrID)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if len(params.ToAttributeID) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, attrID := range params.ToAttributeID {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "relationships.to_attribute_id=?"
+				whereClause.WriteString("relationships.to_attribute_id=?")
 				args = append(args, attrID)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if len(params.EntityID) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, entityID := range params.EntityID {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "from_ent.id=? OR to_ent.id=?"
+				whereClause.WriteString("from_ent.id=? OR to_ent.id=?")
 				args = append(args, entityID, entityID)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if len(params.DataText) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, txt := range params.DataText {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "items.data_text LIKE '%' || ? || '%'"
+				whereClause.WriteString("items.data_text LIKE '%' || ? || '%'")
 				args = append(args, txt)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if params.StartTimestamp != nil {
-			whereClause += " AND items.timestamp > ?"
+			whereClause.WriteString(" AND items.timestamp > ?")
 			args = append(args, params.StartTimestamp.UnixMilli())
 		}
 		if params.EndTimestamp != nil && (untilUnixMs == 0 || untilUnixMs > params.EndTimestamp.UnixMilli()) {
-			whereClause += andItemsTimestampLessThanArg
+			whereClause.WriteString(andItemsTimestampLessThanArg)
 			args = append(args, params.EndTimestamp.UnixMilli())
 		} else if untilUnixMs > 0 {
-			whereClause += andItemsTimestampLessThanArg
+			whereClause.WriteString(andItemsTimestampLessThanArg)
 			args = append(args, untilUnixMs)
 		}
 
@@ -257,7 +258,7 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 			LEFT JOIN entities AS to_ent ON to_ent.id = to_ea.entity_id
 			LEFT JOIN attributes AS from_attr ON from_attr.id = from_ea.attribute_id
 			LEFT JOIN attributes AS to_attr ON to_attr.id = to_ea.attribute_id
-			` + whereClause + `
+			` + whereClause.String() + `
 			ORDER BY items.timestamp DESC
 			LIMIT ?`
 

@@ -282,16 +282,17 @@ func saveAllDataSources(ctx context.Context, db sqliteDB) error {
 		return nil
 	}
 
-	query := `INSERT OR IGNORE INTO "data_sources" ("name", "title", "description", "media", "media_type", "standard") VALUES`
+	var query strings.Builder
+	query.WriteString(`INSERT OR IGNORE INTO "data_sources" ("name", "title", "description", "media", "media_type", "standard") VALUES`)
 
 	vals := make([]any, 0, len(dataSources))
 	var count int
 
 	for _, ds := range dataSources {
 		if count > 0 {
-			query += ","
+			query.WriteString(",")
 		}
-		query += " (?, ?, ?, ?, ?, ?)"
+		query.WriteString(" (?, ?, ?, ?, ?, ?)")
 
 		var media []byte
 		var mediaType *string
@@ -327,7 +328,7 @@ func saveAllDataSources(ctx context.Context, db sqliteDB) error {
 		count++
 	}
 
-	_, err := db.WritePool.ExecContext(ctx, query, vals...)
+	_, err := db.WritePool.ExecContext(ctx, query.String(), vals...)
 	if err != nil {
 		return fmt.Errorf("writing data sources to DB: %w", err)
 	}

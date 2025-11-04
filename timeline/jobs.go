@@ -430,6 +430,9 @@ func (tl *Timeline) runJob(row Job) error {
 			// "One thing I will suggest is running pragma wal_checkpoint after committing the
 			// insert transaction, as that will merge the WAL file back into the main database file,
 			// which will make subsequent reads faster." -rittneje
+			// and since the default mode is PASSIVE, this page recommends using FULL or TRUNCATE
+			// but I haven't personally seen a need for those heavier operations yet:
+			// https://phiresky.github.io/blog/2020/sqlite-performance-tuning/#regarding-wal-mode
 			if _, err := tl.db.WritePool.ExecContext(ctx, "PRAGMA wal_checkpoint"); err != nil {
 				logger.Error("could not create WAL checkpoint", zap.Error(err))
 			}
