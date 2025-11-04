@@ -344,22 +344,23 @@ func saveAllStandardEntityTypes(ctx context.Context, db sqliteDB) error {
 		// TODO: could also have company/organization, office/designation, government, etc.
 	}
 
-	query := `INSERT INTO entity_types ("name") VALUES`
+	var query strings.Builder
+	query.WriteString(`INSERT INTO entity_types ("name") VALUES`)
 
 	vals := make([]any, 0, len(entityTypes))
 	var count int
 
 	for _, et := range entityTypes {
 		if count > 0 {
-			query += ","
+			query.WriteRune(',')
 		}
-		query += " (?)"
+		query.WriteString(" (?)")
 		vals = append(vals, et)
 		count++
 	}
-	query += ` ON CONFLICT DO UPDATE SET name=excluded.name`
+	query.WriteString(` ON CONFLICT DO UPDATE SET name=excluded.name`)
 
-	_, err := db.WritePool.ExecContext(ctx, query, vals...)
+	_, err := db.WritePool.ExecContext(ctx, query.String(), vals...)
 	if err != nil {
 		return fmt.Errorf("writing standard entity types to DB: %w", err)
 	}
