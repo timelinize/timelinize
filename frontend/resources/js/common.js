@@ -328,7 +328,8 @@ function connectLog() {
 	// (and since we are now trying to connect, we can clear the sentinel)
 	tlz.loggerSocket.retrying = false;
 
-	tlz.loggerSocket.socket = new WebSocket(`ws://${window.location.host}/api/logs`);
+	const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+	tlz.loggerSocket.socket = new WebSocket(`${wsProto}//${window.location.host}/api/logs`);
 
 	tlz.loggerSocket.socket.onopen = function(event) {
 		console.info("Established connection to logger socket", event, tlz.loggerSocket.socket);

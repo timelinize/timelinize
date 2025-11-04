@@ -1134,16 +1134,15 @@ function avatar(colored, entity, classes) {
 
 function initials(name) {
 	if (!name) return "";
-
-	// ignore any parenthetical suffix
-	const regex = /^(.+)\(.+\)$/;
-	let matches = regex.exec(name);
+	
+	// match only sequences of alphanumeric characters
+	const regex = /[A-Za-z0-9]+/g;
+	let matches = name.split('@')[0].match(regex); // only consider username portion of email addresses
 	if (matches) {
-		name = matches[1].trim();
+		name = matches.join(" ").trim();
 	}
 
-	// TODO: maybe do this server-side?
-	// strip emojis... this is cutting-edge, apparently (March 2023) -- not yet supported in Firefox :(
+	// as of March 2023, this was cutting-edge, but now all major browsers support this API
 	// Emoji-aware split(): https://stackoverflow.com/a/71619350/1048862
 	// Detecting emoji: https://stackoverflow.com/a/64007175/1048862
 	if (Intl.Segmenter) {
@@ -1153,7 +1152,7 @@ function initials(name) {
 		name = nonEmojiRunes.join("").trim();
 	}
 
-	let initials = name.split(" ").map((n) => n[0]).join("") || "?";
+	let initials = name.split(" ").map((n) => n[0]).join("") || "";
 	if (initials.length > 2) {
 		initials = initials[0] + initials[initials.length-1];
 	}
