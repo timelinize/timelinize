@@ -282,16 +282,17 @@ func saveAllDataSources(ctx context.Context, db sqliteDB) error {
 		return nil
 	}
 
-	query := `INSERT OR IGNORE INTO "data_sources" ("name", "title", "description", "media", "media_type", "standard") VALUES`
+	var query strings.Builder
+	query.WriteString(`INSERT OR IGNORE INTO "data_sources" ("name", "title", "description", "media", "media_type", "standard") VALUES`)
 
 	vals := make([]any, 0, len(dataSources))
 	var count int
 
 	for _, ds := range dataSources {
 		if count > 0 {
-			query += ","
+			query.WriteString(",")
 		}
-		query += " (?, ?, ?, ?, ?, ?)"
+		query.WriteString(" (?, ?, ?, ?, ?, ?)")
 
 		var media []byte
 		var mediaType *string
@@ -327,7 +328,7 @@ func saveAllDataSources(ctx context.Context, db sqliteDB) error {
 		count++
 	}
 
-	_, err := db.WritePool.ExecContext(ctx, query, vals...)
+	_, err := db.WritePool.ExecContext(ctx, query.String(), vals...)
 	if err != nil {
 		return fmt.Errorf("writing data sources to DB: %w", err)
 	}
@@ -343,22 +344,23 @@ func saveAllStandardEntityTypes(ctx context.Context, db sqliteDB) error {
 		// TODO: could also have company/organization, office/designation, government, etc.
 	}
 
-	query := `INSERT INTO entity_types ("name") VALUES`
+	var query strings.Builder
+	query.WriteString(`INSERT INTO entity_types ("name") VALUES`)
 
 	vals := make([]any, 0, len(entityTypes))
 	var count int
 
 	for _, et := range entityTypes {
 		if count > 0 {
-			query += ","
+			query.WriteRune(',')
 		}
-		query += " (?)"
+		query.WriteString(" (?)")
 		vals = append(vals, et)
 		count++
 	}
-	query += ` ON CONFLICT DO UPDATE SET name=excluded.name`
+	query.WriteString(` ON CONFLICT DO UPDATE SET name=excluded.name`)
 
-	_, err := db.WritePool.ExecContext(ctx, query, vals...)
+	_, err := db.WritePool.ExecContext(ctx, query.String(), vals...)
 	if err != nil {
 		return fmt.Errorf("writing standard entity types to DB: %w", err)
 	}
@@ -367,23 +369,24 @@ func saveAllStandardEntityTypes(ctx context.Context, db sqliteDB) error {
 }
 
 func saveAllStandardClassifications(ctx context.Context, db sqliteDB) error {
-	query := `INSERT INTO "classifications" ("standard", "name", "labels", "description") VALUES`
+	var query strings.Builder
+	query.WriteString(`INSERT INTO "classifications" ("standard", "name", "labels", "description") VALUES`)
 
 	vals := make([]any, 0, len(classifications)*4) //nolint:mnd
 	var count int
 
 	for _, cl := range classifications {
 		if count > 0 {
-			query += ","
+			query.WriteRune(',')
 		}
-		query += " (?, ?, ?, ?)"
+		query.WriteString(" (?, ?, ?, ?)")
 		vals = append(vals, true, cl.Name, strings.Join(cl.Labels, ","), cl.Description)
 		count++
 	}
-	query += ` ON CONFLICT DO UPDATE SET standard=excluded.standard, name=excluded.name,
-		labels=excluded.labels, description=excluded.description`
+	query.WriteString(` ON CONFLICT DO UPDATE SET standard=excluded.standard, name=excluded.name,
+		labels=excluded.labels, description=excluded.description`)
 
-	_, err := db.WritePool.ExecContext(ctx, query, vals...)
+	_, err := db.WritePool.ExecContext(ctx, query.String(), vals...)
 	if err != nil {
 		return fmt.Errorf("writing standard classifications to DB: %w", err)
 	}

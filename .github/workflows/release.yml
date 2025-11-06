@@ -8,7 +8,7 @@ jobs:
       APP_NAME: timelinize
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-13, ubuntu-24.04-arm]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel, ubuntu-24.04-arm]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     steps:
@@ -41,7 +41,7 @@ jobs:
       # In late May 2025, installing glib was no longer sufficient; and indeed a warning showed that it was already installed and up-to-date. But the linker couldn't find gio-2.0 (same error as in April).
       # The fix for May's error involved setting CGO_LDFLAGS below using pkg-config (which is also already installed and up-to-date).
       - name: Install libraries (macOS)
-        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-13' }}
+        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-15-intel' }}
         run: |
           brew install vips
 
@@ -99,7 +99,7 @@ jobs:
           zip "$ARTIFACT_NAME" ${{ env.APP_NAME }}
 
       - name: Compress build (macOS x64)
-        if: matrix.os == 'macos-13'
+        if: matrix.os == 'macos-15-intel'
         run: |
           REF_NAME=$(echo ${{ github.ref_name }} | sed 's|/|-|g')
           export ARTIFACT_NAME="${{ env.APP_NAME }}_${REF_NAME}_mac_x64.zip"

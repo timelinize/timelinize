@@ -55,19 +55,35 @@ type FileImporter struct{}
 func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	rec := timeline.Recognition{DirThreshold: .9}
 
-	// we can import directories, but let the import planner figure that out; only recognize files
+	pathInFS := "." // start by assuming we'll inspect the current file
 	if dirEntry.IsDir() {
+		// if a directory, specifically, a folder for a contact list in a Google Takeout archive,
+		// recognize the whole folder so we can import those profile pictures as well
+		parts := strings.Split(dirEntry.FullPath(), "/")
+		if len(parts) >= 3 && parts[len(parts)-3] == "Takeout" && parts[len(parts)-2] == "Contacts" {
+			if vcfFilename := parts[len(parts)-1] + ".vcf"; timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, vcfFilename)) {
+				pathInFS = vcfFilename
+			} else {
+				return rec, nil
+			}
+		} else {
+			return rec, nil
+		}
+	} else {
+		// only inspect file if it has a relevant extension
+		switch strings.ToLower(path.Ext(dirEntry.Name())) {
+		case ".vcf", ".vcard":
+		default:
+			return rec, nil
+		}
+	}
+
+	// we can import directories, but let the import planner figure that out; only recognize files
+	if dirEntry.IsDir() && pathInFS == "." {
 		return rec, nil
 	}
 
-	// skip unsupported file types
-	switch strings.ToLower(path.Ext(dirEntry.Name())) {
-	case ".vcf", ".vcard":
-	default:
-		return rec, nil
-	}
-
-	file, err := dirEntry.Open(".")
+	file, err := dirEntry.Open(pathInFS)
 	if err != nil {
 		return rec, err
 	}
@@ -107,6 +123,11 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 		}
 		if d.IsDir() {
 			return nil // traverse into subdirectories
+		}
+		switch strings.ToLower(path.Ext(d.Name())) {
+		case ".vcf", ".vcard":
+		default:
+			return nil
 		}
 
 		file, err := dirEntry.FS.Open(filePath)
@@ -176,12 +197,19 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				})
 			}
 
-			// for a picture, see if there's a sidecar file that matches the name (this is the case for Google Takeout exports)
+			// for a picture, see if there's a sidecar file that matches the name or email address
+			// (this is the case for Google Takeout exports) -- this is faster
 			if p.Name != "" {
-				sidecarFilename := path.Join(path.Dir(dirEntry.Filename), p.Name+".jpg")
-				if timeline.FileExistsFS(dirEntry.FS, sidecarFilename) {
+				if sidecarFilename := path.Join(path.Dir(filePath), p.Name+".jpg"); timeline.FileExistsFS(dirEntry.FS, sidecarFilename) {
 					p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
 						return dirEntry.FS.Open(sidecarFilename)
+					}
+				} else if attr, ok := p.Attribute(timeline.AttributeEmail); ok && attr.Value != nil {
+					sidecarFilename = path.Join(dirEntry.Filename, attr.Value.(string)) + ".jpg"
+					if timeline.FileExistsFS(dirEntry.FS, sidecarFilename) {
+						p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+							return dirEntry.FS.Open(sidecarFilename)
+						}
 					}
 				}
 			}

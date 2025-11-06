@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	"github.com/timelinize/timelinize/datasources/vcard"
@@ -50,7 +51,15 @@ type FileImporter struct{}
 
 // FileImport imports data from a file.
 func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	file, err := dirEntry.Open(".")
+	// start by assuming the dirEntry points directly to a CSV file
+	pathInFS := "."
+
+	// but if a directory was recognized, alter the path to refer to the CSV file within it
+	if dirEntry.IsDir() {
+		pathInFS = path.Base(dirEntry.Name()) + ".csv"
+	}
+
+	file, err := dirEntry.Open(pathInFS)
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
 	}
@@ -104,9 +113,12 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 		// then, convert each field+values pair to something about the person
 		p := new(timeline.Entity)
 
+		var firstName, midName, lastName string
+
 		for field, values := range mappedValues {
 			for _, value := range values {
-				if strings.TrimSpace(value) == "" {
+				value = strings.TrimSpace(value)
+				if value == "" {
 					// ignore empty values; especially if there are multiple matched columns
 					// for a field (like Name, for some reason), don't overwrite a non-empty
 					// first column with an empty second column
@@ -116,9 +128,11 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 				case "full_name":
 					p.Name = value
 				case "first_name":
-					p.Name = value + " " + p.Name
+					firstName = value
+				case "middle_name":
+					midName = value
 				case "last_name":
-					p.Name += " " + value
+					lastName = value
 				case "birthdate":
 					birthDate := vcard.ParseBirthday(value)
 					if birthDate != nil {
@@ -148,6 +162,43 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 						Value:       value,
 						Identifying: true,
 					})
+				}
+			}
+		}
+
+		// assemble name, if given in different fields
+		if p.Name == "" {
+			p.Name = firstName
+			if midName != "" {
+				if p.Name != "" {
+					p.Name += " "
+				}
+				p.Name += midName
+			}
+			if lastName != "" {
+				if p.Name != "" {
+					p.Name += " "
+				}
+				p.Name += lastName
+			}
+		}
+
+		// contact lists from Google Takeout have profile pictures as sidecar files,
+		// named as a concatenation of their names, or their email address; we can read
+		// those directly for much faster and more reliable imports, if this import is
+		// acting on a directory rather than on a regular file
+		if dirEntry.IsDir() {
+			pfpPathByName := path.Join(dirEntry.Filename, p.Name) + ".jpg"
+			if timeline.FileExistsFS(dirEntry.FS, pfpPathByName) {
+				p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+					return dirEntry.FS.Open(pfpPathByName)
+				}
+			} else if attr, ok := p.Attribute(timeline.AttributeEmail); ok && attr.Value != nil {
+				pfpPathByEmail := path.Join(dirEntry.Filename, attr.Value.(string)) + ".jpg"
+				if timeline.FileExistsFS(dirEntry.FS, pfpPathByEmail) {
+					p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+						return dirEntry.FS.Open(pfpPathByEmail)
+					}
 				}
 			}
 		}
