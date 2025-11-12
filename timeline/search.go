@@ -592,26 +592,25 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 		}
 	})
 
-	// TODO: can do local-time-aware querying by doing: "items.timestamp + items.time_offset*1000" instead of just "items.timestamp" (I think)
 	// TODO: Use BETWEEN maybe
 
 	if params.StartTimestamp != nil {
 		and(func() {
-			or("items.timestamp + COALESCE(items.time_offset*1000, 0) "+gt+" ?", params.StartTimestamp.UTC().UnixMilli())
+			or("items.timestamp"+gt+" ?", params.StartTimestamp.UTC().UnixMilli())
 			if !params.StrictStartTimestamp {
 				// if not strict, allow items to spill into the window even if the started before it
-				or("items.timespan + COALESCE(items.time_offset*1000, 0) "+gt+" ?", params.StartTimestamp.UTC().UnixMilli())
+				or("items.timespan "+gt+" ?", params.StartTimestamp.UTC().UnixMilli())
 			}
 		})
 	}
 	if params.EndTimestamp != nil {
 		and(func() {
-			or("items.timestamp + COALESCE(items.time_offset*1000, 0) "+lt+" ?", params.EndTimestamp.UTC().UnixMilli())
+			or("items.timestamp "+lt+" ?", params.EndTimestamp.UTC().UnixMilli())
 		})
 		if params.StrictEndTimestamp {
 			// if strict, items' timespan must end before the EndTimestamp (item can't merely start before it)
 			and(func() {
-				or("items.timespan IS NULL OR items.timespan + COALESCE(items.time_offset*1000, 0) "+lt+" ?", params.EndTimestamp.UTC().UnixMilli())
+				or("items.timespan IS NULL OR items.timespan "+lt+" ?", params.EndTimestamp.UTC().UnixMilli())
 			})
 		}
 	}
