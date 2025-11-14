@@ -27,6 +27,7 @@ import (
 	_ "github.com/timelinize/timelinize/datasources/applephotos"
 	_ "github.com/timelinize/timelinize/datasources/calendar"
 	_ "github.com/timelinize/timelinize/datasources/contactlist"
+	_ "github.com/timelinize/timelinize/datasources/element"
 	_ "github.com/timelinize/timelinize/datasources/email"
 	_ "github.com/timelinize/timelinize/datasources/facebook"
 	_ "github.com/timelinize/timelinize/datasources/firefox"
