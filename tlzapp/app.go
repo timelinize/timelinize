@@ -413,11 +413,19 @@ func (app *App) serve() error {
 
 	// TODO: remote server (with TLS mutual auth)
 
-	app.log.Info("started admin server", zap.String("listener", ln.Addr().String()))
+	allowedOrigins := make([]string, 0, len(app.server.allowedOrigins))
+	for _, u := range app.server.allowedOrigins {
+		allowedOrigins = append(allowedOrigins, u.String())
+	}
+
+	app.log.Info("started admin server",
+		zap.String("listener", ln.Addr().String()),
+		zap.Strings("allowed_origins", allowedOrigins))
+
 	app.server.httpServer = &http.Server{
 		Handler:           app.server,
-		ReadHeaderTimeout: 10 * time.Second,
-		MaxHeaderBytes:    1024 * 512,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    1024 * 128,
 	}
 
 	go func() {
