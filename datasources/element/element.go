@@ -59,14 +59,14 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	defer f.Close()
 
 	// Try to parse the beginning to see if it looks like an Element export
-	var export elementExport
-	decoder := json.NewDecoder(f)
-	if err := decoder.Decode(&export); err != nil {
+	limitedReader := io.LimitReader(f, 200)
+	content := make([]byte, 200)
+	n, err := limitedReader.Read(content)
+	if err != nil && err != io.EOF {
 		return timeline.Recognition{}, nil
 	}
 
-	// Check for required fields that indicate this is an Element export
-	if export.RoomName == "" && export.Messages == nil {
+	if !strings.Contains(string(content[:n]), `"room_name"`) {
 		return timeline.Recognition{}, nil
 	}
 
@@ -109,12 +109,12 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 	}
 
 	// Second pass: process messages
-	for i, msg := range export.Messages {
+	for _, msg := range export.Messages {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		// Skip non-message events for now
+		// Skip non-message
 		if msg.Type != "m.room.message" {
 			continue
 		}
@@ -156,81 +156,69 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 			default:
 				messageText = msg.Content.Body
 			}
-		}
 
-		// Skip messages with no text and no attachment
-		if messageText == "" && attachment == nil {
-			continue
-		}
-
-		// Create the message item
-		item := &timeline.Item{
-			ID:             msg.EventID,
-			Classification: timeline.ClassMessage,
-			Timestamp:      timestamp,
-			Owner:          sender,
-		}
-
-		// Set content only if there's message text
-		if messageText != "" {
-			item.Content = timeline.ItemData{
-				Data: timeline.StringData(messageText),
+			// Skip messages with no text and no attachment
+			if messageText == "" && attachment == nil {
+				continue
 			}
-		}
 
-		// Add metadata
-		metadata := timeline.Metadata{
-			"matrix_event_id": msg.EventID,
-			"matrix_room_id":  msg.RoomID,
-			"room_name":       export.RoomName,
-		}
-
-		if msg.Content != nil && msg.Content.MsgType != "" {
-			metadata["message_type"] = msg.Content.MsgType
-		}
-
-		if export.Topic != "" {
-			metadata["room_topic"] = export.Topic
-		}
-
-		// Add formatted content if available
-		if msg.Content != nil && msg.Content.FormattedBody != "" && msg.Content.Format != "" {
-			metadata["formatted_body"] = msg.Content.FormattedBody
-			metadata["format"] = msg.Content.Format
-		}
-
-		item.Metadata = metadata
-
-		// Create graph with the item
-		graph := &timeline.Graph{Item: item}
-
-		// Add attachment relationship if present
-		if attachment != nil {
-			graph.ToItem(timeline.RelAttachment, attachment)
-		}
-
-		// Add relationships to all other participants in the room
-		for participantID, participant := range participants {
-			if participantID != msg.Sender {
-				participantCopy := participant
-				graph.ToEntity(timeline.RelSent, &participantCopy)
+			// Create the message item
+			item := &timeline.Item{
+				ID:             msg.EventID,
+				Classification: timeline.ClassMessage,
+				Timestamp:      timestamp,
+				Owner:          sender,
 			}
-		}
 
-		// Send to pipeline
-		params.Pipeline <- graph
-
-		// Send checkpoint every 100 messages
-		if (i+1)%100 == 0 {
-			params.Pipeline <- &timeline.Graph{
-				Checkpoint: fmt.Sprintf("Processed %d/%d messages from %s", i+1, len(export.Messages), export.RoomName),
+			// Set content only if there's message text
+			if messageText != "" {
+				item.Content = timeline.ItemData{
+					Data: timeline.StringData(messageText),
+				}
 			}
-		}
-	}
 
-	// Final checkpoint
-	params.Pipeline <- &timeline.Graph{
-		Checkpoint: fmt.Sprintf("Completed: Processed %d messages from %s", len(export.Messages), export.RoomName),
+			// Add metadata
+			metadata := timeline.Metadata{
+				"matrix_event_id": msg.EventID,
+				"matrix_room_id":  msg.RoomID,
+				"room_name":       export.RoomName,
+			}
+
+			if msg.Content != nil && msg.Content.MsgType != "" {
+				metadata["message_type"] = msg.Content.MsgType
+			}
+
+			if export.Topic != "" {
+				metadata["room_topic"] = export.Topic
+			}
+
+			// Add formatted content if available
+			if msg.Content != nil && msg.Content.FormattedBody != "" && msg.Content.Format != "" {
+				metadata["formatted_body"] = msg.Content.FormattedBody
+				metadata["format"] = msg.Content.Format
+			}
+
+			item.Metadata = metadata
+
+			// Create graph with the item
+			graph := &timeline.Graph{Item: item, Checkpoint: msg}
+
+			// Add attachment relationship if present
+			if attachment != nil {
+				graph.ToItem(timeline.RelAttachment, attachment)
+			}
+
+			// Add relationships to all other participants in the room
+			for participantID, participant := range participants {
+				if participantID != msg.Sender {
+					participantCopy := participant
+					graph.ToEntity(timeline.RelSent, &participantCopy)
+				}
+			}
+
+			// Send to pipeline
+			params.Pipeline <- graph
+		}
 	}
 
 	return nil
@@ -257,8 +245,8 @@ func createAttachmentItem(msg elementMessage, timestamp time.Time, owner timelin
 	}
 
 	// Try to find the actual file in the appropriate directory
-	// Element exports use different folders: images/, stickers/, videos/, audio/, files/
-	// Naming patterns: image-{timestamp}.jpg, sticker-{timestamp}.png, video-{timestamp}.mp4,
+	// Element exports use different folders: images/, videos/, audio/, files/
+	// Naming patterns: image-{timestamp}.jpg, video-{timestamp}.mp4,
 	// Voice message-{timestamp}.ogg, file-{timestamp} (plus original filenames)
 	var possibleFilenames []string
 
@@ -268,15 +256,9 @@ func createAttachmentItem(msg elementMessage, timestamp time.Time, owner timelin
 	// Element exports use consistent patterns based on content type
 	switch msg.Content.MsgType {
 	case "m.image":
-		// Check if it's a sticker first
-		if strings.Contains(msg.Content.Body, "sticker") || strings.Contains(msg.Content.URL, "sticker") {
-			possibleFilenames = append(possibleFilenames,
-				fmt.Sprintf("stickers/sticker-%s.png", timeStr))
-		} else {
-			// Regular images are "image.jpg" -> "image-{timestamp}.jpg"
-			possibleFilenames = append(possibleFilenames,
-				fmt.Sprintf("images/image-%s.jpg", timeStr))
-		}
+		// Regular images are "image.jpg" -> "image-{timestamp}.jpg"
+		possibleFilenames = append(possibleFilenames,
+			fmt.Sprintf("images/image-%s.jpg", timeStr))
 	case "m.video":
 		// Videos use same pattern as images but in videos folder
 		possibleFilenames = append(possibleFilenames,
@@ -297,11 +279,7 @@ func createAttachmentItem(msg elementMessage, timestamp time.Time, owner timelin
 		var dir string
 		switch msg.Content.MsgType {
 		case "m.image":
-			if strings.Contains(msg.Content.Body, "sticker") || strings.Contains(msg.Content.URL, "sticker") {
-				dir = "stickers"
-			} else {
-				dir = "images"
-			}
+			dir = "images"
 		case "m.video":
 			dir = "videos"
 		case "m.audio":
@@ -388,19 +366,13 @@ func createAttachmentItem(msg elementMessage, timestamp time.Time, owner timelin
 		var dir string
 		switch msg.Content.MsgType {
 		case "m.image":
-			if strings.Contains(msg.Content.Filename, "sticker") || strings.Contains(msg.Content.URL, "sticker") {
-				dir = "stickers"
-			} else {
-				dir = "images"
-			}
+			dir = "images"
 		case "m.video":
 			dir = "videos"
 		case "m.audio":
 			dir = "audio"
 		case "m.file":
 			dir = "files"
-		default:
-			dir = "images" // fallback
 		}
 		possibleFilenames = append(possibleFilenames,
 			fmt.Sprintf("%s/%s", dir, msg.Content.Filename))
@@ -431,7 +403,7 @@ func createAttachmentItem(msg elementMessage, timestamp time.Time, owner timelin
 		}
 
 		for _, filename := range candidates {
-			if fileExists(dirEntry.FS, filename) {
+			if timeline.FileExistsFS(dirEntry.FS, filename) {
 				return createAttachmentItemWithFile(filename, timestamp, owner, msg, dirEntry.FS)
 			}
 		}
@@ -443,15 +415,12 @@ func createAttachmentItem(msg elementMessage, timestamp time.Time, owner timelin
 
 // createAttachmentItemWithFile creates the actual attachment item
 func createAttachmentItemWithFile(filename string, timestamp time.Time, owner timeline.Entity, msg elementMessage, filesystem fs.FS) *timeline.Item {
-	var fileKey timeline.ItemRetrieval
-	fileKey.SetKey(fmt.Sprintf("element-%s-%s", timestamp.Format(time.DateTime), msg.EventID))
 
 	item := &timeline.Item{
 		ID:             msg.EventID + "-attachment",
 		Classification: timeline.ClassMessage, // Could be ClassFile or ClassMedia in the future
 		Timestamp:      timestamp,
 		Owner:          owner,
-		Retrieval:      fileKey,
 	}
 
 	// Set up metadata
@@ -499,19 +468,13 @@ func createAttachmentItemWithFile(filename string, timestamp time.Time, owner ti
 			timeStr := timestamp.Format("1-2-2006 at 3-04-05 PM")
 			switch msg.Content.MsgType {
 			case "m.image":
-				if strings.Contains(msg.Content.Body, "sticker") || strings.Contains(msg.Content.URL, "sticker") {
-					placeholderFilename = fmt.Sprintf("sticker-%s.png", timeStr)
-				} else {
-					placeholderFilename = fmt.Sprintf("image-%s.jpg", timeStr)
-				}
+				placeholderFilename = fmt.Sprintf("image-%s.jpg", timeStr)
 			case "m.video":
 				placeholderFilename = fmt.Sprintf("video-%s.mp4", timeStr)
 			case "m.audio":
 				placeholderFilename = fmt.Sprintf("Voice message-%s.ogg", timeStr)
 			case "m.file":
 				placeholderFilename = fmt.Sprintf("file-%s", timeStr)
-			default:
-				placeholderFilename = fmt.Sprintf("attachment-%s", timeStr)
 			}
 		}
 		item.Content = timeline.ItemData{
@@ -521,16 +484,6 @@ func createAttachmentItemWithFile(filename string, timestamp time.Time, owner ti
 	}
 
 	return item
-}
-
-// fileExists checks if a file exists in the filesystem
-func fileExists(filesystem fs.FS, filename string) bool {
-	f, err := filesystem.Open(filename)
-	if err != nil {
-		return false
-	}
-	f.Close()
-	return true
 }
 
 // IsGenericImageName checks if the body/filename is a generic name like "image.jpg", "video.mp4", etc.
@@ -543,7 +496,6 @@ func IsGenericImageName(name string) bool {
 	lowerName := strings.ToLower(name)
 	return lowerName == "image.jpg" ||
 		lowerName == "video.mp4" ||
-		lowerName == "sticker.png" ||
 		strings.HasPrefix(lowerName, "voice message") ||
 		lowerName == "file"
 }
@@ -590,6 +542,4 @@ type elementMediaInfo struct {
 	Size     int64  `json:"size,omitempty"`
 }
 
-const (
-	ChatPath = "export.json"
-)
+const ChatPath = "export.json"
