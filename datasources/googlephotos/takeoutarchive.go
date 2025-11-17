@@ -75,6 +75,9 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if !albumFolder.IsDir() {
+			continue
+		}
 
 		thisAlbumFolderPath := path.Join(dirEntry.Filename, albumFolder.Name())
 
@@ -96,7 +99,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		// matching up filenames correctly (metadata + media files)
 		albumItems, err := fs.ReadDir(dirEntry.FS, thisAlbumFolderPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading album directory: %w", err)
 		}
 		sort.Slice(albumItems, func(i, j int) bool {
 			iName, jName := albumItems[i].Name(), albumItems[j].Name()

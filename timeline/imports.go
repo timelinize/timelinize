@@ -359,7 +359,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 				if err := p.process(job.Context(), dirEntry, dsCheckpoint); err != nil {
 					ij.generateThumbnailsForImportedItems()
 					ij.generateEmbeddingsForImportedItems()
-					return fmt.Errorf("processing %s: %w", filename, err)
+					return fmt.Errorf("processing %s as %s: %w", filename, ds.Name, err)
 				}
 
 				// the data source checkpoint is only applicable to the starting point (the filename we resumed from)
