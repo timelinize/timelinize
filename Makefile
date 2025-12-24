@@ -48,11 +48,22 @@ dep-libvps:
 
 ### bin
 
+# macOS rpath flags for portable binaries (works on both Intel and Apple Silicon)
+MACOS_RPATH_FLAGS=-Wl,-rpath,/opt/homebrew/lib -Wl,-rpath,/usr/local/lib \
+	-Wl,-rpath,/opt/homebrew/opt/glib/lib -Wl,-rpath,/usr/local/opt/glib/lib \
+	-Wl,-rpath,/opt/homebrew/opt/vips/lib -Wl,-rpath,/usr/local/opt/vips/lib \
+	-Wl,-rpath,/opt/homebrew/opt/gettext/lib -Wl,-rpath,/usr/local/opt/gettext/lib
+
 bin: dep
 	# darwin amd64
 	#CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o $(BIN_ROOT)/$(BIN_NAME)_darwin_amd64
 	# darwin arm64
+ifeq ($(OS_NAME),darwin)
+	CGO_LDFLAGS="$$(pkg-config --libs gio-2.0 vips) $(MACOS_RPATH_FLAGS)" go build -o $(BIN_ROOT)/$(BIN_NAME)_darwin_arm64
+	./.github/scripts/fix-macos-dylib-paths.sh $(BIN_ROOT)/$(BIN_NAME)_darwin_arm64
+else
 	go build -o $(BIN_ROOT)/$(BIN_NAME)_darwin_arm64
+endif
 bin-cross:
 	# linux amd64
 	#CGO_ENABLED=1 GOOS=linux GOARCH=amd64 CC="zig cc -target x86_64-linux" CXX="zig c++ -target x86_64-linux" go build -o $(BIN_ROOT)/$(BIN_NAME)_linux_amd64

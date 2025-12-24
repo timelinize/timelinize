@@ -60,17 +60,37 @@ jobs:
       # - export CGO_CFLAGS="$(pkg-config --cflags gio-2.0 vips)"
       # - export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/opt/homebrew/opt/glib/lib/pkgconfig:$PKG_CONFIG_PATH"
       # but they don't seem to be necessary. Adding as a comment in case something breaks AGAIN in the future, maybe they'll help.
+      #
+      # As of Dec 2025, we also add -rpath flags for both Homebrew locations to make binaries
+      # portable across Intel (/usr/local) and Apple Silicon (/opt/homebrew) Macs.
       - name: Compile application
         env:
           CGO_ENABLED: 1
         shell: bash
         run: |
-          export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 vips)"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            # Add rpath linker flags for both Homebrew locations for cross-architecture compatibility
+            RPATH_FLAGS="-Wl,-rpath,/opt/homebrew/lib -Wl,-rpath,/usr/local/lib"
+            RPATH_FLAGS="$RPATH_FLAGS -Wl,-rpath,/opt/homebrew/opt/glib/lib -Wl,-rpath,/usr/local/opt/glib/lib"
+            RPATH_FLAGS="$RPATH_FLAGS -Wl,-rpath,/opt/homebrew/opt/vips/lib -Wl,-rpath,/usr/local/opt/vips/lib"
+            RPATH_FLAGS="$RPATH_FLAGS -Wl,-rpath,/opt/homebrew/opt/gettext/lib -Wl,-rpath,/usr/local/opt/gettext/lib"
+            export CGO_LDFLAGS="$(pkg-config --libs gio-2.0 vips) $RPATH_FLAGS"
+          else
+            export CGO_LDFLAGS="${CGO_LDFLAGS:-}"
+          fi
           env
           go env
           echo "Building..."
           go build
           echo "Success."
+
+      # Fix macOS dynamic library paths to use @rpath instead of absolute Homebrew paths
+      # This makes binaries portable across Intel and Apple Silicon Macs
+      - name: Fix dynamic library paths (macOS)
+        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-15-intel' }}
+        run: |
+          chmod +x .github/scripts/fix-macos-dylib-paths.sh
+          ./.github/scripts/fix-macos-dylib-paths.sh ${{ env.APP_NAME }}
       
       # use conventional archive formats for each platform
 
