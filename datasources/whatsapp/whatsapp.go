@@ -31,15 +31,32 @@ type Importer struct{}
 
 // Recognize returns whether the input is supported.
 func (Importer) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	// Standard WhatsApp export name
 	if dirEntry.FileExists(chatPath) {
 		return timeline.Recognition{Confidence: 0.8}, nil
 	}
+
+	// Also accept files whose name contains "whatsapp" and ends with .txt (common renames)
+	name := strings.ToLower(dirEntry.Name())
+	if strings.Contains(name, "whatsapp") && strings.HasSuffix(name, ".txt") {
+		return timeline.Recognition{Confidence: 0.6}, nil
+	}
+
 	return timeline.Recognition{}, nil
 }
 
 // FileImport imports data from the file or folder.
 func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	file, err := dirEntry.FS.Open(chatPath)
+	// Try default path first, then fall back to the selected file if it's a WhatsApp export
+	chatFilePath := chatPath
+
+	file, err := dirEntry.FS.Open(chatFilePath)
+	if err != nil {
+		if dirEntry.Filename != "" && dirEntry.Filename != "." && !dirEntry.IsDir() {
+			chatFilePath = dirEntry.Filename
+			file, err = dirEntry.FS.Open(chatFilePath)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("loading chat: %w", err)
 	}
@@ -57,14 +74,19 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 		messageLine := scanner.Text()
 
 		sub := messageStartRegex.FindStringSubmatch(messageLine)
+		if sub == nil {
+			// Ignore lines that don't look like messages to avoid panics
+			continue
+		}
 
-		timestamp, err := parseTime(sub[2], sub[3])
+		dateStr, timeStr, name := extractMatchParts(sub)
+
+		timestamp, err := parseTime(dateStr, timeStr)
 		if err != nil {
 			return err
 		}
 
 		content := strings.Split(messageLine[len(sub[0])-1:], "\u200E")
-		name := sub[4]
 
 		owner := timeline.Entity{
 			Name: name,
@@ -145,6 +167,11 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 }
 
 func parseTime(dateStr, timeStr string) (time.Time, error) {
+	// Add seconds if missing
+	if len(timeStr) == len("15:04") {
+		timeStr += ":00"
+	}
+
 	yearAtEnd := true
 	sep := dateStr[2:3]
 	if _, err := strconv.Atoi(sep); err == nil {

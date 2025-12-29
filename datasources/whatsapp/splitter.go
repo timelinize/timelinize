@@ -5,7 +5,17 @@ import (
 	"regexp"
 )
 
-var messageStartRegex = regexp.MustCompile(`(?s)(` + "\u200E" + `)?\[(\d{4}[-./]\d{2}[-./]\d{2}|\d{2}[-./]\d{2}[-./]\d{4}), (\d{2}:\d{2}:\d{2})\] ([^:]+): `)
+// Matches both standard WhatsApp exports "[YYYY/MM/DD, HH:MM:SS] Name: ..."
+// and the mobile export variant "DD/MM/YYYY, HH:MM - Name: ..."
+// Capturing groups (1-indexed):
+// 1: optional \u200E
+// 2: date (bracketed form)
+// 3: time (bracketed form, HH:MM or HH:MM:SS)
+// 4: name (bracketed form)
+// 5: date (dash form)
+// 6: time (dash form, HH:MM or HH:MM:SS)
+// 7: name (dash form)
+var messageStartRegex = regexp.MustCompile(`(?s)(` + "\u200E" + `)?(?:\[(\d{4}[-./]\d{2}[-./]\d{2}|\d{2}[-./]\d{2}[-./]\d{4}), (\d{2}:\d{2}(?::\d{2})?)\] ([^:]+): |(\d{4}[-./]\d{2}[-./]\d{2}|\d{2}[-./]\d{2}[-./]\d{4}), (\d{2}:\d{2}(?::\d{2})?) - ([^:]+): )`)
 
 func chatSplit(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	// +1: Make sure not to match a message start if it's right at the start of the provided data
