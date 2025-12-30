@@ -39,7 +39,7 @@ func (Importer) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timel
 	// Also accept files whose name contains "whatsapp" and ends with .txt (common renames)
 	name := strings.ToLower(dirEntry.Name())
 	if strings.Contains(name, "whatsapp") && strings.HasSuffix(name, ".txt") {
-		return timeline.Recognition{Confidence: 0.6}, nil
+		return timeline.Recognition{Confidence: 0.8}, nil
 	}
 
 	return timeline.Recognition{}, nil
