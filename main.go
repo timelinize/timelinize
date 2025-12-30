@@ -32,6 +32,7 @@ import (
 	_ "github.com/timelinize/timelinize/datasources/firefox"
 	_ "github.com/timelinize/timelinize/datasources/flighty"
 	_ "github.com/timelinize/timelinize/datasources/generic"
+	_ "github.com/timelinize/timelinize/datasources/geocaching"
 	_ "github.com/timelinize/timelinize/datasources/geojson"
 	_ "github.com/timelinize/timelinize/datasources/github"
 	_ "github.com/timelinize/timelinize/datasources/goodreads"
