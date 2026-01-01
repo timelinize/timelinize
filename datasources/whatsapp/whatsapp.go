@@ -73,27 +73,25 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 	for scanner.Scan() {
 		messageLine := scanner.Text()
 
-		sub := messageStartRegex.FindStringSubmatch(messageLine)
-		if sub == nil {
-			// Ignore lines that don't look like messages to avoid panics
+		h, ok := parseMessageHeader([]byte(messageLine))
+		if !ok {
+			// Ignore lines that don't look like messages
 			continue
 		}
 
-		dateStr, timeStr, name := extractMatchParts(sub)
-
-		timestamp, err := parseTime(dateStr, timeStr)
+		timestamp, err := parseTime(h.Date, h.Time)
 		if err != nil {
 			return err
 		}
 
-		content := strings.Split(messageLine[len(sub[0])-1:], "\u200E")
+		content := strings.Split(messageLine[h.HeaderLen-1:], "\u200E")
 
 		owner := timeline.Entity{
-			Name: name,
+			Name: h.Name,
 			Attributes: []timeline.Attribute{
 				{
 					Name:     "whatsapp_name",
-					Value:    name,
+					Value:    h.Name,
 					Identity: true, // the data export only gives us this info for the owner, so it is the identity, but only for this user
 				},
 			},
@@ -101,7 +99,7 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 
 		var attachment *timeline.Item
 		// If a line has an attachment the final \x200E separated column is always about that attachment
-		if sub[1] == "\u200E" {
+		if h.HasLRO {
 			attachment = attachmentToItem(content[len(content)-1], timestamp, owner, dirEntry)
 			content = content[:len(content)-1]
 		}
@@ -142,8 +140,8 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 
 		// Record all recipients for messages we're keeping
 		// We'll tag all messages with all recipients later
-		if _, ok := recipients[name]; !ok {
-			recipients[name] = owner
+		if _, ok := recipients[h.Name]; !ok {
+			recipients[h.Name] = owner
 		}
 		messages = append(messages, message)
 	}
@@ -194,19 +192,6 @@ func parseTime(dateStr, timeStr string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("unable to convert '%s %s' into a time", dateStr, timeStr)
 	}
 	return timestamp, nil
-}
-
-// extractMatchParts normalizes the regex capture groups for both bracketed and dash formats.
-func extractMatchParts(sub []string) (dateStr, timeStr, name string) {
-	// Bracketed form: groups 2=date, 3=time, 4=name
-	if len(sub) >= 5 && sub[2] != "" {
-		return sub[2], sub[3], sub[4]
-	}
-	// Dash form: groups 5=date, 6=time, 7=name
-	if len(sub) >= 8 {
-		return sub[5], sub[6], sub[7]
-	}
-	return "", "", ""
 }
 
 const (
