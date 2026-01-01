@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"bufio"
 	"bytes"
+	"strconv"
 )
 
 var lro = []byte{0xE2, 0x80, 0x8E} // U+200E (LRO)
@@ -157,17 +158,31 @@ func isDate(b []byte) bool {
 
 	// YYYY?MM?DD
 	if sep4 == '-' || sep4 == '/' || sep4 == '.' {
-		return isDigit(b[0]) && isDigit(b[1]) && isDigit(b[2]) && isDigit(b[3]) &&
+		if !(isDigit(b[0]) && isDigit(b[1]) && isDigit(b[2]) && isDigit(b[3]) &&
 			isDigit(b[5]) && isDigit(b[6]) && isDigit(b[8]) && isDigit(b[9]) &&
-			b[7] == sep4
+			b[7] == sep4) {
+			return false
+		}
+
+		year, _ := strconv.Atoi(string(b[0:4]))
+		month, _ := strconv.Atoi(string(b[5:7]))
+		day, _ := strconv.Atoi(string(b[8:10]))
+		return year >= 1 && month >= 1 && month <= 12 && day >= 1 && day <= 31
 	}
 
 	// DD?MM?YYYY
 	if sep2 == '-' || sep2 == '/' || sep2 == '.' {
-		return isDigit(b[0]) && isDigit(b[1]) &&
+		if !(isDigit(b[0]) && isDigit(b[1]) &&
 			isDigit(b[3]) && isDigit(b[4]) &&
 			isDigit(b[6]) && isDigit(b[7]) && isDigit(b[8]) && isDigit(b[9]) &&
-			b[2] == sep2 && b[5] == sep2
+			b[2] == sep2 && b[5] == sep2) {
+			return false
+		}
+
+		day, _ := strconv.Atoi(string(b[0:2]))
+		month, _ := strconv.Atoi(string(b[3:5]))
+		year, _ := strconv.Atoi(string(b[6:10]))
+		return year >= 1 && month >= 1 && month <= 12 && day >= 1 && day <= 31
 	}
 
 	return false
