@@ -356,14 +356,14 @@ func markdownContent(title, author string, myRating, avgRating float64, body str
 	sb.WriteString("# ")
 	sb.WriteString(title)
 	if author != "" {
-		sb.WriteString("\n\n**Auteur :** ")
+		sb.WriteString("\n\n**Author:** ")
 		sb.WriteString(author)
 	}
 	if myRating > 0 {
-		sb.WriteString(fmt.Sprintf("\n\n**Ma note :** %.1f", myRating))
+		sb.WriteString(fmt.Sprintf("\n\n**My rating:** %.1f", myRating))
 	}
 	if avgRating > 0 {
-		sb.WriteString(fmt.Sprintf("\n\n**Note moyenne :** %.2f", avgRating))
+		sb.WriteString(fmt.Sprintf("\n\n**Average rating:** %.2f", avgRating))
 	}
 	if body != "" {
 		sb.WriteString("\n\n---\n\n")
@@ -377,9 +377,9 @@ func reviewWithNotes(review, privateNotes string) string {
 	privateNotes = strings.TrimSpace(privateNotes)
 	switch {
 	case review != "" && privateNotes != "":
-		return review + "\n\n> Notes privees :\n" + privateNotes
+		return review + "\n\n> Private notes:\n" + privateNotes
 	case privateNotes != "":
-		return "> Notes privees :\n" + privateNotes
+		return "> Private notes:\n" + privateNotes
 	default:
 		return review
 	}
