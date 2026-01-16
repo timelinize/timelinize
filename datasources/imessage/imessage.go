@@ -470,7 +470,7 @@ func (m message) sender() timeline.Entity {
 func (m message) sentTo() []*timeline.Entity {
 	senderID := m.senderID()
 
-	var ents []*timeline.Entity //nolint:prealloc // bug filed: https://github.com/alexkohler/prealloc/issues/30
+	var ents []*timeline.Entity
 
 	// if device is not the sender, it is at least a recipient!
 	if !m.fromMe() {
