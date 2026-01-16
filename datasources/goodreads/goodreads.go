@@ -4,8 +4,9 @@ package goodreads
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -231,9 +232,7 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 		coverTimestamp := pickCoverTimestamp(readDate, dateAdded, sendEnd)
 		coverISBN10, coverISBN13 := coverISBNPair(isbn, isbn13)
 		coverURL := ""
-		if opt.DisableCovers {
-			// Covers explicitly disabled.
-		} else if !coverTimestamp.IsZero() {
+		if !opt.DisableCovers && !coverTimestamp.IsZero() {
 			cacheKey := coverCacheKey(coverISBN10, coverISBN13, opt.CoverSize)
 			if cacheKey != "" {
 				if coverCacheChecked[cacheKey] {
@@ -319,7 +318,7 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 func optionsFromParams(params timeline.ImportParams) Options {
 	// Default: covers are disabled (opt-in to avoid network calls without consent).
 	opt := Options{
-		DisableCovers: false,
+		DisableCovers: true,
 		CoverSize:     defaultCoverSize,
 	}
 
@@ -479,7 +478,7 @@ func composeID(base, suffix string) string {
 }
 
 func hashStrings(parts ...string) string {
-	h := sha1.New()
+	h := sha256.New()
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -489,7 +488,7 @@ func hashStrings(parts ...string) string {
 		_, _ = h.Write([]byte{0})
 	}
 	sum := h.Sum(nil)
-	return fmt.Sprintf("%x", sum[:8])
+	return hex.EncodeToString(sum[:8])
 }
 
 func pickCoverTimestamp(readDate, dateAdded time.Time, preferRead bool) time.Time {
@@ -834,48 +833,56 @@ func logCoverError(log *zap.Logger, url string, err error) {
 	log.Debug("cover lookup failed", zap.String("url", url), zap.Error(err))
 }
 
+const (
+	isbn10Len       = 10
+	isbn13Len       = 13
+	isbn13WeightAlt = 3
+	mod10           = 10
+	mod11           = 11
+)
+
 func isbn10To13(isbn10 string) string {
-	if len(isbn10) != 10 {
+	if len(isbn10) != isbn10Len {
 		return ""
 	}
-	for i := 0; i < 9; i++ {
+	for i := range isbn10Len - 1 {
 		if isbn10[i] < '0' || isbn10[i] > '9' {
 			return ""
 		}
 	}
 	core := "978" + isbn10[:9]
 	sum := 0
-	for i := 0; i < len(core); i++ {
+	for i := range len(core) {
 		digit := int(core[i] - '0')
 		if i%2 == 0 {
 			sum += digit
 		} else {
-			sum += digit * 3
+			sum += digit * isbn13WeightAlt
 		}
 	}
-	check := (10 - (sum % 10)) % 10
+	check := (mod10 - (sum % mod10)) % mod10
 	return core + strconv.Itoa(check)
 }
 
 func isbn13To10(isbn13 string) string {
-	if len(isbn13) != 13 {
+	if len(isbn13) != isbn13Len {
 		return ""
 	}
 	if !strings.HasPrefix(isbn13, "978") {
 		return ""
 	}
-	for i := 0; i < len(isbn13); i++ {
+	for i := range len(isbn13) {
 		if isbn13[i] < '0' || isbn13[i] > '9' {
 			return ""
 		}
 	}
 	core := isbn13[3:12]
 	sum := 0
-	for i := 0; i < len(core); i++ {
+	for i := range len(core) {
 		digit := int(core[i] - '0')
-		sum += (10 - i) * digit
+		sum += (mod10 - i) * digit
 	}
-	check := 11 - (sum % 11)
+	check := mod11 - (sum % mod11)
 	switch check {
 	case 10:
 		return core + "X"

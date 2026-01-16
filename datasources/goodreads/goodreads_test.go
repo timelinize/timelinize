@@ -102,7 +102,7 @@ func TestGoodreadsFileImport(t *testing.T) {
 		params := timeline.ImportParams{
 			DataSourceOptions: &Options{DisableCovers: true},
 		}
-		graphs := runImport(t, ctx, fi, "goodreads-library.csv", params)
+		graphs := runImport(ctx, t, fi, "goodreads-library.csv", params)
 		if len(graphs) != 2 {
 			t.Fatalf("expected 2 graphs, got %d", len(graphs))
 		}
@@ -125,7 +125,7 @@ func TestGoodreadsFileImport(t *testing.T) {
 			Timeframe:         timeline.Timeframe{Since: &since},
 			DataSourceOptions: &Options{DisableCovers: true},
 		}
-		graphs := runImport(t, ctx, fi, "goodreads-library.csv", params)
+		graphs := runImport(ctx, t, fi, "goodreads-library.csv", params)
 		if len(graphs) != 0 {
 			t.Fatalf("expected 0 graphs, got %d", len(graphs))
 		}
@@ -140,14 +140,14 @@ func TestGoodreadsFileImport(t *testing.T) {
 			Checkpoint:        raw,
 			DataSourceOptions: &Options{DisableCovers: true},
 		}
-		graphs := runImport(t, ctx, fi, "goodreads-three-records.csv", params)
+		graphs := runImport(ctx, t, fi, "goodreads-three-records.csv", params)
 		if len(graphs) != 1 {
 			t.Fatalf("expected 1 graph, got %d", len(graphs))
 		}
 	})
 }
 
-func runImport(t *testing.T, ctx context.Context, fi FileImporter, filename string, params timeline.ImportParams) []*timeline.Graph {
+func runImport(ctx context.Context, t *testing.T, fi FileImporter, filename string, params timeline.ImportParams) []*timeline.Graph {
 	t.Helper()
 
 	itemChan := make(chan *timeline.Graph, 10)
