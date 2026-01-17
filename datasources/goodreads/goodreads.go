@@ -68,7 +68,14 @@ type Options struct {
 	CoverSize     string `json:"cover_size"`
 }
 
-// Recognize reports support for Goodreads CSV exports.
+// Recognize reports support for Goodreads "Library Export" CSV data.
+// This data source accepts either:
+//   - the single CSV export file (goodreads_library_export.csv), or
+//   - a directory containing that file (for convenience).
+//
+// DirThreshold=1 means a directory is only auto-assigned as a Goodreads dataset
+// if all non-hidden entries in it are recognized as Goodreads exports.
+// Recognize implements the timeline.FileImporter interface.
 func (FileImporter) Recognize(_ context.Context, entry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	rec := timeline.Recognition{DirThreshold: 1}
 
