@@ -469,7 +469,7 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 	entityIDsArray, entityIDs := sqlArray(params.EntityID)
 
 	var sb strings.Builder
-	var args []any //nolint:prealloc // we could technically do this, but... why, not worth it, it's basically just: len(entityIDs)*2 + 3
+	var args []any
 
 	sb.WriteString("WITH participant_list AS (\n\t")
 	for i, entityID := range params.EntityID {

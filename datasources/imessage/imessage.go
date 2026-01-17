@@ -171,7 +171,7 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 
 	var sb strings.Builder
 	sb.WriteString("SELECT\n\t")
-	var selectedCols []string //nolint:prealloc // linter false positive: we don't know how many we will be selecting
+	var selectedCols []string
 
 	// select only from columns that exist
 	for _, col := range supportedMessageTableColumns {

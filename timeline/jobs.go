@@ -818,7 +818,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 // GetJobs loads the jobs with the specified IDs, or by the most recent jobs, whichever is set.
 // Both technically can be set, but why?
 func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []uint64, mostRecent int) ([]Job, error) {
-	var jobs []Job //nolint:prealloc // false positive! can't always know how many we'll have in this case
+	var jobs []Job
 
 	// load most recent jobs
 	if mostRecent > 0 {

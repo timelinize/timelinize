@@ -11,7 +11,7 @@ require (
 	github.com/adrianmo/go-nmea v1.10.0
 	github.com/apognu/gocal v0.9.1
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
-	github.com/brianvoe/gofakeit/v7 v7.7.3
+	github.com/brianvoe/gofakeit/v7 v7.9.0
 	github.com/caddyserver/caddy/v2 v2.10.2
 	github.com/cozy/goexif2 v1.3.1
 	github.com/cshum/vipsgen v1.1.2
@@ -20,20 +20,20 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jhillyerd/enmime/v2 v2.2.0
-	github.com/maruel/natural v1.1.1
+	github.com/maruel/natural v1.2.1
 	github.com/mattn/go-sqlite3 v1.14.32
-	github.com/mholt/archives v0.1.5-0.20250923193103-71b922ebb93b
+	github.com/mholt/archives v0.1.6-0.20251107150748-4a3da7803a6f
 	github.com/mholt/go-xmp v0.0.0-20241206042901-5c1584d01f1e
-	github.com/ringsaturn/tzf v1.0.0
+	github.com/ringsaturn/tzf v1.0.2
 	github.com/signal-golang/go-vcard v0.1.2
 	github.com/ttacon/libphonenumber v1.2.1
 	github.com/zeebo/blake3 v0.2.4
 	go.n16f.net/thumbhash v1.1.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/image v0.32.0
-	golang.org/x/net v0.46.0
-	golang.org/x/oauth2 v0.31.0
-	golang.org/x/sys v0.37.0
+	golang.org/x/image v0.33.0
+	golang.org/x/net v0.47.0
+	golang.org/x/oauth2 v0.33.0
+	golang.org/x/sys v0.38.0
 	howett.net/plist v1.0.1
 )
 
@@ -117,11 +117,11 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/nwaples/rardecode/v2 v2.1.1 // indirect
+	github.com/nwaples/rardecode/v2 v2.2.0 // indirect
 	github.com/olekukonko/errors v1.1.0 // indirect
 	github.com/olekukonko/ll v0.0.9 // indirect
 	github.com/olekukonko/tablewriter v1.0.7 // indirect
-	github.com/paulmach/orb v0.11.1 // indirect
+	github.com/paulmach/orb v0.12.0 // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -131,7 +131,7 @@ require (
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.54.0 // indirect
-	github.com/ringsaturn/tzf-rel-lite v0.0.2025-b // indirect
+	github.com/ringsaturn/tzf-rel-lite v0.0.2025-b2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
@@ -146,7 +146,7 @@ require (
 	github.com/smallstep/scep v0.0.0-20240926084937-8cf1ca453101 // indirect
 	github.com/smallstep/truststore v0.13.0 // indirect
 	github.com/sorairolake/lzip-go v0.3.8 // indirect
-	github.com/spf13/afero v1.11.0 // indirect
+	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.7.0 // indirect
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.7 // indirect
@@ -174,13 +174,13 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
+	golang.org/x/crypto v0.44.0 // indirect
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20250305170421-49bf5b80c810 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/mod v0.29.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/term v0.36.0 // indirect
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/sync v0.18.0 // indirect
+	golang.org/x/term v0.37.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
 	google.golang.org/api v0.240.0 // indirect
@@ -188,6 +188,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
 	google.golang.org/grpc v1.73.0 // indirect
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1 // indirect
-	google.golang.org/protobuf v1.36.6 // indirect
+	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

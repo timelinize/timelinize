@@ -275,7 +275,7 @@ type fbMessengerThread struct {
 }
 
 func (thread fbMessengerThread) sentTo(senderName, dsName string) []*timeline.Entity {
-	var sentTo []*timeline.Entity //nolint:prealloc // bug filed: https://github.com/alexkohler/prealloc/issues/30
+	var sentTo []*timeline.Entity
 	for _, participant := range thread.Participants {
 		participantName := FixString(participant.Name)
 		if participantName == senderName {
