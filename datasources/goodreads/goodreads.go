@@ -966,7 +966,6 @@ func baseMetadata(author, additionalAuthors, publisher string, pages int, avgRat
 		"Spoiler":                   spoiler,
 		"Read":                      readFlag,
 	}
-	meta.Clean()
 	return meta
 }
 
