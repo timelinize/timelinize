@@ -98,24 +98,27 @@ func TestGoodreadsFileImport(t *testing.T) {
 	ctx := context.Background()
 	fi := FileImporter{}
 
-	t.Run("emits start and end items", func(t *testing.T) {
+	t.Run("emits single item with read timestamp", func(t *testing.T) {
 		params := timeline.ImportParams{
 			DataSourceOptions: &Options{DisableCovers: true},
 		}
 		graphs := runImport(ctx, t, fi, "goodreads-library.csv", params)
-		if len(graphs) != 2 {
-			t.Fatalf("expected 2 graphs, got %d", len(graphs))
+		if len(graphs) != 1 {
+			t.Fatalf("expected 1 graph, got %d", len(graphs))
 		}
-		for _, graph := range graphs {
-			if graph.Item == nil {
-				t.Fatalf("expected item, got nil")
-			}
-			if graph.Item.Classification.Name != timeline.ClassDocument.Name {
-				t.Fatalf("expected classification %q, got %q", timeline.ClassDocument.Name, graph.Item.Classification.Name)
-			}
-			if graph.Item.Content.MediaType != "text/markdown" {
-				t.Fatalf("expected media type text/markdown, got %q", graph.Item.Content.MediaType)
-			}
+		graph := graphs[0]
+		if graph.Item == nil {
+			t.Fatalf("expected item, got nil")
+		}
+		if graph.Item.Classification.Name != timeline.ClassDocument.Name {
+			t.Fatalf("expected classification %q, got %q", timeline.ClassDocument.Name, graph.Item.Classification.Name)
+		}
+		if graph.Item.Content.MediaType != "text/markdown" {
+			t.Fatalf("expected media type text/markdown, got %q", graph.Item.Content.MediaType)
+		}
+		wantTS := time.Date(2024, 2, 3, 0, 0, 0, 0, time.UTC)
+		if !graph.Item.Timestamp.Equal(wantTS) {
+			t.Fatalf("expected timestamp %v, got %v", wantTS, graph.Item.Timestamp)
 		}
 	})
 
@@ -132,7 +135,8 @@ func TestGoodreadsFileImport(t *testing.T) {
 	})
 
 	t.Run("checkpoint skips earlier records", func(t *testing.T) {
-		raw, err := json.Marshal(1)
+		// checkpoint stores the next line index (1-based); 3 skips the first two records
+		raw, err := json.Marshal(3)
 		if err != nil {
 			t.Fatalf("marshal checkpoint: %v", err)
 		}

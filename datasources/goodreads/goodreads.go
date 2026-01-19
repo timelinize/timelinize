@@ -148,7 +148,7 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 		col[strings.ToLower(h)] = i
 	}
 
-	line := -1
+	line := 0
 	checkpoint := -1
 	if params.Checkpoint != nil {
 		if err := json.Unmarshal(params.Checkpoint, &checkpoint); err != nil {
@@ -173,10 +173,13 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 		}
 		line++
 		if len(record) == 0 {
+			if err := params.Continue(); err != nil {
+				return err
+			}
 			continue
 		}
 
-		if checkpoint >= 0 && line <= checkpoint {
+		if checkpoint > 0 && line < checkpoint {
 			if err := params.Continue(); err != nil {
 				return err
 			}
@@ -216,9 +219,22 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 
 		readDate := parseDate(dateReadStr)
 		dateAdded := parseDate(dateAddedStr)
-		sendStart := !dateAdded.IsZero() && params.Timeframe.Contains(dateAdded)
-		sendEnd := !readDate.IsZero() && params.Timeframe.Contains(readDate)
-		if !sendStart && !sendEnd {
+		isRead := strings.EqualFold(strings.TrimSpace(shelf), "read") && !readDate.IsZero()
+		var ts time.Time
+		contentBody := ""
+		switch {
+		case isRead:
+			ts = readDate
+			contentBody = reviewWithNotes(review, privateNotes)
+		case !dateAdded.IsZero():
+			ts = dateAdded
+		default:
+			if err := params.Continue(); err != nil {
+				return err
+			}
+			continue
+		}
+		if !params.Timeframe.Contains(ts) {
 			if err := params.Continue(); err != nil {
 				return err
 			}
@@ -236,7 +252,7 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 			idBase = hashStrings(title, author)
 		}
 
-		coverTimestamp := pickCoverTimestamp(readDate, dateAdded, sendEnd)
+		coverTimestamp := ts
 		coverISBN10, coverISBN13 := coverISBNPair(isbn, isbn13)
 		coverURL := ""
 		if !opt.DisableCovers && !coverTimestamp.IsZero() {
@@ -252,69 +268,27 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 			}
 		}
 
-		startCheckpoint := any(nil)
-		endCheckpoint := any(nil)
-		if sendStart && !sendEnd {
-			startCheckpoint = line
+		meta := baseMetadata(author, additionalAuthors, publisher, pages, avgRating, myRating, yearPublished, origYear, dateReadStr, dateAddedStr, shelf, bookshelves, isbn, isbn13, binding, readCount, ownedCopies, spoiler, readFlag)
+		content := markdownContent(title, author, myRating, avgRating, contentBody)
+		item := &timeline.Item{
+			ID:                   composeID(idBase, "book"),
+			Classification:       timeline.ClassDocument,
+			Timestamp:            ts,
+			IntermediateLocation: entry.Name(),
+			Content: timeline.ItemData{
+				MediaType: "text/markdown",
+				Data:      timeline.StringData(content),
+			},
+			Metadata: meta,
 		}
-		if sendEnd {
-			endCheckpoint = line
+		graph := &timeline.Graph{Item: item}
+		graph.Checkpoint = line + 1
+		if coverURL != "" && !coverTimestamp.IsZero() {
+			graph.ToItem(timeline.RelAttachment, coverItem(idBase, coverTimestamp, coverURL, coverISBN10, coverISBN13, entry))
 		}
-
-		// Item start (Date Added) if available
-		if sendStart {
-			metaStart := baseMetadata(author, additionalAuthors, publisher, pages, avgRating, myRating, yearPublished, origYear, dateReadStr, dateAddedStr, shelf, bookshelves, isbn, isbn13, binding, readCount, ownedCopies, spoiler, readFlag)
-			contentStart := markdownContent(title, author, myRating, avgRating, "")
-			itemStart := &timeline.Item{
-				ID:                   composeID(idBase, "start"),
-				Classification:       timeline.ClassDocument,
-				Timestamp:            dateAdded,
-				IntermediateLocation: entry.Name(),
-				Content: timeline.ItemData{
-					MediaType: "text/markdown",
-					Data:      timeline.StringData(contentStart),
-				},
-				Metadata: metaStart,
-			}
-			graph := &timeline.Graph{Item: itemStart}
-			if startCheckpoint != nil {
-				graph.Checkpoint = startCheckpoint
-			}
-			if !sendEnd && coverURL != "" && !coverTimestamp.IsZero() {
-				graph.ToItem(timeline.RelAttachment, coverItem(idBase, coverTimestamp, coverURL, coverISBN10, coverISBN13, entry))
-			}
-			params.Pipeline <- graph
-			if err := params.Continue(); err != nil {
-				return err
-			}
-		}
-
-		// Item end (Date Read) with review/private notes
-		if sendEnd {
-			metaEnd := baseMetadata(author, additionalAuthors, publisher, pages, avgRating, myRating, yearPublished, origYear, dateReadStr, dateAddedStr, shelf, bookshelves, isbn, isbn13, binding, readCount, ownedCopies, spoiler, readFlag)
-			contentEnd := markdownContent(title, author, myRating, avgRating, reviewWithNotes(review, privateNotes))
-			itemEnd := &timeline.Item{
-				ID:                   composeID(idBase, "end"),
-				Classification:       timeline.ClassDocument,
-				Timestamp:            readDate,
-				IntermediateLocation: entry.Name(),
-				Content: timeline.ItemData{
-					MediaType: "text/markdown",
-					Data:      timeline.StringData(contentEnd),
-				},
-				Metadata: metaEnd,
-			}
-			graph := &timeline.Graph{Item: itemEnd}
-			if endCheckpoint != nil {
-				graph.Checkpoint = endCheckpoint
-			}
-			if coverURL != "" && !coverTimestamp.IsZero() {
-				graph.ToItem(timeline.RelAttachment, coverItem(idBase, coverTimestamp, coverURL, coverISBN10, coverISBN13, entry))
-			}
-			params.Pipeline <- graph
-			if err := params.Continue(); err != nil {
-				return err
-			}
+		params.Pipeline <- graph
+		if err := params.Continue(); err != nil {
+			return err
 		}
 
 	}
