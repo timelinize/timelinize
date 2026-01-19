@@ -81,13 +81,14 @@ func defaultOptions() Options {
 }
 
 // Recognize reports support for Goodreads "Library Export" CSV data.
-// This data source accepts either:
-//   - the single CSV export file (goodreads_library_export.csv), or
+//
+// Supported inputs:
+//   - the Goodreads Library Export CSV file (typically named goodreads_library_export.csv), and
 //   - a directory containing that file (for convenience).
 //
-// DirThreshold=1 means a directory is only auto-assigned as a Goodreads dataset
-// if all non-hidden entries in it are recognized as Goodreads exports.
-// Recognize implements the timeline.FileImporter interface.
+// Note: recognizing a directory does not necessarily mean it will be auto-assigned/collapsed.
+// DirThreshold controls when a directory is treated as a single dataset: with DirThreshold=1,
+// this only happens when all non-hidden entries in the directory are recognized as Goodreads exports.
 func (FileImporter) Recognize(_ context.Context, entry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	rec := timeline.Recognition{DirThreshold: 1}
 
