@@ -50,7 +50,7 @@ func init() {
 		Title:           "Goodreads",
 		Icon:            "goodreads.jpg",
 		Description:     "Imports Goodreads library export CSV files.",
-		NewOptions:      func() any { return new(Options) },
+		NewOptions:      func() any { return defaultOptions() },
 		NewFileImporter: func() timeline.FileImporter { return FileImporter{} },
 	})
 	if err != nil {
@@ -64,8 +64,20 @@ type FileImporter struct{}
 // Options configures the Goodreads importer.
 type Options struct {
 	// Covers trigger network calls to Open Library; keep opt-in by default.
-	DisableCovers bool   `json:"disable_covers"`
-	CoverSize     string `json:"cover_size"`
+	DisableCovers bool `json:"disable_covers"`
+	// CoverSize accepts "S", "M", or "L" (default: "L").
+	CoverSize string `json:"cover_size"`
+	// IncludeNonRead imports non-read shelves (to-read, currently-reading, etc.)
+	// as "added/shelved" events using Date Added (it is not treated as a reading start).
+	IncludeNonRead bool `json:"include_non_read"`
+}
+
+func defaultOptions() Options {
+	return Options{
+		DisableCovers:  true,
+		CoverSize:      defaultCoverSize,
+		IncludeNonRead: false,
+	}
 }
 
 // Recognize reports support for Goodreads "Library Export" CSV data.
@@ -148,7 +160,7 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 		col[strings.ToLower(h)] = i
 	}
 
-	line := 0
+	line := -1
 	checkpoint := -1
 	if params.Checkpoint != nil {
 		if err := json.Unmarshal(params.Checkpoint, &checkpoint); err != nil {
@@ -211,6 +223,13 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 		isbn13 := cleanISBN(field(col, record, "isbn13"))
 		binding := field(col, record, "binding")
 		shelf := field(col, record, "exclusive shelf")
+		shelf = strings.ToLower(strings.TrimSpace(shelf))
+		if !opt.IncludeNonRead && shelf != "read" {
+			if err := params.Continue(); err != nil {
+				return err
+			}
+			continue
+		}
 		bookshelves := splitList(field(col, record, "bookshelves"))
 		readCount := parseInt(field(col, record, "read count"))
 		ownedCopies := parseInt(field(col, record, "owned copies"))
@@ -219,20 +238,25 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 
 		readDate := parseDate(dateReadStr)
 		dateAdded := parseDate(dateAddedStr)
-		isRead := strings.EqualFold(strings.TrimSpace(shelf), "read") && !readDate.IsZero()
 		var ts time.Time
 		contentBody := ""
-		switch {
-		case isRead:
+		if shelf == "read" {
+			if readDate.IsZero() {
+				if err := params.Continue(); err != nil {
+					return err
+				}
+				continue
+			}
 			ts = readDate
 			contentBody = reviewWithNotes(review, privateNotes)
-		case !dateAdded.IsZero():
-			ts = dateAdded
-		default:
-			if err := params.Continue(); err != nil {
-				return err
+		} else {
+			if dateAdded.IsZero() {
+				if err := params.Continue(); err != nil {
+					return err
+				}
+				continue
 			}
-			continue
+			ts = dateAdded
 		}
 		if !params.Timeframe.Contains(ts) {
 			if err := params.Continue(); err != nil {
@@ -269,10 +293,17 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 		}
 
 		meta := baseMetadata(author, additionalAuthors, publisher, pages, avgRating, myRating, yearPublished, origYear, dateReadStr, dateAddedStr, shelf, bookshelves, isbn, isbn13, binding, readCount, ownedCopies, spoiler, readFlag)
+		if opt.IncludeNonRead && shelf != "read" {
+			meta["Imported shelf"] = shelf
+		}
 		content := markdownContent(title, author, myRating, avgRating, contentBody)
+		if coverURL != "" && !coverTimestamp.IsZero() {
+			meta["Summary"] = content
+			content = ""
+		}
 		item := &timeline.Item{
 			ID:                   composeID(idBase, "book"),
-			Classification:       timeline.ClassDocument,
+			Classification:       timeline.ClassEvent,
 			Timestamp:            ts,
 			IntermediateLocation: entry.Name(),
 			Content: timeline.ItemData{
@@ -281,36 +312,36 @@ func (FileImporter) FileImport(ctx context.Context, entry timeline.DirEntry, par
 			},
 			Metadata: meta,
 		}
+		if coverURL != "" {
+			item.Content = timeline.ItemData{
+				Filename:  coverFilename(idBase, coverISBN10, coverISBN13),
+				MediaType: "image/jpeg",
+				Data:      timeline.DownloadData(coverURL),
+			}
+		}
 		graph := &timeline.Graph{Item: item}
 		graph.Checkpoint = line + 1
-		if coverURL != "" && !coverTimestamp.IsZero() {
-			graph.ToItem(timeline.RelAttachment, coverItem(idBase, coverTimestamp, coverURL, coverISBN10, coverISBN13, entry))
-		}
 		params.Pipeline <- graph
 		if err := params.Continue(); err != nil {
 			return err
 		}
-
 	}
 
 	return nil
 }
 
 func optionsFromParams(params timeline.ImportParams) Options {
-	// Default: covers are disabled (opt-in to avoid network calls without consent).
-	opt := Options{
-		DisableCovers: true,
-		CoverSize:     defaultCoverSize,
-	}
+	opt := defaultOptions()
 
 	if params.DataSourceOptions != nil {
 		switch v := params.DataSourceOptions.(type) {
 		case *Options:
-			if v != nil && !isZeroOptions(*v) {
+			if v != nil {
 				opt.DisableCovers = v.DisableCovers
 				if strings.TrimSpace(v.CoverSize) != "" {
 					opt.CoverSize = v.CoverSize
 				}
+				opt.IncludeNonRead = v.IncludeNonRead
 			}
 		case map[string]any:
 			if val, ok := v["disable_covers"]; ok {
@@ -323,27 +354,29 @@ func optionsFromParams(params timeline.ImportParams) Options {
 					opt.CoverSize = s
 				}
 			}
+			if val, ok := v["include_non_read"]; ok {
+				if b, ok := val.(bool); ok {
+					opt.IncludeNonRead = b
+				}
+			}
 		case json.RawMessage, []byte:
 			var o Options
 			raw, ok := v.(json.RawMessage)
 			if !ok {
 				raw = json.RawMessage(v.([]byte))
 			}
-			if err := json.Unmarshal(raw, &o); err == nil && !isZeroOptions(o) {
+			if err := json.Unmarshal(raw, &o); err == nil {
 				opt.DisableCovers = o.DisableCovers
 				if strings.TrimSpace(o.CoverSize) != "" {
 					opt.CoverSize = o.CoverSize
 				}
+				opt.IncludeNonRead = o.IncludeNonRead
 			}
 		}
 	}
 
 	opt.CoverSize = normalizeCoverSize(opt.CoverSize)
 	return opt
-}
-
-func isZeroOptions(o Options) bool {
-	return !o.DisableCovers && strings.TrimSpace(o.CoverSize) == ""
 }
 
 func field(cols map[string]int, rec []string, name string) string {
@@ -470,16 +503,6 @@ func hashStrings(parts ...string) string {
 	}
 	sum := h.Sum(nil)
 	return hex.EncodeToString(sum[:8])
-}
-
-func pickCoverTimestamp(readDate, dateAdded time.Time, preferRead bool) time.Time {
-	if preferRead && !readDate.IsZero() {
-		return readDate
-	}
-	if !dateAdded.IsZero() {
-		return dateAdded
-	}
-	return readDate
 }
 
 func coverISBNPair(isbn10, isbn13 string) (string, string) {
@@ -874,41 +897,6 @@ func isbn13To10(isbn13 string) string {
 		return ""
 	}
 	return core + strconv.Itoa(check)
-}
-
-func coverItem(bookID string, ts time.Time, url, isbn, isbn13 string, entry timeline.DirEntry) *timeline.Item {
-	filename := coverFilename(bookID, isbn, isbn13)
-	return &timeline.Item{
-		ID:                   coverItemID(bookID, isbn, isbn13),
-		Classification:       timeline.ClassMedia,
-		Timestamp:            ts,
-		IntermediateLocation: entry.Name(),
-		Content: timeline.ItemData{
-			Filename:  filename,
-			MediaType: "image/jpeg",
-			Data:      timeline.DownloadData(url),
-		},
-		Metadata: timeline.Metadata{
-			"ISBN":   isbn,
-			"ISBN13": isbn13,
-			"Source": "Open Library",
-			"URL":    url,
-		},
-	}
-}
-
-func coverItemID(bookID, isbn, isbn13 string) string {
-	base := bookID
-	if base == "" {
-		base = isbn13
-	}
-	if base == "" {
-		base = isbn
-	}
-	if base == "" {
-		base = hashStrings("cover", isbn13, isbn, bookID)
-	}
-	return composeID(base, "cover")
 }
 
 func coverFilename(bookID, isbn, isbn13 string) string {

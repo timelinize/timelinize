@@ -110,8 +110,8 @@ func TestGoodreadsFileImport(t *testing.T) {
 		if graph.Item == nil {
 			t.Fatalf("expected item, got nil")
 		}
-		if graph.Item.Classification.Name != timeline.ClassDocument.Name {
-			t.Fatalf("expected classification %q, got %q", timeline.ClassDocument.Name, graph.Item.Classification.Name)
+		if graph.Item.Classification.Name != timeline.ClassEvent.Name {
+			t.Fatalf("expected classification %q, got %q", timeline.ClassEvent.Name, graph.Item.Classification.Name)
 		}
 		if graph.Item.Content.MediaType != "text/markdown" {
 			t.Fatalf("expected media type text/markdown, got %q", graph.Item.Content.MediaType)
@@ -135,14 +135,17 @@ func TestGoodreadsFileImport(t *testing.T) {
 	})
 
 	t.Run("checkpoint skips earlier records", func(t *testing.T) {
-		// checkpoint stores the next line index (1-based); 3 skips the first two records
-		raw, err := json.Marshal(3)
+		// checkpoint stores the next line index; 2 skips the first two records (line starts at -1)
+		raw, err := json.Marshal(2)
 		if err != nil {
 			t.Fatalf("marshal checkpoint: %v", err)
 		}
 		params := timeline.ImportParams{
-			Checkpoint:        raw,
-			DataSourceOptions: &Options{DisableCovers: true},
+			Checkpoint: raw,
+			DataSourceOptions: &Options{
+				DisableCovers:  true,
+				IncludeNonRead: true,
+			},
 		}
 		graphs := runImport(ctx, t, fi, "goodreads-three-records.csv", params)
 		if len(graphs) != 1 {
