@@ -148,13 +148,6 @@ func parseMessageHeader(b []byte) (messageHeader, bool) {
 	return h, true
 }
 
-func skipLRO(b []byte) []byte {
-	if bytes.HasPrefix(b, lro) {
-		return b[len(lro):]
-	}
-	return b
-}
-
 func isDate(b []byte) bool {
 	if len(b) != dateLen {
 		return false
@@ -164,9 +157,9 @@ func isDate(b []byte) bool {
 
 	// YYYY?MM?DD
 	if sep4 == '-' || sep4 == '/' || sep4 == '.' {
-		if !(isDigit(b[0]) && isDigit(b[1]) && isDigit(b[2]) && isDigit(b[3]) &&
-			isDigit(b[5]) && isDigit(b[6]) && isDigit(b[8]) && isDigit(b[9]) &&
-			b[7] == sep4) {
+		if !isDigit(b[0]) || !isDigit(b[1]) || !isDigit(b[2]) || !isDigit(b[3]) ||
+			!isDigit(b[5]) || !isDigit(b[6]) || !isDigit(b[8]) || !isDigit(b[9]) ||
+			b[7] != sep4 {
 			return false
 		}
 
@@ -178,10 +171,10 @@ func isDate(b []byte) bool {
 
 	// DD?MM?YYYY
 	if sep2 == '-' || sep2 == '/' || sep2 == '.' {
-		if !(isDigit(b[0]) && isDigit(b[1]) &&
-			isDigit(b[3]) && isDigit(b[4]) &&
-			isDigit(b[6]) && isDigit(b[7]) && isDigit(b[8]) && isDigit(b[9]) &&
-			b[2] == sep2 && b[5] == sep2) {
+		if !isDigit(b[0]) || !isDigit(b[1]) ||
+			!isDigit(b[3]) || !isDigit(b[4]) ||
+			!isDigit(b[6]) || !isDigit(b[7]) || !isDigit(b[8]) || !isDigit(b[9]) ||
+			b[2] != sep2 || b[5] != sep2 {
 			return false
 		}
 
