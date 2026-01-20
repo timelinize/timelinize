@@ -127,11 +127,11 @@ func TestChatSplitTwoMessages(t *testing.T) {
 	if len(tokens) != 2 {
 		t.Fatalf("expected 2 tokens, got %d", len(tokens))
 	}
-	if string(tokens[0]) != "[2024/12/31, 12:34] Alice: hello\n" {
-		t.Fatalf("first token mismatch: got %q", string(tokens[0]))
+	if tokens[0] != "[2024/12/31, 12:34] Alice: hello\n" {
+		t.Fatalf("first token mismatch: got %q", tokens[0])
 	}
-	if string(tokens[1]) != "[2024/12/31, 12:35] Bob: hi there\n" {
-		t.Fatalf("second token mismatch: got %q", string(tokens[1]))
+	if tokens[1] != "[2024/12/31, 12:35] Bob: hi there\n" {
+		t.Fatalf("second token mismatch: got %q", tokens[1])
 	}
 }
 
@@ -140,11 +140,11 @@ func TestChatSplitTwoMessagesDash(t *testing.T) {
 	if len(tokens) != 2 {
 		t.Fatalf("expected 2 tokens, got %d", len(tokens))
 	}
-	if string(tokens[0]) != "2024-12-31, 12:34 - Alice: hello\n" {
-		t.Fatalf("first token mismatch: got %q", string(tokens[0]))
+	if tokens[0] != "2024-12-31, 12:34 - Alice: hello\n" {
+		t.Fatalf("first token mismatch: got %q", tokens[0])
 	}
-	if string(tokens[1]) != "2024-12-31, 12:35 - Bob: hi there\n" {
-		t.Fatalf("second token mismatch: got %q", string(tokens[1]))
+	if tokens[1] != "2024-12-31, 12:35 - Bob: hi there\n" {
+		t.Fatalf("second token mismatch: got %q", tokens[1])
 	}
 }
 
@@ -153,11 +153,11 @@ func TestChatSplitTwoMessagesLRO(t *testing.T) {
 	if len(tokens) != 2 {
 		t.Fatalf("expected 2 tokens, got %d", len(tokens))
 	}
-	if string(tokens[0]) != "\u200E[2024/12/31, 12:34] Alice: hello\n" {
-		t.Fatalf("first token mismatch: got %q", string(tokens[0]))
+	if tokens[0] != "\u200E[2024/12/31, 12:34] Alice: hello\n" {
+		t.Fatalf("first token mismatch: got %q", tokens[0])
 	}
-	if string(tokens[1]) != "\u200E[2024/12/31, 12:35] Bob: hi there\n" {
-		t.Fatalf("second token mismatch: got %q", string(tokens[1]))
+	if tokens[1] != "\u200E[2024/12/31, 12:35] Bob: hi there\n" {
+		t.Fatalf("second token mismatch: got %q", tokens[1])
 	}
 }
 

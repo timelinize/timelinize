@@ -6,14 +6,19 @@ import (
 	"strconv"
 )
 
-var lro = []byte{0xE2, 0x80, 0x8E} // U+200E (LRO)
+var lro = []byte{0xE2, 0x80, 0x8E} // U+200E (LRM)
 const (
 	dateLen    = 10
 	timeLenHM  = 5
 	timeLenHMS = 8
 	splitTwo   = 2
+	minYear    = 1
+	minMonth   = 1
+	maxMonth   = 12
+	minDay     = 1
+	maxDay     = 31
+	scanOffset = 4
 )
-const scanOffset = 4
 
 type messageHeader struct {
 	HeaderLen int
@@ -166,7 +171,7 @@ func isDate(b []byte) bool {
 		year, _ := strconv.Atoi(string(b[0:4]))
 		month, _ := strconv.Atoi(string(b[5:7]))
 		day, _ := strconv.Atoi(string(b[8:10]))
-		return year >= 1 && month >= 1 && month <= 12 && day >= 1 && day <= 31
+		return year >= minYear && month >= minMonth && month <= maxMonth && day >= minDay && day <= maxDay
 	}
 
 	// DD?MM?YYYY
@@ -181,7 +186,7 @@ func isDate(b []byte) bool {
 		day, _ := strconv.Atoi(string(b[0:2]))
 		month, _ := strconv.Atoi(string(b[3:5]))
 		year, _ := strconv.Atoi(string(b[6:10]))
-		return year >= 1 && month >= 1 && month <= 12 && day >= 1 && day <= 31
+		return year >= minYear && month >= minMonth && month <= maxMonth && day >= minDay && day <= maxDay
 	}
 
 	return false
@@ -191,7 +196,7 @@ func isTime(b []byte) bool {
 	if len(b) != timeLenHM && len(b) != timeLenHMS {
 		return false
 	}
-	if !(isDigit(b[0]) && isDigit(b[1]) && b[2] == ':' && isDigit(b[3]) && isDigit(b[4])) {
+	if !isDigit(b[0]) || !isDigit(b[1]) || b[2] != ':' || !isDigit(b[3]) || !isDigit(b[4]) {
 		return false
 	}
 	if len(b) == timeLenHM {
