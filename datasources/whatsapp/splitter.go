@@ -2,18 +2,37 @@ package whatsapp
 
 import (
 	"bufio"
-	"regexp"
+	"bytes"
+	"strconv"
 )
 
-var messageStartRegex = regexp.MustCompile(`(?s)(` + "\u200E" + `)?\[(\d{4}[-./]\d{2}[-./]\d{2}|\d{2}[-./]\d{2}[-./]\d{4}), (\d{2}:\d{2}:\d{2})\] ([^:]+): `)
+var lro = []byte{0xE2, 0x80, 0x8E} // U+200E (LRM)
+const (
+	dateLen    = 10
+	timeLenHM  = 5
+	timeLenHMS = 8
+	splitTwo   = 2
+	minYear    = 1
+	minMonth   = 1
+	maxMonth   = 12
+	minDay     = 1
+	maxDay     = 31
+	scanOffset = 4
+)
+
+type messageHeader struct {
+	HeaderLen int
+	HasLRO    bool
+	Date      string
+	Time      string
+	Name      string
+}
 
 func chatSplit(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	// +1: Make sure not to match a message start if it's right at the start of the provided data
-	// +3: Go two longer so a first message with an attachment (starting \u200E) doesn't match either
-	// This means loc[0] will be three lower than it should be
-	loc := messageStartRegex.FindIndex(data[4:])
+	// Start a few bytes in to avoid matching a message start at the very beginning of the buffer
+	loc := findMessageStart(data, scanOffset)
 
-	if loc == nil {
+	if loc == -1 {
 		// We have the last message — return it
 		if atEOF {
 			return 0, data, bufio.ErrFinalToken
@@ -22,6 +41,170 @@ func chatSplit(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		return 0, nil, nil
 	}
 
-	message := data[0 : loc[0]+4]
+	message := data[:loc]
 	return len(message), message, nil
+}
+
+// findMessageStart returns the index of the next message start at or after offset, or -1 if none.
+func findMessageStart(data []byte, offset int) int {
+	for i := offset; i < len(data); i++ {
+		c := data[i]
+		if c != '[' && (c < '0' || c > '9') && c != lro[0] {
+			continue
+		}
+		if c == lro[0] && !bytes.HasPrefix(data[i:], lro) {
+			continue
+		}
+		if isMessageStart(data[i:]) {
+			return i
+		}
+	}
+	return -1
+}
+
+func isMessageStart(b []byte) bool {
+	_, ok := parseMessageHeader(b)
+	return ok
+}
+
+func parseMessageHeader(b []byte) (messageHeader, bool) {
+	origLen := len(b)
+
+	var h messageHeader
+	if bytes.HasPrefix(b, lro) {
+		h.HasLRO = true
+		b = b[len(lro):]
+	}
+	if len(b) < dateLen {
+		return messageHeader{}, false
+	}
+
+	// Standard WhatsApp export:
+	// [YYYY/MM/DD, HH:MM(:SS)] Name: message
+	if b[0] == '[' {
+		endBracket := bytes.IndexByte(b, ']')
+		if endBracket == -1 {
+			return messageHeader{}, false
+		}
+		header := b[1:endBracket]
+		parts := bytes.SplitN(header, []byte(", "), splitTwo)
+		if len(parts) != splitTwo || !isDate(parts[0]) || !isTime(parts[1]) {
+			return messageHeader{}, false
+		}
+
+		nameStart := endBracket + len("] ")
+		if nameStart >= len(b) || b[endBracket+1] != ' ' {
+			return messageHeader{}, false
+		}
+		nameEndRel := bytes.Index(b[nameStart:], []byte(": "))
+		if nameEndRel <= 0 {
+			return messageHeader{}, false
+		}
+		nameEnd := nameStart + nameEndRel
+
+		h.Date = string(parts[0])
+		h.Time = string(parts[1])
+		h.Name = string(b[nameStart:nameEnd])
+
+		hLen := nameEnd + len(": ")
+		if h.HasLRO {
+			hLen += len(lro)
+		}
+		// sanity
+		if hLen > origLen {
+			return messageHeader{}, false
+		}
+		h.HeaderLen = hLen
+		return h, true
+	}
+
+	// Mobile export variant:
+	// DD/MM/YYYY, HH:MM(:SS) - Name: message
+	parts := bytes.SplitN(b, []byte(", "), splitTwo)
+	if len(parts) != splitTwo || !isDate(parts[0]) {
+		return messageHeader{}, false
+	}
+	dateStr := parts[0]
+
+	parts2 := bytes.SplitN(parts[1], []byte(" - "), splitTwo)
+	if len(parts2) != splitTwo || !isTime(parts2[0]) {
+		return messageHeader{}, false
+	}
+	timeStr := parts2[0]
+	nameAndMsg := parts2[1]
+
+	nameEnd := bytes.Index(nameAndMsg, []byte(": "))
+	if nameEnd <= 0 {
+		return messageHeader{}, false
+	}
+
+	h.Date = string(dateStr)
+	h.Time = string(timeStr)
+	h.Name = string(nameAndMsg[:nameEnd])
+
+	hLen := len(dateStr) + len(", ") + len(timeStr) + len(" - ") + nameEnd + len(": ")
+	if h.HasLRO {
+		hLen += len(lro)
+	}
+	if hLen > origLen {
+		return messageHeader{}, false
+	}
+	h.HeaderLen = hLen
+	return h, true
+}
+
+func isDate(b []byte) bool {
+	if len(b) != dateLen {
+		return false
+	}
+	sep4 := b[4]
+	sep2 := b[2]
+
+	// YYYY?MM?DD
+	if sep4 == '-' || sep4 == '/' || sep4 == '.' {
+		if !isDigit(b[0]) || !isDigit(b[1]) || !isDigit(b[2]) || !isDigit(b[3]) ||
+			!isDigit(b[5]) || !isDigit(b[6]) || !isDigit(b[8]) || !isDigit(b[9]) ||
+			b[7] != sep4 {
+			return false
+		}
+
+		year, _ := strconv.Atoi(string(b[0:4]))
+		month, _ := strconv.Atoi(string(b[5:7]))
+		day, _ := strconv.Atoi(string(b[8:10]))
+		return year >= minYear && month >= minMonth && month <= maxMonth && day >= minDay && day <= maxDay
+	}
+
+	// DD?MM?YYYY
+	if sep2 == '-' || sep2 == '/' || sep2 == '.' {
+		if !isDigit(b[0]) || !isDigit(b[1]) ||
+			!isDigit(b[3]) || !isDigit(b[4]) ||
+			!isDigit(b[6]) || !isDigit(b[7]) || !isDigit(b[8]) || !isDigit(b[9]) ||
+			b[2] != sep2 || b[5] != sep2 {
+			return false
+		}
+
+		day, _ := strconv.Atoi(string(b[0:2]))
+		month, _ := strconv.Atoi(string(b[3:5]))
+		year, _ := strconv.Atoi(string(b[6:10]))
+		return year >= minYear && month >= minMonth && month <= maxMonth && day >= minDay && day <= maxDay
+	}
+
+	return false
+}
+
+func isTime(b []byte) bool {
+	if len(b) != timeLenHM && len(b) != timeLenHMS {
+		return false
+	}
+	if !isDigit(b[0]) || !isDigit(b[1]) || b[2] != ':' || !isDigit(b[3]) || !isDigit(b[4]) {
+		return false
+	}
+	if len(b) == timeLenHM {
+		return true
+	}
+	return b[5] == ':' && isDigit(b[6]) && isDigit(b[7])
+}
+
+func isDigit(c byte) bool {
+	return c >= '0' && c <= '9'
 }
