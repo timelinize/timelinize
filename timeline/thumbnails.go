@@ -1074,7 +1074,7 @@ func loadImageVips(logger *zap.Logger, inputFilePath string, inputBytes []byte) 
 	// that returns errors for loaders that don't support it (like pngload), even with
 	// FailOnError set to false; but this apparently works anyway, I suppose since it bypasses
 	// the loader.
-	if err := img.Autorot(); err != nil {
+	if err := img.Autorot(nil); err != nil {
 		logger.Warn("autorotate failed",
 			zap.String("input_file_path", inputFilePath),
 			zap.Int("input_buffer_len", len(inputBytes)),
