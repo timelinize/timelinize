@@ -30,7 +30,7 @@ import (
 
 // Recognize returns true if the file is recognized as a contact list,
 // or a Google Takeout contact list folder that also contains pictures.
-func (fimp *FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, opts timeline.RecognizeParams) (timeline.Recognition, error) {
+func (fimp *FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	pathInFS := "." // start by assuming we'll inspect the current file
 	if dirEntry.IsDir() {
 		// if a directory, specifically, a folder for a contact list in a Google Takeout archive,
@@ -54,22 +54,45 @@ func (fimp *FileImporter) Recognize(ctx context.Context, dirEntry timeline.DirEn
 		}
 	}
 
-	for _, delim := range []rune{',', '\t', ';'} {
-		result, err := recognizeCSV(ctx, dirEntry, pathInFS, opts, delim)
-		if err != nil {
-			return result, fmt.Errorf("inspecting CSV for contact list: %w", err)
-		}
-		if result.Confidence > 0 {
-			return result, nil
-		}
+	bestColMapping, bestDelim, err := bestColumnMappingAndDelim(ctx, dirEntry, pathInFS)
+	if err != nil {
+		return timeline.Recognition{}, err
 	}
+
+	if len(bestColMapping) > recognizeAtLeastFields && bestDelim != 0 {
+		return timeline.Recognition{Confidence: 1.0}, nil
+	}
+
 	return timeline.Recognition{}, nil
 }
 
-func recognizeCSV(_ context.Context, dirEntry timeline.DirEntry, pathInFS string, _ timeline.RecognizeParams, delim rune) (timeline.Recognition, error) {
+// bestColumnMappingAndDelim determines the best mapping of columns, which is canonical field name -> matched column indices,
+// along with the associated detected delimiter of the file.
+func bestColumnMappingAndDelim(ctx context.Context, dirEntry timeline.DirEntry, pathInFS string) (map[string][]int, rune, error) {
+	var bestDelim rune
+	var bestMapping map[string][]int // best column mapping across all delimiters
+
+	for _, delim := range []rune{',', '\t', ';'} {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
+		colMapping, err := determineColumnMappingForDelimiter(dirEntry, pathInFS, delim)
+		if err != nil {
+			return nil, 0, fmt.Errorf("trying to determine column mapping with delimiter %s: %w", string(delim), err)
+		}
+		if len(colMapping) > len(bestMapping) {
+			bestMapping = colMapping
+			bestDelim = delim
+		}
+	}
+
+	return bestMapping, bestDelim, nil
+}
+
+func determineColumnMappingForDelimiter(dirEntry timeline.DirEntry, pathInFS string, delim rune) (map[string][]int, error) {
 	file, err := dirEntry.Open(pathInFS)
 	if err != nil {
-		return timeline.Recognition{}, err
+		return nil, err
 	}
 	defer file.Close()
 
@@ -77,10 +100,11 @@ func recognizeCSV(_ context.Context, dirEntry timeline.DirEntry, pathInFS string
 	r.Comma = delim
 
 	var fieldCount int
+	var columnMapping map[string][]int
 	for {
 		row, err := r.Read()
 		if err != nil {
-			return timeline.Recognition{}, nil // most likely a syntax error, nbd
+			return nil, nil // most likely a syntax error, nbd
 		}
 
 		if fieldCount == 0 {
@@ -89,29 +113,30 @@ func recognizeCSV(_ context.Context, dirEntry timeline.DirEntry, pathInFS string
 			// should have at least two fields to be useful
 			fieldCount = len(row)
 			if fieldCount < minFields {
-				return timeline.Recognition{}, nil
+				return nil, nil
 			}
 
 			// if we don't recognize the minimum number of distinct fields, it's not a recognized contact list
-			if len(bestColumnMapping(row)) < recognizeAtLeastFields {
-				return timeline.Recognition{}, nil
+			columnMapping = bestColumnMappingForFields(row)
+			if len(columnMapping) < recognizeAtLeastFields {
+				return nil, nil
 			}
 		} else {
 			// we've already seen the header row;
 			// field count should be equal to header row
 			if len(row) != fieldCount {
-				return timeline.Recognition{}, nil
+				return nil, nil
 			}
 			break
 		}
 	}
 
-	return timeline.Recognition{Confidence: 1.0}, nil
+	return columnMapping, nil
 }
 
-// bestColumnMapping returns the best mapping of canonical field name
+// bestColumnMappingForFields returns the best mapping of canonical field name
 // to column indices we could find.
-func bestColumnMapping(headerRow []string) map[string][]int {
+func bestColumnMappingForFields(headerRow []string) map[string][]int {
 	var bestMapping map[string][]int
 	for _, f := range formats {
 		result := f.match(headerRow)

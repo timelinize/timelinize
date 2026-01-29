@@ -91,16 +91,16 @@ var formats = []format{
 				exact{"name", "full name"},
 			},
 			"first_name": {
-				exact{"first name", "given name"},
+				exact{"first name", "firstname", "given name", "given names", "fname"},
 			},
 			"middle_name": {
-				exact{"middle name"},
+				exact{"middle name", "middlename"},
 			},
 			"last_name": {
-				exact{"last name", "surname", "family name", "second name"},
+				exact{"last name", "lastname", "surname", "family name", "second name", "lname"},
 			},
 			"birthdate": {
-				exact{"birthday", "birthdate", "birth date", "date of birth", "dob"},
+				exact{"birthday", "birthdate", "birth date", "date of birth", "dob", "bday"},
 			},
 			timeline.AttributePhoneNumber: {
 				exact{"phone", "phone number", "phone no", "telephone", "telephone number", "telephone no"},

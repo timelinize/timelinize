@@ -59,6 +59,18 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 		pathInFS = path.Base(dirEntry.Name()) + ".csv"
 	}
 
+	bestColumnMapping, bestDelim, err := bestColumnMappingAndDelim(ctx, dirEntry, ".")
+	if err != nil {
+		return err
+	}
+
+	// at least 2 fields should be required in order to be useful, right?
+	// like an email by itself (or a name by itself) has no value I think...
+	// especially since no items are attached from a contact list
+	if len(bestColumnMapping) < recognizeAtLeastFields {
+		return errors.New("insufficient header row")
+	}
+
 	file, err := dirEntry.Open(pathInFS)
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
@@ -67,9 +79,9 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 
 	r := csv.NewReader(file)
 	r.ReuseRecord = true // with this enabled, DO NOT MODIFY THE SLICE RETURNED FROM Read()
+	r.Comma = bestDelim
 
 	var headerRow []string
-	var bestMapping map[string][]int // canonical field name -> matched column indices
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -88,23 +100,12 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 		if len(headerRow) == 0 {
 			headerRow = make([]string, len(row))
 			copy(headerRow, row)
-
-			// detect best format or mapping of columns to known fields
-			bestMapping = bestColumnMapping(headerRow)
-
-			// TODO: at least 2 fields should be required in order to be useful, right?
-			// like an email by itself (or a name by itself) has no value I think... esp.
-			// since no items are attached from a contact list
-			if len(bestMapping) < recognizeAtLeastFields {
-				return errors.New("insufficient header row")
-			}
-
 			continue
 		}
 
 		// first, extract mappedValues from recognized columns in the row
 		mappedValues := make(map[string][]string) // map of canonical field name -> associated value(s) from row
-		for canonicalField, colIndices := range bestMapping {
+		for canonicalField, colIndices := range bestColumnMapping {
 			for _, colIdx := range colIndices {
 				mappedValues[canonicalField] = append(mappedValues[canonicalField], row[colIdx])
 			}
