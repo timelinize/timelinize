@@ -26,8 +26,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: msys2/setup-msys2@v2
         with:
-          # TODO: Enable this for more current packages, I guess? But it takes longer.
-          # update: true
+          update: true  # gets more current packages (often necessary when we update vips), but takes longer
           install: >-
              base-devel
              mingw-w64-x86_64-toolchain
@@ -54,6 +53,20 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: echo "$RUNNER_TEMP\msys64\mingw64\bin" >> $GITHUB_PATH
+
+      # Print versions for troubleshooting purposes
+      - name: Check vips version (Windows)
+        if: startsWith(matrix.os, 'windows-')
+        shell: bash
+        run: vips --version
+
+      - name: Check vips version (Linux)
+        if: startsWith(matrix.os, 'ubuntu-')
+        run: vips --version
+
+      - name: Check vips version (macOS)
+        if: startsWith(matrix.os, 'macos-')
+        run: vips --version
 
       # As of May 2025, The CGO_LDFLAGS env var is necessary on macOS since it can't find gio-2.0 otherwise.
       # LLMs also suggested adding:
