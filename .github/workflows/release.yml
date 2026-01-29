@@ -44,22 +44,6 @@ jobs:
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'macos-15-intel' }}
         run: |
           brew install vips
-      
-      # Print versions for troubleshooting purposes
-      - name: Check vips version (Windows)
-        if: startsWith(matrix.os, 'windows-')
-        shell: bash
-        run: |
-          export PATH="$RUNNER_TEMP/msys64/mingw64/bin:$PATH"
-          vips --version
-
-      - name: Check vips version (Linux)
-        if: startsWith(matrix.os, 'ubuntu-')
-        run: vips --version
-
-      - name: Check vips version (macOS)
-        if: startsWith(matrix.os, 'macos-')
-        run: vips --version
 
       # It is crucial to use our gcc compiler instead of the preinstalled gcc,
       # which has an MSYS2 path at c:\msys64. The MSYS2 we installed is in $RUNNER_TEMP.
@@ -70,6 +54,20 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: echo "$RUNNER_TEMP\msys64\mingw64\bin" >> $GITHUB_PATH
+
+      # Print versions for troubleshooting purposes
+      - name: Check vips version (Windows)
+        if: startsWith(matrix.os, 'windows-')
+        shell: bash
+        run: vips --version
+
+      - name: Check vips version (Linux)
+        if: startsWith(matrix.os, 'ubuntu-')
+        run: vips --version
+
+      - name: Check vips version (macOS)
+        if: startsWith(matrix.os, 'macos-')
+        run: vips --version
 
       # As of May 2025, The CGO_LDFLAGS env var is necessary on macOS since it can't find gio-2.0 otherwise.
       # LLMs also suggested adding:
