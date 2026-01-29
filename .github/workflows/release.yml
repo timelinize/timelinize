@@ -26,8 +26,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: msys2/setup-msys2@v2
         with:
-          # TODO: Enable this for more current packages, I guess? But it takes longer.
-          # update: true
+          update: true  # gets more current packages (often necessary when we update vips), but takes longer
           install: >-
              base-devel
              mingw-w64-x86_64-toolchain
