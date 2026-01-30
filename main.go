@@ -42,6 +42,7 @@ import (
 	_ "github.com/timelinize/timelinize/datasources/instagram"
 	_ "github.com/timelinize/timelinize/datasources/iphone"
 	_ "github.com/timelinize/timelinize/datasources/kmlgx"
+	_ "github.com/timelinize/timelinize/datasources/line"
 	_ "github.com/timelinize/timelinize/datasources/media"
 	_ "github.com/timelinize/timelinize/datasources/nmea"
 	_ "github.com/timelinize/timelinize/datasources/smsbackuprestore"

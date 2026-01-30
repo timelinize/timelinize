@@ -1,0 +1,85 @@
+﻿Chat history in "GroupChat"
+Saved on: 1/30/2026, 22:11
+
+Mon, 8/19/2019
+11:28	Alice	Hey everyone!
+Can we plan the meetup?
+11:29	Unknown	Um, when?
+11:29	Unknown	Like next weekend?
+11:32	Unknown	I'm available
+11:33	Unknown	Me too
+11:36	Unknown	Saturday works
+11:36	Unknown	I can do Saturday
+11:41	Alice	Okay great
+11:49	Alice	@Bob your thoughts???
+16:11	Bob	Saturday afternoon works for me
+
+Tue, 8/20/2019
+09:33	Charlie	Hello all
+10:16	Charlie	Anyone need a ride?
+14:23	Alice	Forgot to make an album, sorry
+17:05	Josie left the group.
+
+Wed, 8/21/2019
+14:02	Unknown left the chat.
+
+Thu, 11/14/2019
+09:02	David	[Photo]
+09:03	Eve	Nice!
+09:04	David	Thanks
+21:37	Unknown left the chat.
+
+Fri, 11/15/2019
+06:45	Alice	Morning everyone
+06:46	Bob	Good morning!
+06:47	Charlie	Morning!
+
+Sat, 11/16/2019
+09:02	Unknown left the chat.
+12:30	Eve	[Sticker]
+12:31	David	😄
+
+Wed, 11/27/2019
+08:00	Alice	Happy Thanksgiving!
+08:01	Bob	Happy Thanksgiving to you too!
+08:02	Charlie	Have a great day everyone
+
+Thu, 6/11/2020
+10:00	Eve	[Photo]
+10:01	David	Beautiful!
+
+Fri, 6/12/2020
+06:27	Unknown left the chat.
+14:30	Alice	Anyone free for lunch?
+14:31	Bob	I am!
+14:32	Charlie	Count me in
+
+Sat, 10/31/2020
+10:00	Eve	Happy Halloween! 🎃
+10:01	David	[Photo]
+10:02	Alice	Great costume!
+10:03	Bob	Spooky!
+
+Mon, 3/1/2021
+09:00	Charlie	New month!
+09:01	Alice	Let's make it a good one
+
+Tue, 3/2/2021
+14:00	Bob	[Sticker]
+14:01	Eve	😂
+
+Wed, 5/5/2021
+08:30	David	Morning all
+08:31	Alice	Morning!
+
+Sat, 6/5/2021
+16:00	Eve	Weekend plans?
+16:01	Bob	Relaxing
+16:02	Charlie	Same here
+
+Sun, 1/2/2022
+10:00	Alice	Happy New Year!
+10:01	Bob	Happy 2022!
+10:02	Charlie	Best wishes everyone
+10:03	David	Cheers to a great year
+10:04	Eve	🎉
