@@ -19,6 +19,7 @@
 package tlzapp
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,5 +68,9 @@ func getFileSelectorRoots() ([]fileSelectorRoot, error) {
 }
 
 func fileHidden(filename string) bool {
-	return strings.HasPrefix(filename, ".")
+	return strings.HasPrefix(filepath.Base(filename), ".")
+}
+
+func dirEntryHidden(d fs.DirEntry) (bool, error) {
+	return fileHidden(d.Name()), nil
 }

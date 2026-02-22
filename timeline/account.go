@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -113,10 +114,8 @@ func (tl *Timeline) AddAccount(ctx context.Context, dataSourceID string, _ json.
 
 	// store the account
 	var accountID int64
-	tl.dbMu.Lock()
-	err := tl.db.QueryRow(`INSERT INTO accounts (data_source_id) VALUES (?) RETURNING id`,
+	err := tl.db.WritePool.QueryRowContext(ctx, `INSERT INTO accounts (data_source_id) VALUES (?) RETURNING id`,
 		dataSourceID).Scan(&accountID)
-	tl.dbMu.Unlock()
 	if err != nil {
 		return Account{}, fmt.Errorf("inserting into DB: %w", err)
 	}
@@ -142,10 +141,8 @@ func (acc *Account) AuthorizeOAuth2(ctx context.Context, oauth2 OAuth2) error {
 
 // SaveAuthorization saves the credentials to the DB for this account.
 func (acc *Account) SaveAuthorization(ctx context.Context, credentials []byte) error {
-	acc.tl.dbMu.Lock()
-	_, err := acc.tl.db.ExecContext(ctx, `UPDATE accounts SET authorization=? WHERE id=?`, // TODO: LIMIT would be nice here
+	_, err := acc.tl.db.WritePool.ExecContext(ctx, `UPDATE accounts SET authorization=? WHERE id=?`, // TODO: LIMIT would be nice here
 		credentials, acc.ID)
-	acc.tl.dbMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("updating credentials in account row: %w", err)
 	}
@@ -155,9 +152,8 @@ func (acc *Account) SaveAuthorization(ctx context.Context, credentials []byte) e
 // LoadAccount loads the account with the given ID from the database.
 func (tl *Timeline) LoadAccount(ctx context.Context, id int64) (Account, error) {
 	var acc Account
-	tl.dbMu.RLock()
-	err := tl.db.QueryRowContext(ctx,
-		`SELECT 
+	err := tl.db.ReadPool.QueryRowContext(ctx,
+		`SELECT
 			accounts.id, accounts.authorization,
 			data_sources.name
 		FROM accounts, data_sources
@@ -165,7 +161,6 @@ func (tl *Timeline) LoadAccount(ctx context.Context, id int64) (Account, error) 
 			AND data_sources.id = accounts.data_source_id
 		LIMIT 1`,
 		id).Scan(&acc.ID, &acc.authorization, &acc.DataSource.Name)
-	tl.dbMu.RUnlock()
 	if err != nil {
 		return acc, fmt.Errorf("querying account %d from DB: %w", id, err)
 	}
@@ -183,42 +178,41 @@ func (tl *Timeline) LoadAccounts(ids []int64, dataSourceIDs []string) ([]Account
 		return []Account{}, nil
 	}
 
-	q := `
+	var sb strings.Builder
+
+	sb.WriteString(`
 	SELECT
 		accounts.id, accounts.authorization,
 		data_sources.name
 	FROM accounts, data_sources
-	WHERE data_sources.id = accounts.data_source_id`
+	WHERE data_sources.id = accounts.data_source_id`)
 	args := make([]any, 0, len(ids)+len(dataSourceIDs))
 	if len(ids) > 0 || len(dataSourceIDs) > 0 {
-		q += " AND ("
+		sb.WriteString(" AND (")
 	}
 	for i, id := range ids {
 		if i > 0 {
-			q += " OR "
+			sb.WriteString(" OR ")
 		}
-		q += "accounts.id=?"
+		sb.WriteString("accounts.id=?")
 		args = append(args, id)
 	}
 	if len(ids) > 0 && len(dataSourceIDs) > 0 {
-		q += ") AND ("
+		sb.WriteString(") AND (")
 	}
 	for i, dsID := range dataSourceIDs {
 		if i > 0 {
-			q += " OR "
+			sb.WriteString(" OR ")
 		}
-		q += "data_sources.name=?"
+		sb.WriteString("data_sources.name=?")
 		args = append(args, dsID)
 	}
 	if len(ids) > 0 || len(dataSourceIDs) > 0 {
-		q += ")"
+		sb.WriteString(")")
 	}
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
 	accounts := []Account{}
-	rows, err := tl.db.Query(q, args...)
+	rows, err := tl.db.ReadPool.QueryContext(tl.ctx, sb.String(), args...)
 	if err != nil {
 		return accounts, fmt.Errorf("querying accounts from DB: %w", err)
 	}

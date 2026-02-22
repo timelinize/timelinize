@@ -90,10 +90,7 @@ func (tl *Timeline) chartRecentItems(ctx context.Context, params url.Values) (an
 			GROUP BY period
 			ORDER BY timestamp`, dateAdjust, startOf, periodColumn)
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	rows, err := tl.db.QueryContext(ctx, query)
+	rows, err := tl.db.ReadPool.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -129,10 +126,7 @@ func (tl *Timeline) chartRecentItems(ctx context.Context, params url.Values) (an
 }
 
 func (tl *Timeline) chartItemTypes(ctx context.Context) (any, error) {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	rows, err := tl.db.QueryContext(ctx, "SELECT classification_name, count() FROM extended_items GROUP BY classification_id")
+	rows, err := tl.db.ReadPool.QueryContext(ctx, "SELECT classification_name, count() FROM extended_items GROUP BY classification_id")
 	if err != nil {
 		return nil, err
 	}
@@ -170,9 +164,6 @@ func (tl *Timeline) chartRecentDaysItemCount(ctx context.Context, params url.Val
 		return nil, err
 	}
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
 	const msPerDay = int(24 * time.Hour / time.Millisecond)
 
 	minTime := msPerDay * days
@@ -181,7 +172,7 @@ func (tl *Timeline) chartRecentDaysItemCount(ctx context.Context, params url.Val
 	// (the `date(min(timestamp/1000, unixepoch()), 'unixepoch'))` bit is the same as similar in another chart query,
 	// to prevent future-timestampped items, which are usually wrong or from calendars, from crowding out all
 	// the other data on the chart; so the latest timestamp we accept is today's date)
-	rows, err := tl.db.QueryContext(ctx, `
+	rows, err := tl.db.ReadPool.QueryContext(ctx, `
 		SELECT
 			strftime('%Y-%m-%d', date(min(timestamp/1000, unixepoch()), 'unixepoch')) AS date,
 			data_source_name,
@@ -236,9 +227,6 @@ LIMIT 1000;
 
 // chartDataSourceUsage returns the counts by data source.
 func (tl *Timeline) chartDataSourceUsage(ctx context.Context) (any, error) {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
 	// This query is a bit of a mouthful, but basically, its purpose is to retrieve a sampling of items
 	// that are likely representative of the whole repo, and group them by data source and hour so that
 	// they can be rendered onto a chart where the X axis is date, Y is time/hour of day, and Z (the size
@@ -259,7 +247,7 @@ func (tl *Timeline) chartDataSourceUsage(ctx context.Context) (any, error) {
 	//
 	// Oh, and we make sure to set the end date to the last item, or today's date if the last item is in
 	// the future, since future items are outliers and throw off the whole chart.
-	rows, err := tl.db.QueryContext(ctx, `
+	rows, err := tl.db.ReadPool.QueryContext(ctx, `
 		SELECT
 			data_source_name,
 			date(timestamp/1000, 'unixepoch') AS date,
@@ -312,10 +300,7 @@ func (tl *Timeline) AttributeStats(ctx context.Context, params url.Values) (any,
 		return nil, fmt.Errorf("invalid entity ID; must be integer: %w", err)
 	}
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	rows, err := tl.db.QueryContext(ctx, `
+	rows, err := tl.db.ReadPool.QueryContext(ctx, `
 		SELECT
 			strftime('%Y', date(items.timestamp/1000, 'unixepoch')) AS year,
 			strftime('%m', date(items.timestamp/1000, 'unixepoch')) AS month,

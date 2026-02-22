@@ -55,27 +55,43 @@ type FileImporter struct{}
 func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
 	rec := timeline.Recognition{DirThreshold: .9}
 
-	// we can import directories, but let the import planner figure that out; only recognize files
+	pathInFS := "." // start by assuming we'll inspect the current file
 	if dirEntry.IsDir() {
+		// if a directory, specifically, a folder for a contact list in a Google Takeout archive,
+		// recognize the whole folder so we can import those profile pictures as well
+		parts := strings.Split(dirEntry.FullPath(), "/")
+		if len(parts) >= 3 && parts[len(parts)-3] == "Takeout" && parts[len(parts)-2] == "Contacts" {
+			if vcfFilename := parts[len(parts)-1] + ".vcf"; timeline.FileExistsFS(dirEntry.FS, path.Join(dirEntry.Filename, vcfFilename)) {
+				pathInFS = vcfFilename
+			} else {
+				return rec, nil
+			}
+		} else {
+			return rec, nil
+		}
+	} else {
+		// only inspect file if it has a relevant extension
+		switch strings.ToLower(path.Ext(dirEntry.Name())) {
+		case ".vcf", ".vcard":
+		default:
+			return rec, nil
+		}
+	}
+
+	// we can import directories, but let the import planner figure that out; only recognize files
+	if dirEntry.IsDir() && pathInFS == "." {
 		return rec, nil
 	}
 
-	// skip unsupported file types
-	switch strings.ToLower(path.Ext(dirEntry.Name())) {
-	case ".vcf", ".vcard":
-	default:
-		return rec, nil
-	}
-
-	file, err := dirEntry.Open(".")
+	file, err := dirEntry.Open(pathInFS)
 	if err != nil {
 		return rec, err
 	}
 	defer file.Close()
 
 	buf := bufPool.Get().([]byte)
-	//nolint:gofmt,staticcheck
-	defer bufPool.Put(buf[:len(buf)]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice) -- WOW the linters hate this one
+	//nolint:gocritic,staticcheck
+	defer bufPool.Put(buf[:]) // ensure that even if buf is resized (it's not), we don't put back a larger buffer (good practice) -- WOW the linters hate this one
 
 	// read the first few bytes to see if it looks like a legit vcard; ignore empty or short files
 	_, err = io.ReadFull(file, buf)
@@ -91,7 +107,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 
 // FileImport imports data from the given file/folder.
 func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(_ string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(dirEntry.FS, dirEntry.Filename, func(filePath string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -108,8 +124,13 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 		if d.IsDir() {
 			return nil // traverse into subdirectories
 		}
+		switch strings.ToLower(path.Ext(d.Name())) {
+		case ".vcf", ".vcard":
+		default:
+			return nil
+		}
 
-		file, err := dirEntry.Open(".")
+		file, err := dirEntry.FS.Open(filePath)
 		if err != nil {
 			return err
 		}
@@ -176,12 +197,19 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				})
 			}
 
-			// for a picture, see if there's a sidecar file that matches the name (this is the case for Google Takeout exports)
+			// for a picture, see if there's a sidecar file that matches the name or email address
+			// (this is the case for Google Takeout exports) -- this is faster
 			if p.Name != "" {
-				sidecarFilename := path.Join(path.Dir(dirEntry.Filename), p.Name+".jpg")
-				if timeline.FileExistsFS(dirEntry.FS, sidecarFilename) {
+				if sidecarFilename := path.Join(path.Dir(filePath), p.Name+".jpg"); timeline.FileExistsFS(dirEntry.FS, sidecarFilename) {
 					p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
 						return dirEntry.FS.Open(sidecarFilename)
+					}
+				} else if attr, ok := p.Attribute(timeline.AttributeEmail); ok && attr.Value != nil {
+					sidecarFilename = path.Join(dirEntry.Filename, attr.Value.(string)) + ".jpg"
+					if timeline.FileExistsFS(dirEntry.FS, sidecarFilename) {
+						p.NewPicture = func(_ context.Context) (io.ReadCloser, error) {
+							return dirEntry.FS.Open(sidecarFilename)
+						}
 					}
 				}
 			}
@@ -298,22 +326,26 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 	return nil
 }
 
-// ParseBirthday parses bday in either "--MMDD" or "YYYYMMDD" format.
-// If the former, the year is omitted, and as such, the Unix timestamp
-// of the date will compute to be over 2000 years ago. If the date
-// fails to parse, a nil time is returned.
+// ParseBirthday parses bday in one of these formats:
+//
+// - "--MMDD" (year is omitted, and as such, the Unix timestamp of the date will compute to be over 2000 years ago)
+// - "YYYYMMDD"
+// - "YYYY-MM-DD" (issue #153)
+//
+// If the date fails to parse, a nil time is returned.
 func ParseBirthday(bday string) *time.Time {
-	const fullBdayFormat = "20060102"
-	if len(bday) == 6 && bday[:2] == "--" {
-		monthDay, err := time.Parse("--0102", bday)
-		if err == nil {
-			return &monthDay
-		}
-	} else if len(bday) == len(fullBdayFormat) {
-		fullDate, err := time.Parse(fullBdayFormat, bday)
-		if err == nil {
-			return &fullDate
-		}
+	var date time.Time
+	var err error
+	switch len(bday) {
+	case 6:
+		date, err = time.ParseInLocation("--0102", bday, time.Local)
+	case 8:
+		date, err = time.ParseInLocation("20060102", bday, time.Local)
+	case 10:
+		date, err = time.ParseInLocation("2006-01-02", bday, time.Local)
+	}
+	if err == nil {
+		return &date
 	}
 	return nil
 }

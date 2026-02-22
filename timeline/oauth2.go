@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/timelinize/timelinize/oauth2client"
+	"github.com/timelinize/timelinize/internal/oauth2client"
 	"golang.org/x/oauth2"
 )
 
@@ -127,7 +127,7 @@ func (ps *persistedTokenSource) Token() (*oauth2.Token, error) {
 			return nil, fmt.Errorf("gob-encoding new OAuth2 token: %w", err)
 		}
 
-		_, err = ps.tl.db.Exec(`UPDATE accounts SET authorization=? WHERE id=?`, authBytes, ps.accountID)
+		_, err = ps.tl.db.WritePool.ExecContext(context.TODO(), `UPDATE accounts SET authorization=? WHERE id=?`, authBytes, ps.accountID)
 		if err != nil {
 			return nil, fmt.Errorf("storing refreshed OAuth2 token: %w", err)
 		}

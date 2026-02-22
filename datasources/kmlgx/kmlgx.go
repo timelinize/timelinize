@@ -32,6 +32,7 @@ import (
 	"github.com/timelinize/timelinize/datasources/googlelocation"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
+	"golang.org/x/net/html/charset"
 )
 
 // This could be nearly identical to GPX importer except the XML structure is different.
@@ -60,7 +61,8 @@ type Options struct {
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
 	OwnerEntityID uint64 `json:"owner_entity_id"`
 
-	Simplification float64 `json:"simplification,omitempty"`
+	// Options specific to the location processor.
+	googlelocation.LocationProcessingOptions
 }
 
 // FileImporter implements the timeline.FileImporter interface.
@@ -75,9 +77,24 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 		return rec, nil
 	}
 
-	// recognize by file extension
+	// recognize by file extension, then verify by decoding the file
+	// (TODO: If a recognize FastMode is created, opening and decoding the file should not happen in FastMode)
 	if strings.ToLower(path.Ext(dirEntry.Name())) == ".kml" {
-		rec.Confidence = 1
+		file, err := dirEntry.Open(".")
+		if err != nil {
+			return rec, err
+		}
+		defer file.Close()
+		dec := xml.NewDecoder(file)
+		dec.CharsetReader = charset.NewReaderLabel // handle non-UTF-8 encodings
+		var doc document
+		err = dec.Decode(&doc)
+		if err != nil {
+			return rec, nil
+		}
+		if strings.HasPrefix(doc.XMLNSGX, "http://www.google.com/kml/ext/2") {
+			rec.Confidence = 1.0
+		}
 	}
 
 	return rec, nil
@@ -116,8 +133,11 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		}
 		defer file.Close()
 
+		dec := xml.NewDecoder(file)
+		dec.CharsetReader = charset.NewReaderLabel // handle non-UTF-8 encodings
+
 		var doc document
-		err = xml.NewDecoder(file).Decode(&doc)
+		err = dec.Decode(&doc)
 		if err != nil {
 			return err
 		}
@@ -132,7 +152,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		}
 
 		// create location processor to clean up any noisy raw data
-		locProc, err := googlelocation.NewLocationProcessor(&doc, dsOpt.Simplification)
+		locProc, err := googlelocation.NewLocationProcessor(&doc, dsOpt.LocationProcessingOptions)
 		if err != nil {
 			return err
 		}

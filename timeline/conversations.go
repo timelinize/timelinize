@@ -54,10 +54,7 @@ outer:
 
 // RecentConversations loads recent conversations from the DB. It honors a select number of ItemSearchParams fields.
 func (tl *Timeline) RecentConversations(ctx context.Context, params ItemSearchParams) ([]*Conversation, error) {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.ReadPool.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -162,12 +159,13 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 	for len(convosMap) < params.Limit && queries < maxQueries {
 		queries++
 
-		whereClause := `WHERE relationships.to_attribute_id IS NOT NULL`
+		var whereClause strings.Builder
+		whereClause.WriteString(`WHERE relationships.to_attribute_id IS NOT NULL`)
 		var args []any
 
 		// include only conversational items and relations; otherwise we get results like
 		// media where people are depicted, or any other items that point to entities...
-		whereClause += " AND (relationships.relation_id IN (?, ?) OR items.classification_id IN (?, ?, ?))"
+		whereClause.WriteString(" AND (relationships.relation_id IN (?, ?) OR items.classification_id IN (?, ?, ?))")
 		args = append(args,
 			tl.relations[RelSent.Label],
 			tl.relations[RelReply.Label],
@@ -177,69 +175,69 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 		)
 
 		if len(params.classificationIDs) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, classID := range params.classificationIDs {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "items.classification_id=?"
+				whereClause.WriteString("items.classification_id=?")
 				args = append(args, classID)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if len(params.AttributeID) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, attrID := range params.AttributeID {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "items.attribute_id=?"
+				whereClause.WriteString("items.attribute_id=?")
 				args = append(args, attrID)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if len(params.ToAttributeID) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, attrID := range params.ToAttributeID {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "relationships.to_attribute_id=?"
+				whereClause.WriteString("relationships.to_attribute_id=?")
 				args = append(args, attrID)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if len(params.EntityID) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, entityID := range params.EntityID {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "from_ent.id=? OR to_ent.id=?"
+				whereClause.WriteString("from_ent.id=? OR to_ent.id=?")
 				args = append(args, entityID, entityID)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if len(params.DataText) > 0 {
-			whereClause += " AND ("
+			whereClause.WriteString(" AND (")
 			for i, txt := range params.DataText {
 				if i > 0 {
-					whereClause += " OR "
+					whereClause.WriteString(" OR ")
 				}
-				whereClause += "items.data_text LIKE '%' || ? || '%'"
+				whereClause.WriteString("items.data_text LIKE '%' || ? || '%'")
 				args = append(args, txt)
 			}
-			whereClause += ")"
+			whereClause.WriteString(")")
 		}
 		if params.StartTimestamp != nil {
-			whereClause += " AND items.timestamp > ?"
+			whereClause.WriteString(" AND items.timestamp > ?")
 			args = append(args, params.StartTimestamp.UnixMilli())
 		}
 		if params.EndTimestamp != nil && (untilUnixMs == 0 || untilUnixMs > params.EndTimestamp.UnixMilli()) {
-			whereClause += andItemsTimestampLessThanArg
+			whereClause.WriteString(andItemsTimestampLessThanArg)
 			args = append(args, params.EndTimestamp.UnixMilli())
 		} else if untilUnixMs > 0 {
-			whereClause += andItemsTimestampLessThanArg
+			whereClause.WriteString(andItemsTimestampLessThanArg)
 			args = append(args, untilUnixMs)
 		}
 
@@ -260,7 +258,7 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 			LEFT JOIN entities AS to_ent ON to_ent.id = to_ea.entity_id
 			LEFT JOIN attributes AS from_attr ON from_attr.id = from_ea.attribute_id
 			LEFT JOIN attributes AS to_attr ON to_attr.id = to_ea.attribute_id
-			` + whereClause + `
+			` + whereClause.String() + `
 			ORDER BY items.timestamp DESC
 			LIMIT ?`
 
@@ -376,10 +374,7 @@ func (tl *Timeline) LoadConversation(ctx context.Context, params ItemSearchParam
 		return SearchResults{}, errors.New("lookup by both entity and attribute not currently supported")
 	}
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.ReadPool.BeginTx(ctx, nil)
 	if err != nil {
 		return SearchResults{}, err
 	}
@@ -471,119 +466,169 @@ func (tl *Timeline) prepareConversationQuery(params ItemSearchParams) (string, [
 		tl.cachesMu.RUnlock()
 	}
 
-	var where string
-	var args, whereArgs []any
+	entityIDsArray, entityIDs := sqlArray(params.EntityID)
+
+	var sb strings.Builder
+	var args []any
+
+	sb.WriteString("WITH participant_list AS (\n\t")
+	for i, entityID := range params.EntityID {
+		if i > 0 {
+			sb.WriteString(" UNION ALL\n\t")
+		}
+		sb.WriteString("SELECT ?")
+		if i == 0 {
+			sb.WriteString(" AS entity_id")
+		}
+		args = append(args, entityID)
+	}
+
+	sb.WriteString(`
+),
+-- Get all participants for each message (both senders and receivers)
+message_all_participants AS (
+	SELECT
+		items.id AS item_id,
+		from_ea.entity_id AS participant_id,
+		'from' AS participant_role
+	FROM extended_items AS items
+	JOIN relationships ON relationships.from_item_id = items.id
+	JOIN entity_attributes from_ea ON from_ea.attribute_id = items.attribute_id
+
+	UNION
+
+	SELECT
+		items.id AS item_id,
+		to_ea.entity_id AS participant_id,
+		'to' AS participant_role
+	FROM extended_items AS items
+	JOIN relationships ON relationships.from_item_id = items.id
+	JOIN entity_attributes to_ea ON to_ea.attribute_id = relationships.to_attribute_id
+),
+-- Find messages with exactly our participant set
+exact_match_messages AS (
+	SELECT
+		item_id,
+		COUNT(DISTINCT CASE
+			WHEN participant_id IN `)
+
+	sb.WriteString(entityIDsArray)
+	args = append(args, entityIDs...)
+
+	sb.WriteString(`
+			THEN participant_id
+		END) AS matching_count,
+	COUNT(DISTINCT CASE
+	WHEN participant_id NOT IN `)
+
+	sb.WriteString(entityIDsArray)
+	args = append(args, entityIDs...)
+
+	sb.WriteString(`
+		THEN participant_id
+			END) AS other_count
+	FROM message_all_participants
+	GROUP BY item_id
+	HAVING matching_count = ?  -- Exactly these participants present
+		AND other_count = 0      -- No other participants
+)
+-- Get full message details
+SELECT DISTINCT
+	items.id, items.data_source_id, items.job_id, items.modified_job_id,
+	items.attribute_id, items.classification_id, items.original_id,
+	items.original_location, items.intermediate_location, items.filename,
+	items.timestamp, items.timespan, items.timeframe, items.time_offset,
+	items.time_offset_origin, items.time_uncertainty, items.stored,
+	items.modified, items.data_id, items.data_type, items.data_text,
+	items.data_file, items.data_hash, items.metadata, items.longitude,
+	items.latitude, items.altitude, items.coordinate_system,
+	items.coordinate_uncertainty, items.note, items.starred, items.thumb_hash,
+	items.original_id_hash, items.initial_content_hash, items.retrieval_key,
+	items.hidden, items.deleted, data_source_name, data_source_title,
+	classification_name, entities.id AS entity_id, entities.name, entities.picture_file
+FROM extended_items AS items
+JOIN exact_match_messages emm ON emm.item_id = items.id
+JOIN relationships ON relationships.from_item_id = items.id
+JOIN entity_attributes from_ea ON from_ea.attribute_id = items.attribute_id
+JOIN entities ON from_ea.entity_id = entities.id`)
+	args = append(args, len(entityIDs))
+
+	var hasWhere bool
 
 	if len(params.classificationIDs) > 0 {
-		where += " AND ("
+		if !hasWhere {
+			sb.WriteString("\nWHERE (")
+			hasWhere = true
+		} else {
+			sb.WriteString(" AND (")
+		}
 		for i, classID := range params.classificationIDs {
 			if i > 0 {
-				where += " OR "
+				sb.WriteString(" OR ")
 			}
-			where += "items.classification_id=?"
-			whereArgs = append(whereArgs, classID)
+			sb.WriteString("items.classification_id=?")
+			args = append(args, classID)
 		}
-		where += ")"
+		sb.WriteRune(')')
 	}
 	if len(params.DataSourceName) > 0 {
-		where += " AND ("
+		if !hasWhere {
+			sb.WriteString("\nWHERE (")
+			hasWhere = true
+		} else {
+			sb.WriteString(" AND (")
+		}
 		for i, dsn := range params.DataSourceName {
 			if i > 0 {
-				where += " OR "
+				sb.WriteString(" OR ")
 			}
-			where += "data_source_name=?"
-			whereArgs = append(whereArgs, dsn)
+			sb.WriteString("data_source_name=?")
+			args = append(args, dsn)
 		}
-		where += ")"
+		sb.WriteRune(')')
 	}
 	if len(params.DataText) > 0 {
-		where += " AND ("
+		if !hasWhere {
+			sb.WriteString("\nWHERE (")
+			hasWhere = true
+		} else {
+			sb.WriteString(" AND (")
+		}
 		for i, txt := range params.DataText {
 			if i > 0 {
-				where += " OR "
+				sb.WriteString(" OR ")
 			}
-			where += "items.data_text LIKE '%' || ? || '%'"
-			whereArgs = append(whereArgs, txt)
+			sb.WriteString("items.data_text LIKE '%' || ? || '%'")
+			args = append(args, txt)
 		}
-		where += ")"
+		sb.WriteRune(')')
 	}
 	if params.StartTimestamp != nil {
-		where += " AND items.timestamp > ?"
-		whereArgs = append(whereArgs, params.StartTimestamp.UnixMilli())
+		if !hasWhere {
+			sb.WriteString("\nWHERE ")
+			hasWhere = true
+		} else {
+			sb.WriteString(" AND ")
+		}
+		sb.WriteString("items.timestamp > ?")
+		args = append(args, params.StartTimestamp.UnixMilli())
 	}
 	if params.EndTimestamp != nil {
-		where += andItemsTimestampLessThanArg
-		whereArgs = append(whereArgs, params.EndTimestamp.UnixMilli())
+		if !hasWhere {
+			sb.WriteString("\nWHERE ")
+		} else {
+			sb.WriteString(" AND ")
+		}
+		sb.WriteString("items.timestamp < ?")
+		args = append(args, params.EndTimestamp.UnixMilli())
 	}
 
-	// clean up and prepend the actual "WHERE"
-	if len(where) > 0 {
-		where += " AND "
-	}
-	where = "WHERE " + strings.TrimPrefix(where, " AND ")
-
-	// TODO: Not sure if this is needed (is it okay if "attachments" show up as part of a conversation?
-	// seems unlikely that there would be such a thing, but):
-	// To select only "root" items (items that are NOT at the end of a
-	// directed relation from another item), join in the relation values
-	// if needed, then use this WHERE clause:
-	//  ...LEFT JOIN relationships ON relationships.to_item_id = items.id
-	//     LEFT JOIN relations ON relations.id = relationships.relation_id
-	// ... WHERE (relations.directed != 1 OR relations.subordinating = 0 OR relationships.to_item_id IS NULL)
-	// (the WHERE clause can be AND'ed into an existing one)
-	// (TODO: Not sure yet if a GROUP BY items.id is needed to avoid duplicates that have multiple relations)
-
-	selects := make([]string, 0, len(params.EntityID))
-	idsForExcept := make([]string, 0, len(params.EntityID))
-	for _, entityID := range params.EntityID {
-		idsForExcept = append(idsForExcept, strconv.FormatUint(entityID, 10))
-		selects = append(selects, fmt.Sprintf(
-			`SELECT %s, entities.id, entities.name, entities.picture_file
-			FROM extended_items AS items
-			JOIN relationships ON relationships.from_item_id = items.id
-			JOIN entity_attributes from_ea ON from_ea.attribute_id = items.attribute_id
-			JOIN entity_attributes to_ea   ON to_ea.attribute_id   = relationships.to_attribute_id
-			JOIN entities ON from_ea.entity_id = entities.id
-			%s
-				(from_ea.entity_id=? OR to_ea.entity_id=?)`, itemDBColumns, where))
-		args = append(args, append(whereArgs, entityID, entityID)...)
-	}
-	for _, attrID := range params.AttributeID {
-		idsForExcept = append(idsForExcept, strconv.FormatInt(attrID, 10))
-		// TODO: we'd have to add some joins here to get entity info...
-		selects = append(selects, fmt.Sprintf(
-			`SELECT %s, entities.id, entities.name, entities.picture_file
-			FROM extended_items AS items
-			JOIN relationships ON relationships.from_item_id = items.id
-			%s
-				AND (items.attribute_id=? OR relationships.to_attribute_id=?)
-				AND (relations.directed != 1 OR relations.subordinating = 0 OR relationships.to_item_id IS NULL)`, itemDBColumns, where))
-		args = append(args, append(whereArgs, attrID, attrID)...)
-	}
-
-	q := strings.Join(selects, "\nINTERSECT\n")
-
-	exceptStr := strings.Join(idsForExcept, ", ")
-
-	// append the EXCEPT clause, otherwise we get a superset of what we're querying
-	// (like, messages from conversations from groups that include *at least* people instead of *only* these people)
-	if len(params.EntityID) > 0 {
-		q += fmt.Sprintf(`
-		EXCEPT
-		SELECT %s, entities.id, entities.name, entities.picture_file
-			FROM extended_items AS items
-			JOIN relationships ON relationships.from_item_id = items.id
-			JOIN entity_attributes from_ea ON from_ea.attribute_id = items.attribute_id
-			JOIN entity_attributes to_ea ON to_ea.attribute_id = relationships.to_attribute_id
-			JOIN entities ON from_ea.entity_id = entities.id
-			WHERE (from_ea.entity_id NOT IN (%s) OR to_ea.entity_id NOT IN (%s))`,
-			itemDBColumns, exceptStr, exceptStr)
-	}
-
-	q += fmt.Sprintf("\nORDER BY items.timestamp %s LIMIT ?", sortDir)
+	sb.WriteString("\nORDER BY items.timestamp ")
+	sb.WriteString(sortDir)
+	sb.WriteString("\nLIMIT ?")
 	args = append(args, params.Limit)
 
-	return q, args, nil
+	return sb.String(), args, nil
 }
 
 type uint64Slice []uint64

@@ -30,6 +30,7 @@ import (
 	"log"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -120,12 +121,74 @@ type Importer struct {
 
 // ImportMessages imports messages from the chat DB.
 func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams) error {
-	rows, err := im.DB.QueryContext(ctx,
-		`SELECT
-			m.ROWID, m.guid, m.text, m.attributedBody, m.service, m.date, m.date_read, m.date_delivered,
-			m.is_from_me, m.is_spam,
-			m.associated_message_guid, m.associated_message_type, m.associated_message_emoji,
-			m.destination_caller_id, m.reply_to_guid, m.thread_originator_guid,
+	var whereClause string
+	var args []any
+
+	// build WHERE clause: honor configured timeframe to greatly speed up such imports
+	if !opt.Timeframe.IsEmpty() {
+		if opt.Timeframe.Since != nil {
+			appleTsStart := TimeToCocoaNano(*opt.Timeframe.Since)
+			whereClause = "WHERE m.date >= ?"
+			args = append(args, appleTsStart)
+		}
+		if opt.Timeframe.Until != nil {
+			if whereClause == "" {
+				whereClause = "WHERE "
+			} else {
+				whereClause = " AND "
+			}
+			appleTsEnd := TimeToCocoaNano(*opt.Timeframe.Until)
+			whereClause += "m.date < ?"
+			args = append(args, appleTsEnd)
+		}
+	}
+
+	// newer versions of iMessage / Mac add columns to the message table which we support,
+	// but we should also support older versions (for example, associated_message_emoji,
+	// which are message reactions, is a newer feature as are threads)
+	supportedMessageTableColumns := []string{
+		"ROWID",
+		"guid",
+		"text",
+		"attributedBody",
+		"service",
+		"date",
+		"date_read",
+		"date_delivered",
+		"is_from_me",
+		"is_spam",
+		"associated_message_guid",
+		"associated_message_type",
+		"associated_message_emoji", // newer column
+		"destination_caller_id",
+		"reply_to_guid",
+		"thread_originator_guid", // newer column
+	}
+	messageTableColumns, err := GetColumnNames(ctx, im.DB, "message")
+	if err != nil {
+		return fmt.Errorf("getting column names: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("SELECT\n\t")
+	var selectedCols []string
+
+	// select only from columns that exist
+	for _, col := range supportedMessageTableColumns {
+		if !slices.Contains(messageTableColumns, col) {
+			opt.Log.Warn("message database does not have column in message table", zap.String("column", col))
+			continue
+		}
+		if len(selectedCols) > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString("m.")
+		sb.WriteString(col)
+		selectedCols = append(selectedCols, col)
+	}
+
+	// remainder of query
+	sb.WriteString(`,
 			h.id, h.country, h.service,
 			chat_h.id, chat_h.country, chat_h.service,
 			a.guid, a.created_date, a.filename, a.mime_type, a.transfer_name
@@ -136,7 +199,10 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		LEFT JOIN handle       AS h      ON h.ROWID        = m.handle_id    -- handle from message row
 		LEFT JOIN message_attachment_join AS maj ON maj.message_id = m.ROWID
 		LEFT JOIN attachment              AS a   ON a.ROWID        = maj.attachment_id
+		` + whereClause + `
 		ORDER BY m.ROWID ASC`)
+
+	rows, err := im.DB.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
 		return fmt.Errorf("querying for message rows: %w", err)
 	}
@@ -197,13 +263,55 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		var joinedH handle
 		var attach attachment
 
-		err := rows.Scan(
-			&msg.rowid, &msg.guid, &msg.text, &msg.attributedBody, &msg.service, &msg.date, &msg.dateRead,
-			&msg.dateDelivered, &msg.isFromMe, &msg.isSpam,
-			&msg.associatedMessageGUID, &msg.associatedMessageType, &msg.associatedMessageEmoji,
-			&msg.destinationCallerID, &msg.replyToGUID, &msg.threadOriginatorGUID, &msg.handle.id,
-			&msg.handle.country, &msg.handle.service, &joinedH.id, &joinedH.country, &joinedH.service,
-			&attach.guid, &attach.createdDate, &attach.filename, &attach.mimeType, &attach.transferName)
+		// these go at the end...
+		hardCodedTargets := []any{
+			&msg.handle.id, &msg.handle.country, &msg.handle.service,
+			&joinedH.id, &joinedH.country, &joinedH.service,
+			&attach.guid, &attach.createdDate, &attach.filename, &attach.mimeType, &attach.transferName,
+		}
+
+		// because the select clause is dynamically generated, we also need to
+		// dynamically generate the list of targets...
+		targets := make([]any, 0, len(selectedCols)+len(hardCodedTargets))
+		for _, col := range selectedCols {
+			switch col {
+			case "ROWID":
+				targets = append(targets, &msg.rowid)
+			case "guid":
+				targets = append(targets, &msg.guid)
+			case "text":
+				targets = append(targets, &msg.text)
+			case "attributedBody":
+				targets = append(targets, &msg.attributedBody)
+			case "service":
+				targets = append(targets, &msg.service)
+			case "date":
+				targets = append(targets, &msg.date)
+			case "date_read":
+				targets = append(targets, &msg.dateRead)
+			case "date_delivered":
+				targets = append(targets, &msg.dateDelivered)
+			case "is_from_me":
+				targets = append(targets, &msg.isFromMe)
+			case "is_spam":
+				targets = append(targets, &msg.isSpam)
+			case "associated_message_guid":
+				targets = append(targets, &msg.associatedMessageGUID)
+			case "associated_message_type":
+				targets = append(targets, &msg.associatedMessageType)
+			case "associated_message_emoji":
+				targets = append(targets, &msg.associatedMessageEmoji)
+			case "destination_caller_id":
+				targets = append(targets, &msg.destinationCallerID)
+			case "reply_to_guid":
+				targets = append(targets, &msg.replyToGUID)
+			case "thread_originator_guid":
+				targets = append(targets, &msg.threadOriginatorGUID)
+			}
+		}
+		targets = append(targets, hardCodedTargets...)
+
+		err := rows.Scan(targets...)
 		if err != nil {
 			return fmt.Errorf("scanning row: %w", err)
 		}
@@ -214,7 +322,7 @@ func (im Importer) ImportMessages(ctx context.Context, opt timeline.ImportParams
 		// fill in the normalized ID (phone number, usually) of the device; prefer the entry in the DB, I guess,
 		// but fall back to the device's telephony/commcenter information if needed
 		if msg.destinationCallerID != nil {
-			msg.normalizedCallerID = NormalizePhoneNumber(*msg.destinationCallerID, "")
+			msg.normalizedCallerID = NormalizePhoneNumber(ctx, *msg.destinationCallerID, "")
 		} else {
 			msg.normalizedCallerID = im.DeviceID
 		}
@@ -336,7 +444,7 @@ func (m message) timestamp() time.Time {
 	if m.date == nil {
 		return time.Time{}
 	}
-	return AppleNanoToTime(*m.date)
+	return CocoaNanoToTime(*m.date)
 }
 
 // fromMe returns true if the message was sent by the owner of the device.
@@ -362,7 +470,7 @@ func (m message) sender() timeline.Entity {
 func (m message) sentTo() []*timeline.Entity {
 	senderID := m.senderID()
 
-	var ents []*timeline.Entity //nolint:prealloc // bug filed: https://github.com/alexkohler/prealloc/issues/30
+	var ents []*timeline.Entity
 
 	// if device is not the sender, it is at least a recipient!
 	if !m.fromMe() {
@@ -397,7 +505,7 @@ func (m message) attachments(ctx context.Context, im Importer, sender timeline.E
 		}
 		var ts time.Time
 		if a.createdDate != nil {
-			ts = AppleSecondsToTime(*a.createdDate)
+			ts = CocoaSecondsToTime(*a.createdDate)
 		}
 
 		it := &timeline.Item{
@@ -479,10 +587,10 @@ func (m message) metadata() timeline.Metadata {
 		meta["Service"] = *m.service
 	}
 	if m.dateRead != nil {
-		meta["Date read"] = AppleNanoToTime(*m.dateRead)
+		meta["Date read"] = CocoaNanoToTime(*m.dateRead)
 	}
 	if m.dateDelivered != nil {
-		meta["Date delivered"] = AppleNanoToTime(*m.dateDelivered)
+		meta["Date delivered"] = CocoaNanoToTime(*m.dateDelivered)
 	}
 	return meta
 }
@@ -505,7 +613,7 @@ func (h handle) normalizedID() string {
 	if h.country != nil {
 		country = strings.ToUpper(*h.country)
 	}
-	return NormalizePhoneNumber(h.ID(), country)
+	return NormalizePhoneNumber(context.TODO(), h.ID(), country)
 }
 
 func (h handle) entity() timeline.Entity {
@@ -532,12 +640,35 @@ type attachment struct {
 }
 
 // NormalizePhoneNumber tries to NormalizePhoneNumber the ID (phone number), and simply returns the input if it fails.
-func NormalizePhoneNumber(id, country string) string {
-	norm, err := timeline.NormalizePhoneNumber(id, country)
+func NormalizePhoneNumber(ctx context.Context, id, country string) string {
+	norm, err := timeline.NormalizePhoneNumber(ctx, id, country)
 	if err != nil {
 		return id // oh well
 	}
 	return norm
+}
+
+// GetColumnNames returns the names of the columns from the given table name in the given sqlite database.
+func GetColumnNames(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", tableName)
+	if err != nil {
+		return nil, fmt.Errorf("querying table info: %w", err)
+	}
+	defer rows.Close()
+
+	var cols []string
+	for rows.Next() {
+		var col string
+		if err := rows.Scan(&col); err != nil {
+			return nil, fmt.Errorf("scanning row: %w", err)
+		}
+		cols = append(cols, col)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("next row: %w", err)
+	}
+
+	return cols, nil
 }
 
 func entityWithID(id string) timeline.Entity {

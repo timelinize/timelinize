@@ -24,11 +24,12 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<meta name="theme-color" content="#002848">
 
-		<link rel="icon" href="/resources/images/favicon.png">
+		<link rel="icon" href="/resources/images/favicon-light.png" media="(prefers-color-scheme: light)">
+		<link rel="icon" href="/resources/images/favicon-dark.png" media="(prefers-color-scheme: dark)">
 
 		<!-- Mapbox GL JS -->
-		<link rel="stylesheet" href="/resources/css/vendor/mapbox-gl-js-v3.11.0.min.css">
-		<script src="/resources/js/vendor/mapbox-gl-js-v3.11.0.min.js"></script>
+		<link rel="stylesheet" href="/resources/css/vendor/mapbox-gl-js-v3.13.0.min.css">
+		<script src="/resources/js/vendor/mapbox-gl-js-v3.13.0.min.js"></script>
 
 		<!-- Mapbox GL Draw with the Geodesic plugin (which gives us circle drawing) -->
 		<link rel="stylesheet" href="/resources/css/vendor/mapbox-gl-draw-v1.5.0.css">
@@ -46,7 +47,7 @@
 
 		<!-- First vendored scripts, then Tabler, then ours -->
 		<script src="/resources/js/vendor/luxon.v3.5.0.min.js"></script>
-		<script src="/resources/js/vendor/echarts-v5.6.0.min.js"></script>
+		<script src="/resources/js/vendor/echarts-v6.0.0.min.js"></script>
 		<script src="/resources/js/vendor/nouislider.v15.6.1.min.js"></script>
 		<script src="/resources/js/vendor/air-datepicker.min.js"></script>
 		<script src="/resources/js/vendor/tom-select.base.min.js"></script>
@@ -128,8 +129,8 @@
 						<!-- Timelinize Logo! -->
 						<h1 class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3 ps-2 ps-md-0 pt-0 pb-0">
 							<a href="/" title="Dashboard">
-								<img src="/resources/images/timelinize-light.svg" class="logo logo-light">
-								<img src="/resources/images/timelinize-dark.svg" class="logo logo-dark">
+								<img src="/resources/images/logo-light.svg" class="logo logo-light">
+								<img src="/resources/images/logo-dark.svg" class="logo logo-dark">
 							</a>
 						</h1>
 					</div>
@@ -318,7 +319,7 @@
 										</span>
 									</a>
 									<div class="dropdown-menu dropdown-menu-card"
-										style="--tblr-dropdown-min-width: 700px; --tblr-dropdown-border-width: 0;" data-bs-theme="light">
+										style="min-width: 700px; --tblr-dropdown-border-width: 0;" data-bs-theme="light">
 										<div class="card">
 			
 			

@@ -75,12 +75,23 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if !albumFolder.IsDir() {
+			continue
+		}
 
 		thisAlbumFolderPath := path.Join(dirEntry.Filename, albumFolder.Name())
 
 		albumMeta, err := fimp.readAlbumMetadata(dirEntry, thisAlbumFolderPath)
 		if err != nil {
-			opt.Log.Error("could not open album metadata (maybe it is in another archive?)", zap.Error(err))
+			if errors.Is(err, fs.ErrNotExist) {
+				opt.Log.Warn("album metadata not found; maybe it is in another archive or this folder is not an album",
+					zap.String("folder_path", thisAlbumFolderPath),
+					zap.Error(err))
+			} else {
+				opt.Log.Error("could not open album metadata",
+					zap.String("folder_path", thisAlbumFolderPath),
+					zap.Error(err))
+			}
 		}
 
 		// read album folder contents, then sort in what I think is the same way
@@ -88,7 +99,7 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		// matching up filenames correctly (metadata + media files)
 		albumItems, err := fs.ReadDir(dirEntry.FS, thisAlbumFolderPath)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading album directory: %w", err)
 		}
 		sort.Slice(albumItems, func(i, j int) bool {
 			iName, jName := albumItems[i].Name(), albumItems[j].Name()
@@ -102,7 +113,12 @@ func (fimp *FileImporter) listFromTakeoutArchive(ctx context.Context, opt timeli
 		})
 
 		for _, d := range albumItems {
-			fpath := path.Join(thisAlbumFolderPath, dirEntry.Name())
+			// make pauses more responsive
+			if err := opt.Continue(); err != nil {
+				return err
+			}
+
+			fpath := path.Join(thisAlbumFolderPath, d.Name())
 			if checkpoint != "" {
 				if fpath != checkpoint {
 					continue // keep going until we find the checkpoint position
@@ -174,12 +190,6 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 			return fmt.Errorf("parsing timestamp from item %s: %w", fpath, err)
 		}
 
-		// ensure item is within configured timeframe before continuing
-		if !opt.Timeframe.Contains(itemMeta.parsedPhotoTakenTime) {
-			opt.Log.Debug("item is outside timeframe", zap.String("filename", fpath))
-			return nil
-		}
-
 		mediaFilePath = fimp.determineMediaFilenameInArchive(fpath, itemMeta)
 		opt.Log.Debug("mapped sidecar to target media file",
 			zap.String("sidecar_file", fpath),
@@ -189,6 +199,12 @@ func (fimp *FileImporter) processAlbumItem(ctx context.Context, albumMeta albumA
 	}
 
 	ig := fimp.makeItemGraph(mediaFilePath, itemMeta, albumMeta, opt)
+
+	// ensure item is within configured timeframe before continuing
+	if !opt.Timeframe.Contains(ig.Item.Timestamp) {
+		opt.Log.Debug("item is outside timeframe", zap.String("filename", fpath))
+		return nil
+	}
 
 	// Between the JSON file and the actual media file, we typically prefer the
 	// filename in the JSON file and everything else that overlaps in the media
@@ -282,16 +298,10 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 		},
 	}
 	if itemMeta.source.FS != nil {
-		if item.Content.Filename == "" {
-			// if we're on the actual media file itself, and not the metadata file,
-			// we are still likely to get the filename (mostly) right if we use the
-			// filename, AFAIK it only changes if it gets truncated for length, in
-			// which case, the DB row will be updated to the correct filename when
-			// we do eventually read the sidecar file (the data file name in the repo
-			// will still have this name even after the DB row gets updated, but that
-			// name is internal-only for the most part)
-			item.Content.Filename = path.Base(mediaFilePath)
-		}
+		// don't send filename since we can't trust the filename we have here;
+		// Google Takeout likes to truncate them, and also remove/replace special
+		// characters without any indication of the original filename
+
 		item.Content.Data = func(_ context.Context) (io.ReadCloser, error) {
 			return itemMeta.source.FS.Open(path.Join(itemMeta.source.Filename, mediaFilePath))
 		}
@@ -315,15 +325,26 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 	// the retrieval key is crucial so that we can store what data we have from an item
 	// as we get it, without getting the whole item, even across different imports; it
 	// consists of the data source name to avoid conflicts with other DSes, the name of
-	// the archive (with the index part remove, of course, since a metadata file in
+	// the archive (with the index part removed, of course, since a metadata file in
 	// -001.zip might have its media file in -002.zip, but they should have the same
 	// retrieval key; this does rely on them not being renamed), and the expected path
 	// of the media file within the archive (if we're on the media file, it's just that
 	// path, but if we're on the sidecar JSON file, we have to construct it with heuristics
 	// since Google's naming convention isn't documented)
-	archiveName := fimp.archiveFilenameWithoutPositionPart()
+	archiveName := fimp.exportIDFromArchiveFilename()
 	retKey := fmt.Sprintf("%s::%s::%s", dataSourceName, archiveName, mediaFilePath)
 	item.Retrieval.SetKey(retKey)
+
+	// since we don't know the filename if we are on the picture file,
+	// and we don't know the data if we are on the metadata file, tell
+	// the processor that a nil value of these means that we don't know
+	// what it is, rather than us asserting that it's intentionally nil
+	// (this is crucial to allow us to process takeouts with duplicates
+	// without having duplicates in the timeline)
+	item.Retrieval.UniqueConstraints = map[string]bool{
+		"filename": item.Content.Filename != "",
+		"data":     item.Content.Data != nil,
+	}
 
 	ig := &timeline.Graph{Item: item}
 
@@ -363,22 +384,36 @@ func (fimp *FileImporter) makeItemGraph(mediaFilePath string, itemMeta mediaArch
 	return ig
 }
 
-// archiveFilenameWithoutPositionPart returns the name of the archive without the
-// positional index and without the extension. It assumes a Takeout archive filename
-// that has not been renamed, for example: "takeout-20240516T230250Z-003.zip", this
-// returns "takeout-20240516T230250Z". This is useful for identifying which export
-// an archive belongs to. (The filename is not strictly parsed; it quite naively
-// just uses the name up to the last dash, as long as whatever is before the last dash
+// exportIDFromArchiveFilename returns the name of the archive without the positional
+// index(es) and without the extension. It assumes a Takeout archive filename that has
+// NOT been renamed.
+//
+// A couple examples: given an import filepath of
+// "/foo/takeout-20240516T230250Z-003.zip/Takeout/Google Photos", this returns
+// "takeout-20240516T230250Z", which seems to be a unique identifier for the particular
+// export this archive is a part of. For newer/larger (~Q3 2025) takeouts, an import
+// filepath of "/foo/takeout-20250921T1994402Z-3-009.zip/Takeout/Google Photos" (notice
+// this has another component in the archive filename) returns "takeout-20250921T1994402Z",
+// which is the export ID.
+//
+// The archive name is extracted from the import path, trimming the Google Photos subpath
+// ("Takeout/Google Photos"). The archive filename is not strictly parsed; it quite naively
+// just uses the name up to the second "-", as long as whatever is before the second "-"
 // is the same for all archives in the group.)
-func (fimp *FileImporter) archiveFilenameWithoutPositionPart() string {
+func (fimp *FileImporter) exportIDFromArchiveFilename() string {
 	// For "/foo/takeout-20240516T230250Z-003.zip/Takeout/Google Photos", strip the
 	// "Takeout/Google Photos" suffix to terminate the path at the root of the archive
 	base := filepath.Base(strings.TrimSuffix(fimp.filename, googlePhotosPath))
-	lastDashPos := strings.LastIndex(base, "-")
-	if lastDashPos <= 0 {
+	firstDashPos := strings.Index(base, "-")
+	if firstDashPos < 0 {
 		return base
 	}
-	return base[:lastDashPos]
+	secondDashPosRelative := strings.Index(base[firstDashPos+1:], "-")
+	if secondDashPosRelative <= 0 {
+		return base
+	}
+	absoluteSecondDashPos := firstDashPos + 1 + secondDashPosRelative
+	return base[:absoluteSecondDashPos]
 }
 
 func (fimp *FileImporter) readAlbumMetadata(d timeline.DirEntry, albumFolderPath string) (albumArchiveMetadata, error) {
@@ -463,6 +498,9 @@ type mediaArchiveMetadata struct {
 			} `json:"deviceFolder"`
 			DeviceType string `json:"deviceType"`
 		} `json:"mobileUpload"`
+		Composition struct {
+			Type string `json:"type"`
+		} `json:"composition"`
 	} `json:"googlePhotosOrigin"`
 	PhotoLastModifiedTime struct {
 		Timestamp string `json:"timestamp"`
@@ -506,6 +544,7 @@ var errNoTimestamp = errors.New("no timestamp available")
 func (m mediaArchiveMetadata) timestamp() (time.Time, error) {
 	ts := m.PhotoTakenTime.Timestamp
 	if ts == "" {
+		// if a photo is in multiple albums/folders, this can be different between the two
 		ts = m.CreationTime.Timestamp
 	}
 	if ts == "" {
@@ -518,7 +557,8 @@ func (m mediaArchiveMetadata) timestamp() (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	return time.Unix(parsed, 0), nil
+	// timestamp represents UTC (no offset), so call UTC() since Unix() defaults to local offset
+	return time.Unix(parsed, 0).UTC(), nil
 }
 
 // determineMediaFilenameInArchive returns the path to the media file in the archive
@@ -540,24 +580,34 @@ func (fimp *FileImporter) determineMediaFilenameInArchive(jsonFilePath string, i
 	titleWithoutExt := strings.TrimSuffix(transformedTitle, titleExt)
 
 	// Google truncates filenames longer than this (sans extension)
-	const truncateAt = 47
+	const maxLength = 47
+
+	// truncating filenames obviously introduces the chance of filename
+	// collisions, if multiple files have the same long prefix; additionally,
+	// they may also collide with a file whose entire name is the prefix (i.e.
+	// collision with a file that is exactly the max length that does not get
+	// truncated) -- for that reason, we need to count how many times we see
+	// each filename up to the max length -- including path since each folder
+	// has a distinct file list -- even if the name is not longer than the
+	// max length.
 
 	// if the filename is long enough, Google truncates it, so we need
 	// to reconstruct it; this depends on the order we're reading the files,
 	// because Google auto-increments a "uniqueness suffix" in the form of
 	// "(N)" where N is how many times that truncated filename has already
 	// appeared before this.
-	if len(titleWithoutExt) > truncateAt {
-		truncatedTitle := titleWithoutExt[:truncateAt]
-		truncatedTitleWithDir := path.Join(dir, truncatedTitle)
-		fullTruncatedName := truncatedTitleWithDir + titleExt
+	truncateAt := min(maxLength, len(titleWithoutExt))
+	truncatedTitle := titleWithoutExt[:truncateAt]
+	truncatedTitleWithDir := path.Join(dir, truncatedTitle)
+	fullTruncatedName := truncatedTitleWithDir + titleExt
 
-		// then count this "hit" for the name
-		fimp.truncatedNames[fullTruncatedName]++
+	// then count this "hit" for the name
+	fimp.truncatedNames[fullTruncatedName]++
 
-		// now read the count; it will be at least 1
-		seenCount := fimp.truncatedNames[fullTruncatedName]
+	// now read the count; it will be at least 1
+	seenCount := fimp.truncatedNames[fullTruncatedName]
 
+	if len(titleWithoutExt) > maxLength {
 		// a uniqueness suffix is only inserted (before the extension) if the
 		// truncated filename has not already been seen in our walk, so if this
 		// is the first (or only) occurrence, just return the truncated filename

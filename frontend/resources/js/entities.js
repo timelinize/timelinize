@@ -28,6 +28,9 @@ async function filterAndRenderEntitiesList() {
 
 	const owner = await getOwner();
 
+    // Ensure the "select all" checkbox is unchecked when the list is refreshed/filtered
+    $('#select-all-entities').checked = false; 
+
 	for (const ent of entities) {
 		const tpl = cloneTemplate('#tpl-entity');
 		$('.entity-id', tpl).innerText = ent.id;//String(ent.id).padStart(4, '0');
@@ -146,6 +149,42 @@ on('change', '.select-entity', e => {
 	} else {
 		$('#merge-entities').classList.add('disabled');
 	}
+});
+
+// Function to check the state of the merge button enablement
+function updateMergeButtonState() {
+    const checkedCount = $$('.select-entity:checked').length;
+    if (checkedCount > 1) {
+        $('#merge-entities').classList.remove('disabled');
+    } else {
+        $('#merge-entities').classList.add('disabled');
+    }
+
+    // Uncheck the "select all" box if not all items are checked
+    const allCheckboxes = $$('.select-entity');
+    if (checkedCount < allCheckboxes.length) {
+        $('#select-all-entities').checked = false;
+    } else if (allCheckboxes.length > 0 && checkedCount === allCheckboxes.length) {
+        // If all are checked, make sure the master is checked (useful when filtering might leave a few items)
+        $('#select-all-entities').checked = true;
+    }
+}
+
+// Event listener for the individual checkboxes, for the merge button check
+on('change', '.select-entity', e => {
+    updateMergeButtonState();
+});
+
+// Event listener for the "Select All" checkbox
+on('change', '#select-all-entities', e => {
+    const isChecked = e.target.checked;
+    // Iterate over all individual checkboxes and set their state to match the master
+    $$('.select-entity').forEach(checkbox => {
+        checkbox.checked = isChecked;
+    });
+
+    // Update the merge button state after toggling all checkboxes
+    updateMergeButtonState();
 });
 
 on('click', '#confirm-merge-entities', async e => {

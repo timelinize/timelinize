@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"io"
 	"mime"
 	"net/http"
@@ -39,6 +40,7 @@ import (
 	"github.com/Masterminds/sprig/v3"
 	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
+	"go.n16f.net/thumbhash"
 )
 
 // serveFrontend serves frontend assets, such as repository resources,
@@ -261,8 +263,8 @@ func (s server) servePreviewImage(w http.ResponseWriter, r *http.Request, tl ope
 		return fmt.Errorf("item %d does not have a data file recorded, so no preview image is possible", itemID)
 	}
 	if itemRow.DataType != nil {
-		switch *itemRow.DataType {
-		case "image/gif", "image/x-icon":
+		if *itemRow.DataType == "image/x-icon" {
+			// icons won't get obfuscated, but last time I checked we had trouble decoding these
 			r.URL.Path = "/" + path.Join("repo", tl.ID().String(), *itemRow.DataFile)
 			return s.serveDataFile(w, r, tl, *itemRow.DataFile)
 		}
@@ -342,7 +344,7 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 		}
 	}
 
-	thumb, err := tl.Thumbnail(r.Context(), itemDataID, r.FormValue("data_file"), dataType, thumbType)
+	thumb, thash, err := tl.Thumbnail(r.Context(), itemDataID, r.FormValue("data_file"), dataType, thumbType)
 	if err != nil {
 		return fmt.Errorf("unable to provide thumbnail: %w", err)
 	}
@@ -351,13 +353,25 @@ func (s server) serveThumbnail(w http.ResponseWriter, r *http.Request, tl opened
 		w.Header().Set("Content-Type", thumb.MediaType)
 	}
 
+	// if obfuscation is enabled, return the thumbhash of an image (easy, quick blurred version)
+	// or blurry-transcoded video
 	thumbReader := bytes.NewReader(thumb.Content)
 	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
 	if obfuscate {
 		if strings.HasPrefix(thumbType, "image/") {
-			return Error{
-				Err:        errors.New("obfuscation mode enabled: image thumbnail can just be thumbhash"),
-				HTTPStatus: http.StatusNoContent,
+			const aspectRatioPrefixLen = 4
+			if len(thash) < aspectRatioPrefixLen {
+				w.WriteHeader(http.StatusNoContent)
+				return nil
+			}
+			img, err := thumbhash.DecodeImage(thash[aspectRatioPrefixLen:])
+			if err != nil {
+				return fmt.Errorf("invalid thumbhash %x: %w", thash, err)
+			}
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.WriteHeader(http.StatusOK)
+			if err := jpeg.Encode(w, img, nil); err != nil {
+				return fmt.Errorf("encoding and streaming out JPEG thumbhash: %w", err)
 			}
 		} else if strings.HasPrefix(thumbType, "video/") {
 			return s.transcodeVideo(r.Context(), w, "", thumbReader, obfuscate)
@@ -381,11 +395,14 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 
 	videoDataFile := r.FormValue("hint")    // data file of the related motion item -- confidently the motion picture
 	imgDataFile := r.FormValue("data_file") // item's data file -- may or may not have a motion picture embedded in it
+	var imgType string
 
-	// if client wasn't able to give us both file paths, we have to query the DB because we'll need
-	// to verify that no related motion photo exists, and also get the image data file so we can
-	// try extracting from it if no related motion item exists
-	if videoDataFile == "" || imgDataFile == "" {
+	// if client wasn't able to give us both file paths, or if the image's data file doesn't have an extension,
+	// (either because that's just how it is, or because we haven't finished importing the rest of the item yet),
+	// we have to query the DB because we'll need to verify that no related motion photo exists, and also get
+	// the image data file so we can try extracting from it if no related motion item exists -- and if there's
+	// no extension, we'll need that too!
+	if videoDataFile == "" || imgDataFile == "" || path.Ext(imgDataFile) == "" {
 		itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 		if err != nil {
 			return Error{
@@ -416,10 +433,14 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 			// we might still use the original image file if there's no related motion item
 			imgDataFile = *results.Items[0].DataFile
 		}
+		if results.Items[0].DataType != nil {
+			imgType = *results.Items[0].DataType // useful if filename doesn't have an extension
+		}
 		for _, rel := range results.Items[0].Related {
 			if rel.Label == media.RelMotionPhoto.Label && rel.ToItem != nil && rel.ToItem.DataFile != nil {
 				// great, we found a related motion item!
 				videoDataFile = *rel.ToItem.DataFile
+				break
 			}
 		}
 	}
@@ -465,7 +486,7 @@ func (s server) motionPhoto(w http.ResponseWriter, r *http.Request, tl openedTim
 	isGoogleMP := path.Ext(strings.ToLower(videoDataFile)) == ".mp" ||
 		path.Ext(strings.ToLower(strings.TrimSuffix(imgDataFile, imgExt))) == ".mp"
 	_, obfuscate := s.app.ObfuscationMode(tl.Timeline)
-	if videoDataFile == "" || imgExt == ".heif" || imgExt == ".heic" || isGoogleMP || obfuscate {
+	if videoDataFile == "" || imgExt == ".heif" || imgExt == ".heic" || imgType == "image/heic" || imgType == "image/heif" || isGoogleMP || obfuscate {
 		return s.transcodeVideo(r.Context(), w, inputFile, nil, obfuscate)
 	}
 
@@ -661,7 +682,7 @@ func (s server) transcodeVideo(ctx context.Context, w http.ResponseWriter, input
 	// TODO: Safari sends "Range: bytes=0-1" before it requests the whole video, I think it expects a Content-Range header. can we use ServeContent to make it work on Safari?
 
 	if err := s.app.Transcode(ctx, inputVideoFilePath, inputVideoStream, format, w, obfuscate); err != nil {
-		return fmt.Errorf("video transcode error: %#w", err)
+		return fmt.Errorf("video transcode error: %w", err)
 	}
 
 	return nil
@@ -721,17 +742,17 @@ func tplFuncIntIter(n int) []struct{} {
 // and renders it in place. Note that included files are NOT escaped, so you
 // should only include trusted files. If it is not trusted, be sure to use
 // escaping functions in your template.
-func (a *App) tplFuncInclude(filename string) (string, error) {
+func (app *App) tplFuncInclude(filename string) (string, error) {
 	bodyBuf := bufPool.Get().(*bytes.Buffer)
 	bodyBuf.Reset()
 	defer bufPool.Put(bodyBuf)
 
-	err := readFileToBuffer(http.FS(a.server.frontend), filename, bodyBuf)
+	err := readFileToBuffer(http.FS(app.server.frontend), filename, bodyBuf)
 	if err != nil {
 		return "", err
 	}
 
-	err = executeTemplateInBuffer(filename, bodyBuf, nil, a)
+	err = executeTemplateInBuffer(filename, bodyBuf, nil, app)
 	if err != nil {
 		return "", err
 	}

@@ -45,7 +45,9 @@ async function loadAndRenderMapData() {
 	// like a synchronous forEach (waits for all async funcs to finish), see: https://stackoverflow.com/a/37576787/1048862
 	await Promise.all(tlz.openRepos.map(async repo => {
 		// asynchronously load and render the heatmap (query could be slow)
-		loadAndRenderHeatmap(repo);
+		if (!mapData.heatmap) {
+			loadAndRenderHeatmap(repo);
+		}
 
 		const params = mapPageFilterParams(repo);
 		if ($('.date-input').datepicker.selectedDates.length == 0) {
@@ -74,7 +76,7 @@ async function loadAndRenderMapData() {
 		// them so we can compute actual timeframe bounds for step colors and legend;
 
 		// prepare map data: associate each coordinate with its information & color
-		let newMapData = { items: [], params: params, totalDistance: 0 };
+		let newMapData = { items: [], params: params, totalDistance: 0, totalTravelTime: 0 };
 		for (let i = 0; i < results.items?.length; i++) {
 			const item = results.items[i];
 			
@@ -100,35 +102,45 @@ async function loadAndRenderMapData() {
 				item,
 				coords: [item.longitude, item.latitude],
 				coordsStr: coordsStr,
-				ts: DateTime.fromISO(item.timestamp)
+				// use setZone: true so that the time displays in the item's time zone
+				timestamp: DateTime.fromISO(item.timestamp, {setZone: true}),
+				// we'll calculate the non-zero value for these (if it's not the first point) in a moment
+				travelTimeSoFar: 0,
+				distanceFromStart: 0
 			};
+			if (item.timespan) {
+				mapItem.timespan = DateTime.fromISO(item.timespan, {setZone: true})
+			}
 
+			// Count how much time was spent between points (as opposed to total time from
+			// start to end), and add up distance traveled between points. This is needed
+			// for proper marker and path gradient coloring. The path's gradient stops are
+			// set by distance, not by time; but the color represents the passage of time,
+			// so we need to make sure marker color and gradient stops both use the same
+			// points of reference from start to end. If we simply calculated end-start,
+			// clusters (or any points that span time) would throw off the coloring, since
+			// they don't cover any distance. For our purposes, we need the duration to
+			// cover distance, OR we need multiple gradient stops on top of each other at
+			// points spanning time. I think it's better to just count time and distance
+			// traveled.
 			if (newMapData.items.length > 0) {
 				const prev = newMapData.items[newMapData.items.length-1];
+				
+				const base = newMapData.items.length == 0 ? (mapItem.timespan || mapItem.timestamp) : mapItem.timestamp;
+				const timeSincePrev = Math.abs(base.diff(prev.timespan || prev.timestamp).toFormat('s'));
+				newMapData.totalTravelTime += timeSincePrev;
+				mapItem.travelTimeSoFar = newMapData.totalTravelTime;
+
 				const distanceFromPrev = haversineDistance(prev.coords, mapItem.coords);
 				newMapData.totalDistance += distanceFromPrev;
 				mapItem.distanceFromStart = newMapData.totalDistance;
-			} else {
-				mapItem.distanceFromStart = 0;
 			}
 
 			newMapData.items.push(mapItem);
 		}
 
-		// compute actual time range (time between first and last item)
-		let actualTimeframeSeconds = 0, firstItemTimestamp, lastItemTimestamp;
-		if (newMapData.items.length > 0) {
-			firstItemTimestamp = newMapData.items[0].ts;
-			lastItemTimestamp = newMapData.items[newMapData.items.length - 1].ts;
-			actualTimeframeSeconds = Math.abs(firstItemTimestamp.diff(lastItemTimestamp).toFormat('s'));
-		}
-
 		for (let i = 0; i < newMapData.items.length; i++) {
 			const mapItem = newMapData.items[i];
-
-			// we compute the number of seconds into the actual timeframe of the map
-			// so that we can get the color scaled correctly
-			const itemSecondsIntoActualTimeframe = Number(mapItem.ts.diff(firstItemTimestamp).toFormat('s'));
 
 			// Hue calculation is based on simple linear y = mx+b formula,
 			// where y is the hue, m is the step size (hue change rate; this is
@@ -149,7 +161,7 @@ async function loadAndRenderMapData() {
 			const maxHue = 360;
 			const endHue = 240;
 			const hueRange = startHue + (maxHue - endHue); // distance traveled from startHue to 0/360, then from 0/360 to endHue
-			const scaledProgress = ((hueRange / actualTimeframeSeconds) * itemSecondsIntoActualTimeframe)
+			const scaledProgress = (hueRange / newMapData.totalTravelTime) * mapItem.travelTimeSoFar
 			const unboundedHue = maxHue - scaledProgress + startHue;
 			const hue = unboundedHue % maxHue;
 			const color = `hsl(${hue}deg, 100%, 55%)`;
@@ -160,8 +172,9 @@ async function loadAndRenderMapData() {
 
 		// update legend labels
 		if (newMapData.items.length > 0) {
-			$('.color-legend-start').innerText = DateTime.fromISO(newMapData.items[0].item.timestamp).toLocaleString(DateTime.DATETIME_FULL);
-			$('.color-legend-end').innerText = DateTime.fromISO(newMapData.items[newMapData.items.length-1].item.timestamp).toLocaleString(DateTime.DATETIME_FULL);
+			// setZone: true makes the time display in the timestamp's local timezone, rather than the user's local time zone
+			$('.color-legend-start').innerText = (newMapData.items[0].timespan || newMapData.items[0].timestamp).toLocaleString(DateTime.DATETIME_FULL);
+			$('.color-legend-end').innerText = newMapData.items[newMapData.items.length-1].timestamp.toLocaleString(DateTime.DATETIME_FULL);
 		}
 
 		// TODO: I don't think this will work cleanly if there's more than 1 open repo
@@ -201,8 +214,8 @@ function makeMarker(repo, mapItem) {
 		const markerElem = document.createElement('div');
 		markerElem.innerHTML = `<svg
 			class="location-dot"
-			width="12"
-			height="12"
+			width="15"
+			height="15"
 			viewBox="0 0 100 100"
 			version="1.1"
 			xmlns="http://www.w3.org/2000/svg">
@@ -214,7 +227,8 @@ function makeMarker(repo, mapItem) {
 		// show timestamp on hover
 		markerElem.addEventListener('mouseenter', e => {
 			popup.setLngLat(mapItem.coords)
-				.setHTML(`${mapItem.ts.toLocaleString(DateTime.DATETIME_FULL)}`)
+				// setZone: true makes the time display in the timestamp's local timezone, rather than the user's local time zone
+				.setHTML(`${mapItem.timestamp.toLocaleString(DateTime.DATETIME_FULL, {setZone: true})}`)
 				.setOffset(0)
 				.addTo(tlz.map);
 		});
@@ -266,8 +280,8 @@ function makeMarker(repo, mapItem) {
 		markerElem.classList.add('active');
 		
 		// fill in the preview box
-		$('#infocard .date').innerText = mapItem.ts.toLocaleString(DateTime.DATE_HUGE);
-		$('#infocard .time').innerText = mapItem.ts.toLocaleString(DateTime.TIME_WITH_SECONDS);
+		$('#infocard .date').innerText = mapItem.timestamp.toLocaleString(DateTime.DATE_HUGE);
+		$('#infocard .time').innerText = mapItem.timestamp.toLocaleString(DateTime.TIME_WITH_SECONDS);
 
 		// display items in a timeline, careful to not use a map :)
 		$('#infocard .map-preview-content').replaceChildren(itemsAsTimeline(coordsToItems[mapItem.coordsStr], { noMap: true, autoplay: true }));
@@ -292,7 +306,13 @@ function makeMarker(repo, mapItem) {
 		const containerEl = cloneTemplate('#tpl-map-popup');
 		const markerCoords = coordsToItems[mapItem.coordsStr].balloonMarker.getLngLat();
 		$('.map-preview-coordinates', containerEl).innerText = `${markerCoords.lat.toFixed(coordPrecision)}, ${markerCoords.lng.toFixed(coordPrecision)}`;
-		$('.map-preview-timestamp', containerEl).innerText = `${mapItem.ts.toLocaleString(DateTime.DATETIME_FULL)}`;
+		$('.map-preview-timestamp', containerEl).innerText = `${mapItem.timestamp.toLocaleString(DateTime.DATETIME_FULL)}`;
+		if (mapItem.timespan) {
+			$('.map-preview-timestamp', containerEl).innerText += `–${mapItem.timespan.toLocaleString(DateTime.DATETIME_FULL)} (${betterToHuman(mapItem.timespan.diff(mapItem.timestamp))})`;
+		}
+		if (mapItem.item?.metadata?.['Cluster size']) {
+			$('.map-preview-meta', containerEl).innerHTML = `<b>Cluster size:</b> ${mapItem.item?.metadata?.['Cluster size']}`;
+		}
 		containerEl.append(previewEl);
 
 		popup.setLngLat(mapItem.coords)
@@ -326,31 +346,47 @@ async function renderMapData(newMapData) {
 		}
 	}
 
-	// remove previous layers/sources
-	// if (tlz.map.getLayer('route')) {
-		tlz.map.tl_removeLayer('route');
-	// }
-	// if (tlz.map.getSource('journey')) {
-		tlz.map.tl_removeSource('journey');
-	// };
-
 	// only draw connecting lines if it makes sense to
 	if (temporallyConsistent(dataToRender.params) && dataToRender.items.length) {
 		// connect markers with lines
 		// EXAMPLE: https://docs.mapbox.com/mapbox-gl-js/example/line-gradient/
 		const geojsonLines = {
-			'type': 'FeatureCollection',
-			'features': [
+			type: 'FeatureCollection',
+			features: [
 				{
-					'type': 'Feature',
-					'properties': {},
-					'geometry': {
-						'coordinates': dataToRender.items.map(item => item.coords),
-						'type': 'LineString'
+					type: 'Feature',
+					properties: {},
+					geometry: {
+						coordinates: dataToRender.items.map(item => item.coords),
+						type: 'LineString'
 					}
 				}
 			]
 		};
+		const geojsonSymbolLines = {
+			type: 'FeatureCollection',
+			features: []
+		};
+		
+		for (let i = 0; i < dataToRender.items.length; i++) {
+			const coords = [dataToRender.items[i].coords];
+			let duration;
+			if (i < dataToRender.items.length-1) {
+				coords.push(dataToRender.items[i+1].coords);
+				duration = betterToHuman(dataToRender.items[i+1].timestamp.diff(dataToRender.items[i].timestamp), { unitDisplay: 'narrow' }).replaceAll(',', '');
+			}
+			geojsonSymbolLines.features.push({
+				type: 'Feature',
+				properties: {
+					'label': duration
+				},
+				geometry: {
+					coordinates: coords,
+					type: 'LineString'
+				}
+			});
+		}
+
 		const lineGradient = function () {
 			let arr = []; // (gradient stop, color) pairs
 			for (let i = 0; i < dataToRender.items.length; i++) {
@@ -362,20 +398,26 @@ async function renderMapData(newMapData) {
 			}
 			return arr;
 		}
+		
+		const addSourceAndLayer = function() {
+			// remove previous layers/sources (remove layers first)
+			tlz.map.tl_removeLayer('route');
+			tlz.map.tl_removeLayer('symbols');
+			tlz.map.tl_removeSource('journey');
+			tlz.map.tl_removeSource('symbols-route');
 
-		const addSource = function() {
 			tlz.map.tl_addSource('journey', {
 				type: 'geojson',
 				lineMetrics: true,
 				data: geojsonLines
 			});
-
 			tlz.map.tl_addLayer({
 				id: "route",
 				type: "line",
 				source: "journey",
 				paint: {
-					"line-width": 5,
+					"line-width": 9,
+					'line-blur': 3,
 					'line-gradient': [
 						'interpolate',
 						['linear'],
@@ -388,23 +430,65 @@ async function renderMapData(newMapData) {
 					'line-join': 'round'
 				}
 			});
+			// add text between points that label how much time between the points
+			tlz.map.tl_addSource('symbols-route', {
+				type: 'geojson',
+				data: geojsonSymbolLines
+			});
+			tlz.map.tl_addLayer({
+				"id": "symbols",
+				"type": "symbol",
+				"source": "symbols-route",
+				"layout": {
+					"symbol-placement": "line",
+					// "text-font": ["Open Sans Regular"],
+					// "text-field": 'this is a test',
+					"text-field": ['get', 'label'],
+					// "text-size": 32
+				},
+				"paint": {
+					"text-halo-color": "rgba(255, 255, 255, 1)",
+					"text-halo-width": 3
+				}
+			});
 		};
-		if (tlz.map.isStyleLoaded()) {
-			addSource();
+		if (tlz.map.idle()) {
+			addSourceAndLayer();
 		} else {
-			tlz.map.on('load', addSource);
+			tlz.map.once('idle', addSourceAndLayer);
 		}
 	}
 
 	// remove old markers, add new markers
 	tlz.map.tl_clearMarkers();
 	dataToRender.items.forEach(mapItem => mapItem.markers.forEach(marker => tlz.map.tl_addMarker(marker)));
-
+	
 	// fly to bounding box of data if requisite
 	if (newMapData && dataToRender.items.length) {
 		let bounds = new mapboxgl.LngLatBounds();
 		dataToRender.items.forEach(item => bounds.extend(item.coords));
-		tlz.map.fitBounds(bounds, { padding: 100, maxZoom: 16 });
+
+		// EDIT: Scratch the below; I don't think it's accurate. The load and style.load events are actually just flaky, period.
+		// I can observe the flakiness even without cancelled requests.
+		//
+		// I think idle is the only reliable event.
+		//
+		// OUTDATED: ~~Any function that causes the map to move/pan/zoom/etc can cause it to cancel requests for tiles that are no longer
+		// necessary as part of the new camera position (at least, this is what I assume is correct behavior after observing
+		// network requests for .pbf files being aborted when the movement starts). We can't draw layers until the map has
+		// finished loading apparently, but when the tile requests are canceled, mapbox doesn't fire the load event, ever!
+		// (as far as I can tell) Anyway, that seems like a bug, but we can work around it by waiting until the map is idle,
+		// which includes movement, fade/transition animations, and tile loading. By waiting here, we can more reliably
+		// draw the layers like heatmap and path. Without this wait, we might cause the map to never finish loading sometimes,
+		// and layers randomly don't end up getting drawn.~~
+		const fitBounds = function() {
+			tlz.map.fitBounds(bounds, { padding: 100, maxZoom: 16 });
+		};
+		if (tlz.map.idle()) {
+			fitBounds();
+		} else {
+			tlz.map.once('idle', fitBounds); // note use of "once" instead of "on" so that we don't keep re-homing after the user pans the map or something :)
+		}
 	}
 
 	// replace the current map data with what is rendered
@@ -427,12 +511,12 @@ async function renderMapData(newMapData) {
 			prevTs = prevTs || dataPoint.item.timestamp;
 			nextTs = nextTs || dataPoint.item.timestamp;
 
-			const dt = DateTime.fromISO(dataPoint.item.timestamp);
+			const dt = DateTime.fromISO(dataPoint.item.timestamp, { setZone: true });
 
 			// as a last resort, choose an arbitrary span of time if that's all we can do;
 			// and convert to luxon DT values so we can split the differences...
-			let prevDT = prevTs ? DateTime.fromISO(prevTs) : dt.minus({ minutes: 30 });
-			let nextDT = nextTs ? DateTime.fromISO(nextTs) : dt.plus({ minutes: 30 });
+			let prevDT = prevTs ? DateTime.fromISO(prevTs, { setZone: true }) : dt.minus({ minutes: 30 });
+			let nextDT = nextTs ? DateTime.fromISO(nextTs, { setZone: true }) : dt.plus({ minutes: 30 });
 
 			// if location data is too far apart in time, arbitrarily cap the time span
 			prevDT = DateTime.max(prevDT, dt.minus({ hours: 12 }));
@@ -696,7 +780,7 @@ on('click', '#bbox-toggle', event => {
 // 	hideMapPageInfoCard();
 // });
 
-on('click', '#map-page #infocard .btn-close', e => {
+on('click', '#map-page #infocard .btn-action.close', e => {
 	hideMapPageInfoCard();
 });
 
@@ -810,17 +894,21 @@ function mapPageFilterParams(repo) {
 	};
 	commonFilterSearchParams(params);
 
+	// This makes the Date object be interpreted as UTC time, not local time, i.e. "15:00" in -6 GMT will be shifted to "21:00" with no TZ offset.s
+	// Same thing as Luxon's ".toUTC(null, { keepLocalTime: true })".
+	function reinterpretAsUTC(localDate) {
+		// Shift by the local offset so wall time = UTC time
+		return new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60_000);
+	}
+
+
 	// date range
 	// if one date is selected, set the range to that day;
 	// if two dates are selected, make the range inclusive
 	const pickerDates = $('.date-input').datepicker.selectedDates;
 	if (pickerDates.length > 0) {
-		params.start_timestamp = pickerDates[0];
-		if (pickerDates.length == 1) {
-			params.end_timestamp = DateTime.fromJSDate(pickerDates[0]).plus({ days: 1 }).toJSDate();
-		} else if (pickerDates.length == 2) {
-			params.end_timestamp = DateTime.fromJSDate(pickerDates[1]).plus({ days: 1 }).toJSDate();
-		}
+		params.start_timestamp = reinterpretAsUTC(pickerDates[0])
+		params.end_timestamp = DateTime.fromJSDate(pickerDates[pickerDates.length-1]).toUTC(null, { keepLocalTime: true }).plus({ days: 1 }).toJSDate();
 	}
 
 	// location proximity
@@ -955,69 +1043,106 @@ function loadAndRenderHeatmap(repo) {
 }
 
 function renderHeatmap() {
-	tlz.map.tl_removeLayer('items-sample');
-	tlz.map.tl_removeSource('all-items');
-	const addSource = function() { // source can't be added until style loads, apparently: https://stackoverflow.com/q/40557070
+	const addSourceAndLayer = function() {
+		tlz.map.tl_removeLayer('items-sample'); // always remove layers before sources, which the layers depend on
+		tlz.map.tl_removeSource('all-items');
+
 		tlz.map.tl_addSource('all-items', {
 			type: 'geojson',
 			data: mapData.heatmap
 		});
-	};
-	if (tlz.map.isStyleLoaded()) {
-		addSource();
-	} else {
-		tlz.map.on('load', addSource);
-	}
-	// Docs: https://docs.mapbox.com/mapbox-gl-js/style-spec/layers/#heatmap
-	tlz.map.tl_addLayer(
-		{
+		// Docs: https://docs.mapbox.com/mapbox-gl-js/style-spec/layers/#heatmap
+		tlz.map.tl_addLayer({
 			'id': 'items-sample',
 			'type': 'heatmap',
 			'source': 'all-items',
 			// 'maxzoom': 16,
+
+			// The heatmap paint properties have been carefully tuned over hours of various
+			// data sets to try to achieve an optimal viewing experience with the most useful
+			// color presentation. It's very difficult to tune well. I find it helpful to
+			// revert to static values and adjust interpolated properties one at a time for
+			// tuning. Get familiar with exactly how each property behaves/influences the
+			// result.
 			'paint': {
-				// Increase the heatmap weight based on frequency and property magnitude
-				// 'heatmap-weight': [
-				// 	'interpolate', ['linear'], ['get', 'mag'],
-				// 	0, 0,
-				// 	6, 1
-				// ],
-				// Increase the heatmap color weight weight by zoom level
-				// heatmap-intensity is a multiplier on top of heatmap-weight
-				'heatmap-intensity': [
+				// The weight each point carries. Tuned in coordination with the color
+				// settings. When zoomed out, points appear closer together, so it's
+				// easier to get to red/hot blobs, so a lower weight is used. But if
+				// we go too low (i.e. .001), the gaussian algorithm starts to render
+				// a truncated/crosshatched/blotchy heatmap. This value is scaled by
+				// the intensity property. Currently, we increase weight when zoomed
+				// in since points will spread out more, and we want individual points
+				// in sparse areas to still show up, but when zoomed out, we don't
+				// want everything to be a red blob (even though most cities/clusters
+				// will be red anyway). As we zoom in, we want the red to dissipate
+				// quickly to be red/hot only over actual clusters.
+				'heatmap-weight': [
 					'interpolate', ['linear'], ['zoom'],
-					0, 0.1,
-					12, 2
+					1, 0.01,
+					5, 0.015,
+					10, 0.02,
+					20, 0.025,
 				],
-				// Color ramp for heatmap.  Domain is 0 (low) to 1 (high).
-				// Begin color ramp at 0-stop with a 0-transparancy color
-				// to create a blur-like effect.
-				// 'heatmap-color': [
-				// 	'interpolate', ['linear'], ['heatmap-density'],
-				// 	0,   'rgba(33,102,172,0)',
-				// 	0.2, 'rgb(103,169,207)',
-				// 	0.4, 'rgb(209,229,240)',
-				// 	0.6, 'rgb(253,219,199)',
-				// 	0.8, 'rgb(239,138,98)',
-				// 	1,   'rgb(178,24,43)'
-				// ],
-				// Adjust the heatmap radius by zoom level
-				// TODO: the radii should be increased/decreased  when the sampling interval is increased/decreased, respectively
+
+				// Radius adjusts the spread of influence of each point's weight.
+				// Too high, and you'll have hot blobs everywhere. Too low, and
+				// you won't be able to see individual points or even small clusters.
+				// A lower radius is very helpful at lower zoom levels to avoid
+				// every path looking like a red blob.
 				'heatmap-radius': [
 					'interpolate', ['linear'], ['zoom'],
-					0, 8,
-					6, 14
+					1, 5,
+					10, 25,
+					14, 40,
+					18, 75,
 				],
-				'heatmap-opacity': [
+
+				// Intensity apparently scales the weight. Default is 1 (no scaling).
+				// When zoomed out, lots of points are already going to be close together,
+				// so we desensitize the weight, so that not everything is a red blob when
+				// looking at the big picture. When zoomed in, we increase the intensity
+				// so that singular/sparse points don't get lost. But once we get REALLY
+				// zoomed in, we don't need that intensity as the user isn't scanning or
+				// searching at that point, they're just trying to drill down.
+				'heatmap-intensity': [
 					'interpolate', ['linear'], ['zoom'],
-					7,  .5,
-					14, .25,
-					16, .25,
-					18, 0
-				]
+					1, 0.2,
+					5, 0.5,
+					9, 1,
+					12, 4,
+					14, 4,
+					18, 2
+				],
+
+				// Tune colors relative to weight so that red appears only for absolute hotspots.
+				// Input range (density) is 0-1. This is the only property that can use density
+				// as an input.
+				'heatmap-color': [
+					'interpolate', ['linear'], ['heatmap-density'],
+					0,   'rgba(0, 0, 0, 0)',
+					0.015, 'royalblue', // don't raise this too much relative to weight*intensity, or the lone points will disappear
+					0.1, 'cyan',
+					0.12, 'lime',
+					0.4, 'yellow',
+					1, 'red'
+				],
+
+				// Opacity could be interpolated based on zoom level as well,
+				// but so far I've found a static value to offer good visibility
+				// at all zoom levels. Zoomed out, less opaque is okay since you
+				// can't see details anyway, but zoomed in you don't want to go
+				// too transparent or you lose the singular points, which may
+				// still be desired. So I just choose this middle ground for now.
+				'heatmap-opacity': .5
 			}
-		}, 'route'
-	);
+		}, 'route');
+	};
+	// source can't be added until style loads, apparently: https://stackoverflow.com/q/40557070 (and layer depends on source)
+	if (tlz.map.idle()) {
+		addSourceAndLayer();
+	} else {
+		tlz.map.once('idle', addSourceAndLayer);
+	}
 }
 
 

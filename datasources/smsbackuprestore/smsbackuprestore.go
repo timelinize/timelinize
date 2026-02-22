@@ -35,6 +35,7 @@ import (
 
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
+	"golang.org/x/net/html/charset"
 )
 
 func init() {
@@ -74,7 +75,7 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 	defer file.Close()
 
 	dec := xml.NewDecoder(file)
-
+	dec.CharsetReader = charset.NewReaderLabel // handle non-UTF-8 encodings
 	for {
 		// NOTE: I've seen JSON files successfully get a first token from the XML decoder
 		tkn, err := dec.Token()
@@ -136,7 +137,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 	}
 
 	// standardize phone number, and ensure it is marked as identity
-	standardizedPhoneNum, err := timeline.NormalizePhoneNumber(dsOpt.OwnerPhoneNumber, dsOpt.DefaultRegion)
+	standardizedPhoneNum, err := timeline.NormalizePhoneNumber(ctx, dsOpt.OwnerPhoneNumber, dsOpt.DefaultRegion)
 	if err != nil {
 		return fmt.Errorf("standardizing owner's phone number '%s': %w", dsOpt.OwnerPhoneNumber, err)
 	}
@@ -169,6 +170,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 	// processing messages concurrently is not faster, based on my testing
 
 	dec := xml.NewDecoder(xmlFile)
+	dec.CharsetReader = charset.NewReaderLabel // handle non-UTF-8 encodings
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -205,7 +207,7 @@ func (imp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEn
 				if err := dec.DecodeElement(&mms, &startElem); err != nil {
 					return fmt.Errorf("decoding XML element as MMS: %w", err)
 				}
-				imp.processMMS(line, mms, params, dsOpt)
+				imp.processMMS(ctx, line, mms, params, dsOpt)
 			}
 
 			line++
@@ -224,7 +226,7 @@ func (imp *FileImporter) processSMS(line int, sms SMS, opt timeline.ImportParams
 	ig := &timeline.Graph{
 		Item: &timeline.Item{
 			Classification: timeline.ClassMessage,
-			Timestamp:      time.UnixMilli(sms.Date),
+			Timestamp:      time.UnixMilli(sms.Date).UTC(), // these unix timestamps represent the actual UTC date, not local time
 			Owner:          sender,
 			Content: timeline.ItemData{
 				MediaType: "text/plain",
@@ -240,12 +242,12 @@ func (imp *FileImporter) processSMS(line int, sms SMS, opt timeline.ImportParams
 	opt.Pipeline <- ig
 }
 
-func (imp *FileImporter) processMMS(line int, mms MMS, opt timeline.ImportParams, dsOpt Options) {
+func (imp *FileImporter) processMMS(ctx context.Context, line int, mms MMS, opt timeline.ImportParams, dsOpt Options) {
 	if !mms.within(opt.Timeframe) {
 		return
 	}
 
-	sender, recipients := mms.people(dsOpt)
+	sender, recipients := mms.people(ctx, dsOpt)
 
 	// the ordering of the parts is not guaranteed, and I've seen them
 	// switched around on different exports; I think it makes sense to

@@ -145,6 +145,14 @@ function updateFilterResults() {
 	setTimeout(async function() {
 		// update the results
 		await tlz.currentPageController?.render();
+
+		// I find it's generally expected to start at the top of the results after updating filters
+		// TODO: Not true on the conversation page, this can be a little racey with that
+		window.scrollTo({
+			top: 0,
+			left: 0,
+			behavior: 'instant'
+		});
 		
 		// after the rendering is complete, fade in results
 		// (need brief timeout to allow time for paint, I guess; otherwise browser just flashes in the content)
@@ -243,7 +251,7 @@ function getEntityAttribute(entity, attributeName) {
 function setDynamicTimestamp(elem, isoOrUnixSecTime, forDuration) {
 	elem._timestamp = typeof isoOrUnixSecTime === 'number'
 		? DateTime.fromSeconds(isoOrUnixSecTime)
-		: DateTime.fromISO(isoOrUnixSecTime);
+		: DateTime.fromISO(isoOrUnixSecTime, { setZone: true });
 	elem.innerText = elem._timestamp.toRelative();
 	elem.classList.add(forDuration ? "dynamic-duration" : "dynamic-time");
 }
@@ -320,7 +328,8 @@ function connectLog() {
 	// (and since we are now trying to connect, we can clear the sentinel)
 	tlz.loggerSocket.retrying = false;
 
-	tlz.loggerSocket.socket = new WebSocket(`ws://${window.location.host}/api/logs`);
+	const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+	tlz.loggerSocket.socket = new WebSocket(`${wsProto}//${window.location.host}/api/logs`);
 
 	tlz.loggerSocket.socket.onopen = function(event) {
 		console.info("Established connection to logger socket", event, tlz.loggerSocket.socket);
@@ -337,15 +346,17 @@ function connectLog() {
 			return;
 		}
 
-		if (l.logger == "job.status") {
+		if (l.logger == "job.status" && l.job) {
+			const job = l.job;
+
 			// if this job has a parent that happens to be on the screen showing
 			// previews of its children, make sure this job is rendered so it
 			// can be updated
-			if (l.parent_job_id != null) {
-				const container = $(`#subsequent-jobs-container.job-id-${l.parent_job_id}`);
-				if (container && !$(`.job-preview.job-id-${l.id}`, container)) {
+			if (job.parent_job_id != null) {
+				const container = $(`#subsequent-jobs-container.job-id-${job.parent_job_id}`);
+				if (container && !$(`.job-preview.job-id-${job.id}`, container)) {
 					container.classList.remove('d-none');
-					renderJobPreview($('#subsequent-jobs-list'), l);
+					renderJobPreview($('#subsequent-jobs-list'), job);
 				}
 			}
 
@@ -355,17 +366,17 @@ function connectLog() {
 				// does this for us, but we are wrapping the container for the sake of
 				// display in the navbar dropdown, which is a list-group, so we have
 				// to check for duplicates ourselves
-				if ($(`.job-preview.job-id-${l.id}`, listElem)) {
+				if ($(`.job-preview.job-id-${job.id}`, listElem)) {
 					continue;
 				}
 				const listItemWrapperElem = document.createElement('div');
 				listItemWrapperElem.classList.add('list-group-item');
-				renderJobPreview(listItemWrapperElem, l);
+				renderJobPreview(listItemWrapperElem, job);
 				listElem.prepend(listItemWrapperElem);
 			}
 
 			// update UI elements that portray this job
-			jobProgressUpdate(l);
+			jobProgressUpdate(job);
 
 			return;
 		}
@@ -375,11 +386,13 @@ function connectLog() {
 			updateRepoOwners(true);
 		}
 
-		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.id}`)) {
+		if (l.logger == "job.action" && l.msg == "finished graph" && $(`.job-import-stream.job-id-${l.job.id}`)) {
+			const job = l.job;
+
 			// this page is for this import job, so display its table
 			$('.job-import-stream-container').classList.remove('d-none');
 			
-			const tableElem = $(`.job-import-stream.job-id-${l.id}`);
+			const tableElem = $(`.job-import-stream.job-id-${job.id}`);
 			const rowElem = cloneTemplate('#tpl-job-import-stream-row');
 
 			let location = l?.lat?.toFixed?.(4) || "";
@@ -424,7 +437,7 @@ function connectLog() {
 			$('.import-stream-row-data-source', rowElem).innerHTML = `<img src="/ds-image/${l.data_source_name}">`;
 			$('.import-stream-row-class', rowElem).innerText = l.classification !== undefined ? classInfo(l.classification).labels[0] : "";
 			$('.import-stream-row-entity', rowElem).innerText = l.entity || "";
-			$('.import-stream-row-content', rowElem).innerText = l.preview || maxlenStr(l.filename, 25) || "";
+			$('.import-stream-row-content', rowElem).innerText = l.preview || maxlenStr(l.filename, 35) || maxlenStr(l.intermediate_path, 35) || maxlenStr(l.original_path, 35) || "";
 			$('.import-stream-row-timestamp', rowElem).innerText = l.item_timestamp ? DateTime.fromSeconds(l.item_timestamp).toLocaleString(DateTime.DATETIME_SHORT_WITH_SECONDS) : "";
 			$('.import-stream-row-location', rowElem).innerText = location;
 			// $('.import-stream-row-content-type', rowElem).innerText = l.media_type || "";
@@ -437,17 +450,21 @@ function connectLog() {
 			for (let i = MAX_STREAM_TABLE_ROWS; i < $$('tbody tr', tableElem).length; i++) {
 				$$('tbody tr', tableElem)[i].remove();
 			}
-		} else if (l.logger == "job.action" && l.msg == "finished thumbnail" && $(`.job-thumbnail-stream.job-id-${l.id}`)) {
+		} else if (l.logger == "job.action" && l.msg == "finished thumbnail" && $(`.job-thumbnail-stream.job-id-${l.job.id}`)) {
+			const job = l.job;
+
 			// this page is for this thumbnail job, so display its output
 			$('.job-thumbnail-stream-container').classList.remove('d-none');
 
-			
-			
-			const gridElem = $(`.job-thumbnail-stream.job-id-${l.id}`);
+			const gridElem = $(`.job-thumbnail-stream.job-id-${job.id}`);
 			const cellElem = cloneTemplate('#tpl-job-thumbnail-stream-cell');
 
 			$('.datagrid-content', cellElem).append(itemContentElement({
-				...l,
+				data_file: l.data_file,
+				data_id: l.data_id,
+				data_type: l.data_type,
+				repo_id: job.repo_id,
+				thumb_hash: l.thumb_hash,
 			}, { thumbnail: true }))
 
 			gridElem.prepend(cellElem);
@@ -578,10 +595,10 @@ function moveMapInto(mapContainerElem) {
 			};
 
 			// render new data
-			if (tlz.map.tl_isLoaded) {
+			if (tlz.map.isStyleLoaded()) {
 				renderMapData();
 			} else {
-				tlz.map.on('load', async () => {
+				tlz.map.once('style.load', async () => {
 					// // Custom atmosphere styling
 					// map.setFog({
 					// 	'color': 'rgb(220, 159, 159)', // Pink fog / lower atmosphere
@@ -593,8 +610,8 @@ function moveMapInto(mapContainerElem) {
 			}
 		}
 
-		if (resizeCount >= 3) {
-			// we're done, so no need to observe anymore
+		if (resizeCount >= 10) {
+			// hopefully no need to observe anymore
 			observer.disconnect();
 		}
 	});

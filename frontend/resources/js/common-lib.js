@@ -24,10 +24,10 @@ const Interval = luxon.Interval;
 const Duration = luxon.Duration;
 
 
-// // Tabler 1.2.0 moved/hid the bootstrap variable and the prior tabler variable into a new global... see https://github.com/tabler/tabler/issues/2273#issuecomment-2816833153
-// // It broke quite a few things, so I'm holding out on Tabler 1.2 until some things are sorted out.
-// var bootstrap = tabler.bootstrap;
-// var tabler = tabler.tabler;
+// Tabler 1.2.0 moved/hid the bootstrap variable and the prior tabler variable into a new global... see https://github.com/tabler/tabler/issues/2273#issuecomment-2816833153
+// It broke quite a few things, so here's a quick shim...
+const bootstrap = tabler.bootstrap;
+var tabler = tabler.tabler;
 
 
 
@@ -63,6 +63,14 @@ const tlz = {
 			<path d="M19 4v16h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12z" />
 			<path d="M19 16h-12a2 2 0 0 0 -2 2" />
 			<path d="M9 8h6" />`,
+		event: `
+			<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+			<path d="M4 5m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z" />
+			<path d="M16 3l0 4" />
+			<path d="M8 3l0 4" />
+			<path d="M4 11l16 0" />
+			<path d="M8 15h2v2h-2z" />
+		`,
 		"": `
 			<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
 			<path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
@@ -98,13 +106,19 @@ const tlz = {
 
 		page_view: `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>
 		<path d="M12 8l0 4l2 2" /><path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5" />
-		`
+		`,
+		document: `
+            <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+            <path d="M14 3v4a1 1 0 0 0 1 1h4"></path>
+            <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"></path>
+            <path d="M9 17h6"></path>
+            <path d="M9 13h6"></path>`,
 	},
 
 	itemClassIconAndLabel(item, pathOnly) {
-		const info = classInfo(item.classification);
+		const info = classInfo(item?.classification);
 		const iconMap = pathOnly ? tlz.itemClassIconPaths : tlz.itemClassIcons;
-		if (item.classification == "media") {
+		if (item?.classification == "media") {
 			if (item?.data_type?.startsWith("image/")) {
 				return {
 					icon: iconMap.media_image,
@@ -124,7 +138,7 @@ const tlz = {
 		}
 
 		return {
-			icon: iconMap[item.classification],
+			icon: iconMap[item?.classification || ""],
 			label: info.labels[0]
 		};
 	},
@@ -238,6 +252,10 @@ tlz.itemClassIcons = {
 		<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-book-2">
 			${tlz.itemClassIconPaths.collection}
 		</svg>`,
+	event: `
+		<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-calendar-event">
+			${tlz.itemClassIconPaths.event}
+		</svg>`,
 	"": `
 		<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-file-unknown" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
 			${tlz.itemClassIconPaths[""]}
@@ -245,7 +263,8 @@ tlz.itemClassIcons = {
 
 	// because the "media" classification is so broad, we can show a more specific
 	// icon based on the data_type column (mime type) of the item
-	media_image: `<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-photo" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+	media_image: `
+		<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-photo" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
 			${tlz.itemClassIconPaths.media_image}
 		</svg>`,
 	media_video: `
@@ -253,7 +272,7 @@ tlz.itemClassIcons = {
 			${tlz.itemClassIconPaths.media_video}
 		</svg>`,
 	media_audio: `
-	  <svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="currentColor"  class="icon icon-tabler icons-tabler-filled icon-tabler-bookmark">
+		<svg xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="currentColor"  class="icon icon-tabler icons-tabler-filled icon-tabler-bookmark">
 			${tlz.itemClassIconPaths.media_audio}
 		</svg>`,
 
@@ -261,18 +280,22 @@ tlz.itemClassIcons = {
 	// since cameras can do pictures, videos, and audio
 	media: `
 		<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-camera" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-		${tlz.itemClassIconPaths.media}
-	</svg>`,
+			${tlz.itemClassIconPaths.media}
+		</svg>`,
 
 	bookmark: `
 		<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-camera" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-		${tlz.itemClassIconPaths.bookmark}
-	</svg>`,
+			${tlz.itemClassIconPaths.bookmark}
+		</svg>`,
 
 	page_view: `
-	  <svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-history">
-		${tlz.itemClassIconPaths.page_view}
-	</svg>`
+		<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-history">
+			${tlz.itemClassIconPaths.page_view}
+		</svg>`,
+	document: `
+        <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-file-description" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            ${tlz.itemClassIconPaths.document}
+        </svg>`,
 };
 
 // set all the predefined intervals
@@ -377,18 +400,23 @@ function initMapSingleton() {
 	tlz.map.tl_isLoaded = false;
 	tlz.map.on('load', () => tlz.map.tl_isLoaded = true);
 
-	tlz.map.on('style.load', async () => {
+	tlz.map.once('style.load', () => {
 		// update the lighting every minute to match the current time of day
-		updateMapLighting();
 		setInterval(updateMapLighting, 60000);
+	});
+
+	tlz.map.on('style.load', () => {
+		updateMapLighting();
 
 		// add terrain source, but don't set it on the map unless enabled
-		tlz.map.tl_addSource('mapbox-dem', {
-			type: 'raster-dem',
-			// TODO: what's the difference between these?
-			url: 'mapbox://mapbox.terrain-rgb'
-			// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
-		});
+		if (!tlz.map.getSource('mapbox-dem')) {
+			tlz.map.tl_addSource('mapbox-dem', {
+				type: 'raster-dem',
+				// TODO: what's the difference between these?
+				url: 'mapbox://mapbox.terrain-rgb'
+				// url: "mapbox://mapbox.mapbox-terrain-dem-v1"
+			});
+		}
 
 		applyTerrain();
 
@@ -414,6 +442,12 @@ function initMapSingleton() {
 			$('.mapboxgl-canvas-container').style.cursor = '';
 		}
 	});
+
+
+	// Can be useful when troubleshooting zoom-related things
+	// tlz.map.on('zoom', function() {
+	// 	console.debug('MAP ZOOM:', tlz.map.getZoom());
+	// });
 }
 
 
@@ -1063,7 +1097,7 @@ function itemImgSrc(item, thumbnail = false) {
 		data_type: item.data_type
 	});
 	const ext = thumbnail ? "" : ".avif"; // thumbnail extension is dictated by server
-	return `/repo/${item.repo_id}/${thumbnail ? "thumbnail" : "image"}/${item.id}${ext}?${params.toString()}`;
+	return `/repo/${item.repo_id}/${thumbnail ? "thumbnail" : "image"}/${item.id ? item.id+ext : ""}?${params.toString()}`;
 }
 
 function entityDisplayNameAndAttr(entity) {
@@ -1110,16 +1144,15 @@ function avatar(colored, entity, classes) {
 
 function initials(name) {
 	if (!name) return "";
-
-	// ignore any parenthetical suffix
-	const regex = /^(.+)\(.+\)$/;
-	let matches = regex.exec(name);
+	
+	// match only sequences of alphanumeric characters
+	const regex = /[A-Za-z0-9]+/g;
+	let matches = name.split('@')[0].match(regex); // only consider username portion of email addresses
 	if (matches) {
-		name = matches[1].trim();
+		name = matches.join(" ").trim();
 	}
 
-	// TODO: maybe do this server-side?
-	// strip emojis... this is cutting-edge, apparently (March 2023) -- not yet supported in Firefox :(
+	// as of March 2023, this was cutting-edge, but now all major browsers support this API
 	// Emoji-aware split(): https://stackoverflow.com/a/71619350/1048862
 	// Detecting emoji: https://stackoverflow.com/a/64007175/1048862
 	if (Intl.Segmenter) {
@@ -1129,7 +1162,7 @@ function initials(name) {
 		name = nonEmojiRunes.join("").trim();
 	}
 
-	let initials = name.split(" ").map((n) => n[0]).join("") || "?";
+	let initials = name.split(" ").map((n) => n[0]).join("") || "";
 	if (initials.length > 2) {
 		initials = initials[0] + initials[initials.length-1];
 	}
@@ -1174,13 +1207,16 @@ function itemTimestampDisplay(item, endItem) {
 		endItem = undefined;
 	}
 
-	const dt = DateTime.fromISO(item.timestamp);
+	// setZone: true will show the time in the local time zone if set,
+	// which makes the most sense for most places in our application
+	const dt = DateTime.fromISO(item.timestamp, { setZone: true });
+
 	result.relative = dt.toRelative();
 
 	if (item.timeframe) {
 		// find the level of precision by looking at each major compontent of the timestamps
 
-		const tf = DateTime.fromISO(item.timeframe);
+		const tf = DateTime.fromISO(item.timeframe, { setZone: true });
 		const itvl = Interval.fromDateTimes(dt, tf);
 
 		// hasSame() is a weirdly-named function, since it seems to actually return true
@@ -1192,6 +1228,7 @@ function itemTimestampDisplay(item, endItem) {
 				dateWithWeekday: `${dt.toLocaleString(DateTime.DATE_MED)} (${dt.weekdayLong})`,
 				time: `${dt.hour % 12} o'clock` // TODO: have it be like "1pm" instead of "13 o'clock"
 			};
+			result.timeWithZone = `${result.time} ${dt.toFormat("ZZZZ")}`;
 		} else {
 			if (itvl.hasSame('day')) {
 				result.dateTime = `${dt.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)}`;
@@ -1209,11 +1246,12 @@ function itemTimestampDisplay(item, endItem) {
 		}
 	} else {
 		result = {
-			dateTime: `${dt.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)} ${dt.toLocaleString(DateTime.TIME_WITH_SECONDS)}`,
+			dateTime: `${dt.toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY)} ${dt.toFormat("ZZZZ")}`,
 			weekdayDate: `${dt.weekdayLong}, ${dt.toLocaleString(DateTime.DATE_MED)}`,
 			dateWithWeekday: `${dt.toLocaleString(DateTime.DATE_MED)} (${dt.weekdayLong})`,
-			time: dt.toLocaleString(DateTime.TIME_SIMPLE)
+			time: dt.toLocaleString(DateTime.TIME_SIMPLE),
 		};
+		result.timeWithZone = `${result.time} ${dt.toFormat("ZZZZ")}`;
 	}
 
 	const timespan = endItem?.timespan || endItem?.timestamp || item.timespan;
@@ -1313,8 +1351,34 @@ function itemContentElement(item, opts) {
 
 		return container;
 	}
-	else if (item.data_file || item.data_hash)
+	else if (item.data_file || item.data_hash || item.data_id)
 	{
+		const wrapInLoaderContainer = function(container, mediaTag, readyEvent) {
+			const loaderSupercontainer = cloneTemplate('#loader-container');
+			$('.loading-message', loaderSupercontainer).innerText = "Rendering preview";
+
+			// prepend the img tag to the supercontainer since it's (probably)
+			// lazy-loaded, and it has to be on the DOM to try loading -- then
+			// we can fade out the loader 
+			loaderSupercontainer.prepend(mediaTag);
+
+			container.append(loaderSupercontainer);
+
+			// when the image has loaded, replace loader element with the image
+			// (img tags might be unset if obfuscation is enabled)
+			mediaTag?.addEventListener(readyEvent, function() {
+				// In case the caller added classes to the returned element (the container),
+				// we will need to add those to the mediaTag since it will replace the container.
+				container.classList.forEach(name => mediaTag.classList.add(name));
+
+				$('.loader-container', loaderSupercontainer).classList.add('fade-out');
+				setTimeout(function() {
+					$('.loader-container', loaderSupercontainer).remove();
+				}, 1000);
+				
+			});
+		}
+
 		if (item.data_type.startsWith("image/"))
 		{
 			// initial image tag (or placeholder element, if processing) to return
@@ -1366,36 +1430,44 @@ function itemContentElement(item, opts) {
 			// if the image has been cached or already loaded recently, it might already
 			// be available; if so, skip the complicated stuff
 			if (imgTag && ((imgTag.src && imgTag.complete) || opts?.avatar)) {
-				return imgTag;
+				const container = document.createElement('div');
+				container.classList.add('thumbhash-container');
+				container.append(imgTag);
+				return container;
 			}
 
 			// the container will hold either the thumbhash and the final image, or
-			// the loading indicator. If it holds the the loading indicator, it gets
+			// the loading indicator. If it holds the loading indicator, it gets
 			// replaced with the img tag when the image is done loading
 			const container = document.createElement('div');
 
 			// if a thumbhash is available, render it while we load the full image/thumbnail
 			if (item.thumb_hash) {
+				container.classList.add('thumbhash-container');
+				
 				const thumbHashWithAspectRatio = decodeBase64ToBytes(item.thumb_hash);
 				const aspectRatioBytes = thumbHashWithAspectRatio.subarray(0, 4);
 				const thumbHash = thumbHashWithAspectRatio.subarray(4);
 				const aspectRatio = new DataView(aspectRatioBytes.buffer).getFloat32(0);
 
+				const obfuscate = tlz.settings?.application?.obfuscation?.enabled;
+
 				const thumbhashImgTag = makeImgTag(thumbHashToDataURL(thumbHash));
 				thumbhashImgTag.classList.add('thumbhash');
+				thumbhashImgTag.classList.remove('content');
+				if (!obfuscate) {
+					thumbhashImgTag.classList.add('breathing'); // this indicates it's loading, which it's really not when in demo mode
+				}
+				
+				container.style.aspectRatio = aspectRatio;
 				thumbhashImgTag.style.aspectRatio = aspectRatio;
-
-				container.classList.add('thumbhash-container', 'rounded');
-
+				
 				container.append(thumbhashImgTag);
 
-				if (imgTag) {
-					// getting the preview image will take some time: hide the img tag until it's
+				if (imgTag && !obfuscate) {
+					// getting the encoded image will take some time: hide the img tag until it's
 					// done loading, and when it's done, swap the placeholder for, or show, the image
 					imgTag.classList.add('invisible');
-
-					// make final image appear directly over the thumbhash image
-					imgTag.classList.add('absolute');
 
 					// when the image has loaded, fade in the picture over the thumbhash
 					imgTag.addEventListener('load', function() {
@@ -1404,37 +1476,14 @@ function itemContentElement(item, opts) {
 						// TODO: This is used on the item page where the image may be replaced by the motionpic...
 						setTimeout(function() {
 							imgTag.classList.remove('fade-in');
+							thumbhashImgTag.classList.remove('breathing');
 						}, 1000);
 					});
 
 					container.append(imgTag);
 				}
-			} else {
-				const loaderSupercontainer = cloneTemplate('#loader-container');
-				$('.loading-message', loaderSupercontainer).innerText = "Rendering preview";
-
-				// prepend the img tag to the supercontainer since it's (probably)
-				// lazy-loaded, and it has to be on the DOM to try loading -- then
-				// we can fade out the loader 
-				// TODO: Make videos have the same effect
-				loaderSupercontainer.prepend(imgTag);
-
-				container.append(loaderSupercontainer);
-
-				// when the image has loaded, replace loader element with the image
-				// (imgTag might be unset if obfuscation is enabled)
-				imgTag?.addEventListener('load', function() {
-					// TODO: is this still true now that we don't replace the container? (TODO: actually, we probably should, to keep things tidy, no need to keep the "supercontainer" around. just the content)
-					// In case the caller added classes to the returned element (the container),
-					// we will need to add those to the imgTag since it will replace the container.
-					container.classList.forEach(name => imgTag.classList.add(name));
-
-					$('.loader-container', loaderSupercontainer).classList.add('fade-out');
-					setTimeout(function() {
-						$('.loader-container', loaderSupercontainer).remove();
-					}, 1000);
-					
-				});
+			} else if (imgTag) {
+				wrapInLoaderContainer(container, imgTag, 'load');
 			}
 
 			return container;
@@ -1445,7 +1494,7 @@ function itemContentElement(item, opts) {
 			const makeVideoTag = function(sources) {
 				const videoTag = document.createElement('video');
 				videoTag.dataset.contentType = "video";
-				videoTag.classList.add('content', 'rounded');
+				videoTag.classList.add('content', 'w-100');
 				if (opts?.thumbnail) {
 					videoTag.classList.add('video-thumbnail');
 				}
@@ -1486,7 +1535,10 @@ function itemContentElement(item, opts) {
 				// 	}
 				// });
 
-				return videoTag;
+				const container = document.createElement('div');
+				wrapInLoaderContainer(container, videoTag, 'canplay');
+
+				return container;
 			};
 
 			// // 3GPP files are common among text messages.
@@ -1523,6 +1575,19 @@ function itemContentElement(item, opts) {
 			audioTag.setAttribute('controls', '');
 			audioTag.src = `/repo/${item.repo_id}/${item.data_file}`;
 			return audioTag;
+		}
+		else if (item.data_type == "application/pdf")
+		{
+			const objectTag = document.createElement('object');
+			objectTag.type = item.data_type;
+			objectTag.data = `/repo/${item.repo_id}/${item.data_file}#zoom=FitH`;
+			objectTag.innerHTML = "<p>Could not render PDF.</p>";
+
+			const divContainer = document.createElement('div');
+			divContainer.classList.add('ratio', 'ratio-4x3');
+			divContainer.append(objectTag);
+
+			return divContainer;
 		}
 		else
 		{
@@ -1579,7 +1644,9 @@ function itemMiniDisplay(items, options) {
 		case 'bookmark':
 			return miniDisplayBookmark(items);
 		case 'page_view':
-				return miniDisplayPageView(items);
+			return miniDisplayPageView(items);
+		case 'event':
+			return miniDisplayEvent(items);
 		default:
 			console.warn("TODO: UNSUPPORTED ITEM CLASS:", representative.classification, items);
 			return miniDisplayMisc(items);
@@ -1642,16 +1709,17 @@ function miniDisplayMedia(items, options) {
 		const a = document.createElement('a');
 		a.href = `/items/${item.repo_id}/${item.id}`;
 		const elem = itemContentElement(item, { options, thumbnail: true });
+		elem.classList.add('h-100', 'rounded');
 		a.append(elem);
 		container.append(a);
 	}
 
 	if (items.length == 1) {
-		container.classList.add('minidisp-media-xl', 'minidisp-media-nocrop');
+		container.classList.add('minidisp-media-xl');
 	} else if (items.length <= 3) {
-		container.classList.add('minidisp-media-l', 'minidisp-media-nocrop');
+		container.classList.add('minidisp-media-l');
 	} else if (items.length >= 4 && items.length < 7) {
-		container.classList.add('minidisp-media-m', 'minidisp-media-nocrop');
+		container.classList.add('minidisp-media-m');
 	}
 
 	return {
@@ -1759,6 +1827,20 @@ function renderPaperItem(item) {
 	return el;
 }
 
+function miniDisplayEvent(items) {
+	const container = document.createElement('div');
+	for (const item of items) {
+		container.append(itemContentElement(item, {
+			maxLength: 1024,
+		}));
+	}
+	return {
+		icon: `<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="currentColor"  class="icon icon-tabler icons-tabler-filled icon-tabler-calendar-week"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M16 2c.183 0 .355 .05 .502 .135l.033 .02c.28 .177 .465 .49 .465 .845v1h1a3 3 0 0 1 2.995 2.824l.005 .176v12a3 3 0 0 1 -2.824 2.995l-.176 .005h-12a3 3 0 0 1 -2.995 -2.824l-.005 -.176v-12a3 3 0 0 1 2.824 -2.995l.176 -.005h1v-1a1 1 0 0 1 .514 -.874l.093 -.046l.066 -.025l.1 -.029l.107 -.019l.12 -.007q .083 0 .161 .013l.122 .029l.04 .012l.06 .023c.328 .135 .568 .44 .61 .806l.007 .117v1h6v-1a1 1 0 0 1 1 -1m3 7h-14v9.625c0 .705 .386 1.286 .883 1.366l.117 .009h12c.513 0 .936 -.53 .993 -1.215l.007 -.16z" /><path d="M9.015 13a1 1 0 0 1 -1 1a1.001 1.001 0 1 1 -.005 -2c.557 0 1.005 .448 1.005 1" /><path d="M13.015 13a1 1 0 0 1 -1 1a1.001 1.001 0 1 1 -.005 -2c.557 0 1.005 .448 1.005 1" /><path d="M17.02 13a1 1 0 0 1 -1 1a1.001 1.001 0 1 1 -.005 -2c.557 0 1.005 .448 1.005 1" /><path d="M12.02 15a1 1 0 0 1 0 2a1.001 1.001 0 1 1 -.005 -2z" /><path d="M9.015 16a1 1 0 0 1 -1 1a1.001 1.001 0 1 1 -.005 -2c.557 0 1.005 .448 1.005 1" /></svg>`,
+		iconColor: 'red',
+		element: container,
+	};
+}
+
 
 function miniDisplayMisc(items) {
 	const container = document.createElement('div');
@@ -1768,16 +1850,7 @@ function miniDisplayMisc(items) {
 		}));
 	}
 	return {
-		icon: `
-			<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-					stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-					class="icon icon-tabler icons-tabler-outline icon-tabler-file-unknown">
-				<path stroke="none" d="M0 0h24v24H0z" fill="none" />
-				<path d="M14 3v4a1 1 0 0 0 1 1h4" />
-				<path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
-				<path d="M12 17v.01" />
-				<path d="M12 14a1.5 1.5 0 1 0 -1.14 -2.474" />
-			</svg>`,
+		icon: tlz.itemClassIconAndLabel().icon,
 		iconColor: 'gray',
 		element: container,
 	};
@@ -1866,7 +1939,8 @@ function renderMessageItem(item, options) {
 		$('.align-items-top', elem).classList.add('flex-row-reverse');
 		$('.chat-bubble', elem).classList.add('chat-bubble-me');
 	}
-	$('.message-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
+	const dt = DateTime.fromISO(item.timestamp, { setZone: true });
+	$('.message-timestamp', elem).innerText = `${dt.toLocaleString(DateTime.DATETIME_MED)} ${dt.toFormat("ZZZZ")}`;
 	$('.message-avatar', elem).innerHTML = avatar(true, item.entity);
 	$('.data-source-icon', elem).style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
 	$('.data-source-icon', elem).title = item.data_source_title;
@@ -1900,12 +1974,12 @@ function renderMessageItem(item, options) {
 		for (const rel of item.related) {
 			if (rel.label == 'attachment' && rel.to_item) {
 				$('.attachments', elem).classList.remove('d-none');
-				if (rel.to_item.data_type.startsWith('image/')) {
+				if (rel.to_item.data_type?.startsWith('image/')) {
 					let imgTag = document.createElement('span');
 					imgTag.classList.add("avatar", "avatar-xl", "m-1");
 					imgTag.style.backgroundImage = `url('${itemImgSrc(rel.to_item, true)}')`;
 					$('.attachments', elem).appendChild(imgTag);
-				} else if (rel.to_item.data_type.startsWith('video/')) {
+				} else if (rel.to_item?.data_type?.startsWith('video/')) {
 					let videoTag = document.createElement('video');
 					videoTag.src = `/repo/${item.repo_id}/${rel.to_item.data_file}`;
 					videoTag.setAttribute('type', rel.to_item.data_type);
@@ -2183,13 +2257,14 @@ const PreviewModal = (function() {
 
 			$('#modal-preview .media-owner-avatar').innerHTML = avatar(true, item.entity, "me-3");
 			$('#modal-preview .media-owner-name').innerText = entityDisplayNameAndAttr(item.entity).name;
-			$('#modal-preview .text-secondary').innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
+			$('#modal-preview .text-secondary').innerText = DateTime.fromISO(item.timestamp, { setZone: true }).toLocaleString(DateTime.DATETIME_MED);
 
 			$('#modal-preview .modal-title').innerHTML = `<span class="avatar avatar-xs rounded me-2" style="background-image: url('/ds-image/${item.data_source_name}')"></span>`;
 			$('#modal-preview .modal-title').appendChild(document.createTextNode(item?.filename || baseFilename(item?.data_file)));
 			$('#modal-preview .subheader').innerText = `# ${item.id}`;
 
 			const mediaElem = itemContentElement(item);
+			mediaElem.classList.add('rounded');
 			$('#modal-preview-content').append(mediaElem);
 
 			// toggle prev/next buttons
@@ -2495,6 +2570,14 @@ function filterToQueryString() {
 			qs.delete('semantic_text');
 	}
 
+	// text search for conversations
+	if ($('#message-substring')) {
+		if ($('#message-substring').value)
+			qs.set('text', $('#message-substring').value);
+		else
+			qs.delete('text');
+	}
+
 	return qs;
 }
 
@@ -2578,6 +2661,11 @@ async function queryStringToFilter() {
 	// semantic search
 	if ($('.semantic-text-search')) {
 		$('.semantic-text-search').value = qs.get('semantic_text');
+	}
+
+	// text search for conversations
+	if ($('#message-substring')) {
+		$('#message-substring').value = qs.get('text') || '';
 	}
 }
 

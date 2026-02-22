@@ -32,9 +32,10 @@ import (
 
 	"github.com/zeebo/blake3"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-const maxThrottleCPUPct = 0.25
+const maxThrottleCPUPct = 0.75
 
 var (
 	throttleSize         = max(int(float64(runtime.NumCPU())*maxThrottleCPUPct), 1)
@@ -90,10 +91,7 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 		ParentJobID: parentJobIDPtr,
 	}
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.WritePool.BeginTx(tl.ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -109,13 +107,15 @@ func (tl *Timeline) CreateJob(action JobAction, scheduled time.Time, repeat time
 	// longer-term status logger doesn't get made until runJob... so we have
 	// to make a logger with the same name and many of the same fields...
 	Log.Named("job.status").Info("created",
-		zap.String("repo_id", tl.ID().String()),
-		zap.Uint64("id", jobID),
-		zap.String("type", string(job.Type)),
-		zap.Time("created", created),
-		zap.Timep("start", job.Start),
-		zap.Uint64p("parent_job_id", parentJobIDPtr),
-		zap.Intp("size", totalPtr))
+		zap.Object("job", Job{
+			RepoID:      tl.ID().String(),
+			ID:          jobID,
+			Type:        job.Type,
+			Created:     created,
+			Start:       job.Start,
+			ParentJobID: parentJobIDPtr,
+			Total:       totalPtr,
+		}))
 
 	err = tl.startJob(tl.ctx, tx, jobID)
 	if err != nil {
@@ -197,7 +197,7 @@ func (tl *Timeline) loadJob(ctx context.Context, tx *sql.Tx, jobID uint64, paren
 	var rows *sql.Rows
 	var err error
 	if tx == nil {
-		rows, err = tl.db.QueryContext(ctx, q, vals...)
+		rows, err = tl.db.ReadPool.QueryContext(ctx, q, vals...)
 	} else {
 		rows, err = tx.QueryContext(ctx, q, vals...)
 	}
@@ -319,12 +319,9 @@ func (tl *Timeline) startJob(ctx context.Context, tx *sql.Tx, jobID uint64) erro
 			case <-ctx.Done():
 				return
 			case <-time.After(time.Until(scheduledStart)):
-				tl.dbMu.Lock()
-				defer tl.dbMu.Unlock()
-
 				logger := Log.Named("job")
 
-				tx, err := tl.db.Begin()
+				tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 				if err != nil {
 					logger.Error("could not start transaction to start job", zap.Error(err))
 					return
@@ -388,12 +385,7 @@ func (tl *Timeline) runJob(row Job) error {
 		return fmt.Errorf("unknown job type '%s'", row.Type)
 	}
 
-	baseLogger := Log.Named("job").With(
-		zap.String("repo_id", tl.ID().String()),
-		zap.Uint64("id", row.ID),
-		zap.String("type", string(row.Type)),
-		zap.Time("created", row.Created),
-		zap.Timep("start", row.Start))
+	baseLogger := Log.Named("job")
 
 	// keep a pointer outside the ActiveJob struct because after
 	// the job is done, we will update the logger, and it's not
@@ -409,7 +401,7 @@ func (tl *Timeline) runJob(row Job) error {
 		done:            make(chan struct{}),
 		id:              row.ID,
 		tl:              tl,
-		logger:          baseLogger.Named("action"),
+		logger:          baseLogger.Named("action").With(zap.Object("job", row)),
 		statusLog:       statusLog,
 		parentJobID:     row.ParentJobID,
 		action:          action,
@@ -417,6 +409,9 @@ func (tl *Timeline) runJob(row Job) error {
 		currentProgress: row.Progress,
 		currentTotal:    row.Total,
 		currentMessage:  row.Message,
+
+		started: *row.Start,
+		jobType: row.Type,
 	}
 
 	// run the job asynchronously -- never block the calling goroutine!
@@ -429,6 +424,18 @@ func (tl *Timeline) runJob(row Job) error {
 					zap.Any("error", r),
 					zap.String("stack", string(debug.Stack())))
 			}
+
+			// apparently it's best-practice to checkpoint at the end of large write operations:
+			// https://github.com/mattn/go-sqlite3/issues/1022#issuecomment-1071755879
+			// "One thing I will suggest is running pragma wal_checkpoint after committing the
+			// insert transaction, as that will merge the WAL file back into the main database file,
+			// which will make subsequent reads faster." -rittneje
+			// and since the default mode is PASSIVE, this page recommends using FULL or TRUNCATE
+			// but I haven't personally seen a need for those heavier operations yet:
+			// https://phiresky.github.io/blog/2020/sqlite-performance-tuning/#regarding-wal-mode
+			if _, err := tl.db.WritePool.ExecContext(ctx, "PRAGMA wal_checkpoint"); err != nil {
+				logger.Error("could not create WAL checkpoint", zap.Error(err))
+			}
 		}()
 
 		// when we're done here, clean up our map of active jobs
@@ -438,7 +445,9 @@ func (tl *Timeline) runJob(row Job) error {
 			tl.activeJobsMu.Unlock()
 		}()
 
-		statusLog.Info("running", zap.String("state", string(row.State)))
+		statusLog.Info("running",
+			zap.Object("job", row),
+			zap.String("state", string(row.State)))
 
 		// signal to any waiters when this job action returns; we intentionally
 		// don't signal until after we've synced the job state to the DB
@@ -452,7 +461,7 @@ func (tl *Timeline) runJob(row Job) error {
 		// type conversion for checkpoint; it's easier for actions to use []byte, but we like using *string
 		// for database since most DB viewers make it easier to read TEXT columns than BLOB columns
 		var chkpt []byte
-		if row.Checkpoint != nil {
+		if row.Checkpoint != nil && len(*row.Checkpoint) > 0 {
 			chkpt = []byte(*row.Checkpoint)
 		}
 
@@ -471,33 +480,31 @@ func (tl *Timeline) runJob(row Job) error {
 
 		// add info to the logger and log the result
 		end := time.Now()
-		statusLog = statusLog.With(zap.Time("ended", end))
+		row.Ended = &end
 		if row.Start != nil {
 			statusLog = statusLog.With(zap.Duration("duration", end.Sub(*row.Start)))
 		}
 
 		job.mu.Lock()
 		job.currentState = newState
+		job.ended = end
 		job.flushProgress(statusLog) // allow the UI to update live job progress display one last time
 		job.mu.Unlock()
 
 		// print a final message indicating the state and error, if any (TODO: could do above on that last flushProgress(), I guess)
 		switch newState {
 		case JobSucceeded:
-			statusLog.Info(string(newState))
+			statusLog.Info(string(newState), zap.Object("job", row))
 		case JobAborted:
-			statusLog.Warn(string(newState), zap.Error(actionErr))
+			statusLog.Warn(string(newState), zap.Object("job", row), zap.Error(actionErr))
 		case JobFailed:
-			statusLog.Error(string(newState), zap.Error(actionErr))
+			statusLog.Error(string(newState), zap.Object("job", row), zap.Error(actionErr))
 		}
 
 		// sync to the DB, and dequeue the next job
-		tl.dbMu.Lock()
-		defer tl.dbMu.Unlock()
-
-		tx, err := tl.db.Begin()
+		tx, err := tl.db.WritePool.BeginTx(tl.ctx, nil) // don't use the job's context, it might have been canceled!
 		if err != nil {
-			logger.Error("beginning transaction", zap.Error(err))
+			logger.Error("beginning transaction for ended job", zap.Error(err))
 			return
 		}
 		defer tx.Rollback()
@@ -582,6 +589,11 @@ type ActiveJob struct {
 	parentJobID *uint64
 	action      JobAction
 
+	// these fields are needed mainly for accurate real-time logging purposes
+	jobType JobType
+	started time.Time
+	ended   time.Time
+
 	mu sync.Mutex
 
 	// protected by mu
@@ -594,6 +606,34 @@ type ActiveJob struct {
 	lastCheckpoint    *time.Time // when last checkpoint was created (may be more recent than last DB sync, which is throttled)
 	lastSync          time.Time  // last DB update
 	lastFlush         time.Time  // last frontend update
+}
+
+// MarshalLogObject satisfies the zapcore.ObjectMarshaler interface.
+func (j *ActiveJob) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("repo_id", j.tl.id.String())
+	enc.AddUint64("id", j.id)
+	enc.AddString("type", string(j.jobType))
+	enc.AddString("state", string(j.currentState))
+	enc.AddTime("start", j.started)
+	if !j.ended.IsZero() {
+		enc.AddTime("ended", j.ended)
+	}
+	if j.parentJobID != nil {
+		enc.AddUint64("parent_job_id", *j.parentJobID)
+	}
+	if j.lastCheckpoint != nil {
+		enc.AddTime("checkpointed", *j.lastCheckpoint)
+	}
+	if j.currentMessage != nil {
+		enc.AddString("message", *j.currentMessage)
+	}
+	if j.currentProgress != nil {
+		enc.AddInt("progress", *j.currentProgress)
+	}
+	if j.currentTotal != nil {
+		enc.AddInt("total", *j.currentTotal)
+	}
+	return nil
 }
 
 // Context returns the context the job is being run in. It should
@@ -685,13 +725,7 @@ func (j *ActiveJob) flushProgress(logger *zap.Logger) {
 		if logger == nil {
 			logger = j.statusLog
 		}
-		logger.Info("progress",
-			zap.String("state", string(j.currentState)),
-			zap.Intp("progress", j.currentProgress),
-			zap.Intp("total", j.currentTotal),
-			zap.Stringp("message", j.currentMessage),
-			zap.Timep("checkpointed", j.lastCheckpoint),
-			zap.Uint64p("parent_job_id", j.parentJobID))
+		logger.Info("progress", zap.Object("job", j))
 		j.lastFlush = time.Now()
 		_ = logger.Sync() // ensure it gets written promptly
 	}
@@ -768,9 +802,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 
 	var err error
 	if tx == nil {
-		j.tl.dbMu.Lock()
-		_, err = j.tl.db.ExecContext(j.tl.ctx, q, vals...)
-		j.tl.dbMu.Unlock()
+		_, err = j.tl.db.WritePool.ExecContext(j.tl.ctx, q, vals...)
 	} else {
 		_, err = tx.ExecContext(j.tl.ctx, q, vals...)
 	}
@@ -786,7 +818,7 @@ func (j *ActiveJob) sync(tx *sql.Tx, checkpoint any) error {
 // GetJobs loads the jobs with the specified IDs, or by the most recent jobs, whichever is set.
 // Both technically can be set, but why?
 func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []uint64, mostRecent int) ([]Job, error) {
-	var jobs []Job //nolint:prealloc // false positive! can't always know how many we'll have in this case
+	var jobs []Job
 
 	// load most recent jobs
 	if mostRecent > 0 {
@@ -801,7 +833,7 @@ func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []uint64, mostRecent int
 
 		var rows *sql.Rows
 		var err error
-		rows, err = tl.db.QueryContext(ctx, q, mostRecent)
+		rows, err = tl.db.ReadPool.QueryContext(ctx, q, mostRecent)
 		if err != nil {
 			return nil, err
 		}
@@ -826,9 +858,7 @@ func (tl *Timeline) GetJobs(ctx context.Context, jobIDs []uint64, mostRecent int
 
 	// load specific jobs by ID
 	for _, id := range jobIDs {
-		tl.dbMu.RLock()
 		job, err := tl.loadJob(ctx, nil, id, true)
-		tl.dbMu.RUnlock()
 		if err != nil {
 			return nil, fmt.Errorf("loading job %d: %w", id, err)
 		}
@@ -882,10 +912,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID uint64) error {
 	// it is still queued and they just want to prevent it from
 	// running; etc, let's check the DB
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -903,7 +930,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID uint64) error {
 		// its context), and we should resume interrupted jobs at startup,
 		// but might as well allow them here since it's no matter
 		job.State = JobAborted
-		_, err = tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE id=?`, job.State, jobID) // TODO: LIMIT 1
+		_, err = tl.db.WritePool.ExecContext(ctx, `UPDATE jobs SET state=? WHERE id=?`, job.State, jobID) // TODO: LIMIT 1
 		if err != nil {
 			return fmt.Errorf("updating job state: %w", err)
 		}
@@ -916,12 +943,7 @@ func (tl *Timeline) CancelJob(ctx context.Context, jobID uint64) error {
 	}
 
 	// update any UI elements that may be showing info about this inactive job
-	statusLog := Log.Named("job.status").With(
-		zap.String("repo_id", tl.ID().String()),
-		zap.Uint64("id", job.ID),
-		zap.String("type", string(job.Type)),
-		zap.Time("created", job.Created),
-		zap.Timep("start", job.Start))
+	statusLog := Log.Named("job.status")
 	inactiveJob := &ActiveJob{
 		id:              job.ID,
 		statusLog:       statusLog,
@@ -961,9 +983,7 @@ func (tl *Timeline) PauseJob(ctx context.Context, jobID uint64) error {
 	// 3. Update the UI's state to "paused" so that controls appear to allow resumption.
 
 	// step 1. update the DB with the authoritative job state
-	tl.dbMu.Lock()
-	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobPaused, JobStarted, job.id) // TODO: LIMIT 1
-	tl.dbMu.Unlock()
+	_, err := tl.db.WritePool.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobPaused, JobStarted, job.id) // TODO: LIMIT 1
 	if err != nil {
 		return fmt.Errorf("job paused, but error updating job state in DB: %w", err)
 	}
@@ -996,9 +1016,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 	if !ok {
 		// not active; see if it's in the DB... if so, it's the same as starting the job
 		var state JobState
-		tl.dbMu.Lock()
-		err := tl.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id=? LIMIT 1`, jobID).Scan(&state)
-		tl.dbMu.Unlock()
+		err := tl.db.ReadPool.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id=? LIMIT 1`, jobID).Scan(&state)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("job %d not found", jobID)
 		}
@@ -1012,9 +1030,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 	}
 
 	// update the DB first because it's authoritative for the job's state
-	tl.dbMu.Lock()
-	_, err := tl.db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
-	tl.dbMu.Unlock()
+	_, err := tl.db.WritePool.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=? AND id=?`, JobStarted, JobPaused, job.id) // TODO: LIMIT 1
 	if err != nil {
 		return fmt.Errorf("job resumed, but error updating job state in DB: %w", err)
 	}
@@ -1038,10 +1054,7 @@ func (tl *Timeline) UnpauseJob(ctx context.Context, jobID uint64) error {
 }
 
 func (tl *Timeline) StartJob(ctx context.Context, jobID uint64, startOver bool) error {
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -1123,6 +1136,27 @@ type Job struct {
 	// only used when loading jobs from the DB for the frontend
 	Parent   *Job  `json:"parent,omitempty"`
 	Children []Job `json:"children,omitempty"`
+}
+
+// MarshalLogObject satisfies the zapcore.ObjectMarshaler interface.
+func (j Job) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("repo_id", j.RepoID)
+	enc.AddUint64("id", j.ID)
+	if j.ParentJobID != nil {
+		enc.AddUint64("parent_job_id", *j.ParentJobID)
+	}
+	enc.AddString("type", string(j.Type))
+	enc.AddTime("created", j.Created)
+	if j.Start != nil {
+		enc.AddTime("start", *j.Start)
+	}
+	if j.Ended != nil {
+		enc.AddTime("ended", *j.Ended)
+	}
+	if j.Name != nil {
+		enc.AddString("name", *j.Name)
+	}
+	return nil
 }
 
 func (j Job) hash() []byte {

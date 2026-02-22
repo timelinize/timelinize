@@ -121,6 +121,9 @@ const app = {
 	GetEntity(repo_id, entity_id) {
 		return post("/api/get-entity", { repo_id, entity_id });
 	},
+	GetSettings() {
+		return get("/api/settings");
+	},
 	Import(params) {
 		return post("/api/import", params);
 	},
@@ -168,9 +171,6 @@ const app = {
 	},
 	SearchEntities(params) {
 		return post("/api/search-entities", params);
-	},
-	GetSettings() {
-		return get("/api/settings");
 	},
 	SubmitGraph(repo_id, job_id, graph, skip) {
 		return post("/api/submit-graph", { repo_id, job_id, graph, skip });
@@ -261,12 +261,11 @@ function trigger(el, eventType, detail) {
 // cloneTemplate does a deep clone of the <template> tag selected by tplSelector.
 function cloneTemplate(tplSelector) {
 	// Ohhhhhh wow, we need to use firstElementChild when cloning the content of a template tag (!!!!):
-	// https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template#avoiding_documentfragment_pitfall
+	// https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/template#avoiding_documentfragment_pitfalls
 	// I spent way too long on this.
 	const elem = $(tplSelector);
 	if (!elem) return;
-	return elem.content.firstElementChild.cloneNode(true);
-	// return document.importNode(elem.content, true);
+	return document.importNode(elem.content.firstElementChild, true);
 }
 
 function fadeOut(sel, duration) {
@@ -393,8 +392,8 @@ function baseFilename(filepath) {
 async function openRepository(repoPath, createIfNotExist) {
 	const repo = await app.OpenRepository(repoPath, createIfNotExist);
 	tlz.openRepos.push(repo);
-	await updateRepoOwners();
-	await updateItemClasses();
+	await updateRepoOwners(true);
+	await updateItemClasses(true);
 	return repo;
 }
 

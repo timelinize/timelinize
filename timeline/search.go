@@ -165,7 +165,7 @@ type ItemSearchParams struct {
 type SearchResults struct {
 	// If enabled, the total count of items matching the search query
 	// without regard for limit and offset.
-	Total int `json:"total,omitempty"`
+	Total *int `json:"total,omitempty"`
 
 	// The items of the search result.
 	Items []*SearchResult `json:"items,omitempty"`
@@ -185,13 +185,9 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		return SearchResults{}, err
 	}
 
-	// lock DB for entirety of this operation, as it may involve many queries
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	// open DB transaction to hopefully make it more efficient
+	// open DB transaction to hopefully make it more efficient; may involve many queries
 	// (TODO: we don't currently commit this tx, because we didn't make changes - that's OK, right?)
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.ReadPool.BeginTx(ctx, nil)
 	if err != nil {
 		return SearchResults{}, err
 	}
@@ -204,7 +200,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		if err != nil {
 			return SearchResults{}, err
 		}
-		return SearchResults{Total: count}, nil
+		return SearchResults{Total: &count}, nil
 	}
 
 	// run query and scan results
@@ -273,20 +269,21 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		}
 
 		var re relatedEntity // entity is left-joined, so could be null
-		var embedDist float64
-		extraTargets := []any{&re.ID, &re.Name, &re.Picture, &re.Attribute.Name, &re.Attribute.Value, &re.Attribute.AltValue}
+		var embeddingDistance float64
+		var embeddingID *uint64 // just to know whether there are any embeddings for the item
+		extraTargets := []any{&re.ID, &re.Name, &re.Picture, &re.Attribute.Name, &re.Attribute.Value, &re.Attribute.AltValue, &embeddingID}
 		if params.WithTotal {
 			extraTargets = append(extraTargets, &totalCount)
 		}
 		if params.SemanticText != "" || params.SimilarTo > 0 {
-			extraTargets = append(extraTargets, &embedDist)
+			extraTargets = append(extraTargets, &embeddingDistance)
 		}
 		itemRow, err := scanItemRow(rows, extraTargets)
 		if err != nil {
 			rows.Close()
 			return SearchResults{}, err
 		}
-		sr := &SearchResult{RepoID: tl.id.String(), ItemRow: itemRow, Distance: embedDist}
+		sr := &SearchResult{RepoID: tl.id.String(), ItemRow: itemRow, HasEmbedding: embeddingID != nil, Distance: embeddingDistance}
 		if re.ID != nil {
 			sr.Entity = &re
 		}
@@ -300,7 +297,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 	// in GeoJSON mode, we can be done early by wrapping up our document
 	if params.GeoJSON {
 		sb.WriteString(`]}}`)
-		return SearchResults{GeoJSON: sb.String(), Total: totalCount}, nil
+		return SearchResults{GeoJSON: sb.String(), Total: &totalCount}, nil
 	}
 
 	// TODO: this needs tuning
@@ -368,7 +365,7 @@ func (tl *Timeline) Search(ctx context.Context, params ItemSearchParams) (Search
 		}
 	}
 
-	return SearchResults{Total: totalCount, Items: results}, nil
+	return SearchResults{Total: &totalCount, Items: results}, nil
 }
 
 // TODO: favorites? or maybe a more flexible albums/lists feature? what to call it... "scrapbooks" or "curations"?
@@ -437,7 +434,7 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 
 	// TODO: use strings.Builder (also in RecentConversations())
 
-	q += fmt.Sprintf("\t\tSELECT %s, entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value", itemDBColumns)
+	q += fmt.Sprintf("\t\tSELECT %s, entities.id, entities.name, entities.picture_file, attributes.name, attributes.value, attributes.alt_value, embeddings.id", itemDBColumns)
 	if params.OnlyTotal {
 		q = "\t\tSELECT count(DISTINCT items.id)"
 	}
@@ -452,7 +449,8 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 		FROM extended_items AS items
 		LEFT JOIN attributes ON items.attribute_id = attributes.id
 		LEFT JOIN entity_attributes ON attributes.id = entity_attributes.attribute_id
-		LEFT JOIN entities ON entity_attributes.entity_id = entities.id`
+		LEFT JOIN entities ON entity_attributes.entity_id = entities.id
+		LEFT JOIN embeddings ON embeddings.item_id = items.id`
 
 	// TODO: It's possible that we could move all these (ToAttributeID, ToEntityID, rootItemsOnly) into RelationParams
 	if len(params.ToAttributeID) > 0 || len(params.ToEntityID) > 0 {
@@ -594,26 +592,25 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 		}
 	})
 
-	// TODO: can do local-time-aware querying by doing: "items.timestamp + items.time_offset*1000" instead of just "items.timestamp" (I think)
-	// TODO: only include the time_offset if it's not null
+	// TODO: Use BETWEEN maybe
 
 	if params.StartTimestamp != nil {
 		and(func() {
-			or("items.timestamp "+gt+" ?", params.StartTimestamp.UnixMilli())
+			or("items.timestamp"+gt+" ?", params.StartTimestamp.UTC().UnixMilli())
 			if !params.StrictStartTimestamp {
 				// if not strict, allow items to spill into the window even if the started before it
-				or("items.timespan "+gt+" ?", params.StartTimestamp.UnixMilli())
+				or("items.timespan "+gt+" ?", params.StartTimestamp.UTC().UnixMilli())
 			}
 		})
 	}
 	if params.EndTimestamp != nil {
 		and(func() {
-			or("items.timestamp "+lt+" ?", params.EndTimestamp.UnixMilli())
+			or("items.timestamp "+lt+" ?", params.EndTimestamp.UTC().UnixMilli())
 		})
 		if params.StrictEndTimestamp {
 			// if strict, items' timespan must end before the EndTimestamp (item can't merely start before it)
 			and(func() {
-				or("items.timespan IS NULL OR items.timespan"+lt+" ?", params.EndTimestamp.UnixMilli())
+				or("items.timespan IS NULL OR items.timespan "+lt+" ?", params.EndTimestamp.UTC().UnixMilli())
 			})
 		}
 	}
@@ -754,7 +751,6 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 
 			default:
 				// generic sort, which is timestamp and row ID
-				// q += fmt.Sprintf(" ORDER BY items.timestamp %s, items.id %s", sortDir, sortDir)
 				q += fmt.Sprintf("items.timestamp %s, items.id %s", sortDir, sortDir)
 			}
 		}
@@ -779,7 +775,7 @@ func (tl *Timeline) prepareSearchQuery(ctx context.Context, params ItemSearchPar
 		var targetVectorClause string
 
 		if params.SimilarTo > 0 {
-			targetVectorClause = "(SELECT embedding FROM embeddings JOIN items ON items.embedding_id = embeddings.id WHERE items.id=? LIMIT 1)"
+			targetVectorClause = "(SELECT embedding FROM embeddings JOIN items ON embeddings.item_id = items.id WHERE items.id=? LIMIT 1)"
 			args = append(args, params.SimilarTo)
 		} else if params.SemanticText != "" {
 			// search relative to an arbitrary input (TODO: support image inputs too) - python server must be online
@@ -800,7 +796,7 @@ SELECT
 	search_results.*,
 	vec_distance_l2(%s, embeddings.embedding) AS distance
 FROM search_results
-JOIN embeddings ON embeddings.id = search_results.embedding_id
+JOIN embeddings ON embeddings.item_id = search_results.id
 ORDER BY distance`, targetVectorClause)
 		if params.Limit == 0 {
 			params.Limit = 100
@@ -951,7 +947,7 @@ func (tl *Timeline) expandRelationshipSingle(ctx context.Context, tx *sql.Tx, sr
 }
 
 func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID uint64) (*SearchResult, error) {
-	ir, err := tl.loadItemRow(ctx, tx, itemRowID, nil, nil, nil, false)
+	ir, err := tl.loadItemRow(ctx, tx, itemRowID, 0, nil, nil, nil, false)
 	if err != nil {
 		return nil, fmt.Errorf("loading related item row: %w", err)
 	}
@@ -981,9 +977,10 @@ func (tl *Timeline) loadRelatedItem(ctx context.Context, tx *sql.Tx, itemRowID u
 type SearchResult struct {
 	RepoID string `json:"repo_id,omitempty"`
 	ItemRow
-	Entity  *relatedEntity `json:"entity,omitempty"`
-	Related []Related      `json:"related,omitempty"`
-	Size    int64          `json:"size,omitempty"`
+	HasEmbedding bool           `json:"has_embedding,omitempty"`
+	Entity       *relatedEntity `json:"entity,omitempty"`
+	Related      []Related      `json:"related,omitempty"`
+	Size         int64          `json:"size,omitempty"`
 
 	// from ML model
 	Distance float64 `json:"distance,omitempty"`
@@ -1010,7 +1007,7 @@ type relatedEntity struct {
 // nullableAttribute is like Attribute but with nullable fields
 // so that it can be I/O for the database
 type nullableAttribute struct {
-	ID        *int64   `json:"id,omitempty"`
+	ID        *uint64  `json:"id,omitempty"`
 	Name      *string  `json:"name,omitempty"`
 	Value     *string  `json:"value,omitempty"`
 	AltValue  *string  `json:"alt_value,omitempty"`

@@ -24,7 +24,7 @@ async function itemPageMain() {
 	console.log("RESULT:", results);
 	
 	const item = results.items[0];
-	const dt = DateTime.fromISO(item.timestamp);
+	const dt = DateTime.fromISO(item.timestamp, { setZone: true });
 	
 	const {hourAngle, minuteAngle} = clockArms(dt.hour, dt.minute);
 	$('#time .hour-hand').setAttribute('transform', `rotate(${hourAngle} 12 12)`);
@@ -76,7 +76,7 @@ async function itemPageMain() {
 		$('#item-relative-time').remove();
 	}
 	if (tsDisplay.time) {
-		$('#item-time').innerText = tsDisplay.time;
+		$('#item-time').innerText = tsDisplay.timeWithZone;
 	} else {
 		$('#item-time').parentElement.remove();
 	}
@@ -151,7 +151,7 @@ async function itemPageMain() {
 	} else {
 		$('#item-altitude').parentElement.remove();
 	}
-	$('#item-stored').innerText = DateTime.fromISO(item.stored).toLocaleString(DateTime.DATETIME_MED_WITH_SECONDS);
+	$('#item-stored').innerText = DateTime.fromISO(item.stored, { setZone: true }).toLocaleString(DateTime.DATETIME_MED_WITH_SECONDS);
 
 	$('#data-source-icon').style.backgroundImage = `url('/ds-image/${item.data_source_name}')`;
 	$('#data-source-title').innerText = item.data_source_title;
@@ -203,6 +203,7 @@ async function itemPageMain() {
 			} else if ((rel.label == 'sent' || rel.label == 'cc') && rel.to_entity) {
 				$('#primary-entities').classList.remove('d-none');
 				$('#related-entities').classList.remove('d-none');
+				$('#related-entities-sent-to').classList.remove('d-none');
 
 				const entTpl = cloneTemplate('#tpl-related-entity');
 				
@@ -231,13 +232,10 @@ async function itemPageMain() {
 					const boxEl = document.createElement('div');
 					boxEl.id = `face-circle-rel-${rel.relationship_id}`;
 					boxEl.classList.add('face-circle', 'd-none');
-					const imgRect = $('#item-content').getBoundingClientRect();
-					const width = imgRect.width * sizeX;
-					const height = imgRect.height * sizeY;
-					boxEl.style.width = width+"px";
-					boxEl.style.height = height+"px";
-					boxEl.style.left = `${(centerX-sizeX/2)*imgRect.width}px`;
-					boxEl.style.bottom = `${(centerY-sizeY/2)*imgRect.height}px`; // NOTE: Apple's y-coord is from the bottom, not top!!
+					boxEl.style.width = `${sizeX*100}%`;
+					boxEl.style.height = `${sizeY*100}%`;
+					boxEl.style.left = `${(centerX-sizeX/2)*100}%`
+					boxEl.style.bottom = `${(centerY-sizeY/2)*100}%`; // NOTE: Apple's y-coord is from the bottom, not top!!
 					boxEl.innerText = rel.to_entity.name || "unknown";
 					$('#item-content').append(boxEl);
 
@@ -279,14 +277,18 @@ async function itemPageMain() {
 	}
 
 	// For images, see if there is a motion photo associated with it
-	// (TODO: sidecar files should probably be noted with a relationship)
 	if (item.data_type?.startsWith("image/")) {
 
 		function renderMotionPhoto(videoSrc) {
 			const video = document.createElement('video');
 			video.classList.add('invisible','position-absolute'); // prevent empty space that gets shifted around during load
 
-			video.addEventListener('loadeddata', e => {
+			// apparently canplay/canplaythrough fire multiple times if the video loops or we change the currentTime property
+			let canPlay = false;
+			video.addEventListener('canplay', e => {
+				if (canPlay) return;
+				canPlay = true;
+
 				$('#item-content .thumbhash-container')?.classList?.add('d-none');
 				$$('#item-content .content').forEach(elem => elem.classList.add('d-none')); // multiple .content elems? yes, in case a thumbhash is used with an image
 				video.classList.remove('invisible', 'position-absolute');
@@ -294,15 +296,17 @@ async function itemPageMain() {
 				setTimeout(function() {
 					video.classList.remove('fade-in');
 				}, 1000);
-
 				const tpl = cloneTemplate('#tpl-motionpicture');
 				$('#item-content').append(tpl);
+				video.muted = true; // for some reason, Chrome ignores the "muted" attribute, might be a bug: https://stackoverflow.com/a/51189390
+				video.play();
 			});
 			video.addEventListener('error', (event, err) => {
 				console.error("loading video:", event, err);
 				video.remove();
 			});
 
+			video.setAttribute("controls", "");
 			video.setAttribute("loop", "");
 			video.setAttribute("autoplay", "");
 			video.setAttribute("muted", "");

@@ -50,7 +50,7 @@ function updateActiveJobStats() {
 		const chartContainer = $(`#throughput-chart-container.job-id-${jobID}`);
 		if (chartContainer) {
 			// this element shows the mean throughput over the entire chart data
-			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, elem) => sum+elem.value[1], 0) / chartData.length).toLocaleString({minimumFractionDigits: 1, maximumFractionDigits: 1});
+			$('.throughput-rate', chartContainer).innerText = (chartData.reduce((sum, elem) => sum+elem.value[1], 0) / chartData.length).toLocaleString([], {minimumFractionDigits: 1, maximumFractionDigits: 1});
 			$('#chart-active-job-throughput', chartContainer).chart?.setOption({
 				series: stats.chartSeries,
 				xAxis: {
@@ -116,7 +116,7 @@ function assignJobElements(containerElem, job) {
 
 function jobProgressUpdate(job) {
 	// update live job stats (for charts, etc)
-	const seriesName = "Items"; // TODO: customize per job type
+	const seriesName = "Graphs"; // TODO: customize per job type
 	if (!tlz.jobStats[job.id]) {
 		// TODO: When to clear out the job stats? save to localStorage or anything for future reference?
 		tlz.jobStats[job.id] = {
@@ -665,6 +665,10 @@ on('click', '.start-job', async e => {
 
 	await app.StartJob(tlz.openRepos[0].instance_id, jobID, false);
 
+	// clear any previous stats (issue #158)
+	// (can happen if timeline is cleared between test runs)
+	delete tlz.jobStats[jobID];
+
 	for (const elem of $$(`.start-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');
 		let textElem = $('.start-job-text', elem); // for links that have more than just the text in it
@@ -691,6 +695,9 @@ on('click', '.restart-job', async e => {
 	}
 
 	await app.StartJob(tlz.openRepos[0].instance_id, jobID, true);
+
+	// clear previous stats (issue #158)
+	delete tlz.jobStats[jobID];
 
 	for (const elem of $$(`.restart-job.job-id-${jobID}`)) {
 		elem.classList.remove('disabled');

@@ -114,7 +114,7 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 	if err != nil {
 		return err
 	}
-	fimp.devicePhoneNumber = imessage.NormalizePhoneNumber(commCenter.phoneNumber(), "")
+	fimp.devicePhoneNumber = imessage.NormalizePhoneNumber(ctx, commCenter.phoneNumber(), "")
 	if fimp.devicePhoneNumber != "" {
 		fimp.owner = &timeline.Entity{
 			Attributes: []timeline.Attribute{

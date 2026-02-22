@@ -89,7 +89,9 @@ func handleError(w http.ResponseWriter, r *http.Request, err error) {
 	errVal.ID = newErrorID()
 
 	// ensure error is serialized as a string when written to the client
-	errVal.ErrString = errVal.Err.Error()
+	if errVal.Err != nil {
+		errVal.ErrString = errVal.Err.Error()
+	}
 
 	// see if we can fill in some default values if they're missing
 	if errVal.HTTPStatus == 0 {

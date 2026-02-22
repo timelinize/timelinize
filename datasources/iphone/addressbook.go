@@ -128,7 +128,7 @@ func (fimp *FileImporter) addressBook(ctx context.Context) error {
 
 		// convert timestamps
 		if creationDateAppleSec != nil && *creationDateAppleSec != 0 {
-			creationDate = imessage.AppleSecondsToTime(*creationDateAppleSec)
+			creationDate = imessage.CocoaSecondsToTime(*creationDateAppleSec)
 		}
 
 		// start of new contact
@@ -172,7 +172,7 @@ func (fimp *FileImporter) addressBook(ctx context.Context) error {
 			entity.Name = sb.String()
 
 			if birthday != nil {
-				birthdate, err := imessage.ParseAppleDate(*birthday)
+				birthdate, err := imessage.ParseCocoaDate(*birthday)
 				if err == nil {
 					entity.Attributes = append(entity.Attributes, timeline.Attribute{
 						Name:  "birth_date",

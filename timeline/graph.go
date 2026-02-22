@@ -27,7 +27,6 @@ import (
 	"io"
 	"math/big"
 	"mime"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -206,7 +205,7 @@ type Item struct {
 	// For example, we display and think of chat messages very
 	// differently than we do personal notes and social media
 	// posts.
-	Classification Classification `json:"classification,omitempty"`
+	Classification Classification `json:"classification,omitzero"`
 
 	// The timestamp when the item originated. If multiple
 	// timestamps are available, prefer the timestamp when the
@@ -214,43 +213,43 @@ type Item struct {
 	// example, a photograph is captured at one timestamp and
 	// posted online at another; prefer the first timestamp
 	// when it was originally captured.
-	Timestamp time.Time `json:"timestamp,omitempty"`
+	Timestamp time.Time `json:"timestamp,omitzero"`
 
 	// An optional ending timestamp to make this item span
 	// time instead of being a point in time. If set, it must
 	// be a time after Timestamp. This gives an item duration.
-	Timespan time.Time `json:"timespan,omitempty"`
+	Timespan time.Time `json:"timespan,omitzero"`
 
 	// An optional ending timestamp indicating that the item's
 	// actual timestamp is between Timestamp and Timeframe, but
 	// it's not certain exactly when.
-	Timeframe time.Time `json:"timeframe,omitempty"`
+	Timeframe time.Time `json:"timeframe,omitzero"`
 
 	// Approximate error of the time values.
-	TimeUncertainty time.Duration `json:"time_uncertainty,omitempty"`
+	TimeUncertainty time.Duration `json:"time_uncertainty,omitzero"`
 
 	// The coordinates where the item originated.
 	// TODO: Rename to Geolocation or Coordinates?
-	Location Location `json:"location,omitempty"`
+	Location Location `json:"location,omitzero"`
 
 	// The person who owns, created, or originated the item. At
 	// least one attribute is required: an identifying attribute
 	// like a user ID of the person on this data source.
-	Owner Entity `json:"owne,omitempty"`
+	Owner Entity `json:"owner,omitzero"`
 
 	// If applicable, path to the item on the original data
 	// source, including the filename. Note that this can take
 	// on different formats depending on the data source; for
 	// example, iPhone backups provide paths relative to a
 	// domain, so the paths may be in the form "Domain:Path".
-	OriginalLocation string `json:"original_location,omitempty"`
+	OriginalLocation string `json:"original_location,omitzero"`
 
 	// If applicable, path to the item relative to the root of the
 	// import, including the filename.
-	IntermediateLocation string `json:"intermediate_location,omitempty"`
+	IntermediateLocation string `json:"intermediate_location,omitzero"`
 
 	// The actual content of the item.
-	Content ItemData `json:"content,omitempty"`
+	Content ItemData `json:"content,omitzero"`
 
 	// Optional extra information about the item. Keys should
 	// be human-readable and formatted as natural titles or
@@ -270,32 +269,28 @@ type Item struct {
 	// processor must have the same retrieval key, and no other
 	// item globally must use the same key at any time.
 	//
-	// Only set this field if the Item is or may not be complete
-	// (e.g. if you know it will be processed in multiple pieces),
+	// Only set this field if the Item may not be complete (e.g.
+	// if you know it will be processed in multiple pieces),
 	// since setting a retrieval key forces reprocessing of the
 	// item, which is less efficient than skipping duplicates.
-	Retrieval ItemRetrieval `json:"retrieval,omitempty"`
+	Retrieval ItemRetrieval `json:"retrieval,omitzero"`
 
-	// Used for storing state during processing; either the
-	// text content of the item, or the source from which
-	// to read when creating the data file on disk. Data
-	// sources should set Content instead; NOT these!
-	dataText *string
-
-	// state for processing pipeline phases
-	row                 ItemRow
-	dataFileIn          io.ReadCloser
-	dataFileOut         *os.File
-	dataFileSize        int64
-	dataFileName        string // path to the data file relative to the repo root
-	dataFileHash        []byte // a non-nil hash indicates the file has been downloaded (if 0 size, it will be an empty slice, as opposed to hash's IV)
-	desiredDataFileName string // base filename (sans path) the processor tried to get for the file, but may have been taken
-	idHash              []byte
-	contentHash         []byte
-	skipThumb           bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
-	oldDataFile         string                       // when replacing a data file, used to clean things up at the end of processing the item
-	existingRow         ItemRow                      // only used if a field update policy requires info about the incoming data file
-	fieldUpdatePolicies map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
+	// the following fields are used to store state across
+	// phases of the processing pipeline, data sources
+	// should NOT set these (hence being unexported)
+	row                  ItemRow                      // the DB row associated with this item
+	dataText             *string                      // for plaintext items, to be stored in the items table
+	intendedDataFileName string                       // the ideal/preferred name for the data file, if available
+	dataFilePath         string                       // path of the data file relative to the repo root
+	dataFileHash         []byte                       // the checksum of the data file
+	dataFileSize         int64                        // number of bytes of data read
+	idHash               []byte                       // hash of the item's original ID so we can avoid duplicates in future imports
+	contentHash          []byte                       // hash of the item's original content so we can avoid duplicates in future imports, even if content changes
+	skipThumb            bool                         // avoids counting this data file toward associated thumbnail job (used on sidecar live photos)
+	fieldUpdatePolicies  map[string]FieldUpdatePolicy // dictates how to update which fields, when doing an update as opposed to an insert
+	skip                 bool                         // the processor may mark some items to skip based on import job configuration or other factors
+	tsOffsetOrigin       tzOrigin                     // if the processor adjusts/sets an item's time zone, it is indicated here
+	thumbhash            []byte                       // for when thumbhash is generated during import pipeline, it is kept here until the item row is stored
 }
 
 // ItemRetrieval dictates how to retrieve an existing item from the database.
@@ -304,6 +299,16 @@ type Item struct {
 // gets hashed, so it simply opaque bytes to the processor and DB), and if
 // relevant, set PreferFields to control what gets updated or preferred when
 // data already exists in the DB.
+//
+// Retrieval keys are not guaranteed to be persisted across separate imports,
+// particularly if an item appears in another data source that also uses
+// retrieval keys. Retrieval keys should primarily be used to refer to an
+// item within its data source, for that import job, to make multiple graphs
+// act like one graph. If data soruces document how they set retrieval keys,
+// then it may be possible for multiple data sources to corroborate the same
+// item without stepping on each other.
+
+// TODO: actually, our schema is not well-suited for an item appearing in multiple data sources. an item has just one data source... if two update it, which one wins? maybe that's configurable by the user, the update policies...
 type ItemRetrieval struct {
 	key []byte
 
@@ -317,6 +322,29 @@ type ItemRetrieval struct {
 	// though both have metadata, when importing from the actual image, we prefer that,
 	// and this tells the processor to do so.
 	FieldUpdatePolicies map[string]FieldUpdatePolicy `json:"field_update_policies,omitempty"`
+
+	// Override whether the user's configured unique constraints for each field
+	// are strict nulls or soft nulls. Adding to this map will not create new
+	// unique constraints, but can modify what logic the processor applies if,
+	// for example, the data source knows it doesn't know a certain part of the
+	// item, it can say that the nilness of it shouldn't have to match a nil in
+	// the DB row.
+	UniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
+}
+
+// finalUniqueConstraints combines the unique constraints configured by the user with those
+// specified by the data source. It does not add new ones that the user has not configured,
+// it only updates.
+func (ret *ItemRetrieval) finalUniqueConstraints(configuredUniqueConstraints map[string]bool) map[string]bool {
+	uniq := make(map[string]bool, len(configuredUniqueConstraints))
+	for field, strictNull := range configuredUniqueConstraints {
+		if override, ok := ret.UniqueConstraints[field]; ok {
+			uniq[field] = override
+		} else {
+			uniq[field] = strictNull
+		}
+	}
+	return uniq
 }
 
 // SetKey sets the retrieval key for this item. It should be a globally unique
@@ -437,31 +465,27 @@ func (it *Item) SetTimeframe() {
 	}
 }
 
-// timestampUnix returns the timestamp as Unix timestamp, if non-zero.
-func (it Item) timestampUnix() *int64 {
-	if it.Timestamp.IsZero() {
+// timeOffset returns the time zone offset as a number of seconds
+// east of UTC, based on the item's timestamp. It returns nil if
+// the timestamp is the zero value, or if the timestamp's location
+// is time.Local where we don't know which time zone the item's
+// timestamp is supposed to have originated from. We can't assume
+// it's this same local zone the program is running in. For example,
+// if you go on vacation 4 time zones away like I did and take a
+// bunch of pictures with a camera that only has a wall clock (i.e.
+// no GPS -- or, you made an edit to a photo with time zone info in
+// its EXIF, but the app didn't retain all the EXIF fields in the
+// edited version, omitting OffsetTime) then you come home and
+// import your vacation photos, and if you assumed local time, you'd
+// be 4 hours off, really throwing off the timeline continuity!
+// So, for that reason we don't return a time offset if the timestamp
+// isn't associated with a specific time zone. (Go falls back to "Local")
+func (it Item) timeOffset() *int {
+	if it.Timestamp.IsZero() || it.Timestamp.Location() == time.Local {
 		return nil
 	}
-	unix := it.Timestamp.UnixMilli()
-	return &unix
-}
-
-// timestampUnix returns the timespan as Unix timestamp, if non-zero.
-func (it Item) timespanUnix() *int64 {
-	if it.Timespan.IsZero() {
-		return nil
-	}
-	unix := it.Timespan.UnixMilli()
-	return &unix
-}
-
-// timeframeUnix returns the timeframe as Unix timestamp, if non-zero.
-func (it Item) timeframeUnix() *int64 {
-	if it.Timeframe.IsZero() {
-		return nil
-	}
-	unix := it.Timeframe.UnixMilli()
-	return &unix
+	_, offsetSec := it.Timestamp.Zone()
+	return &offsetSec
 }
 
 // ItemData represents the actual content (data) of an item.
@@ -499,8 +523,10 @@ type ItemData struct {
 	// arbitrary binary blobs or executable programs.
 	MediaType string `json:"media_type,omitempty"`
 
-	// A function that returns a way to read the item's data. The
-	// returned ReadCloser will be closed when processing finishes.
+	// Size of the data in bytes, if known. If set, it must be correct.
+	Size uint64 `json:"size,omitempty"`
+
+	// A function that returns a way to read the item's data.
 	Data DataFunc `json:"-"`
 }
 
@@ -680,14 +706,26 @@ const (
 )
 
 // Merge adds the incoming metadata to m according to the specified conflict policy.
-func (m Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
-	if len(incoming) == 0 {
+// If m is nil (actually nil, not a nil map) or if incoming is empty, this is a no-op.
+func (m *Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
+	if m == nil || len(incoming) == 0 {
 		return
 	}
+	// we want to allow the caller to not have to worry about instantiating the
+	// map m, so we take a pointer receiver and call make() for them, if necessary,
+	// in order to avoid a panic; we have to check for m being a nil map, which is
+	// different from nil: m is almost never going to actually be nil, but
+	// a map that hasn't had make() called yet is a nil map, and I think we need
+	// reflection to detect that, OR we can just check if it's empty -- replacing
+	// an empty map should be fine (famous last words) (fixes issue #160)
+	if len(*m) == 0 {
+		meta := make(Metadata)
+		*m = meta
+	}
 	for key, val := range incoming {
-		if currentVal, ok := m[key]; ok {
-			// nothing to do if the values are the same
-			if val == currentVal {
+		if currentVal, ok := (*m)[key]; ok {
+			// nothing to do if the values are the same (equality op is faster than DeepEqual)
+			if val == currentVal || reflect.DeepEqual(val, currentVal) {
 				continue
 			}
 
@@ -695,23 +733,23 @@ func (m Metadata) Merge(incoming Metadata, policy MetadataMergePolicy) {
 			case MetaMergeAppend:
 				for i := 2; i < 100; i++ {
 					newKey := fmt.Sprintf("%s %d", key, i)
-					if _, ok := m[newKey]; !ok {
-						m[newKey] = val
+					if _, ok := (*m)[newKey]; !ok {
+						(*m)[newKey] = val
 						break
 					}
 				}
 			case MetaMergeReplace:
-				m[key] = val
+				(*m)[key] = val
 			case MetaMergeReplaceEmpty:
 				if isEmpty(currentVal) {
-					m[key] = val
+					(*m)[key] = val
 				}
 			}
 
 			// skip; don't overwrite existing value
 			continue
 		}
-		m[key] = val
+		(*m)[key] = val
 	}
 }
 
@@ -752,28 +790,27 @@ func sameJSON(a, b any) bool {
 var (
 	// TODO: rename to RelAttaches? (and label to "attaches"?)
 	RelAttachment   = Relation{Label: "attachment", Directed: true, Subordinating: true} // "<from_item> has attachment <to_item>", or "<to> is attached to <from>"
-	RelSent         = Relation{Label: "sent", Directed: true}                            // "<from_item> was sent to <to_person>"
-	RelCCed         = Relation{Label: "cc", Directed: true}                              // "<from_item> is carbon-copied to <to_person>"
+	RelSent         = Relation{Label: "sent", Directed: true}                            // "<from_item> was sent to <to_entity>"
+	RelCCed         = Relation{Label: "cc", Directed: true}                              // "<from_item> is carbon-copied to <to_entity>"
 	RelReply        = Relation{Label: "reply", Directed: true}                           // "<from_item> is reply to <to_item>"
 	RelQuotes       = Relation{Label: "quotes", Directed: true}                          // "<from_item> quotes <to>", or "<to> is quoted by <from>"
 	RelReacted      = Relation{Label: "reacted", Directed: true}                         // "<from_entity>" reacted to <to_item> with <value>"
 	RelInCollection = Relation{Label: "in_collection", Directed: true}                   // "<from_item> is in collection <to_item> at position <value>"
-	RelEdit         = Relation{Label: "edit", Directed: true}                            // "<to_item> is edit of <from_item>"
+	RelEdit         = Relation{Label: "edit", Directed: true, Subordinating: false}      // "<to_item> is edit of <from_item>" // TODO: set to true when we have a way of showing edits...
 	RelIncludes     = Relation{Label: "includes", Directed: true}                        // "<from_item> includes <to>" (has, depicts, portrays, contains... doesn't have to be item->entity either)
-	RelVisit        = Relation{Label: "visit", Directed: true}                           // "<from_item> is a visit to/with <to_entity>"
+	RelVisit        = Relation{Label: "visit", Directed: true}                           // "<from_item/entity> is a visit to/with <to_item/entity>"
 	// RelTranscript = Relation{Label: "transcript", Directed: true, Subordinating: true} // "<from_item> is transcribed by <to_item>"
 )
 
 // ItemRow has the structure of an item's row in our DB.
 type ItemRow struct {
-	ID                   uint64          `json:"id"`
-	EmbeddingID          *uint64         `json:"embedding_id,omitempty"`
+	ID                   uint64          `json:"id"`                       // row ID
 	DataSourceID         *uint64         `json:"data_source_id,omitempty"` // row ID, used only for insertion into the DB
 	JobID                *uint64         `json:"job_id,omitempty"`
 	ModifiedJobID        *uint64         `json:"modified_job_id,omitempty"`
 	AttributeID          *uint64         `json:"attribute_id,omitempty"`
 	ClassificationID     *uint64         `json:"classification_id,omitempty"` // row ID, used only internally
-	OriginalID           *string         `json:"original_id,omitempty"`
+	OriginalID           *string         `json:"original_id,omitempty"`       // data-source-assigned item ID
 	OriginalLocation     *string         `json:"original_location,omitempty"`
 	IntermediateLocation *string         `json:"intermediate_location,omitempty"`
 	Filename             *string         `json:"filename,omitempty"`
@@ -781,6 +818,7 @@ type ItemRow struct {
 	Timespan             *time.Time      `json:"timespan,omitempty"`
 	Timeframe            *time.Time      `json:"timeframe,omitempty"`
 	TimeOffset           *int            `json:"time_offset,omitempty"`
+	TimeOffsetOrigin     *tzOrigin       `json:"time_offset_origin,omitempty"`
 	TimeUncertainty      *int64          `json:"time_uncertainty,omitempty"`
 	Stored               time.Time       `json:"stored,omitempty"`
 	Modified             *time.Time      `json:"modified,omitempty"`
@@ -813,27 +851,17 @@ func (ir ItemRow) hasContent() bool {
 	return ir.DataID != nil || ir.DataText != nil || ir.DataFile != nil || !ir.Location.IsEmpty()
 }
 
-func (ir ItemRow) timestampUnix() *int64 {
-	if ir.Timestamp == nil {
+// nullableUnixMilli returns the Unix epoch millisecond UTC timestamp
+// associated with the given time value. If it is nil or zero, nil
+// is returned. Otherwise, the returned value is UTC-adjusted (the
+// time's location is set to UTC and then the unix milli is generated).
+// This means that the return value of this function, when non-nil,
+// is always normalized to UTC time.
+func nullableUnixMilli(t *time.Time) *int64 {
+	if t == nil || t.IsZero() {
 		return nil
 	}
-	unix := ir.Timestamp.UnixMilli()
-	return &unix
-}
-
-func (ir ItemRow) timespanUnix() *int64 {
-	if ir.Timespan == nil {
-		return nil
-	}
-	unix := ir.Timespan.UnixMilli()
-	return &unix
-}
-
-func (ir ItemRow) timeframeUnix() *int64 {
-	if ir.Timeframe == nil {
-		return nil
-	}
-	unix := ir.Timeframe.UnixMilli()
+	unix := t.UTC().UnixMilli()
 	return &unix
 }
 
@@ -843,18 +871,17 @@ type sqlScanner interface {
 
 // scanItemRow reads an item from row and returns the structured ItemRow.
 // The item must have been queried to select all of itemDBColumns.
-// It must be called inside a lock on the database (such as Timeline.dbMu).
 // It scans columns defined by itemDBColumns.
 func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	var ir ItemRow
 
 	var metadata, className *string
-	var ts, tspan, tframe, modified, deleted *int64 // will convert from Unix milli timestamp
-	var stored int64                                // will convert from Unix milli timestamp
+	var ts, tspan, tframe, modified, deleted *int64 // will convert from Unix or Unix milli timestamp
+	var stored int64                                // will convert from Unix timestamp
 
-	itemTargets := []any{&ir.ID, &ir.EmbeddingID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedJobID, &ir.AttributeID,
+	itemTargets := []any{&ir.ID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedJobID, &ir.AttributeID,
 		&ir.ClassificationID, &ir.OriginalID, &ir.OriginalLocation, &ir.IntermediateLocation, &ir.Filename,
-		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeUncertainty, &stored, &modified,
+		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeOffsetOrigin, &ir.TimeUncertainty, &stored, &modified,
 		&ir.DataID, &ir.DataType, &ir.DataText, &ir.DataFile, &ir.DataHash,
 		&metadata, &ir.Location.Longitude, &ir.Location.Latitude, &ir.Location.Altitude,
 		&ir.Location.CoordinateSystem, &ir.Location.CoordinateUncertainty, &ir.Note, &ir.Starred,
@@ -881,6 +908,26 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 		tframeVal := time.UnixMilli(*tframe)
 		ir.Timeframe = &tframeVal
 	}
+	if ir.TimeOffset != nil {
+		// apply the time zone offset to each timestamp, as we want to retain
+		// its local time ("wall time"), rather than use the system's current
+		// time, which is Go's default when using time.UnixMilli().
+		// Note how we don't actually change the time instance, we just set
+		// its location for rendering/serialization purposes.
+		if ir.Timestamp != nil {
+			adjusted := ir.Timestamp.In(time.FixedZone("", *ir.TimeOffset))
+			ir.Timestamp = &adjusted
+		}
+		if ir.Timespan != nil {
+			adjusted := ir.Timespan.In(time.FixedZone("", *ir.TimeOffset))
+			ir.Timespan = &adjusted
+		}
+		if ir.Timeframe != nil {
+			adjusted := ir.Timeframe.In(time.FixedZone("", *ir.TimeOffset))
+			ir.Timeframe = &adjusted
+		}
+	}
+
 	if modified != nil {
 		modVal := time.Unix(*modified, 0)
 		ir.Modified = &modVal
@@ -898,9 +945,10 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 }
 
 // used for selecting from the extended_items view, but "AS items"
-const itemDBColumns = `items.id, items.embedding_id, items.data_source_id, items.job_id, items.modified_job_id, items.attribute_id,
+const itemDBColumns = `items.id, items.data_source_id, items.job_id, items.modified_job_id, items.attribute_id,
 items.classification_id, items.original_id, items.original_location, items.intermediate_location, items.filename,
-items.timestamp, items.timespan, items.timeframe, items.time_offset, items.time_uncertainty, items.stored, items.modified,
+items.timestamp, items.timespan, items.timeframe, items.time_offset, items.time_offset_origin, items.time_uncertainty,
+items.stored, items.modified,
 items.data_id, items.data_type, items.data_text, items.data_file, items.data_hash, items.metadata,
 items.longitude, items.latitude, items.altitude, items.coordinate_system, items.coordinate_uncertainty,
 items.note, items.starred, items.thumb_hash, items.original_id_hash, items.initial_content_hash,
@@ -1130,6 +1178,11 @@ var classifications = []Classification{
 		Name:        "snapshot",
 		Labels:      []string{"Archive", "Snapshot"},
 		Description: "A point-in-time snapshot of something that can change over time, like a website",
+  },
+  {
+    Name:        "event",
+		Labels:      []string{"Event", "Calendar item"},
+		Description: "An event or item on a calendar",
 	},
 }
 
@@ -1138,9 +1191,9 @@ var (
 	ClassMessage    = getClassification("message")
 	ClassEmail      = getClassification("email")
 	ClassSocial     = getClassification("social")
-	ClassLocation   = getClassification("location")
+	ClassLocation   = getClassification("location") // ideally has a coordinate, but could also represent the attribute_id's visit to a named place at a certain time (TODO: Test that, does it actually work without coords?)
 	ClassMedia      = getClassification("media")
-	ClassScreen     = getClassification("screen") // TODO: call it screenshot maybe...? but screen recordings...
+ 	ClassScreen     = getClassification("screen") // TODO: call it screenshot maybe...? but screen recordings...
 	ClassCollection = getClassification("collection")
 	ClassNote       = getClassification("note")
 	ClassDocument   = getClassification("document")
@@ -1158,3 +1211,9 @@ func getClassification(name string) Classification {
 	}
 	return Classification{}
 }
+
+// tzOrigin defines how/why a time zone is inferred or adjusted
+type tzOrigin string
+
+// A time zone was inferred by its geo-coordinates
+const tzOriginGeoLookup = "G"

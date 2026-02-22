@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/timelinize/timelinize/datasources/media"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )
@@ -42,6 +43,7 @@ const (
 	pre2024YourVideosPath              = "posts/your_videos.json"
 	pre2024YourPostsPrefix             = "posts/your_posts_"
 	pre2024MessagesPrefix              = "messages"
+	messagesPrefix2025                 = "your_instagram_activity/messages"
 )
 
 const (
@@ -50,6 +52,10 @@ const (
 	year2024YourVideosPath              = "your_facebook_activity/posts/your_videos.json"
 	year2024YourPostsPrefix             = "your_facebook_activity/posts/your_posts__check_ins__photos_and_videos_"
 	year2024MessagesPrefix              = "your_facebook_activity/messages"
+	year2024PostMediaPrefix             = "your_facebook_activity/posts/media"
+	year2024AlbumPrefix                 = "your_facebook_activity/posts/album"
+	year2024TaggedPlacesPath            = "your_facebook_activity/posts/places_you_have_been_tagged_in.json"
+	year2024CheckInsPath                = "your_facebook_activity/posts/check-ins.json"
 )
 
 // Archive implements the importer for Facebook archives.
@@ -59,18 +65,32 @@ type Archive struct {
 
 // Recognize returns whether the input file is recognized.
 func (Archive) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ timeline.RecognizeParams) (timeline.Recognition, error) {
+	// reject HTML-formatted archives, which we don't support
+	const oneDotHTML = "1.html"
+	if dirEntry.FileExists(pre2024YourPostsPrefix+oneDotHTML) ||
+		dirEntry.FileExists(year2024YourPostsPrefix+oneDotHTML) ||
+		dirEntry.FileExists(path.Join(year2024AlbumPrefix, oneDotHTML)) {
+		return timeline.Recognition{}, nil
+	}
+
 	if dirEntry.FileExists(pre2024ProfileInfoPath) ||
 		dirEntry.FileExists(year2024ProfileInfoPath) {
 		return timeline.Recognition{Confidence: 1}, nil
+	}
+	if dirEntry.FileExists("your_facebook_activity") {
+		return timeline.Recognition{Confidence: .95}, nil
+	}
+	if strings.HasPrefix(dirEntry.Name(), "facebook-") {
+		return timeline.Recognition{Confidence: .9}, nil
 	}
 	return timeline.Recognition{}, nil
 }
 
 // FileImport imports the data in the file.
 func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
-	// dsOpt := opt.DataSourceOptions.(*Options)
+	dsOpt := params.DataSourceOptions.(*Options)
 
-	if err := a.setOwnerEntity(dirEntry); err != nil {
+	if err := a.setOwnerEntity(ctx, dirEntry, dsOpt); err != nil {
 		return err
 	}
 
@@ -81,12 +101,12 @@ func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 	for i := 1; i < 10000; i++ {
 		postsFilename := fmt.Sprintf("%s%d.json", postsFilePrefix, i)
 
-		postsFile, err := dirEntry.FS.Open(postsFilename)
+		postsFile, err := dirEntry.Open(postsFilename)
 		if errors.Is(err, fs.ErrNotExist) && postsFilePrefix == pre2024YourPostsPrefix {
 			// try newer version
 			postsFilePrefix = year2024YourPostsPrefix
 			postsFilename = fmt.Sprintf("%s%d.json", postsFilePrefix, i)
-			postsFile, err = dirEntry.FS.Open(postsFilename)
+			postsFile, err = dirEntry.Open(postsFilename)
 		}
 		if errors.Is(err, fs.ErrNotExist) {
 			break // no more posts files
@@ -102,73 +122,55 @@ func (a Archive) FileImport(ctx context.Context, dirEntry timeline.DirEntry, par
 		}
 	}
 
+	// album media
+	if err := a.processAlbumFiles(ctx, dirEntry, params, []string{
+		year2024AlbumPrefix,
+	}); err != nil {
+		return fmt.Errorf("processing album folder: %w", err)
+	}
+
+	// post media (done separately since they may not be in the same archive as the JSON manifest)
+	if err := a.processPostMedia(ctx, dirEntry, params, []string{
+		year2024PostMediaPrefix,
+		"your_activity_across_facebook", // also found this in a year 2024 archive, full of media files
+	}); err != nil {
+		return fmt.Errorf("processing post media: %w", err)
+	}
+
 	// uncategorized photos
 	if err := a.processPhotosOrVideos(ctx, dirEntry, params, []string{
 		pre2024YourUncategorizedPhotosPath,
 		year2024YourUncategorizedPhotosPath,
-	}, fbYourUncategorizedPhotos{}); err != nil {
+	}, new(fbYourUncategorizedPhotos)); err != nil {
 		return fmt.Errorf("processing uncategorized photos: %w", err)
 	}
 
-	// (uncategorized) videos
+	// uncategorized videos
 	if err := a.processPhotosOrVideos(ctx, dirEntry, params, []string{
 		pre2024YourVideosPath,
 		year2024YourVideosPath,
-	}, fbYourVideos{}); err != nil {
+	}, new(fbYourVideos)); err != nil {
 		return fmt.Errorf("processing videos: %w", err)
+	}
+
+	// tagged places
+	if err := a.processTaggedPlaces(ctx, dirEntry, params, []string{
+		year2024TaggedPlacesPath,
+	}); err != nil {
+		return fmt.Errorf("processing tagged places: %w", err)
+	}
+
+	// check-ins
+	if err := a.processCheckins(ctx, dirEntry, params, []string{
+		year2024CheckInsPath,
+	}); err != nil {
+		return fmt.Errorf("processing check-ins: %w", err)
 	}
 
 	// messages
 	err := GetMessages("facebook", dirEntry, params)
 	if err != nil {
 		return err
-	}
-
-	return nil
-}
-
-func (a Archive) processPhotosOrVideos(ctx context.Context, d timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string, unmarshalInto any) error {
-	const archiveVersionsSupported = 2
-
-	if len(pathsToTry) != archiveVersionsSupported {
-		return fmt.Errorf("should have %d paths to try, since we support %d archive versions; got %d",
-			archiveVersionsSupported, archiveVersionsSupported, len(pathsToTry))
-	}
-
-	file, err := d.FS.Open(pathsToTry[0])
-	if errors.Is(err, fs.ErrNotExist) {
-		// try newer archive version
-		file, err = d.FS.Open(pathsToTry[1])
-	}
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if err := json.NewDecoder(file).Decode(&unmarshalInto); err != nil {
-		return err
-	}
-
-	var medias []fbArchiveMedia
-	switch v := unmarshalInto.(type) {
-	case fbYourUncategorizedPhotos:
-		medias = v.OtherPhotosV2
-	case fbYourVideos:
-		medias = v.VideosV2
-	}
-
-	for _, media := range medias {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		item := &timeline.Item{
-			Owner: a.owner,
-		}
-
-		media.fillItem(item, d, "", opt.Log)
-
-		opt.Pipeline <- &timeline.Graph{Item: item}
 	}
 
 	return nil
@@ -195,7 +197,7 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 
 		item := &timeline.Item{
 			Classification: timeline.ClassSocial,
-			Timestamp:      time.Unix(post.Timestamp, 0),
+			Timestamp:      time.Unix(post.Timestamp, 0).UTC(), // these unix timestams are set in UTC
 			Owner:          a.owner,
 			Content: timeline.ItemData{
 				Data: timeline.StringData(postText),
@@ -212,46 +214,76 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 				Name: matches[1],
 				Attributes: []timeline.Attribute{
 					{
-						Name:     "facebook_name",
-						Value:    matches[1],
-						Identity: true,
+						Name:        "facebook_name",
+						Value:       matches[1],
+						Identifying: true,
 					},
 				},
 			})
 		}
 
-		for _, attachment := range post.Attachments {
-			attachedItem := &timeline.Item{
-				Owner:    a.owner,
-				Metadata: make(timeline.Metadata),
-			}
-			var allText []string
-
-			for _, attachData := range attachment.Data {
-				if attachData.Text != "" {
-					text := FixString(attachData.Text)
+		// confusingly, an attachment object in this array can have multiple attachments
+		// of various types... I don't really know why they group them together, but we
+		// just store 1 point of data (whether it be a location, a media file, or text
+		// content, for example) per item
+		for _, attachmentGroup := range post.Attachments {
+			for _, attachment := range attachmentGroup.Data {
+				attachedItem := &timeline.Item{
+					Owner:     a.owner,
+					Timestamp: item.Timestamp, // assume main item timestamp, can be changed later
+					Metadata:  make(timeline.Metadata),
+				}
+				switch {
+				case attachment.Text != "":
+					text := FixString(attachment.Text)
 					if descStr, ok := attachedItem.Metadata["Description"].(string); ok && text != descStr {
-						allText = append(allText, text)
+						attachedItem.Content.Data = timeline.StringData(text)
 					}
-				}
-				if attachData.Media.URI != "" {
-					attachData.Media.fillItem(attachedItem, d, postText, params.Log)
-				}
-				if attachData.ExternalContext.URL != "" {
-					attachedItem.Content.Data = timeline.StringData(attachData.ExternalContext.Name)
-					attachedItem.Metadata["URL"] = attachData.ExternalContext.URL
+				case attachment.Media.URI != "":
+					attachedItem.Classification = timeline.ClassSocial
+					attachment.Media.fillItem(attachedItem, d, postText, params.Log)
+				case attachment.ExternalContext.URL != "":
+					attachedItem.Content.Data = timeline.StringData(attachment.ExternalContext.Name)
+					attachedItem.Metadata["URL"] = attachment.ExternalContext.URL
 					attachedItem.Classification = timeline.ClassLocation
 					attachedItem.Timestamp = item.Timestamp
+				case attachment.Place.Name != "" ||
+					attachment.Place.Address != "" ||
+					attachment.Place.URL != "" ||
+					(attachment.Place.Coordinate.Latitude != 0 && attachment.Place.Coordinate.Longitude != 0):
+					// We don't know the context of this attachment; is it something like, "I visited this
+					// place, it was cool?" or is it like "Hey everyone, this place is having an event
+					// that you should go to" -- i.e. does it necessarily mean the owner is at this place?
+					// Maybe sometimes, but I don't know that we know for sure.
+					// I wonder if we should just store this as an entity and attach it
+
+					address := timeline.Attribute{
+						Name:  "address",
+						Value: attachment.Place.Address,
+					}
+					if attachment.Place.Coordinate.Latitude != 0 && attachment.Place.Coordinate.Longitude != 0 {
+						address.Latitude = &attachment.Place.Coordinate.Latitude
+						address.Longitude = &attachment.Place.Coordinate.Longitude
+					}
+
+					place := &timeline.Entity{
+						Type:       timeline.EntityPlace,
+						Name:       attachment.Place.Name,
+						Attributes: []timeline.Attribute{address},
+					}
+					ig.ToEntity(timeline.RelAttachment, place)
+				}
+
+				// newDescription := strings.Join(allText, "\n")
+				// if existingDesc, ok := attachedItem.Metadata["Description"].(string); ok && existingDesc != "" {
+				// 	newDescription += "\n\n" + existingDesc
+				// }
+				// attachedItem.Metadata["Description"] = newDescription
+
+				if attachedItem.Content.Data != nil || attachedItem.Content.Filename != "" {
+					ig.ToItem(timeline.RelAttachment, attachedItem)
 				}
 			}
-
-			newDescription := strings.Join(allText, "\n")
-			if existingDesc, ok := attachedItem.Metadata["Description"].(string); ok && existingDesc != "" {
-				newDescription += "\n\n" + existingDesc
-			}
-			attachedItem.Metadata["Description"] = newDescription
-
-			ig.ToItem(timeline.RelAttachment, attachedItem)
 		}
 
 		params.Pipeline <- ig
@@ -260,26 +292,410 @@ func (a Archive) processPostsFile(ctx context.Context, d timeline.DirEntry, file
 	return nil
 }
 
-func (Archive) loadProfileInfo(d timeline.DirEntry) (profileInfo, error) {
-	file, err := d.Open(pre2024ProfileInfoPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		// try another archive version
-		file, err = d.Open(year2024ProfileInfoPath)
-	}
-	if err != nil {
-		return profileInfo{}, err
-	}
-	defer file.Close()
+func (a Archive) processAlbumFiles(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string) error {
+	for _, pathToTry := range pathsToTry {
+		err := fs.WalkDir(tlDirEntry, pathToTry, func(fpath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return fmt.Errorf("visiting %s: %w", fpath, err)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
 
-	var profileInfo profileInfo
-	err = json.NewDecoder(file).Decode(&profileInfo)
-	return profileInfo, err
+			f, err := tlDirEntry.Open(fpath)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			var albumInfo fbAlbumMeta
+			if err := json.NewDecoder(f).Decode(&albumInfo); err != nil {
+				return fmt.Errorf("decoding album file: %s: %w", fpath, err)
+			}
+
+			for _, entry := range albumInfo.Photos {
+				if entry.URI == "" {
+					continue
+				}
+				it := &timeline.Item{
+					Classification:       timeline.ClassMedia,
+					IntermediateLocation: entry.URI,
+					Owner:                a.owner,
+					Timestamp:            time.Unix(entry.CreationTimestamp, 0).UTC(), // this is not when the photo was taken, but we'll get that later, if it's in the actual photo itself
+					Content: timeline.ItemData{
+						Filename: path.Base(entry.URI),
+					},
+					Metadata: timeline.Metadata{
+						"Description": FixString(entry.Description),
+					},
+				}
+				it.Retrieval.SetKey(retrievalKey(tlDirEntry, entry.URI))
+				it.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+					"intermediate_location": timeline.UpdatePolicyPreferExisting,
+					"timestamp":             timeline.UpdatePolicyPreferExisting,
+					"location":              timeline.UpdatePolicyPreferIncoming,
+					"owner":                 timeline.UpdatePolicyPreferIncoming,
+					"data":                  timeline.UpdatePolicyPreferExisting,
+					"metadata":              timeline.UpdatePolicyPreferIncoming,
+				}
+
+				g := &timeline.Graph{Item: it}
+
+				// add photo to album
+				g.ToItem(timeline.RelInCollection, &timeline.Item{
+					Classification: timeline.ClassCollection,
+					Content: timeline.ItemData{
+						Data: timeline.StringData(albumInfo.Name),
+					},
+					Owner: a.owner,
+					Metadata: timeline.Metadata{
+						"Description": FixString(albumInfo.Description),
+					},
+				})
+
+				opt.Pipeline <- g
+			}
+
+			return nil
+		})
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
+		if err != nil {
+			return fmt.Errorf("could not walk known album folder: %s: %w", pathToTry, err)
+		}
+	}
+
+	return nil
 }
 
-func (a *Archive) setOwnerEntity(d timeline.DirEntry) error {
+func (a Archive) processPostMedia(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string) error {
+	for _, pathToTry := range pathsToTry {
+		err := fs.WalkDir(tlDirEntry, pathToTry, func(fpath string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return fmt.Errorf("visiting %s: %w", fpath, err)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+
+			ext := strings.ToLower(path.Ext(info.Name()))
+			switch ext {
+			// in reality I've only seen .jpg, .mp4, and no extension, for valid media files
+			case ".jpg", ".jpeg", ".gif", ".png", ".heic", "", ".mp4", ".mov":
+			default:
+				return nil
+			}
+
+			it := &timeline.Item{
+				Classification:       timeline.ClassMedia,
+				IntermediateLocation: fpath,
+				Owner:                a.owner,
+				Content: timeline.ItemData{
+					Filename: d.Name(),
+					Size:     uint64(info.Size()), //nolint:gosec // Sigh, yes, I know this can overflow... but will it really??
+					Data: func(_ context.Context) (io.ReadCloser, error) {
+						return tlDirEntry.Open(fpath)
+					},
+				},
+			}
+
+			_, err = media.ExtractAllMetadata(opt.Log, tlDirEntry, fpath, it, timeline.MetaMergeAppend)
+			if err != nil {
+				opt.Log.Error("extracting metadata from Facebook media",
+					zap.String("file", fpath),
+					zap.Error(err))
+			}
+
+			retKey := retrievalKey(tlDirEntry, fpath)
+			it.Retrieval.SetKey(retKey)
+			it.Retrieval.FieldUpdatePolicies = map[string]timeline.FieldUpdatePolicy{
+				"data":     timeline.UpdatePolicyPreferIncoming,
+				"metadata": timeline.UpdatePolicyKeepExisting,
+			}
+
+			opt.Pipeline <- &timeline.Graph{Item: it}
+
+			return nil
+		})
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
+		if err != nil {
+			return fmt.Errorf("could not open known post media folder: %w - tried: %s", err, pathToTry)
+		}
+	}
+
+	return nil
+}
+
+func (a Archive) processPhotosOrVideos(ctx context.Context, tlDirEntry timeline.DirEntry, opt timeline.ImportParams, pathsToTry []string, unmarshalInto any) error {
+	for _, pathToTry := range pathsToTry {
+		file, err := tlDirEntry.Open(pathToTry)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
+		if err != nil {
+			return fmt.Errorf("could not open known photos/videos folder: %w - tried: %s", err, pathToTry)
+		}
+		defer file.Close()
+
+		if err := json.NewDecoder(file).Decode(unmarshalInto); err != nil {
+			return err
+		}
+
+		var medias []fbArchiveMedia
+		switch v := unmarshalInto.(type) {
+		case *fbYourUncategorizedPhotos:
+			medias = v.OtherPhotosV2
+		case *fbYourVideos:
+			medias = v.VideosV2
+		}
+
+		for _, media := range medias {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			item := &timeline.Item{
+				Owner:          a.owner,
+				Classification: timeline.ClassMedia,
+			}
+
+			media.fillItem(item, tlDirEntry, "", opt.Log)
+
+			opt.Pipeline <- &timeline.Graph{Item: item}
+		}
+	}
+
+	return nil
+}
+
+func (a Archive) processTaggedPlaces(ctx context.Context, tlDirEntry timeline.DirEntry, params timeline.ImportParams, pathsToTry []string) error {
+	for _, pathToTry := range pathsToTry {
+		file, err := tlDirEntry.Open(pathToTry)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
+		if err != nil {
+			return fmt.Errorf("could not open known tagged places folder: %w - tried: %s", err, pathToTry)
+		}
+		defer file.Close()
+
+		var taggedPlaces fbTaggedPlaces
+		if err := json.NewDecoder(file).Decode(&taggedPlaces); err != nil {
+			return err
+		}
+
+		for _, taggedPlace := range taggedPlaces {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			// TODO: a privacy-preserving way to get the coordinates would be good (possibly a lookup using the Facebook ID could do it)
+
+			visitItem := &timeline.Item{
+				Owner:          a.owner,
+				Classification: timeline.ClassLocation, // TODO: Technically, we don't have coordinates, should we make a new class?? (leaning toward no: a location can still be a visit to a named place, even if coords unknown; the class just means this person was logged at being at a place)
+			}
+			place := &timeline.Entity{
+				Type: timeline.EntityPlace,
+				Attributes: []timeline.Attribute{
+					{
+						Name:     "facebook_id",
+						Value:    taggedPlace.FBID,
+						Identity: true,
+					},
+				},
+			}
+
+			for _, label := range taggedPlace.LabelValues {
+				switch label.Label {
+				case "Place name":
+					place.Name = label.Value
+				case "Visit time":
+					visitItem.Timestamp = time.Unix(int64(label.TimestampValue), 0).UTC()
+				case "Name of application used to tag this place":
+					visitItem.Metadata = timeline.Metadata{
+						"Source": label.Value,
+					}
+				}
+			}
+
+			g := &timeline.Graph{Item: visitItem}
+			g.ToEntity(timeline.RelVisit, place)
+
+			params.Pipeline <- g
+		}
+	}
+
+	return nil
+}
+
+func (a Archive) processCheckins(ctx context.Context, tlDirEntry timeline.DirEntry, params timeline.ImportParams, pathsToTry []string) error {
+	for _, pathToTry := range pathsToTry {
+		file, err := tlDirEntry.Open(pathToTry)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // it's valid for an archive not to have this data
+		}
+		if err != nil {
+			return fmt.Errorf("could not open known check-ins folder: %w - tried: %s", err, pathToTry)
+		}
+		defer file.Close()
+
+		// the check-ins file, at least as of 2024-2025, has two possible formats: an array of objects,
+		// or if there's only 1 check-in, it will have just that single object (no array)... sigh
+		var checkIns fbCheckIns
+		if err := json.NewDecoder(file).Decode(&checkIns); err != nil {
+			// wasn't an array, try the single-object decode
+			file.Close()
+			file, err = tlDirEntry.Open(pathToTry)
+			if err != nil {
+				return fmt.Errorf("reopening check-in file to try alternate decoding target: %s: %w", pathToTry, err)
+			}
+			defer file.Close()
+			var checkIn fbCheckIn
+			if err := json.NewDecoder(file).Decode(&checkIn); err != nil {
+				return err
+			}
+			checkIns = fbCheckIns{checkIn}
+		}
+
+		for _, checkIn := range checkIns {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			visitItem := &timeline.Item{
+				Owner:          a.owner,
+				Classification: timeline.ClassLocation,
+				Timestamp:      time.Unix(int64(checkIn.Timestamp), 0).UTC(),
+				Metadata: timeline.Metadata{
+					"Facebook ID": checkIn.FBID,
+				},
+			}
+
+			place := &timeline.Entity{
+				Type: timeline.EntityPlace,
+			}
+
+			for _, label := range checkIn.LabelValues {
+				switch label.Label {
+				case "Message":
+					visitItem.Content.Data = timeline.StringData(strings.TrimSpace(label.Value))
+				case "Place tags":
+					for _, dictLabel := range label.Dict {
+						switch dictLabel.Label {
+						case "Coordinates":
+							lat, lon, err := parseCoordsFromDictString(dictLabel.Value)
+							if err != nil {
+								params.Log.Error("invalid check-in coordinates", zap.Error(err))
+								continue
+							}
+							if lat != 0 && lon != 0 {
+								visitItem.Location = timeline.Location{
+									Longitude: &lon,
+									Latitude:  &lat,
+								}
+							}
+						case "Address":
+							place.Attributes = append(place.Attributes, timeline.Attribute{
+								Name:  "address",
+								Value: strings.TrimSpace(dictLabel.Value),
+							})
+						case "Name":
+							place.Name = strings.TrimSpace(dictLabel.Value)
+						}
+					}
+				}
+			}
+
+			g := &timeline.Graph{Item: visitItem}
+			if place.Name != "" || len(place.Attributes) > 0 {
+				g.ToEntity(timeline.RelVisit, place)
+			}
+
+			params.Pipeline <- g
+		}
+	}
+
+	return nil
+}
+
+// loadProfileInfo loads the profile info found within the DirEntry.
+// It is possible for there to be none, in which case an empty profileInfo
+// will be returned with no error (because no error occurred while looking
+// for it; it is valid for multi-archive exports to not contain any except
+// in just one of the archives).
+func (Archive) loadProfileInfo(tlDirEntry timeline.DirEntry) (profileInfo, error) {
+	for _, pathToTry := range []string{
+		year2024ProfileInfoPath,
+		pre2024ProfileInfoPath,
+	} {
+		file, err := tlDirEntry.Open(pathToTry)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return profileInfo{}, fmt.Errorf("could not open known places for the profile info: %w", err)
+		}
+		defer file.Close()
+
+		var profileInfo profileInfo
+		err = json.NewDecoder(file).Decode(&profileInfo)
+		return profileInfo, err
+	}
+	return profileInfo{}, nil
+}
+
+func (a *Archive) setOwnerEntity(ctx context.Context, d timeline.DirEntry, options *Options) error {
+	// we might need to get the username from the data source options, since one is not available to us in the data
+	if options.Username == "" {
+		if repoOwner, ok := ctx.Value(timeline.RepoOwnerCtxKey).(timeline.Entity); ok {
+			if accountUsername, ok := repoOwner.AttributeValue("facebook_username").(string); ok {
+				options.Username = accountUsername
+			}
+		}
+	}
+
 	profileInfo, err := a.loadProfileInfo(d)
 	if err != nil {
 		return err
+	}
+	if profileInfo.ProfileV2.Username == "" {
+		if options.Username == "" {
+			return errors.New("account username is needed, and cannot be empty")
+		}
+
+		// this archive doesn't contain profile info; that's expected with multi-archive exports
+		// for all the archives but one; so use the user-supplied username
+		a.owner = timeline.Entity{
+			Attributes: []timeline.Attribute{
+				{
+					Name:     "facebook_username",
+					Value:    options.Username,
+					Identity: true,
+				},
+			},
+		}
+		return nil
+	}
+
+	// these have to match to ensure the imported data is attributed consistently to the correct owner entity
+	if profileInfo.ProfileV2.Username != options.Username {
+		return fmt.Errorf("configured username (%s) does not match what is in the profile manifest: %q",
+			options.Username, profileInfo.ProfileV2.Username)
 	}
 
 	name := FixString(profileInfo.ProfileV2.Name.FullName)
@@ -315,9 +731,8 @@ func (a *Archive) setOwnerEntity(d timeline.DirEntry) error {
 			profileInfo.ProfileV2.Birthday.Day,
 			0, 0, 0, 0, time.Local)
 		a.owner.Attributes = append(a.owner.Attributes, timeline.Attribute{
-			Name:        "birth_date",
-			Value:       bdate,
-			Identifying: true,
+			Name:  "birth_date",
+			Value: bdate,
 		})
 	}
 
@@ -367,264 +782,6 @@ func FixString(malformed string) string {
 		final[i] = byte(r)
 	}
 	return string(final)
-}
-
-// Generated January 2023
-type profileInfo struct {
-	ProfileV2 struct {
-		Name struct {
-			FullName   string `json:"full_name"`
-			FirstName  string `json:"first_name"`
-			MiddleName string `json:"middle_name"`
-			LastName   string `json:"last_name"`
-		} `json:"name"`
-		Emails struct {
-			Emails          []string `json:"emails"`
-			PreviousEmails  []string `json:"previous_emails"`
-			PendingEmails   []any    `json:"pending_emails"`
-			AdAccountEmails []any    `json:"ad_account_emails"`
-		} `json:"emails"`
-		Birthday fbDate `json:"birthday"`
-		Gender   struct {
-			GenderOption string `json:"gender_option"`
-			Pronoun      string `json:"pronoun"`
-		} `json:"gender"`
-		PreviousNames []any `json:"previous_names"`
-		OtherNames    []struct {
-			Name      string `json:"name"`
-			Type      string `json:"type"`
-			Timestamp int    `json:"timestamp"`
-		} `json:"other_names"`
-		Hometown struct {
-			Name      string `json:"name"`
-			Timestamp int    `json:"timestamp"`
-		} `json:"hometown"`
-		Relationship struct {
-			Status      string `json:"status"`
-			Partner     string `json:"partner"`
-			Anniversary fbDate `json:"anniversary"`
-			Timestamp   int    `json:"timestamp"`
-		} `json:"relationship"`
-		FamilyMembers []struct {
-			Name      string `json:"name"`
-			Relation  string `json:"relation"`
-			Timestamp int    `json:"timestamp"`
-		} `json:"family_members"`
-		EducationExperiences []struct {
-			Name           string   `json:"name"`
-			StartTimestamp int      `json:"start_timestamp,omitempty"`
-			EndTimestamp   int      `json:"end_timestamp"`
-			Graduated      bool     `json:"graduated"`
-			Concentrations []string `json:"concentrations"`
-			Degree         string   `json:"degree,omitempty"`
-			SchoolType     string   `json:"school_type"`
-			Timestamp      int      `json:"timestamp"`
-		} `json:"education_experiences"`
-		WorkExperiences []any `json:"work_experiences"`
-		BloodInfo       struct {
-			BloodDonorStatus string `json:"blood_donor_status"`
-		} `json:"blood_info"`
-		Websites []struct {
-			Address string `json:"address"`
-		} `json:"websites"`
-		PhoneNumbers []struct {
-			PhoneType   string `json:"phone_type"`
-			PhoneNumber string `json:"phone_number"`
-			Verified    bool   `json:"verified"`
-		} `json:"phone_numbers"`
-		Username              string `json:"username"`
-		RegistrationTimestamp int    `json:"registration_timestamp"`
-		ProfileURI            string `json:"profile_uri"`
-	} `json:"profile_v2"`
-}
-
-type fbDate struct {
-	Year  int `json:"year"`
-	Month int `json:"month"`
-	Day   int `json:"day"`
-}
-
-type yourPosts []struct {
-	Timestamp   int64 `json:"timestamp"`
-	Attachments []struct {
-		Data []struct {
-			Text            string `json:"text"`
-			ExternalContext struct {
-				Name string `json:"name"`
-				URL  string `json:"url"`
-			} `json:"external_context"`
-			Media fbArchiveMedia `json:"media"`
-		} `json:"data"`
-	} `json:"attachments,omitempty"`
-	Data []struct {
-		Post string `json:"post"`
-	} `json:"data"`
-	Title string `json:"title,omitempty"`
-	Tags  []struct {
-		Name string `json:"name"`
-	} `json:"tags,omitempty"`
-}
-
-type fbYourUncategorizedPhotos struct {
-	OtherPhotosV2 []fbArchiveMedia `json:"other_photos_v2"`
-}
-
-type fbYourVideos struct {
-	VideosV2 []fbArchiveMedia `json:"videos_v2"`
-}
-
-type fbArchiveMedia struct {
-	URI               string `json:"uri"`
-	CreationTimestamp int64  `json:"creation_timestamp"`
-	MediaMetadata     struct {
-		PhotoMetadata *struct {
-			EXIFData []struct {
-				ISO               int     `json:"iso"`
-				FocalLength       string  `json:"focal_length"`
-				UploadIP          string  `json:"upload_ip"`
-				TakenTimestamp    int64   `json:"taken_timestamp"`
-				ModifiedTimestamp int64   `json:"modified_timestamp"`
-				CameraMake        string  `json:"camera_make"`
-				CameraModel       string  `json:"camera_model"`
-				Exposure          string  `json:"exposure"`
-				FStop             string  `json:"f_stop"`
-				Orientation       int     `json:"orientation"`
-				OriginalWidth     int     `json:"original_width"`
-				OriginalHeight    int     `json:"original_height"`
-				Latitude          float64 `json:"latitude"`
-				Longitude         float64 `json:"longitude"`
-			} `json:"exif_data"`
-		} `json:"photo_metadata"`
-		VideoMetadata *struct {
-			EXIFData []struct {
-				UploadIP        string `json:"upload_ip"`
-				UploadTimestamp int64  `json:"upload_timestamp"`
-			} `json:"exif_data"`
-		} `json:"video_metadata"`
-	} `json:"media_metadata"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-}
-
-func (m fbArchiveMedia) fillItem(item *timeline.Item, d timeline.DirEntry, postText string, logger *zap.Logger) {
-	if m.CreationTimestamp > 0 {
-		item.Timestamp = time.Unix(m.CreationTimestamp, 0)
-	}
-
-	if item.Content.Data == nil {
-		item.Content = timeline.ItemData{
-			Filename: path.Base(m.URI),
-			Data: func(_ context.Context) (io.ReadCloser, error) {
-				return d.FS.Open(m.URI)
-			},
-		}
-	}
-
-	if item.Metadata == nil {
-		item.Metadata = make(timeline.Metadata)
-	}
-
-	item.Metadata["Title"] = FixString(m.Title)
-	if desc := FixString(m.Description); desc != postText {
-		// TODO: this filter probably doesn't work with multiple attachment data where some are text with the same description
-		item.Metadata["Description"] = FixString(m.Description)
-	}
-
-	// TODO: use media importer functions for this as well...
-	// Collect metadata... while we do, prefer TakenTimestamp over CreationTimestamp;
-	// I think TakenTimestamp is when the media was captured, and CreationTimestamp is
-	// when the post or attachment was created on Facebook. I think.
-	// We also include all the EXIF data Facebook gives us because they strip the EXIF
-	// data from the files they give us.
-	if m.MediaMetadata.PhotoMetadata != nil {
-		for _, exif := range m.MediaMetadata.PhotoMetadata.EXIFData {
-			if exif.TakenTimestamp != 0 { // negative is valid! (pre-1970)
-				item.Timestamp = time.Unix(exif.TakenTimestamp, 0)
-
-				// I've seen this happen where the value is -62169958800 (for multiple items!)
-				// which results in a Very Wrong Timestamp. I don't know what to make of this
-				// value, so we have to simply throw it away.
-				if item.Timestamp.Year() <= 0 {
-					logger.Warn("data source provided TakenTimestamp that is before year 0; not using it", zap.Time("taken_timestamp", item.Timestamp))
-					item.Timestamp = time.Time{}
-				}
-			}
-			if lat := exif.Latitude; lat != 0 {
-				item.Location.Latitude = &lat
-			}
-			if lon := exif.Longitude; lon != 0 {
-				item.Location.Longitude = &lon
-			}
-			item.Metadata["ISO"] = exif.ISO
-			item.Metadata["Focal length"] = exif.FocalLength
-			item.Metadata["Upload IP"] = exif.UploadIP
-			if exif.ModifiedTimestamp > 0 {
-				item.Metadata["Modified"] = time.Unix(exif.ModifiedTimestamp, 0)
-			}
-			item.Metadata["Camera make"] = exif.CameraMake
-			item.Metadata["Camera model"] = exif.CameraModel
-			item.Metadata["Exposure"] = exif.Exposure
-			item.Metadata["F-stop"] = exif.FStop
-			item.Metadata["Orientation"] = exif.Orientation
-			item.Metadata["Original width"] = exif.OriginalWidth
-			item.Metadata["Original height"] = exif.OriginalHeight
-		}
-	} else if m.MediaMetadata.VideoMetadata != nil {
-		for _, exif := range m.MediaMetadata.VideoMetadata.EXIFData {
-			item.Metadata["Upload IP"] = exif.UploadTimestamp
-			item.Metadata["Upload timestamp"] = time.Unix(exif.UploadTimestamp, 0)
-		}
-	}
-}
-
-type fbMessengerThread struct {
-	Participants []struct {
-		Name string `json:"name"`
-	} `json:"participants"`
-	Messages []struct {
-		SenderName  string `json:"sender_name"`
-		TimestampMS int64  `json:"timestamp_ms"`
-		IsUnsent    bool   `json:"is_unsent,omitempty"`
-		Content     string `json:"content,omitempty"`
-		Share       struct {
-			Link      string `json:"link"`
-			ShareText string `json:"share_text"`
-		} `json:"share,omitempty"`
-		Reactions []struct {
-			Reaction string `json:"reaction"`
-			Actor    string `json:"actor"`
-		} `json:"reactions,omitempty"`
-		Photos     []fbArchiveMedia `json:"photos,omitempty"`
-		Videos     []fbArchiveMedia `json:"videos,omitempty"`
-		GIFs       []fbArchiveMedia `json:"gifs,omitempty"`
-		AudioFiles []fbArchiveMedia `json:"audio_files,omitempty"`
-		Sticker    fbArchiveMedia   `json:"sticker,omitempty"`
-	} `json:"messages"`
-	Title              string `json:"title"`
-	IsStillParticipant bool   `json:"is_still_participant"`
-	ThreadPath         string `json:"thread_path"`
-	MagicWords         []any  `json:"magic_words"`
-}
-
-func (thread fbMessengerThread) sentTo(senderName, dsName string) []*timeline.Entity {
-	var sentTo []*timeline.Entity //nolint:prealloc // bug filed: https://github.com/alexkohler/prealloc/issues/30
-	for _, participant := range thread.Participants {
-		participantName := FixString(participant.Name)
-		if participantName == senderName {
-			continue
-		}
-		sentTo = append(sentTo, &timeline.Entity{
-			Name: participantName,
-			Attributes: []timeline.Attribute{
-				{
-					Name:     dsName + "_name",
-					Value:    participantName,
-					Identity: true,
-				},
-			},
-		})
-	}
-	return sentTo
 }
 
 var wroteOnOtherTimelineRegex = regexp.MustCompile(`.* wrote on (.*)'s timeline.`)

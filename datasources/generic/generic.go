@@ -27,8 +27,8 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/mholt/goexif2/exif"
-	"github.com/mholt/goexif2/mknote"
+	"github.com/cozy/goexif2/exif"
+	"github.com/cozy/goexif2/mknote"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
 )

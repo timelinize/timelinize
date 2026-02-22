@@ -1,7 +1,7 @@
 <a href="https://timelinize.com">
 	<picture>
-		<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-dark.svg">
-		<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-light.svg">
+		<source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/logo-dark.svg">
+		<source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/logo-light.svg">
 		<img src="https://raw.githubusercontent.com/timelinize/timelinize/main/frontend/resources/images/timelinize-light.svg" alt="Timelinize" width="400">
 	</picture>
 </a>
@@ -11,22 +11,32 @@
 &nbsp;
 [![Discord](https://dcbadge.limes.pink/api/server/C9dCnTW6qV?style=flat-square)](https://discord.gg/C9dCnTW6qV)
 
-Organize your photos & videos, chats & messages, location history, social media content, contacts, and more into a single cohesive timeline on your own computer where you can keep them alive forever.
+Organize your photos & videos, chats & messages, location history, social media content, contacts, and more into a single cohesive timeline on your own computer where you can keep them alive and own them forever.
 
 Timelinize lets you import your data from practically anywhere: your computer, phone, online accounts, GPS-enabled radios, various apps and programs, contact lists, cameras, and more.
 
 **[Join our Discord](https://discord.gg/C9dCnTW6qV)** to discuss!
 
-> [!NOTE]
-> I am looking for a better name for this project. If you have an idea for a good name that is short, relevant, unique, and available, [I'd love to hear it!](https://github.com/timelinize/timelinize/issues/2)
+
+> [!TIP]  
+> Screenshots and videos here portray real timelines containing real data in **demo mode**, which obfuscates the sensitive information. Images are blurred, names and other identifiers are replaced with random data, and some locations are faked. Your timeline will show the real data.
+
+## Videos
+
+**90 second intro:**
+
+[![Timelinize Intro](https://img.youtube.com/vi/B7h_oYAZQbo/0.jpg)](https://www.youtube.com/watch?v=B7h_oYAZQbo)
+
+**30 minute tour:**
+
+[![Timelinize Tour](https://img.youtube.com/vi/VRhtEjz6hws/0.jpg)](https://www.youtube.com/watch?v=VRhtEjz6hws)
+
+
 
 ## Screenshots
 
-These were captured using a dev repository of mine filled with a subset of my real data, so I've run Timelinize in obfuscation mode: images and videos are blurred (except profile pictures---need to fix that); names, identifiers, and locations around sensitive areas are all randomized, and text has been replaced with random words so that the string is about the same length.
-
-(I hope to make a video tour soon.)
-
-**Please remember this is an early alpha preview, and the software is very much evolving and improving. And you can help!**
+> [!NOTE]  
+> The UI is still evolving, so these screenshots are outdated, but they give you the idea.
 
 |  |  |
 | ---- | ---- |
@@ -40,13 +50,13 @@ These were captured using a dev repository of mine filled with a subset of my re
 
 ## How it works
 
-1. [Obtain your data.](https://timelinize.com/docs/data-preparation) This usually involves exporting your data from apps, online accounts, or devices. For example, requesting an archive from Google Takeout. (Apple iCloud, Facebook, Twitter/X, Strava, Instagram, etc. all offer similar functionality for GDPR compliance.) Do this early/soon, because some services take days to provide your data.
-2. Import your data using Timelinize. You don't need to extract or decompress .tar or .zip archives; Timelinize will attempt to recognize your data in its original format and folder structure. All the data you import is indexed in a SQLite database and stored on disk organized by date -- no obfuscation or proprietary formats; you can simply browse your files if you wish.
-3. Explore and organize! Timelinize has a UI that portrays data using various projections and filters. It can recall moments from your past and help you view your life more comprehensively. (It's a great living family history tool.)
-4. Repeat steps 1-3 as often as desired. Timelinize will skip any existing data that is the same and only import new content. You could do this every few weeks or months for busy accounts that are most important to you.
+1. **[Obtain your data.](https://timelinize.com/docs/data-preparation)** This usually involves exporting your data from apps, online accounts, or devices. For example, requesting an archive from Google Takeout. (Apple iCloud, Facebook, Twitter/X, Strava, Instagram, etc. all offer similar functionality for GDPR compliance.) Do this early/soon, because some services take days to provide your data.
+2. **Import your data using Timelinize.** You don't need to extract or decompress .tar or .zip archives; Timelinize will attempt to recognize your data in its original format and folder structure. All the data you import is indexed in a SQLite database and stored on disk organized by date -- no obfuscation or proprietary formats; you can simply browse your files if you wish.
+3. **Explore and organize!** Timelinize has a UI that portrays data using various projections and filters. It can recall moments from your past and help you view your life more comprehensively. (It's a great living family history tool.)
+4. **Repeat steps 1-3 as often as desired.** Timelinize will skip any existing data that is the same and only import new content. You could do this every few weeks or months for busy accounts that are most important to you.
 
 > [!CAUTION]
-> Timelinize is in active development and is still considered unstable. The schema is still changing, necessitating starting over from a clean slate when updating. Always keep your original source data. Expect to delete and recreate your timelines as you upgrade during this alpha development period.
+> Timelinize is in active development and is still  unstable. The schema is still changing, necessitating starting over from a clean slate when updating. Always keep your original source data. Expect to delete and recreate your timelines as you upgrade to new versions/builds.
 
 ## Download and run
 
@@ -127,6 +137,8 @@ This sets up a docker container with all the dependencies required for building 
 
 ## Motivation and vision
 
+(For roadmap, see [issues tagged `long-term 🔭`](https://github.com/timelinize/timelinize/issues?q=is%3Aissue%20label%3A%22long-term%20%F0%9F%94%AD%22).)
+
 The motivation for this project is two-fold. Both press upon me with a sense of urgency, which is why I dedicated some nights and weekends to work on this.
 
 1. Connecting with my family -- both living and deceased -- is important to me and my close relatives. But I wish we had more insights into the lives of those who came before us. What was important to them? Where did they live / travel / spend their time? What lessons did they learn? How did global and local events -- or heck, even the weather -- affect them? What hardships did they endure? What would they have wanted to remember? What would it be like to talk to them? A lot of this could not be known unless they wrote it all down. But these days, we have that data for ourselves. What better time than right now to start collecting personal histories from all available sources and develop a rich timeline of our life for our family, or even just for our own reference and nostalgia.
@@ -151,4 +163,4 @@ I've been working on this project since about 2013, even before I conceptualized
 
 ## License
 
-This project is licensed with AGPL. I chose this license because I do not want others to make proprietary or commercial software using this package. The point of this project is liberation of and control over one's own, personal data, and I want to ensure that this project won't be used in anything that would perpetuate the walled garden dilemma we already face today. Even if the future of this project ever has proprietary source code, I can ensure it will stay aligned with my values and the project's original goals.
+This project is licensed with AGPL. I chose this license because I do not want others, especially companies, to make proprietary or commercial software using this package. The point of this project is liberation of and control over one's own personal data, and I want to ensure that this project won't perpetuate or exacerbate the walled garden problem we already face today. Even if the future of this project ever has proprietary source code, I can ensure it will stay aligned with my values and the project's original goals.

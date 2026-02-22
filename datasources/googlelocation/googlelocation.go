@@ -57,17 +57,13 @@ type Options struct {
 	// The ID of the owner entity. REQUIRED for linking entity in DB.
 	OwnerEntityID uint64 `json:"owner_entity_id"`
 
-	// Set to a value 1-10 to enable path simplification.
-	// 10 means very aggressive simplification (skip many
-	// points, leave practically only clusters or endpoints)
-	// and 1 means to only drop points on the straightest paths.
-	// (My preferred is ~2 when scaled to between 1000 and 50000; i.e. about epsilon=6-7k)
-	Simplification float64 `json:"simplification,omitempty"`
-
 	// When importing location data that was stored only on-device,
 	// any actual information about the device is not available
 	// unless the user provides a name or ID manually.
 	Device string `json:"device,omitempty"`
+
+	// Options specific to the location processor.
+	LocationProcessingOptions
 
 	// keyed by deviceTag from Settings.json
 	devices map[int64]deviceSettings
@@ -285,7 +281,7 @@ func (fi *FileImporter) processFile(ctx context.Context, dec *decoder) error {
 		}
 	}
 
-	locProc, err := NewLocationProcessor(dec, fi.dsOpt.Simplification)
+	locProc, err := NewLocationProcessor(dec, fi.dsOpt.LocationProcessingOptions)
 	if err != nil {
 		return err
 	}

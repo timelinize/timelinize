@@ -66,11 +66,11 @@ type MMS struct {
 // Unfortunately the export format does not currently give us
 // good information for the contacts' names, especially groups.
 // TODO: I've noticed that it even omits the owner from the group sometimes. That must be a bug in the app -- maybe we should always add the owner if not present (as sender if there's no sender)?
-func (m MMS) people(dsOpt Options) (sender timeline.Entity, recipients []timeline.Entity) {
+func (m MMS) people(ctx context.Context, dsOpt Options) (sender timeline.Entity, recipients []timeline.Entity) {
 	addrToPerson := func(addr Address) timeline.Entity {
 		// the processor will standardize phone numbers for us, but we do it here since we
 		// need to compare phone numbers to try to determine who this is
-		standardizedPhoneNum, err := timeline.NormalizePhoneNumber(addr.Address, dsOpt.DefaultRegion)
+		standardizedPhoneNum, err := timeline.NormalizePhoneNumber(ctx, addr.Address, dsOpt.DefaultRegion)
 		if err != nil {
 			// TODO: log this?
 			// oh well; just take what we're given, I guess

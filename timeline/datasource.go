@@ -146,9 +146,6 @@ func AllDataSources() []DataSource {
 func (tl *Timeline) DataSources(ctx context.Context, targetDSName string) ([]DataSourceRow, error) {
 	repoID := tl.id.String()
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
 	var args []any
 	q := "SELECT id, name, title, description, media, media_type, standard FROM data_sources"
 	if targetDSName != "" {
@@ -156,7 +153,7 @@ func (tl *Timeline) DataSources(ctx context.Context, targetDSName string) ([]Dat
 		args = []any{targetDSName}
 	}
 
-	rows, err := tl.db.QueryContext(ctx, q, args...)
+	rows, err := tl.db.ReadPool.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -179,13 +176,10 @@ func (tl *Timeline) DataSources(ctx context.Context, targetDSName string) ([]Dat
 }
 
 func (tl *Timeline) DataSourceImage(ctx context.Context, dsName string) ([]byte, string, error) {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
 	var img []byte
 	var mimeType string
 
-	err := tl.db.QueryRowContext(ctx,
+	err := tl.db.ReadPool.QueryRowContext(ctx,
 		"SELECT media, media_type FROM data_sources WHERE name=? LIMIT 1", dsName).Scan(&img, &mimeType)
 
 	return img, mimeType, err
@@ -193,6 +187,7 @@ func (tl *Timeline) DataSourceImage(ctx context.Context, dsName string) ([]byte,
 
 // TODO: WIP...
 type RecognizeParams struct {
+	// TODO: Possible FastMode, which might result in less confident matches, but can go faster?
 }
 
 // DataSourceRecognition stores the result of whether a data source recognizes an input.
@@ -215,6 +210,8 @@ type Recognition struct {
 
 	// Optional; TODO: used?
 	SnapshotDate *time.Time `json:"snapshot_date,omitempty"`
+
+	// TODO: Add some sort of warning/notice/message if the recognizer has advice/info for the user
 }
 
 // DirEntry is a fs.DirEntry that represents a directory entry (file

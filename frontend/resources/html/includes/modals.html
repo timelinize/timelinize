@@ -107,7 +107,7 @@
 	<div class="mb-3">
 		<div class="row">
 			<div class="col-auto">
-				<span class="avatar avatar-md" style="background-image: url(./static/avatars/002m.jpg)"></span>
+				<span class="avatar avatar-md"></span>
 			</div>
 			<div class="col">
 				<div class="mb-3">
@@ -115,6 +115,21 @@
 					<input type="text" class="sms_backup_restore-owner-phone form-control" placeholder="+1-123-456-7890"
 						required>
 					<small class="form-hint">The phone number that originated this file. A phone number is required, so if this is empty, the timeline owner's phone number will be used (if it is already in the timeline).</small>
+				</div>
+			</div>
+		</div>
+	</div>
+</template>
+
+<template id="tpl-dsopt-facebook">
+	<div class="mb-3">
+		<div class="row">
+			<div class="col">
+				<div class="mb-3">
+					<label class="form-label required">Facebook account username</label>
+					<input type="text" class="facebook-owner-username form-control" placeholder="happy_person123"
+						required>
+					<small class="form-hint">The username of the Facebook account from which the data originated. A username is required, so if this is empty, the timeline owner's Facebook username will be used (if it is already in the timeline).</small>
 				</div>
 			</div>
 		</div>
@@ -146,6 +161,18 @@
 					large data set.
 					A value of 10 means that almost every point except those at the
 					ends of paths will be discarded.
+				</div>
+			</div>
+		</div>
+		<div class="mb-3 row">
+			<label class="col-4 col-form-label">Clustering strength</label>
+			<div class="col">
+				<input type="text" class="google_location-clustering-coeff form-control" placeholder="1.0">
+				<div class="small form-hint">
+					How aggressive point clustering should be. 0 disables clustering.
+					A higher value means more aggressive clustering.
+					Must be non-negative.
+					1.0 is the default.
 				</div>
 			</div>
 		</div>
@@ -207,7 +234,54 @@
 				</div>
 			</div>
 		</div>
-		<!-- todo: simplification -->
+		<div class="mb-3 row">
+			<label class="col-3 col-form-label">Simplification</label>
+			<div class="col">
+				<div class="geojson-simplification form-range mb-2 mt-2"></div>
+				<div class="small form-hint">
+					Reduce the size of the data set by dropping unimportant points
+					(after denoising and clustering).
+					Lower values keeps more data by dropping only those on straight paths,
+					whereas higher values drops more points.
+					A value of 0 means that no points will be discarded, resulting in a
+					large data set.
+					A value of 10 means that almost every point except those at the
+					ends of paths will be discarded.
+				</div>
+			</div>
+		</div>
+	</fieldset>
+</template>
+
+
+<template id="tpl-dsopt-nmea0183">
+	<fieldset class="form-fieldset mb-0">
+		<div class="mb-3 row">
+			<label class="col-4 col-form-label required">Person</label>
+			<div class="col">
+				<select class="nmea0183-owner form-select" placeholder="Name or contact info">
+				</select>
+				<div class="small form-hint">
+					Select the person whose location data this is.
+				</div>
+			</div>
+		</div>
+		<div class="mb-3 row">
+			<label class="col-3 col-form-label">Simplification</label>
+			<div class="col">
+				<div class="nmea0183-simplification form-range mb-2 mt-2"></div>
+				<div class="small form-hint">
+					Reduce the size of the data set by dropping unimportant points
+					(after denoising and clustering).
+					Lower values keeps more data by dropping only those on straight paths,
+					whereas higher values drops more points.
+					A value of 0 means that no points will be discarded, resulting in a
+					large data set.
+					A value of 10 means that almost every point except those at the
+					ends of paths will be discarded.
+				</div>
+			</div>
+		</div>
 	</fieldset>
 </template>
 

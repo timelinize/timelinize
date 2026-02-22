@@ -87,9 +87,14 @@ func (s *server) fillAllowedOrigins(configuredOrigins []string, listenAddr strin
 	if err != nil {
 		listenHost = listenAddr // assume no port (or a default port)
 	}
-	if configuredOrigins == nil {
-		if originEnv := os.Getenv("TLZ_ORIGIN"); originEnv != "" {
-			configuredOrigins = []string{originEnv}
+	// the environment variable takes priority over the config file (see #171)
+	if originEnv := os.Getenv("TLZ_ORIGIN"); originEnv != "" {
+		origins := strings.Split(originEnv, ",")
+		configuredOrigins = make([]string, 0, len(origins))
+		for _, origin := range origins {
+			if trimmed := strings.TrimSpace(origin); trimmed != "" {
+				configuredOrigins = append(configuredOrigins, trimmed)
+			}
 		}
 	}
 	uniqueOrigins := make(map[string]struct{})

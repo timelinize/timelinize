@@ -21,6 +21,7 @@ package twitter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -179,6 +180,10 @@ func (c *Client) makeItemGraphFromTweet(_ context.Context, params timeline.Impor
 				targetFileInArchive := path.Join("data", "tweets_media", dataFileName)
 
 				file, err := fsys.Open(targetFileInArchive)
+				if errors.Is(err, fs.ErrNotExist) {
+					targetFileInArchive = path.Join("data", "tweet_media", dataFileName) // archives from/until (?) 2022 use the singular word "tweet", similar to tweet.js vs. tweets.js
+					file, err = fsys.Open(targetFileInArchive)
+				}
 				if err == nil {
 					m.readCloser = file
 				} else {

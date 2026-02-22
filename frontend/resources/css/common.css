@@ -7,9 +7,14 @@
 
 /*
 
-MY OWN TABLER (BETA 19, 20, 21, 22, and v1.1.1) FIXES
+MY OWN TABLER (BETA 19, 20, 21, 22, and v1.1.1, and v1.4.0) FIXES
 
 */
+
+/* scrollbar styling broke by adding a left margin... see https://github.com/tabler/tabler/issues/2271 -- this might not be the right fix: */
+:root {
+	margin-left: 0;
+}
 
 /* that single-story "a" looks terrible IMO, so disable cv11. See all Inter font features here: https://rsms.me/inter/#features */
 body {
@@ -46,7 +51,10 @@ a parent div. this takes care of that by removing the >. */
 	border-bottom-left-radius: 0;
 }
 
-
+/* broke in v1.4 (clicking on items in Map view) */
+.btn-actions {
+	align-items: center;
+}
 
 /* broke sometime between Beta 22 and v1.1.1 */
 .ts-wrapper.multi .ts-control > div {
@@ -72,7 +80,7 @@ a parent div. this takes care of that by removing the >. */
 /* the tabler-defined height of 1.25rem shifts alignment to be off when inputs are in a row - removing it equalizes heights and alignment of form elements */
 .dropdown-item-indicator {
 	height: inherit;
-	margin-left: 0; /* this fixes the -.25rem value that causes images to be cut off
+	margin-left: 0; /* this fixes the -.25rem value that causes images to be cut off */
 }
 
 
@@ -83,28 +91,14 @@ a parent div. this takes care of that by removing the >. */
 
 
 
-
-
-html,
-body {
-	font-family: Inter, sans-serif;
-	/* height: 100%; */
-}
-
-/* The conversations page needs this, I think (along with the height:100% above), but it breaks the dropdown menu for the mobile navbar */
-/* body {
-	overflow: hidden;
-	display: flex;
-	flex-flow: column;
-} */
 
 .page::-webkit-scrollbar-track {
 	margin-top: 56px !important;
 }
 
 .translucent {
-	backdrop-filter: blur(10px);
-	-webkit-backdrop-filter: blur(10px);
+	backdrop-filter: blur(15px);
+	-webkit-backdrop-filter: blur(15px);
 }
 
 .translucent:not([data-bs-theme=dark]) {
@@ -127,21 +121,32 @@ body {
 }
 
 .thumbhash-container {
-	position: relative;
-	overflow: hidden;
+	display: grid;
+	margin: 0 auto;
+	max-height: inherit;
+}
+
+.thumbhash-container > * {
+	grid-column: 1;
+	grid-row: 1;
+}
+
+.thumbhash {
+	width: 100%;
+	background: black; /* when animated with "breathing" (the "radiate" keyframes), Chrome renders strange fade-to-white on bottom and right edges, unless bg is black */
+}
+
+/* Used to indicate something is loading/processing */
+.breathing {
+	animation: 3s ease-in 0s infinite radiate;
+}
+@keyframes radiate {
+	50% { opacity: 0.65; }
 }
 
 .thumbhash-container .content {
+	object-fit: contain;
 	width: 100%;
-	max-height: 100%;
-	object-fit: cover;
-}
-
-.thumbhash-container .absolute {
-	position: absolute;
-	top: 0;
-	left: 0;
-	background: white; /* TODO: Obviously, this is not always correct; it should be 'inherit', but this doesn't work for some reason */
 }
 
 .fade-in {
@@ -160,19 +165,20 @@ body {
 
 .loader-supercontainer {
 	position: relative;
+	display: grid;
+	height: 100%;
+	overflow: hidden; /* mainly for rounded corners, so the sharp corners don't stick out */
+	place-items: center;
+	object-fit: cover;
+}
+
+.loader-supercontainer > * {
+	grid-area: 1 / 1; /* the content and the loader are superimposed on each other, without position: absolute -- neat! now the container considers both elements' sizes */
 }
 
 .loader-container {
 	padding: 1rem;
-	min-width: 150px;
-	width: 100%;
-	border-radius: 5px;
-
-	position: absolute;
-	top: 0;
-	bottom: 0;
-	left: 0;
-	right: 0;
+	place-self: stretch;
 }
 
 .loader-container-content {
@@ -292,6 +298,10 @@ form .dropdown-menu {
 	min-width: var(--tblr-icon-size);
 }
 
+/* This is needed to make date dropdowns fill the width, for some reason */
+.filter .input-icon {
+	flex: 1;
+}
 
 
 
@@ -581,7 +591,19 @@ styles. But it took hours to figure them out!
 
 
 
+.content {
+	display: block;
+}
 
+.rounded {
+	overflow: hidden; /* prevent pointy corners from sticking out past the border-radius; IMO tabler should do this, but they use simple background-image */
+}
+
+.card-img-top .content, .card-img-bottom .content, /* images */
+.card-img-top.content, .card-img-bottom.content { /* videos */
+	object-fit: cover;
+	width: 100%;
+}
 
 
 /* TODO: still working on this */
@@ -600,42 +622,40 @@ styles. But it took hours to figure them out!
 	align-content: stretch;
 }
 
-.minidisp-media:not(.minidisp-media-nocrop) > a {
-	display: flex;
-}
-
 .minidisp-media > a {
 	flex: 1;
-	align-content: stretch;
 }
 
-.minidisp-media .thumbhash-container,
-.minidisp-media .content {
-	max-height: 150px;
+.minidisp-media > a > * {
 	min-width: 180px;
 	max-width: 100%;
-	flex: 1;
+	width: 100%;
+}
+
+.minidisp-media video {
 	object-fit: cover;
-	flex-basis: content;
+}
+
+.minidisp-media .thumbhash {
+	max-height: inherit;
+	height: 100%;
+}
+
+.minidisp-media .thumbhash-container {
+	margin: 0;
 }
 
 .minidisp-media .thumbhash-container .content {
-	width: 100%;
 	height: 100%;
-	flex: 1;
 	object-fit: cover;
-	flex-basis: content;
 }
 
-.minidisp-media-nocrop > a > * {
-	flex: 0;
-}
-.minidisp-media-nocrop .content {
-	object-fit: inherit;
-}
 .minidisp-media-xl .thumbhash-container,
 .minidisp-media-xl .content {
 	max-height: 500px;
+}
+.minidisp-media-xl > a > * {
+	width: auto;
 }
 .minidisp-media-l .thumbhash-container,
 .minidisp-media-l .content {

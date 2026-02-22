@@ -27,6 +27,7 @@ import (
 	"io"
 	"io/fs"
 
+	"github.com/timelinize/timelinize/datasources/googlelocation"
 	"github.com/timelinize/timelinize/datasources/gpx"
 	"github.com/timelinize/timelinize/timeline"
 	"go.uber.org/zap"
@@ -48,7 +49,8 @@ func init() {
 
 // Options configures the data source.
 type Options struct {
-	Simplification float64 `json:"simplification,omitempty"`
+	// Options specific to the location processor.
+	googlelocation.LocationProcessingOptions
 }
 
 // FileImporter implements the timeline.FileImporter interface.
@@ -238,7 +240,12 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		coll.Metadata.StringsToSpecificType()
 
 		err = fi.processActivity(ctx, dirEntry.FS, rec[fields["Filename"]], owner, coll, params)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Strava is known to write some filenames as "#error#", indicating a bug in their export process: see issue #137
+			params.Log.Error("could not open activity file; likely Strava bug causing export corruption",
+				zap.String("filename", rec[fields["Filename"]]),
+				zap.Error(err))
+		} else if err != nil {
 			return err
 		}
 	}
@@ -255,7 +262,7 @@ func (FileImporter) processActivity(ctx context.Context, fsys fs.FS, filename st
 	}
 	defer file.Close()
 
-	proc, err := gpx.NewProcessor(file, owner, opt, dsOpt.Simplification)
+	proc, err := gpx.NewProcessor(file, owner, opt, dsOpt.LocationProcessingOptions)
 	if err != nil {
 		return err
 	}

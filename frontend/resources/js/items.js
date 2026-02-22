@@ -9,8 +9,6 @@ function itemsPageFilterParams() {
 	const lim = limit();
 	
 	let params = {
-		start_timestamp: datePicker.selectedDates[0],
-		end_timestamp: datePicker.selectedDates[1],
 		offset: lim * (currentPageNum()-1),
 		limit: lim + 1, // add one to know if there's a next page
 		sort: $('.date-sort').value,
@@ -122,7 +120,7 @@ async function itemsMain() {
 	// render all items
 	for (let i = 0; i < results.items?.length; i++) {
 		const item = results.items[i];
-		const ts = DateTime.fromISO(item.timestamp);
+		const ts = DateTime.fromISO(item.timestamp, { setZone: true });
 		const itemLink = `/items/${repo.instance_id}/${item.id}`;
 
 		const tpl = cloneTemplate('#tpl-item');
@@ -144,7 +142,7 @@ async function itemsMain() {
 			$('a.owner-entity', tpl).href = `/entities/${repo.instance_id}/${item.entity.id}`;
 		}
 
-		if (item.embedding_id) {
+		if (item.has_embedding) {
 			const a = document.createElement('a');
 			a.classList.add("btn", "btn-outline", "secondary");
 			a.innerText = "Similar items";
@@ -166,6 +164,7 @@ async function itemsMain() {
 		$('.class-icon', tpl).innerHTML = tlz.itemClassIconAndLabel(item).icon;
 
 		const itemContentEl = itemContentElement(item, { thumbnail: true });
+		itemContentEl.classList.add('rounded');
 		if (itemContentEl.dataset.contentType == "audio")
 		{
 			// show title & artist if available
@@ -220,7 +219,7 @@ async function itemsMain() {
 			}
 		}
 
-		if (!item.entity && $('.other-entities', tpl).isEmpty()) {
+		if (!item.entity && $('.other-entities', tpl).isEmpty() && $('.similar-to', tpl).isEmpty()) {
 			$('.item-entities', tpl).remove();
 		}
 

@@ -50,6 +50,7 @@ func Main(embeddedWebsite fs.FS) {
 	if err != nil {
 		timeline.Log.Fatal("failed to run application", zap.Error(err))
 	}
+	defer app.Shutdown() // close timelines, stop python server if running, etc.
 
 	flag.Parse()
 
@@ -84,7 +85,7 @@ func Main(embeddedWebsite fs.FS) {
 
 	if isDesktopAvailable() {
 		// once the server is running, open GUI in web browser
-		if err := openWebBrowser("http://127.0.0.1:12002"); err != nil {
+		if err := openWebBrowser(ctx, "http://127.0.0.1:12002"); err != nil {
 			timeline.Log.Error("could not open web browser", zap.Error(err))
 		}
 	} else {
@@ -107,7 +108,7 @@ func isDesktopAvailable() bool {
 // fully-qualified URL including a trailing slash even if there
 // is no path (e.g. "http://host/" not "http://host"); if the
 // trailing slash is not present, it will be appended.
-func openWebBrowser(loc string) error {
+func openWebBrowser(ctx context.Context, loc string) error {
 	osCommand := map[string][]string{
 		"darwin":  {"open"},
 		"freebsd": {"xdg-open"},
@@ -139,7 +140,7 @@ func openWebBrowser(loc string) error {
 	timeline.Log.Info("opening web browser to application",
 		zap.Strings("command", append([]string{exe}, args...)))
 
-	cmd := exec.Command(exe, args...)
+	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -153,6 +154,14 @@ func getStandardSubcommand(app *tlzapp.App) (string, func() error) {
 				return err
 			}
 			select {}
+		},
+		"reset": func() error {
+			cfg, err := loadConfigFile()
+			if err != nil {
+				return err
+			}
+			cfg.Repositories = nil
+			return cfg.Save()
 		},
 		"help": func() error { //nolint:unparam // bug filed: https://github.com/mvdan/unparam/issues/82
 			fmt.Println(app.CommandLineHelp())

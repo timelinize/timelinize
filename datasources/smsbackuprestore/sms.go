@@ -55,8 +55,7 @@ type CommonSMSandMMSFields struct {
 
 // within returns true if c.Date is within the given timeframe (it ignores item ID frames).
 func (c CommonSMSandMMSFields) within(tf timeline.Timeframe) bool {
-	// ts := time.Unix(0, c.Date*int64(time.Millisecond))
-	ts := time.UnixMilli(c.Date)
+	ts := time.UnixMilli(c.Date).UTC()
 	return tf.Contains(ts)
 }
 

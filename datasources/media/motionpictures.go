@@ -67,11 +67,12 @@ func IsSidecarVideo(fsys fs.FS, filePath string) bool {
 	vidExtLower := strings.ToLower(vidExt)
 
 	switch vidExtLower {
-	case ".mov", ".mp4":
+	case ".mov", ".mp4", "": // possible extensions; Google Photos takeout sometimes has a bug where there is NO extension on the sidecar video file!
 		// IMG_1234.MOV is a sidecar for IMG_1234.[HEIC|JPG|JPEG|HEIF]
+		// (!! so is IMG_1234 without an extension !! -- I have seen this, presumably a bug, in Google Takeout before)
 		for _, imgExt := range []string{".HEIC", ".JPG", ".JPEG", ".HEIF"} {
 			// iPhone uses uppercase by default (but just in case, try lower...)
-			if vidExt == vidExtLower {
+			if vidExt != "" && vidExt == vidExtLower {
 				imgExt = strings.ToLower(imgExt)
 			}
 			imageFilename := strings.TrimSuffix(filePath, vidExt) + imgExt
@@ -128,9 +129,15 @@ func ConnectMotionPhoto(logger *zap.Logger, fsys fs.FS, pictureFile string, ig *
 		// try the extensions that match the image file's case; they're usually uppercase
 		// but I've seen lowercase after some photo libraries export them; e.g. Google Photos
 		// exports as .MP4 files even though they are originally .MOV.
-		livePhotoExts := []string{".MOV", ".MP4"}
+		// FUN FACT: In 2025, I've seen Google Photos takeouts where some of the sidecar
+		// motion videos don't have any extension at all! Most of them in the same folder
+		// in the same archive do, but some do not. Sometimes. So, we also accept the same
+		// filename without an extension, I guess.
+		// (If the filename extension ends up being too naive, we can check for the ftyp
+		// header in the first few bytes of the file, but that's likely slower.)
+		livePhotoExts := []string{".MOV", ".MP4", ""}
 		if ext == lowExt {
-			livePhotoExts = []string{".mov", ".mp4"}
+			livePhotoExts = []string{".mov", ".mp4", ""}
 		}
 		for _, livePhotoExt := range livePhotoExts {
 			trySidecarName := itemPathNoExt + livePhotoExt

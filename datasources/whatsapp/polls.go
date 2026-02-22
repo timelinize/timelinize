@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/timelinize/timelinize/timeline"
 )
@@ -24,7 +25,9 @@ func extractPoll(content []string) (string, timeline.Metadata, bool) {
 
 	meta := make(timeline.Metadata)
 	meta["Poll question"] = parts[1]
-	customMessage := parts[1]
+
+	var sb strings.Builder // custom message
+	sb.WriteString(parts[1])
 
 	for i, optLine := range content[2:] {
 		parts := optionRegex.FindStringSubmatch(optLine)
@@ -32,7 +35,11 @@ func extractPoll(content []string) (string, timeline.Metadata, bool) {
 			return "", nil, false
 		}
 
-		customMessage += "\r\n- " + parts[1] + " (☑︎ " + parts[2] + ")"
+		sb.WriteString("\r\n- ")
+		sb.WriteString(parts[1])
+		sb.WriteString(" (☑︎ ")
+		sb.WriteString(parts[2])
+		sb.WriteRune(')')
 
 		// No need to track error, it's extracted with `\d+`
 		voteCount, _ := strconv.Atoi(parts[2])
@@ -41,5 +48,5 @@ func extractPoll(content []string) (string, timeline.Metadata, bool) {
 		meta[fmt.Sprintf("Poll votes %d", i+1)] = voteCount
 	}
 
-	return customMessage, meta, true
+	return sb.String(), meta, true
 }

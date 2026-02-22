@@ -42,6 +42,10 @@ const (
 	PyPort = 12003
 )
 
+// embeddingJob represents an embedding job. These jobs only
+// insert new embeddings, they don't update existing ones.
+// If existing embeddings are no longer valid/relevant, they
+// should be deleted prior to this.
 type embeddingJob struct {
 	// be sure not to include duplicates in this list
 	ItemIDs []int64 `json:"item_ids,omitempty"`
@@ -52,7 +56,7 @@ type embeddingJob struct {
 
 func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 	var chkpt embeddingJobCheckpoint
-	if checkpoint != nil {
+	if len(checkpoint) > 0 {
 		if err := json.Unmarshal(checkpoint, &chkpt); err != nil {
 			job.logger.Error("failed to resume from checkpoint", zap.Error(err))
 		}
@@ -81,24 +85,29 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 	logger.Info("counting total size of job")
 
-	const mostOfQuery = `FROM items
-			LEFT JOIN embeddings ON embeddings.id = items.embedding_id
-			LEFT JOIN jobs ON jobs.id = items.modified_job_id
-			WHERE (items.job_id=? OR items.modified_job_id=?)
-				AND (items.data_type LIKE 'image/%' OR items.data_type LIKE 'text/%')
-				AND (items.data_id IS NOT NULL OR items.data_text IS NOT NULL OR items.data_file IS NOT NULL)
-				AND (items.embedding_id IS NULL
-					OR embeddings.generated < items.stored
-					OR (embeddings.generated < items.modified
-						AND embeddings.generated < jobs.ended))`
+	// select items to work on if they don't have an embedding yet,
+	// or if their embedding was created before the modifying job
+	// started, or if their embedding was created before the item
+	// was manually modified; note that we use <= for timestamp
+	// equality, because precision is only in seconds, and some
+	// import jobs can finish very quickly so they can generate
+	// embeddings the same second (TODO: maybe we should use milliseconds across the board)
+	const mostOfQuery = `
+		FROM items
+		LEFT JOIN embeddings ON embeddings.item_id = items.id
+		LEFT JOIN jobs ON jobs.id = items.modified_job_id
+		WHERE (items.job_id=? OR items.modified_job_id=?)
+			AND (items.data_type LIKE 'image/%' OR items.data_type LIKE 'text/%')
+			AND (items.data_id IS NOT NULL OR items.data_text IS NOT NULL OR items.data_file IS NOT NULL)	
+			AND (embeddings.id IS NULL
+				OR embeddings.generated <= jobs.start/1000
+				OR embeddings.generated <= items.modified)`
 
-	job.tl.dbMu.RLock()
 	var jobSize int
-	err := job.tl.db.QueryRowContext(job.ctx, `
+	err := job.tl.db.ReadPool.QueryRowContext(job.ctx, `
 		SELECT count()
 			`+mostOfQuery,
 		ej.ItemsFromImportJob, ej.ItemsFromImportJob).Scan(&jobSize)
-	job.tl.dbMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed counting size of job: %w", err)
 	}
@@ -130,8 +139,7 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 		// select items from the configured import job that have a data type we can generate embeddings for,
 		// and which actually have data, and which do not yet have embeddings (OR the embedding is outdated
 		// and the item was updated more recently than the embedding), and which are on this page of results
-		job.tl.dbMu.RLock()
-		rows, err := job.tl.db.QueryContext(job.ctx, `
+		rows, err := job.tl.db.ReadPool.QueryContext(job.ctx, `
 			SELECT items.id, items.stored, items.data_type
 			`+mostOfQuery+`
 				AND items.id > ?
@@ -139,7 +147,6 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 			LIMIT ?
 			`, ej.ItemsFromImportJob, ej.ItemsFromImportJob, lastItemID, pageSize)
 		if err != nil {
-			job.tl.dbMu.RUnlock()
 			return fmt.Errorf("failed querying page of database table: %w", err)
 		}
 		var hadRow bool
@@ -152,7 +159,6 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 			err := rows.Scan(&rowID, &stored, &dataType)
 			if err != nil {
 				defer rows.Close()
-				job.tl.dbMu.RUnlock()
 				return fmt.Errorf("failed to scan row from database page: %w", err)
 			}
 
@@ -164,7 +170,6 @@ func (ej embeddingJob) Run(job *ActiveJob, checkpoint []byte) error {
 			}
 		}
 		rows.Close()
-		job.tl.dbMu.RUnlock()
 		if err = rows.Err(); err != nil {
 			return fmt.Errorf("iterating rows for researching embeddings failed: %w", err)
 		}
@@ -248,14 +253,12 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 	// text (read the text directly from the DB), and a separate data table (read the blob directly
 	// from the DB); only 1 of those should be non-nil, so we set the "data" variable to whichever
 	// one it is, to be sure we send it in for an embedding
-	job.tl.dbMu.RLock()
-	err := job.tl.db.QueryRowContext(ctx,
+	err := job.tl.db.ReadPool.QueryRowContext(ctx,
 		`SELECT items.data_file, items.data_text, items.data_type, item_data.content
 		FROM items
 		LEFT JOIN item_data ON item_data.id = items.data_id
 		WHERE items.id=?
 		LIMIT 1`, itemID).Scan(&dataFile, &dataText, &dataType, &data)
-	job.tl.dbMu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("querying item for which to generate embedding: %w", err)
 	}
@@ -278,34 +281,9 @@ func (ej embeddingJob) generateEmbeddingForItem(ctx context.Context, job *Active
 		return err
 	}
 
-	job.tl.dbMu.Lock()
-	defer job.tl.dbMu.Unlock()
-
-	tx, err := job.tl.db.Begin()
-	if err != nil {
-		return fmt.Errorf("opening transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// TODO: Why don't we use RETURNING here? is it because the tx isn't committed?
-	_, err = tx.ExecContext(ctx, "INSERT INTO embeddings (embedding) VALUES (?)", v)
+	_, err = job.tl.db.WritePool.ExecContext(ctx, "INSERT INTO embeddings (item_id, embedding) VALUES (?, ?)", itemID, v)
 	if err != nil {
 		return fmt.Errorf("storing embedding for item %d: %w", itemID, err)
-	}
-
-	var embedRowID int64
-	err = tx.QueryRowContext(ctx, "SELECT last_insert_rowid() FROM embeddings LIMIT 1").Scan(&embedRowID)
-	if err != nil {
-		return fmt.Errorf("getting last-stored embedding ID for item %d: %w", itemID, err)
-	}
-
-	_, err = tx.Exec(`UPDATE items SET embedding_id=? WHERE id=?`, embedRowID, itemID) // TODO: LIMIT 1
-	if err != nil {
-		return fmt.Errorf("linking item %d to embedding: %w", itemID, err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	return nil

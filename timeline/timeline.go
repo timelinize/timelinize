@@ -43,14 +43,13 @@ import (
 
 // Timeline represents an opened timeline repository.
 // The zero value is NOT valid; use Open() to obtain
-// a valid value.
+// a valid value. Timeline values MUST NOT be copied.
 type Timeline struct {
 	// A context used primarily for cancellation.
 	ctx    context.Context
 	cancel context.CancelFunc // to be called only by the shutdown routine
 
 	repoDir      string              // path of the timeline repository
-	cacheDir     string              // path of the cache folder (not including the repository subfolder); this generally exists outside the timeline
 	rateLimiters map[int64]RateLimit // keyed by account ID
 	id           uuid.UUID
 
@@ -67,20 +66,17 @@ type Timeline struct {
 	activeJobs   map[uint64]*ActiveJob
 	activeJobsMu sync.RWMutex
 
-	// The database handle and its mutex. Why a mutex for a DB handle? Because
-	// high-volume imports can sometimes yield "database is locked" errors,
-	// presumably because of scanning rows (`for rows.Next()`) while trying
-	// to do a write from another query at the same time:
-	// https://github.com/mattn/go-sqlite3/issues/607#issuecomment-808739698
-	// and this is totally possible since we run our DB ops concurrently.
-	// It's unfortunate that DB locking doesn't handle this for us, but by
-	// wrapping DB calls in this mutex I've noticed the problem disappear.
-	db         *sql.DB
-	dbMu       sync.RWMutex
+	// keeps track of which data file directories are being worked, and
+	// by how many goroutines; this is useful so we don't accidentally
+	// delete an empty directory that may still have a file created in it
+	dataFileWorkingDirs   map[string]int
+	dataFileWorkingDirsMu sync.Mutex
+
+	// The database handle
+	db         sqliteDB
 	optimizing *int64 // accessed atomically; drops overlapping ANALYZE calls
 
-	thumbs   *sql.DB
-	thumbsMu sync.RWMutex
+	thumbs sqliteDB
 }
 
 func (tl *Timeline) String() string { return fmt.Sprintf("%s:%s", tl.id, tl.repoDir) }
@@ -100,7 +96,7 @@ func (tl *Timeline) SetObfuscationFunc(f func() (ObfuscationOptions, bool)) { tl
 // path is already a Timelinize repo, then fs.ErrExist is returned.
 //
 // Timelines should always be Close()'d for a clean shutdown when done.
-func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
+func Create(ctx context.Context, repoPath string) (*Timeline, error) {
 	// ensure the directory exists
 	err := os.MkdirAll(repoPath, 0755)
 	if err != nil {
@@ -146,39 +142,35 @@ func Create(ctx context.Context, repoPath, cacheDir string) (*Timeline, error) {
 		}
 	}
 
-	return openAndProvisionTimeline(ctx, repoPath, cacheDir)
+	return openAndProvisionTimeline(ctx, repoPath, false)
 }
 
 // directoryEmpty returns true if dirPath is an empty directory except for some
 // common, but non-critical, OS files. If false, the name of the first discovered
-// file is returned. If deletePointlessFiles is true, then those implicit OS files
+// file is returned. If deleteUnintentionalFiles is true, then those implicit OS files
 // (like .DS_Store) will be deleted while considering whether a dir is empty.
 // (It is not required to delete the file to still consider it empty, but if
 // preparing an empty dir for deletion, emptying the dir of pointless files will
 // come in handy.)
-func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, error) {
+func directoryEmpty(dirPath string, deleteUnintentionalFiles bool) (bool, string, error) {
 	dir, err := os.Open(dirPath)
 	if err != nil {
 		return false, "", fmt.Errorf("opening folder: %w", err)
 	}
 	defer dir.Close()
 
-	// no need to read whole listing; all we need to do is find one non-intentional file
-	// (reading 2 allows for 1 pointless file)
-	fileList, err := dir.Readdirnames(2) //nolint:mnd
+	// no need to read whole listing; all we need to do is find one intentional file
+	// (read more than the list of unintentional files is long, to ensure if multiple
+	// of them exist, we can be sure if the folder is "empty")
+	fileList, err := dir.Readdirnames(len(unintentionalFiles) + 1)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, "", fmt.Errorf("reading folder contents: %w", err)
 	}
 
-	pointlessFiles := map[string]struct{}{
-		".DS_Store": {},
-		"Thumbs.db": {},
-	}
-
 	for _, f := range fileList {
 		// ignore, and possibly delete, pointless files
-		if _, ok := pointlessFiles[f]; ok {
-			if deletePointlessFiles {
+		if _, ok := unintentionalFiles[f]; ok {
+			if deleteUnintentionalFiles {
 				err := os.Remove(filepath.Join(dirPath, f))
 				if err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return false, f, fmt.Errorf("unable to delete pointless file: %w", err)
@@ -192,28 +184,45 @@ func directoryEmpty(dirPath string, deletePointlessFiles bool) (bool, string, er
 	return true, "", nil
 }
 
+// unintentionalFiles is a map of common file a user did not intentionally create.
+var unintentionalFiles = map[string]struct{}{
+	".DS_Store":       {},
+	".Spotlight-V100": {},
+	".Trash-1000":     {},
+	".Trashes":        {},
+	"Thumbs.db":       {},
+}
+
 // FolderAssessment returns the analysis of a folder related to
 // the existence or possibility of a timeline repository.
+// Regardless of the input path, the answers relate to the
+// TimelinePath. It may be different if the assessment determines
+// a subfolder should be used for the timeline instead.
 //
 //nolint:errname
 type FolderAssessment struct {
-	HasTimeline          bool   `json:"has_timeline"`
-	TimelineCanBeCreated bool   `json:"timeline_can_be_created"`
-	TimelinePath         string `json:"timeline_path,omitempty"`
-	Reason               string `json:"reason,omitempty"`
+	TimelinePath string `json:"timeline_path,omitempty"`
+
+	// If either of these are true, expect TimelinePath to be set also.
+	HasTimeline          bool `json:"has_timeline"`
+	TimelineCanBeCreated bool `json:"timeline_can_be_created"`
+
+	Reason string `json:"reason,omitempty"`
 }
 
 func (fa FolderAssessment) Error() string {
-	return fmt.Sprintf("Has timeline: %t - Timeline can be created: %t - Path: %s - Reason: '%s'",
+	return fmt.Sprintf("Has timeline: %t - Timeline can be created? %t - Path: %s - Reason: '%s'",
 		fa.HasTimeline, fa.TimelineCanBeCreated, fa.TimelinePath, fa.Reason)
 }
 
 func AssessFolder(fpath string) FolderAssessment {
+	fpath = filepath.Clean(fpath)
+
 	info, err := os.Stat(fpath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return FolderAssessment{
 			TimelineCanBeCreated: true,
-			TimelinePath:         filepath.Clean(fpath),
+			TimelinePath:         fpath,
 			Reason:               "folder does not exist yet",
 		}
 	}
@@ -284,7 +293,7 @@ func AssessFolder(fpath string) FolderAssessment {
 	repoDBFile = filepath.Join(proposedPath, DBFilename)
 	if FileExists(repoDBFile) {
 		return FolderAssessment{
-			HasTimeline:  true,
+			HasTimeline:  true, // the timeline is in the subfolder though, not in the input directory
 			TimelinePath: proposedPath,
 			Reason:       fmt.Sprintf("selected folder is not empty (has file <code>%s</code>), and timeline database already exists within at <code>%s</code>", problematicFile, repoDBFile),
 		}
@@ -298,7 +307,7 @@ func AssessFolder(fpath string) FolderAssessment {
 // it does not attempt to create one if it does not already exist.
 // Timelines should always be Close()'d for a clean shutdown when done.
 // TODO: what happens if a timeline folder is (re)moved while it is open?
-func Open(ctx context.Context, repo, cache string) (*Timeline, error) {
+func Open(ctx context.Context, repo string, resumeJobs bool) (*Timeline, error) {
 	// construct filenames within this repo folder specifically
 	repoDBFile := filepath.Join(repo, DBFilename)
 	repoDataFolder := filepath.Join(repo, DataFolderName)
@@ -317,18 +326,18 @@ func Open(ctx context.Context, repo, cache string) (*Timeline, error) {
 		return nil, fmt.Errorf("data folder exists but database is missing within %s - please choose a folder that is either empty or a fully-initialized timeline", repo)
 	}
 
-	return openAndProvisionTimeline(ctx, repo, cache)
+	return openAndProvisionTimeline(ctx, repo, resumeJobs)
 }
 
-func openAndProvisionTimeline(ctx context.Context, repoDir, cacheDir string) (*Timeline, error) {
-	db, err := openAndProvisionDB(ctx, repoDir)
+func openAndProvisionTimeline(ctx context.Context, repoDir string, resumeJobs bool) (*Timeline, error) {
+	db, err := openAndProvisionTimelineDB(ctx, repoDir)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
-	return openTimeline(ctx, repoDir, cacheDir, db)
+	return openTimeline(ctx, repoDir, db, resumeJobs)
 }
 
-func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*Timeline, error) {
+func openTimeline(ctx context.Context, repoDir string, db sqliteDB, resumeJobs bool) (*Timeline, error) {
 	repoMarkerFile := filepath.Join(repoDir, MarkerFilename)
 
 	var err error
@@ -373,7 +382,7 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 
 	// in case of unclean shutdown last time, set all jobs that are on "started" status to "aborted"
 	// (no jobs can be currently running, since we haven't even finished opening the timeline yet)
-	_, err = db.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=?`, JobInterrupted, JobStarted)
+	_, err = db.WritePool.ExecContext(ctx, `UPDATE jobs SET state=? WHERE state=?`, JobInterrupted, JobStarted)
 	if err != nil {
 		return nil, fmt.Errorf("resetting all uncleanly-stopped jobs to 'interrupted' state: %w", err)
 	}
@@ -384,27 +393,27 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	}
 
 	// only used for development
-	// if err := wipeDB(ctx, db, thumbsDB); err != nil {
+	// if err := wipeRepo(ctx, repoDir, db, thumbsDB, true, true); err != nil {
 	// 	return nil, err
 	// }
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	tl := &Timeline{
-		ctx:             ctx,
-		cancel:          cancel,
-		repoDir:         repoDir,
-		cacheDir:        cacheDir,
-		rateLimiters:    make(map[int64]RateLimit),
-		id:              id,
-		db:              db,
-		thumbs:          thumbsDB,
-		optimizing:      new(int64),
-		dataSources:     dbDataSources,
-		classifications: classes,
-		entityTypes:     entityTypes,
-		relations:       relations,
-		activeJobs:      make(map[uint64]*ActiveJob),
+		ctx:                 ctx,
+		cancel:              cancel,
+		repoDir:             repoDir,
+		rateLimiters:        make(map[int64]RateLimit),
+		id:                  id,
+		db:                  db,
+		thumbs:              thumbsDB,
+		optimizing:          new(int64),
+		dataSources:         dbDataSources,
+		classifications:     classes,
+		entityTypes:         entityTypes,
+		relations:           relations,
+		activeJobs:          make(map[uint64]*ActiveJob),
+		dataFileWorkingDirs: make(map[string]int),
 	}
 
 	// start maintenance goroutine; this erases items that have been
@@ -412,103 +421,120 @@ func openTimeline(ctx context.Context, repoDir, cacheDir string, db *sql.DB) (*T
 	// the DB occasionally
 	go tl.maintenanceLoop()
 
-	// start any jobs that were interrupted or which are queued; import jobs
-	// in particular should only be run if they're on the same machine, since
-	// it's likely that filepaths change or don't exist on different machines
-	// (we use a DB lock now because we've started a maintenance loop, and also
-	// starting jobs involve DB concurrency)
-	hostname, err := os.Hostname()
-	if err != nil {
-		Log.Error("unable to lookup hostname for resuming jobs", zap.Error(err))
-	}
-	tl.dbMu.RLock()
-	rows, err := db.QueryContext(ctx,
-		`SELECT id
+	if resumeJobs {
+		// start any jobs that were interrupted or which are queued; import jobs
+		// in particular should only be run if they're on the same machine, since
+		// it's likely that filepaths change or don't exist on different machines
+		// (we use a DB lock now because we've started a maintenance loop, and also
+		// starting jobs involve DB concurrency)
+		hostname, err := os.Hostname()
+		if err != nil {
+			Log.Error("unable to lookup hostname for resuming jobs", zap.Error(err))
+		}
+		rows, err := db.ReadPool.QueryContext(ctx,
+			`SELECT id
 		FROM jobs
 		WHERE (state=? OR state=?) AND (hostname=? OR name!=?)
 		ORDER BY start, created
 		LIMIT 3`, JobQueued, JobInterrupted, hostname, JobTypeImport)
-	if err != nil {
-		return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
-	}
-	tl.dbMu.RUnlock()
-	if err != nil {
-		return nil, fmt.Errorf("could not query jobs to resume: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var jobID uint64
-		err := rows.Scan(&jobID)
 		if err != nil {
-			return nil, fmt.Errorf("scanning row for resuming job: %w", err)
+			return nil, fmt.Errorf("selecting queued and interrupted jobs to resume: %w", err)
 		}
-		Log.Info("resuming job that was queued or interrupted", zap.Uint64("job_id", jobID))
-		if err = tl.StartJob(ctx, jobID, false); err != nil {
-			return nil, fmt.Errorf("starting job %d from last open: %w", jobID, err)
+		if err != nil {
+			return nil, fmt.Errorf("could not query jobs to resume: %w", err)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating rows for resuming jobs: %w", err)
+		defer rows.Close()
+		for rows.Next() {
+			var jobID uint64
+			err := rows.Scan(&jobID)
+			if err != nil {
+				return nil, fmt.Errorf("scanning row for resuming job: %w", err)
+			}
+			Log.Info("resuming job that was queued or interrupted", zap.Uint64("job_id", jobID))
+			if err = tl.StartJob(ctx, jobID, false); err != nil {
+				return nil, fmt.Errorf("starting job %d from last open: %w", jobID, err)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterating rows for resuming jobs: %w", err)
+		}
 	}
 
 	return tl, nil
 }
 
-// wipeDB is used only for development purposes.
+// wipeRepo is used only for development purposes.
 //
 //nolint:unused
-func wipeDB(ctx context.Context, db, thumbsDB *sql.DB) error {
-	Log.Warn("WIPING DB...")
-	_, err := db.ExecContext(ctx, `DELETE FROM items`)
-	if err != nil {
-		return fmt.Errorf("resetting items: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM item_data`)
-	if err != nil {
-		return fmt.Errorf("resetting item_data: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM entities WHERE id > 1`)
-	if err != nil {
-		return fmt.Errorf("resetting entities: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM attributes WHERE id NOT IN (SELECT attribute_id FROM entity_attributes WHERE entity_id = 1)`)
-	if err != nil {
-		return fmt.Errorf("resetting attributes: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM entity_attributes WHERE entity_id > 1`)
-	if err != nil {
-		return fmt.Errorf("resetting entity_attributes: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM relationships`)
-	if err != nil {
-		return fmt.Errorf("resetting relationships: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM relations`)
-	if err != nil {
-		return fmt.Errorf("resetting relations: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM jobs`)
-	if err != nil {
-		return fmt.Errorf("resetting jobs: %w", err)
-	}
-	_, err = db.ExecContext(ctx, `DELETE FROM embeddings`)
+func wipeRepo(ctx context.Context, repoDir string, db, thumbsDB sqliteDB, deleteDataFilesAndAssets, deleteAppTempFiles bool) error {
+	Log.Warn("WIPING REPO...", zap.String("dir", repoDir), zap.Bool("data_files", deleteDataFilesAndAssets))
+	_, err := db.WritePool.ExecContext(ctx, `DELETE FROM embeddings`)
 	if err != nil {
 		return fmt.Errorf("resetting embeddings: %w", err)
 	}
-	_, err = thumbsDB.ExecContext(ctx, `DELETE FROM thumbnails`)
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM relationships`)
+	if err != nil {
+		return fmt.Errorf("resetting relationships: %w", err)
+	}
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM relations`)
+	if err != nil {
+		return fmt.Errorf("resetting relations: %w", err)
+	}
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM items`)
+	if err != nil {
+		return fmt.Errorf("resetting items: %w", err)
+	}
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM item_data`)
+	if err != nil {
+		return fmt.Errorf("resetting item_data: %w", err)
+	}
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM entities WHERE id > 1`)
+	if err != nil {
+		return fmt.Errorf("resetting entities: %w", err)
+	}
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM attributes WHERE id NOT IN (SELECT attribute_id FROM entity_attributes WHERE entity_id = 1)`)
+	if err != nil {
+		return fmt.Errorf("resetting attributes: %w", err)
+	}
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM entity_attributes WHERE entity_id > 1`)
+	if err != nil {
+		return fmt.Errorf("resetting entity_attributes: %w", err)
+	}
+	_, err = db.WritePool.ExecContext(ctx, `DELETE FROM jobs`)
+	if err != nil {
+		return fmt.Errorf("resetting jobs: %w", err)
+	}
+	_, err = thumbsDB.WritePool.ExecContext(ctx, `DELETE FROM thumbnails`)
 	if err != nil {
 		return fmt.Errorf("resetting thumbnails: %w", err)
 	}
-	Log.Warn("DB WIPE COMPLETED.")
+	if deleteDataFilesAndAssets {
+		dataPath := filepath.Join(repoDir, DataFolderName)
+		assetsPath := filepath.Join(repoDir, AssetsFolderName)
+		Log.Warn("NOW WIPING DATA FILES AND ASSETS...", zap.String("data_dir", dataPath), zap.String("assets_path", assetsPath))
+		if err := os.RemoveAll(dataPath); err != nil {
+			return fmt.Errorf("deleting data files: %w", err)
+		}
+		if err := os.RemoveAll(assetsPath); err != nil {
+			return fmt.Errorf("deleting assets: %w", err)
+		}
+	}
+	if deleteAppTempFiles {
+		tempDir := appTempDir()
+		if err := os.RemoveAll(tempDir); err != nil {
+			return fmt.Errorf("deleting temp files %s: %w", tempDir, err)
+		}
+	}
+	Log.Warn("REPO WIPE COMPLETED.", zap.String("dir", repoDir))
 	return nil
 }
 
-func mapNamesToIDs(ctx context.Context, db *sql.DB, table string) (map[string]uint64, error) {
+func mapNamesToIDs(ctx context.Context, db sqliteDB, table string) (map[string]uint64, error) {
 	nameCol := "name"
 	if table == "relations" {
 		nameCol = "label" // TODO: this is annoying... right?
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, `+nameCol+` FROM `+table) //nolint:gosec
+	rows, err := db.ReadPool.QueryContext(ctx, `SELECT id, `+nameCol+` FROM `+table) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("querying %s table: %w", table, err)
 	}
@@ -544,24 +570,14 @@ func (tl *Timeline) Close() error {
 		delete(tl.rateLimiters, key) // TODO: maybe racey?
 	}
 	tl.cancel() // cancel this timeline's context, so anything waiting on it knows we're closing
-	if tl.thumbs != nil {
-		tl.thumbsMu.Lock()
-		defer tl.thumbsMu.Unlock()
-		_ = tl.thumbs.Close()
-	}
-	if tl.db != nil {
-		tl.dbMu.Lock()
-		defer tl.dbMu.Unlock()
-		return tl.db.Close()
-	}
+	tl.db.Close()
+	tl.thumbs.Close()
 	return nil
 }
 
 // Empty returns true if there are no entities in the timeline. (TODO: Can we remember once it's not empty, to avoid repeated queries?)
 func (tl *Timeline) Empty() bool {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-	err := tl.db.QueryRow("SELECT id FROM entities LIMIT 1").Scan()
+	err := tl.db.ReadPool.QueryRowContext(tl.ctx, "SELECT id FROM entities LIMIT 1").Scan()
 	return err == sql.ErrNoRows
 }
 
@@ -677,9 +693,7 @@ func (tl *Timeline) entityTypeNameToID(name string) (uint64, error) {
 	}
 
 	// might be new or one we haven't seen yet
-	tl.dbMu.RLock()
-	err := tl.db.QueryRow(`SELECT id FROM entity_types WHERE name=? LIMIT 1`, name).Scan(&id)
-	tl.dbMu.RUnlock()
+	err := tl.db.ReadPool.QueryRowContext(tl.ctx, `SELECT id FROM entity_types WHERE name=? LIMIT 1`, name).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -700,9 +714,7 @@ func (tl *Timeline) classificationNameToID(name string) (uint64, error) {
 	}
 
 	// might be new or one we haven't seen yet
-	tl.dbMu.RLock()
-	err := tl.db.QueryRow(`SELECT id FROM classifications WHERE name=? LIMIT 1`, name).Scan(&id)
-	tl.dbMu.RUnlock()
+	err := tl.db.ReadPool.QueryRowContext(tl.ctx, `SELECT id FROM classifications WHERE name=? LIMIT 1`, name).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
@@ -715,10 +727,7 @@ func (tl *Timeline) classificationNameToID(name string) (uint64, error) {
 }
 
 func (tl *Timeline) ItemClassifications() ([]Classification, error) {
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	rows, err := tl.db.Query("SELECT id, standard, name, labels, description FROM classifications")
+	rows, err := tl.db.ReadPool.QueryContext(tl.ctx, "SELECT id, standard, name, labels, description FROM classifications")
 	if err != nil {
 		return nil, fmt.Errorf("querying classifications: %w", err)
 	}
@@ -752,16 +761,13 @@ func (tl *Timeline) StoreEntity(ctx context.Context, entity Entity) error {
 		return err
 	}
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	err = tx.QueryRow(`INSERT INTO entities (type_id, name, metadata) VALUES (?, ?, ?) RETURNING id`,
+	err = tx.QueryRowContext(ctx, `INSERT INTO entities (type_id, name, metadata) VALUES (?, ?, ?) RETURNING id`,
 		entity.typeID, entity.Name, metaStr).Scan(&entity.ID)
 	if err != nil {
 		return fmt.Errorf("inserting entity: %w", err)
@@ -792,14 +798,14 @@ func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, en
 	// multiple data sources, like their email address for example) - so we have to
 	// check a count ourselves before inserting
 	var count int
-	err = tx.QueryRow(`SELECT count() FROM entity_attributes WHERE entity_id=? AND attribute_id=? LIMIT 1`,
+	err = tx.QueryRowContext(ctx, `SELECT count() FROM entity_attributes WHERE entity_id=? AND attribute_id=? LIMIT 1`,
 		entityID, attrID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("querying to see if entity_attribute row already exists: %w", err)
 	}
 
 	if count == 0 {
-		_, err = tx.Exec(`INSERT INTO entity_attributes (entity_id, attribute_id) VALUES (?, ?)`,
+		_, err = tx.ExecContext(ctx, `INSERT INTO entity_attributes (entity_id, attribute_id) VALUES (?, ?)`,
 			entityID, attrID)
 		if err != nil {
 			return attrID, fmt.Errorf("linking attribute %d to entity %d: %w", entityID, attrID, err)
@@ -812,19 +818,25 @@ func storeLinkBetweenEntityAndNonIDAttribute(ctx context.Context, tx *sql.Tx, en
 func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	p := Entity{ID: id}
 
-	tl.dbMu.RLock()
-	defer tl.dbMu.RUnlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.ReadPool.BeginTx(tl.ctx, nil)
 	if err != nil {
 		return p, err
 	}
 	defer tx.Rollback()
 
-	err = tx.QueryRow(`SELECT entity_types.name, entities.type_id, entities.name, entities.picture_file
+	var stored int64
+	var modified *int64
+	var metadata *string
+
+	err = tx.QueryRowContext(tl.ctx, `
+		SELECT
+			entity_types.name, entities.type_id,
+			entities.stored, entities.modified,
+			entities.name, entities.picture_file,
+			entities.metadata
 		FROM entities, entity_types
 		WHERE entities.id=? AND entity_types.id = entities.type_id
-		LIMIT 1`, id).Scan(&p.Type, &p.typeID, &p.name, &p.Picture)
+		LIMIT 1`, id).Scan(&p.Type, &p.typeID, &stored, &modified, &p.name, &p.Picture, &metadata)
 	if err != nil {
 		return p, err
 	}
@@ -832,44 +844,83 @@ func (tl *Timeline) LoadEntity(id uint64) (Entity, error) {
 	if p.name != nil {
 		p.Name = *p.name
 	}
+	if stored != 0 {
+		p.Stored = time.Unix(stored, 0)
+	}
+	if modified != nil {
+		modTime := time.Unix(*modified, 0)
+		p.Modified = &modTime
+	}
+	if metadata != nil {
+		err := json.Unmarshal([]byte(*metadata), &p.Metadata)
+		if err != nil {
+			return p, fmt.Errorf("unmarshaling entity metadata: %w", err)
+		}
+	}
 
-	rows, err := tx.Query(`SELECT attributes.name, attributes.value, attributes.alt_value, attributes.metadata, entity_attributes.data_source_id
-		FROM attributes, entity_attributes
-		WHERE entity_attributes.entity_id=?
-			AND attributes.id = entity_attributes.attribute_id`, id)
+	rows, err := tx.QueryContext(tl.ctx, `
+		SELECT
+			attributes.id, attributes.name, attributes.value, attributes.alt_value,
+			attributes.longitude, attributes.latitude, attributes.altitude,
+			attributes.metadata, data_sources.name
+		FROM entity_attributes
+		JOIN attributes ON attributes.id = entity_attributes.attribute_id
+		LEFT JOIN data_sources ON data_sources.id = entity_attributes.data_source_id
+		WHERE entity_attributes.entity_id=?`, id)
 	if err != nil {
 		return p, fmt.Errorf("querying attributes: %w", err)
 	}
 	defer rows.Close()
 
+	var attr Attribute
 	for rows.Next() {
-		var attr Attribute
-		var dsID *int64
-		var altValue, meta *string
+		var rowID uint64
+		var rowName string
+		var rowValue any
+		var rowAlternateValue, rowMeta, rowDSName *string
+		var rowLat, rowLon, rowAlt *float64
 
-		err := rows.Scan(&attr.Name, &attr.Value, &altValue, &meta, &dsID)
-		if dsID != nil {
-			attr.Identity = true
-			attr.Identifying = true
-		}
+		err := rows.Scan(&rowID, &rowName, &rowValue, &rowAlternateValue, &rowLon, &rowLat, &rowAlt, &rowMeta, &rowDSName)
 		if err != nil {
 			return p, fmt.Errorf("scanning: %w", err)
 		}
 
-		if altValue != nil {
-			attr.AltValue = *altValue
-		}
-		if meta != nil {
-			err := json.Unmarshal([]byte(*meta), &attr.Metadata)
-			if err != nil {
-				return p, fmt.Errorf("loading metadata: %w", err)
+		// if this is the first attribute row, or this row is a different attribute than previous row
+		if attr.ID == 0 || (attr.ID != 0 && attr.ID != rowID) {
+			if attr.ID > 0 {
+				p.Attributes = append(p.Attributes, attr)
+			}
+			attr = Attribute{
+				ID:        rowID,
+				Name:      rowName,
+				Value:     rowValue,
+				Latitude:  rowLat,
+				Longitude: rowLon,
+				Altitude:  rowAlt,
+			}
+			if rowAlternateValue != nil {
+				attr.AltValue = *rowAlternateValue
+			}
+			if rowMeta != nil {
+				err := json.Unmarshal([]byte(*rowMeta), &attr.Metadata)
+				if err != nil {
+					return p, fmt.Errorf("unmarshaling attribute metadata: %w", err)
+				}
+			}
+			if rowDSName != nil {
+				attr.IdentityOn = append(attr.IdentityOn, *rowDSName)
+				attr.Identity = true
+				attr.Identifying = true
 			}
 		}
-
-		p.Attributes = append(p.Attributes, attr)
 	}
 	if err := rows.Err(); err != nil {
 		return p, fmt.Errorf("iterating attribute rows: %w", err)
+	}
+
+	// don't forget the last one
+	if attr.ID != 0 {
+		p.Attributes = append(p.Attributes, attr)
 	}
 
 	// TODO: why would we need to commit a read-only tx?
@@ -947,10 +998,10 @@ func (tl *Timeline) loadInteractiveImportJob(jobID uint64) (*ImportJob, error) {
 
 // DeleteOptions configures how to perform a delete.
 type DeleteOptions struct {
-	Remember     bool           `json:"remember,omitempty"`
-	Retain       *time.Duration `json:"retain,omitempty"` // if not specified, use global default
-	PreserveNote bool           `json:"preserve_note,omitempty"`
-	Subtrees     bool           `json:"subtrees,omitempty"` // TODO: probably a good idea for the UI to make this the default
+	Remember     bool           `json:"remember,omitempty"`      // preserve footprint of original ID and data to avoid re-importing
+	Retain       *time.Duration `json:"retain,omitempty"`        // how long to keep items before erasure; if not specified, use global default
+	PreserveNote bool           `json:"preserve_note,omitempty"` // whether to preserve user annotation
+	Subtrees     bool           `json:"subtrees,omitempty"`      // TODO: probably a good idea for the UI to make this the default
 }
 
 // DeleteItems deletes data from the items table with the given row IDs, according to the given deletion options.
@@ -971,10 +1022,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, option
 		return fmt.Errorf("invalid retention period: %s", retention)
 	}
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -997,7 +1045,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, option
 	if options.Remember || retention == 0 {
 		for _, rowID := range itemRowIDs {
 			// get the item
-			ir, err := tl.loadItemRow(ctx, tx, rowID, nil, nil, nil, false)
+			ir, err := tl.loadItemRow(ctx, tx, rowID, 0, nil, nil, nil, false)
 			if err != nil {
 				return fmt.Errorf("could not load item to delete: %w", err)
 			}
@@ -1013,7 +1061,7 @@ func (tl *Timeline) DeleteItems(ctx context.Context, itemRowIDs []uint64, option
 			// see if any other items not being deleted now refer to the same data file; if not, we can delete the data file
 			if retention == 0 && ir.DataFile != nil && *ir.DataFile != "" {
 				var count int
-				err := tx.QueryRow(`SELECT count() FROM items WHERE id NOT IN `+rowIDArray+` AND data_file=? LIMIT 1`,
+				err := tx.QueryRowContext(ctx, `SELECT count() FROM items WHERE id NOT IN `+rowIDArray+` AND data_file=? LIMIT 1`,
 					append(rowIDArgs, *ir.DataFile)...).Scan(&count)
 				if err != nil {
 					return fmt.Errorf("counting rows that share data file: %w", err)
@@ -1095,10 +1143,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 		zap.Bool("remember", remember),
 		zap.Durationp("retention", retention))
 
-	tl.dbMu.Lock()
-	defer tl.dbMu.Unlock()
-
-	tx, err := tl.db.Begin()
+	tx, err := tl.db.WritePool.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -1110,7 +1155,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 		// has a data file and is the only one referencing it
 		var count int
 		var dataFile *string
-		err = tx.QueryRow(`SELECT count(), data_file FROM items
+		err = tx.QueryRowContext(ctx, `SELECT count(), data_file FROM items
 		WHERE data_file = (SELECT data_file FROM items
 							WHERE id=? AND data_file IS NOT NULL
 							AND data_file != "" LIMIT 1)`,
@@ -1119,7 +1164,7 @@ func (tl *Timeline) deleteItemRows(ctx context.Context, rowIDs []int64, remember
 			return fmt.Errorf("querying count of rows sharing data file: %w", err)
 		}
 
-		_, err = tx.Exec(`DELETE FROM items WHERE id=?`, rowID) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
+		_, err = tx.ExecContext(ctx, `DELETE FROM items WHERE id=?`, rowID) // TODO: limit 1 (see https://github.com/mattn/go-sqlite3/pull/802)
 		if err != nil {
 			return fmt.Errorf("deleting item %d from DB: %w", rowID, err)
 		}
@@ -1218,14 +1263,23 @@ func (tl *Timeline) deleteRepoFile(pathInRepo string) error {
 // to the repo path, until there are no more folders left to bubble up.
 func (tl *Timeline) cleanDirs(pathInRepo string) error {
 	for p := path.Dir(pathInRepo); p != "."; p = path.Dir(p) {
+		// if the directory is being actively utilized (a data file is about to be
+		// created and downloaded into it), don't delete it, or any of its parents
+		tl.dataFileWorkingDirsMu.Lock()
+		usageCount := tl.dataFileWorkingDirs[p]
+		tl.dataFileWorkingDirsMu.Unlock()
+		if usageCount > 0 {
+			break
+		}
+
 		fullPath := tl.FullPath(p)
 		isEmpty, _, err := directoryEmpty(fullPath, true)
-		if err != nil {
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("deleted %q, but could not check parent folder %q: %w",
 				pathInRepo, fullPath, err)
 		}
 		if isEmpty {
-			if err := os.Remove(fullPath); err != nil {
+			if err := os.Remove(fullPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("deleted %q, but could not clean up empty parent folder %q: %w",
 					pathInRepo, fullPath, err)
 			}
@@ -1260,7 +1314,7 @@ func sqlArray(rowIDs []uint64) (string, []any) {
 // file existence, and a table and value within the database.It returns an
 // error only if it is unable to assess whether a valid timeline exists.
 func Valid(ctx context.Context, repo string) (bool, error) {
-	db, err := openDB(ctx, repo)
+	db, err := openTimelineDB(ctx, repo)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
@@ -1319,41 +1373,6 @@ func DownloadData(url string) DataFunc {
 	}
 }
 
-// ProcessingOptions configures how item processing is carried out.
-type ProcessingOptions struct {
-	// Whether to perform integrity checks
-	Integrity bool `json:"integrity,omitempty"`
-
-	// Constrain processed items to within a timeframe
-	Timeframe Timeframe `json:"timeframe,omitempty"`
-
-	// If true, items with manual modifications may be updated, overwriting local changes.
-	OverwriteLocalChanges bool `json:"overwrite_local_changes,omitempty"`
-
-	// Names of columns in the items table to check for sameness when loading an item
-	// that doesn't have data_source+original_id. The field/column is the same if the
-	// values are identical or if one of the values is NULL. If the map value is true,
-	// however, strict NULL comparison is applied, where NULL=NULL only.
-	ItemUniqueConstraints map[string]bool `json:"item_unique_constraints,omitempty"`
-
-	// How to update existing items, specified per-field.
-	// If not set, items that already exist will simply be skipped.
-	ItemUpdatePreferences []FieldUpdatePreference `json:"item_update_preferences,omitempty"`
-
-	// TODO: WIP (Should this be in importjob or processingoptions?)
-	Interactive *InteractiveImport `json:"interactive,omitempty"`
-
-	// How many items to process in one database transaction. This is a minimum value,
-	// not a maximum, due to the recursive nature of graphs. (Hopefully data sources
-	// do not build out graphs that are too big for available memory. Most graphs
-	// just have 1-2 things on it). This setting is sensitive. Smaller batches can
-	// reduce performance, slowing down imports. Larger batches can be faster, allowing
-	// for more throughput especially when data files are large, but reduces the
-	// granularity of the live progress updates, and the performance benefit gets
-	// smaller as the database gets larger and the items get smaller.
-	BatchSize int `json:"batch_size,omitempty"`
-}
-
 type InteractiveImport struct {
 	Graphs chan *InteractiveGraph `json:"-"`
 }
@@ -1369,15 +1388,20 @@ type InteractiveGraph struct {
 // For the metadata field, this policy is applied per-metadata-key.
 type FieldUpdatePolicy int
 
+// The update policies are ordered such that the first two
+// keep or prefer existing, and the second two keep or
+// prefer incoming, so that you can use > or < to see if
+// the policy will favor the existing value or the incoming
+// value.
 const (
 	UpdatePolicyKeepExisting FieldUpdatePolicy = iota
+
+	// COALESCE(existing, incoming)
+	UpdatePolicyPreferExisting
 
 	// SET existing=incoming
 	// (i.e. prefer incoming even if incoming is NULL)
 	UpdatePolicyOverwriteExisting
-
-	// COALESCE(existing, incoming)
-	UpdatePolicyPreferExisting
 
 	// COALESCE(incoming, existing)
 	UpdatePolicyPreferIncoming
@@ -1477,14 +1501,6 @@ func (p *processor) distillUpdatePolicy(pref FieldUpdatePreference, incoming *It
 				const bigger, smaller = "bigger", "smaller"
 				if v != bigger && v != smaller {
 					return 0, fmt.Errorf("unknown policy for 'size' property: %v (expected bigger or smaller)", v)
-				}
-				if incoming.dataFileIn != nil && incoming.dataFileSize == 0 && incoming.dataFileHash == nil {
-					// there's a data file incoming, and we don't know its size yet;
-					// we can't determine size until after processing the incoming data...
-					// signal to the processor that the data file should be processed,
-					// but before finalizing things at the end of the pipeline, do all
-					// this again to know how to handle the item
-					return -1, nil
 				}
 				// existing item content could be either in the DB or on disk, so
 				// whichever it is, get the length of it

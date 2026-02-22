@@ -5,6 +5,7 @@ const galleryLimit = 100;
 async function galleryPageMain() {
 	// set up the preview modal to work on our page
 	PreviewModal.prev = async (currentItem) => {
+		// TODO: These don't play nicely when semantic_text is filled out, is there a better way to do these?
 		const params = galleryFilterParams("prev", currentItem);
 		// params.limit = 1;
 		// params.sort = null; // let backend use smart sort
@@ -33,6 +34,7 @@ async function galleryPageMain() {
 
 	// perform search
 	const results = await app.SearchItems(galleryFilterParams());
+	console.log("RESULTS:", results)
 
 	// configure pagination links: enable next if we overflowed the search results limit,
 	// and enable prev if we are not on page 1; otherwise disable prev/next link(s)
@@ -79,8 +81,7 @@ async function galleryPageMain() {
 		elem.id = `item-${item.id}`;
 
 		let mediaElem = itemContentElement(item, { thumbnail: true });
-		mediaElem.classList.add('w-100', 'h-100', 'object-cover', 'card-img-top');
-		mediaElem.classList.remove('rounded');
+		mediaElem.classList.add('card-img-top', 'overflow-hidden'); // overflow-hidden is needed for obfuscation mode...
 
 		/*
 			TODO: I kind of like this dreamy glow effect around each video (maybe image too?) -- maybe just on hover though?
@@ -93,11 +94,13 @@ async function galleryPageMain() {
 			</div>
 		*/
 
+		const dt = DateTime.fromISO(item.timestamp, { setZone: true });
+
 		elem.prepend(mediaElem);
 		elem.dataset.rowid = item.id;
 		$('.media-owner-avatar', elem).innerHTML = avatar(true, item.entity, "me-3");
 		$('.media-owner-name', elem).innerText = entityDisplayNameAndAttr(item.entity).name;
-		$('.media-timestamp', elem).innerText = DateTime.fromISO(item.timestamp).toLocaleString(DateTime.DATETIME_MED);
+		$('.media-timestamp', elem).innerText = `${dt.toLocaleString(DateTime.DATETIME_MED)} ${dt.toFormat("ZZZZ")}`;
 		
 		if (item.score) {
 			$('.media-similarity-score', elem).innerHTML = `<b>${(item.score * 100).toFixed(3)}%</b> match`;

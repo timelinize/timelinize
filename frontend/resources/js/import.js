@@ -84,7 +84,7 @@ on('shown.bs.modal', '#modal-plan-loading', async event => {
 
 	const plan = await app.PlanImport({
 		path: $('#modal-file-picker .file-picker').selected()[0],
-		hidden: $('.file-picker-hidden-files').checked,
+		skip_hidden_files: !$('.file-picker-hidden-files').checked,
 		recursive: $('#recursive').checked,
 		traverse_archives: $('#traverse-archives').checked
 	});
@@ -244,13 +244,13 @@ async function renderDataSourceOptionsModal(ds) {
 	// these can't be set up until after they're displayed
 	if (ds.name == "calendar") {
 		const entitySelect = newEntitySelect($('.calendar-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 	}
 	if (ds.name == "google_location") {
 		const entitySelect = newEntitySelect($('.google_location-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 
@@ -266,7 +266,7 @@ async function renderDataSourceOptionsModal(ds) {
 	}
 	if (ds.name == "gpx") {
 		const entitySelect = newEntitySelect($('.gpx-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 
@@ -282,9 +282,19 @@ async function renderDataSourceOptionsModal(ds) {
 	}
 	if (ds.name == "geojson") {
 		const entitySelect = newEntitySelect($('.geojson-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
+
+		noUiSlider.create($('.geojson-simplification', dsOptElem), {
+			start: defaultPathSimplificationLevel,
+			connect: [true, false],
+			step: 0.1,
+			range: {
+				min: 0,
+				max: 10
+			}
+		});
 	}
 	if (ds.name == "email") {
 		new TomSelect($(".email-skip-labels", dsOptElem),{
@@ -295,15 +305,31 @@ async function renderDataSourceOptionsModal(ds) {
 	}
 	if (ds.name == "icloud") {
 		const entitySelect = newEntitySelect($('.icloud-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
 	}
 	if (ds.name == "media") {
 		const entitySelect = newEntitySelect($('.media-owner', dsOptElem), 1);
-		const owner = await getOwner(tlz.openRepos[0]);
+		const owner = await getOwner();
 		entitySelect.addOption(owner);
 		entitySelect.addItem(owner.id);
+	}
+	if (ds.name == "nmea0183") {
+		const entitySelect = newEntitySelect($('.nmea0183-owner', dsOptElem), 1);
+		const owner = await getOwner();
+		entitySelect.addOption(owner);
+		entitySelect.addItem(owner.id);
+
+		noUiSlider.create($('.nmea0183-simplification', dsOptElem), {
+			start: defaultPathSimplificationLevel,
+			connect: [true, false],
+			step: 0.1,
+			range: {
+				min: 0,
+				max: 10
+			}
+		});
 	}
 	if (ds.name == "apple_photos") {
 		// This data source can sometimes detect its owner, so it's not required for us to assume!
@@ -362,10 +388,12 @@ on('click', '#start-import', async event => {
 				files: []
 			},
 			processing_options: {
-				integrity: $('#integrity-checks').checked,
-				overwrite_local_changes: $('#overwrite-local-changes').checked,
+				infer_time_zone: $('#infer-time-zones').checked,
+				integrity: page.integrityChecks,
+				overwrite_local_changes: page.overwriteLocalChanges,
 				item_unique_constraints: page.itemUniqueConstraints,
-				interactive: $('#interactive').checked ? {} : null
+				// interactive: $('#interactive').checked ? {} : null,
+				thumbnails: $('#generate-thumbnails').checked
 			},
 			estimate_total: $('#estimate-total').checked
 		}
@@ -382,6 +410,11 @@ on('click', '#start-import', async event => {
 		importParams.job.processing_options.timeframe = {
 			since: timeframe[0],
 			until: timeframe[1]
+		};
+	} else if (timeframe?.length == 1) {
+		importParams.job.processing_options.timeframe = {
+			since: timeframe[0],
+			until: DateTime.fromJSDate(timeframe[0]).plus({ days: 1 }).toJSDate()
 		};
 	}
 
@@ -417,6 +450,10 @@ on('click', '#start-import', async event => {
 		duration: 2000
 	});
 
+	// clear any previous stats for a job with this ID (issue #158)
+	// (can happen if timeline is cleared between test runs)
+	delete tlz.jobStats[result.job_id];
+
 	if (importParams.job.processing_options.interactive) {
 		// take user to page where they can begin their interactive import
 		navigateSPA(`/input?repo_id=${repoID}&job_id=${result.job_id}`, true);
@@ -450,7 +487,7 @@ async function dataSourceOptions(ds) {
 		} else {
 			// this DS requires we input the phone number of the phone that created the data,
 			// so if the input field was left empty, ensure the repo owner has a phone number
-			const owner = await getOwner(tlz.openRepos[0]);
+			const owner = await getOwner();
 			if (getEntityAttribute(owner, 'phone_number').length == 0) {
 				ownerPhoneInput.classList.add('is-invalid');
 				ownerPhoneInput.classList.remove('is-valid');
@@ -458,6 +495,28 @@ async function dataSourceOptions(ds) {
 					elem: ownerPhoneInput,
 					title: "Phone number required",
 					message: "The data source doesn't provide a phone number by itself. When no phone number is entered here as part of the data source options, we use the phone number of the timeline owner, but no phone number is known for the timeline owner. Please enter a phone number."
+				}
+			}
+			return;
+		}
+	}
+	if (ds.name == "facebook") {
+		const ownerUsername = $('.facebook-owner-username', dsoptContainer);
+		if (ownerUsername.value) {
+			dsOpt = {
+				username: ownerUsername.value
+			};
+		} else {
+			// this DS requires we input the username of the account that created the data,
+			// so if the input field was left empty, ensure the repo owner has a username
+			const owner = await getOwner();
+			if (getEntityAttribute(owner, 'facebook_username').length == 0) {
+				ownerUsername.classList.add('is-invalid');
+				ownerUsername.classList.remove('is-valid');
+				throw {
+					elem: ownerUsername,
+					title: "Facebook username required",
+					message: "In order to properly associate Facebook data with its owner, you must provide the username of the Facebook account it came from. On the next screen, please enter the Facebook account username (not email address)."
 				}
 			}
 			return;
@@ -473,6 +532,7 @@ async function dataSourceOptions(ds) {
 		if (simplification) {
 			dsOpt.simplification = Number(simplification);
 		}
+		dsOpt.clustering_coefficient = Number($('.google_location-clustering-coeff').value || 1.0);
 	}
 	if (ds.name == "gpx") {
 		dsOpt = {};
@@ -492,6 +552,10 @@ async function dataSourceOptions(ds) {
 			dsOpt.owner_entity_id = Number(owner[0]);
 		}
 		dsOpt.lenient = $('.geojson-lenient', dsoptContainer).checked;
+		const simplification = $('.geojson-simplification', dsoptContainer).noUiSlider.get();
+		if (simplification) {
+			dsOpt.simplification = Number(simplification);
+		}
 	}
 	if (ds.name == "media") {
 		dsOpt = {
@@ -509,6 +573,17 @@ async function dataSourceOptions(ds) {
 		}
 		if ($('.media-end-year', dsoptContainer).value) {
 			dsOpt.date_range.until = DateTime.utc(Number($('.media-end-year', dsoptContainer).value)).endOf('year').toISO();
+		}
+	}
+	if (ds.name == "nmea0183") {
+		dsOpt = {};
+		const owner = $('.nmea0183-owner', dsoptContainer).tomselect.getValue();
+		if (owner.length) {
+			dsOpt.owner_entity_id = Number(owner[0]);
+		}
+		const simplification = $('.nmea0183-simplification', dsoptContainer).noUiSlider.get();
+		if (simplification) {
+			dsOpt.simplification = Number(simplification);
 		}
 	}
 	if (ds.name == "email") {
@@ -598,6 +673,8 @@ on('show.bs.modal', '#modal-advanced-settings', () => {
 			});
 		}
 	}
+	$('#integrity-checks').checked = page.integrityChecks;
+	$('#overwrite-local-changes').checked = page.overwriteLocalChanges;
 });
 
 // save settings when button is clicked (only saved for duration of page load; that's probably best tbh)
@@ -637,6 +714,8 @@ function saveAdvancedSettings() {
 		page.itemUniqueConstraints["data"] = true;
 	}
 	saveItemUpdatePreferences();
+	page.integrityChecks = $('#integrity-checks').checked;
+	page.overwriteLocalChanges = $('#overwrite-local-changes').checked;
 }
 
 function saveItemUpdatePreferences() {

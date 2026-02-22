@@ -51,3 +51,29 @@ func TestDetermineMediaFilenameInArchive(t *testing.T) {
 		}
 	}
 }
+
+func TestExportIDFromArchiveFilename(t *testing.T) {
+	fimp := new(FileImporter)
+
+	for i, test := range []struct {
+		input  string
+		expect string
+	}{
+		{
+			// pre-2025
+			input:  "/foo/takeout-20240516T230250Z-003.zip/Takeout/Google Photos",
+			expect: "takeout-20240516T230250Z",
+		},
+		{
+			// 2025+
+			input:  "/foo/takeout-20250921T1994402Z-3-009.zip/Takeout/Google Photos",
+			expect: "takeout-20250921T1994402Z",
+		},
+	} {
+		fimp.filename = test.input
+		if actual := fimp.exportIDFromArchiveFilename(); actual != test.expect {
+			t.Errorf("Test %d (filename=%q): Expected %q but got %q",
+				i, test.input, test.expect, actual)
+		}
+	}
+}

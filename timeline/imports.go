@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/mholt/archives"
+	"github.com/ringsaturn/tzf"
 	"go.uber.org/zap"
 )
 
@@ -38,9 +39,8 @@ type importJobCheckpoint struct {
 	OuterIndex    int    `json:"outer_index"`
 	InnerIndex    int    `json:"inner_index"`
 
-	// these fields remember the count of new items that will need thumbnails or embeddings
+	// these fields remember the count of new items that will need thumbnails
 	ThumbnailCount int64 `json:"thumbnail_count"`
-	EmbeddingCount int64 `json:"embedding_count"`
 
 	// This is passed through to the data source; and we would be using
 	// json.RawMessage here so that, when loading a checkpoint, the
@@ -154,6 +154,8 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 
 	// two iterations of the phase loop: first to estimate size if enabled, then to actually import items
 	for {
+		start := time.Now()
+
 		// this should be cumulative across all the files
 		var totalSizeEstimate *int64
 		if estimating {
@@ -218,6 +220,16 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 					return err
 				}
 
+				// if time zone inference is enabled, initialize the TZ finder,
+				// which can be expensive, so only do it once
+				var tzFinder tzf.F
+				if ij.ProcessingOptions.InferTimeZone {
+					tzFinder, err = tzf.NewDefaultFinder()
+					if err != nil {
+						return fmt.Errorf("initializing time zone finder: %w", err)
+					}
+				}
+
 				p := processor{
 					outerLoopIdx:   i,
 					innerLoopIdx:   j,
@@ -229,7 +241,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 					dsOpt:    dsOpt,
 					tl:       job.Timeline(),
 					log:      logger,
-					progress: logger.Named("progress"),
+					tzFinder: tzFinder,
 				}
 				ij.pMu.Lock()
 				ij.p = &p
@@ -347,7 +359,7 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 				if err := p.process(job.Context(), dirEntry, dsCheckpoint); err != nil {
 					ij.generateThumbnailsForImportedItems()
 					ij.generateEmbeddingsForImportedItems()
-					return fmt.Errorf("processing %s: %w", filename, err)
+					return fmt.Errorf("processing %s as %s: %w", filename, ds.Name, err)
 				}
 
 				// the data source checkpoint is only applicable to the starting point (the filename we resumed from)
@@ -365,7 +377,9 @@ func (ij *ImportJob) Run(job *ActiveJob, checkpoint []byte) error {
 			total := atomic.LoadInt64(totalSizeEstimate)
 			job.SetTotal(int(total))
 			job.FlushProgress()
-			job.Logger().Info("done with size estimation", zap.Int64("estimated_size", total))
+			job.Logger().Info("done with size estimation",
+				zap.Int64("estimated_size", total),
+				zap.Duration("duration", time.Since(start)))
 
 			// loop once more to import items (don't estimate again); and make sure we start the
 			// next phase from the beginning of the outer list (even if we resumed a checkpoint
@@ -409,6 +423,17 @@ type ImportParams struct {
 
 	// The logger to use.
 	Log *zap.Logger `json:"-"`
+
+	// Typically, job pauses are honored by the processor whenever
+	// a graph is sent down the pipeline. However, if data sources
+	// do a nontrivial amount of work between sending graphs, this
+	// can result in a long delay before pausing. So we expose the
+	// pause function here for the data source to call at each unit
+	// of work. This could be, for example, an iteration of a loop,
+	// which may be looking for the next item within the designated
+	// timeframe, that calls Continue(), which blocks until the job
+	// gets unpaused (and does nothing if the job is not paused).
+	Continue func() error `json:"-"`
 
 	// Time bounds on which data to retrieve.
 	// The respective time and item ID fields
@@ -456,27 +481,11 @@ func (ij ImportJob) successCleanup() error {
 // deleteEmptyItems deletes items that have no content and no meaningful relationships,
 // from the given import.
 func (ij ImportJob) deleteEmptyItems() error {
-	// TODO: we can perform the deletes all at once with the commented query below,
-	// but it does not account for cleaning up the data files, which should only
-	// be done if they're only used by the one item -- maybe we could use `RETURNING data_file` to take care of this?
-	/*
-		DELETE FROM items WHERE id IN (SELECT id FROM items
-			WHERE job_id=?
-			AND (data_text IS NULL OR data_text='')
-				AND data_file IS NULL
-				AND longitude IS NULL
-				AND latitude IS NULL
-				AND altitude IS NULL
-				AND retrieval_key IS NULL
-				AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL))
-	*/
-
 	// we actually keep rows with no content if they are in a relationship, or if
 	// they have a retrieval key, which implies that they will be completed later
 	// (bookmark items are also a special case: they may be empty, to later be populated
 	// by a snapshot, as long as they have metadata)
-	ij.job.tl.dbMu.RLock()
-	rows, err := ij.job.tl.db.Query(`SELECT id FROM extended_items
+	rows, err := ij.job.tl.db.ReadPool.QueryContext(ij.job.ctx, `SELECT id FROM extended_items
 		WHERE job_id=?
 		AND (data_text IS NULL OR data_text='')
 			AND (classification_name != ? OR metadata IS NULL)
@@ -485,10 +494,9 @@ func (ij ImportJob) deleteEmptyItems() error {
 			AND latitude IS NULL
 			AND altitude IS NULL
 			AND retrieval_key IS NULL
-			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL)`,
+			AND id NOT IN (SELECT from_item_id FROM relationships WHERE to_item_id IS NOT NULL OR to_attribute_id IS NOT NULL)`,
 		ij.job.id, ClassBookmark.Name) // TODO: consider deleting regardless of relationships existing (remember the iMessage data source until we figured out why some referred-to rows were totally missing?)
 	if err != nil {
-		ij.job.tl.dbMu.RUnlock()
 		return fmt.Errorf("querying empty items: %w", err)
 	}
 
@@ -497,14 +505,12 @@ func (ij ImportJob) deleteEmptyItems() error {
 		var rowID int64
 		err := rows.Scan(&rowID)
 		if err != nil {
-			defer ij.job.tl.dbMu.RUnlock()
-			defer rows.Close()
+			rows.Close() //nolint:sqlclosecheck
 			return fmt.Errorf("scanning item: %w", err)
 		}
 		emptyItems = append(emptyItems, rowID)
 	}
 	rows.Close()
-	ij.job.tl.dbMu.RUnlock()
 	if err = rows.Err(); err != nil {
 		return fmt.Errorf("iterating item rows: %w", err)
 	}
@@ -518,7 +524,7 @@ func (ij ImportJob) deleteEmptyItems() error {
 	ij.job.Logger().Info("deleting empty items from this import", zap.Int("count", len(emptyItems)))
 
 	retention := time.Duration(0)
-	return ij.job.tl.deleteItemRows(ij.job.tl.ctx, emptyItems, false, &retention)
+	return ij.job.tl.deleteItemRows(ij.job.ctx, emptyItems, false, &retention)
 }
 
 // generateThumbnailsForImportedItems generates thumbnails for qualifying items
@@ -526,6 +532,11 @@ func (ij ImportJob) deleteEmptyItems() error {
 // run after the import completes. It only creates a thumbnail job if there
 // are any imported items that qualify for a thumbnail.
 func (ij ImportJob) generateThumbnailsForImportedItems() {
+	// no-op if thumbnails were generated during the import
+	if ij.ProcessingOptions.Thumbnails {
+		return
+	}
+
 	thumbnailCount := atomic.LoadInt64(ij.thumbnailCount)
 	if thumbnailCount == 0 {
 		ij.job.Logger().Info("no items qualify for thumbnail, so skipping thumbnail generation job")
@@ -546,6 +557,10 @@ func (ij ImportJob) generateThumbnailsForImportedItems() {
 }
 
 func (ij ImportJob) generateEmbeddingsForImportedItems() {
+	if enabled, ok := ij.job.tl.GetProperty(ij.job.tl.ctx, "semantic_features").(bool); !ok || !enabled {
+		return
+	}
+
 	ij.job.Logger().Info("creating embeddings job from import")
 
 	job := embeddingJob{

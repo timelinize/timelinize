@@ -59,8 +59,6 @@ type Options struct {
 	// TODO: maybe an attribute ID instead, in case the data represents multiple people
 	OwnerEntityID uint64 `json:"owner_entity_id"`
 
-	Simplification float64 `json:"simplification,omitempty"`
-
 	// If true, coordinate arrays beyond 2 elements will attempt
 	// to be decoded in non-spec-compliant ways, which is useful
 	// if the source data is non-compliant. If the optional 3rd
@@ -69,6 +67,9 @@ type Options struct {
 	// both third and fourth elements will be tried as timestamp
 	// or altitude, depending on their magnitude. See #23.
 	Lenient bool `json:"lenient,omitempty"`
+
+	// Options specific to the location processor.
+	googlelocation.LocationProcessingOptions
 }
 
 // FileImporter implements the timeline.FileImporter interface.
@@ -128,7 +129,7 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 		jsonDec := &decoder{Decoder: json.NewDecoder(file), lenient: dsOpt.Lenient}
 
 		// create location processor to clean up any noisy raw data
-		locProc, err := googlelocation.NewLocationProcessor(jsonDec, dsOpt.Simplification)
+		locProc, err := googlelocation.NewLocationProcessor(jsonDec, dsOpt.LocationProcessingOptions)
 		if err != nil {
 			return err
 		}

@@ -1,4 +1,4 @@
-name: Run tests
+name: Tests
 
 on:
   push:
@@ -8,24 +8,20 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  build:
+  test:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
         with:
           go-version: stable
 
       - name: Install libraries (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libvips-dev
-          sudo ldconfig
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/compile-libvips-linux
 
-      - name: Build
-        run: go build -v ./...
-      - name: Test with the Go CLI
+      - name: Run tests
         run: go test ./...

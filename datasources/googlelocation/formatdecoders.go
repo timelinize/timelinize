@@ -64,7 +64,7 @@ func (fi *FileImporter) decodeLegacyTakeoutFormat(ctx context.Context, dirEntry 
 }
 
 func (fi *FileImporter) decodeOnDevice2024iOSFormat(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) (bool, error) {
-	if !filenameLooksLikeiOSOnDeviceFile(dirEntry.Name()) {
+	if !filenameHasJSONExtAndContains(dirEntry.Name(), filenameFromiOSDeviceContains) {
 		return false, nil
 	}
 
@@ -84,7 +84,7 @@ func (fi *FileImporter) decodeOnDevice2024iOSFormat(ctx context.Context, dirEntr
 	}
 
 	onDevDec := &onDeviceiOS2024Decoder{Decoder: dec}
-	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.Simplification)
+	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.LocationProcessingOptions)
 	if err != nil {
 		return true, err
 	}
@@ -122,7 +122,7 @@ func (fi *FileImporter) decodeOnDevice2024iOSFormat(ctx context.Context, dirEntr
 }
 
 func (fi *FileImporter) decodeOnDevice2025AndroidFormat(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) (bool, error) {
-	if dirEntry.Name() != filenameFromAndroidDevice {
+	if !filenameHasJSONExtAndContains(dirEntry.Name(), filenameFromAndroidDeviceContains) {
 		return false, nil
 	}
 
@@ -162,7 +162,7 @@ func (fi *FileImporter) decodeOnDevice2025AndroidFormat(ctx context.Context, dir
 
 	// we've arrived at the location data; from here, we can stream-decode the objects in the array
 	onDevDec := &onDeviceAndroid2025Decoder{Decoder: dec}
-	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.Simplification)
+	locProc, err := NewLocationProcessor(onDevDec, fi.dsOpt.LocationProcessingOptions)
 	if err != nil {
 		return true, err
 	}

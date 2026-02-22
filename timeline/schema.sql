@@ -16,10 +16,11 @@
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
--- Generic key/value store for the repo itself (version, ID, etc).
+-- Generic key/value store for the repo itself (version, ID, etc), and settings.
 CREATE TABLE IF NOT EXISTS "repo" (
 	"key" TEXT PRIMARY KEY,
-	"value"
+	"value",
+	"type" TEXT -- hint to the application since all values come back as strings - TODO: can we just infer this? That would be much nicer, but could also be problematic
 ) WITHOUT ROWID;
 
 -- A data source is where data comes from, like a content provider, like a cloud photo service,
@@ -58,17 +59,6 @@ CREATE TABLE IF NOT EXISTS "jobs" (
 	FOREIGN KEY ("parent_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL
 ) STRICT;
 
--- TODO: Update comment; should the embedding just be stored in the items table now??
---
--- Embeddings enable "intelligent" search using ML models to derive semantics and meaning.
--- By finding other embeddings that are close (dot product or euclidean distance),
--- similarity searches are possible. This requires the sqlite-vec module.
-CREATE TABLE IF NOT EXISTS "embeddings" (
-	"id" INTEGER PRIMARY KEY,
-	"generated" INTEGER NOT NULL DEFAULT (unixepoch()), -- when the embedding was generated (timestamp in unix seconds UTC)
-	"embedding" BLOB -- TODO: could define as float[768] (unless STRICT) and then use `check(typeof(contents_embedding) == 'blob' AND vec_length(contents_embedding) == 768)`
-) STRICT;
-
 -- Entity type names are hard-coded (but their IDs are not).
 CREATE TABLE IF NOT EXISTS "entity_types" (
 	"id" INTEGER PRIMARY KEY,
@@ -86,7 +76,7 @@ CREATE TABLE IF NOT EXISTS "entities" (
 	"type_id" INTEGER NOT NULL,
 	"job_id" INTEGER, -- import that originally created this entity, if via a data import
 	"stored" INTEGER NOT NULL DEFAULT (unixepoch()),
-	"modified" INTEGER, -- timestamp when entity was locally/manually modified (may include attributes)
+	"modified" INTEGER, -- timestamp when entity was locally/manually modified (may include linked attributes)
 	"name" TEXT COLLATE NOCASE,
 	"picture_file" TEXT,
 	"metadata" TEXT, -- optional extra information, encoded as JSON (should almost never be used! use attributes instead)
@@ -129,18 +119,14 @@ CREATE TABLE IF NOT EXISTS "entity_attributes" (
 	"entity_id" INTEGER NOT NULL,
 	"attribute_id" INTEGER NOT NULL,
 	"data_source_id" INTEGER, -- if set, the attribute defines the entity's identity on this data source (a row of a certain entity_id and attribute_id can be duplicated if they are identities on different data sources)
-	"job_id" INTEGER, -- the ID of the import that originated this row (originated the linkage between entity and attribute)
-	-- these next two fields explain how the row came into being, by inferring the association from another attribute
-	"autolink_job_id" INTEGER,    -- if set, the import that motivated linking this attribute as the entity's ID on the data source
-	"autolink_attribute_id" INTEGER, -- if set, the other attribute by which this attribute was automatically linked as the entity's ID on the data source
+	"job_id" INTEGER, -- the ID of the import that originated this row
 	"start" INTEGER, -- when the attribute started applying to the entity
-	"end" INTEGER,   -- when the attribute stopped applyiing to the entity
+	"end" INTEGER,   -- when the attribute stopped applying to the entity
 	FOREIGN KEY ("entity_id") REFERENCES "entities"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE,
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL,
-	FOREIGN KEY ("autolink_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL,
-	FOREIGN KEY ("autolink_attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE SET NULL
+	UNIQUE("entity_id", "attribute_id", "data_source_id")
 ) STRICT;
 
 -- These indexes make loading entities by attributes faster, especially during import jobs, when it's in the hot path.
@@ -170,7 +156,6 @@ CREATE TABLE IF NOT EXISTS "item_data" (
 -- specific temporal significance. Items typically exist as a result of entities existing.
 CREATE TABLE IF NOT EXISTS "items" (
 	"id" INTEGER PRIMARY KEY,
-	"embedding_id" INTEGER, -- associated embedding that represents the content of this item according to ML model; TODO: we may need an item_embeddings table for multiple...
 	"data_source_id" INTEGER,
 	"job_id" INTEGER, -- the import job that originally inserted this item
 	"modified_job_id" INTEGER, -- the import job that most recently modified this existing item
@@ -183,7 +168,8 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"timestamp" INTEGER, -- unix epoch millisecond timestamp when item content was originally created (NOT when the database row was created)
 	"timespan" INTEGER,  -- ending unix epoch ms timestamp if this item spans time (instead of being a single point in time); can be used in conjunction with timeframe to suggest duration
 	"timeframe" INTEGER, -- ending unix epoch ms timestamp if this item takes place somewhere between timestamp and timeframe, but it's not certain exactly when
-	"time_offset" INTEGER, -- offset of original timestamp/timespan/timeframe in seconds east of UTC/GMT (time zone)
+	"time_offset" INTEGER, -- offset of original timestamp in seconds east of UTC/GMT (time zone); null means "local time" or "wall time"
+	"time_offset_origin" TEXT, -- if the offset (time zone) was explicitly part of the timestamp, this will be null; otherwise a byte indicating how we sourced/inferred the offset
 	"time_uncertainty" INTEGER, -- if nonzero, time columns may be inaccurate on the order of this number of milliseconds, essentially sliding the times in a fuzzy interval
 	"stored" INTEGER NOT NULL DEFAULT (unixepoch()), -- unix epoch second timestamp when row was created or last retrieved from source
 	"modified" INTEGER, -- unix epoch second timestamp when item was manually modified (not via an import); if not null, then item is "not clean"
@@ -200,13 +186,12 @@ CREATE TABLE IF NOT EXISTS "items" (
 	"coordinate_uncertainty" REAL, -- if nonzero, lat/lon values may be inaccurate by this amount (same unit as coordinates)
 	"note" TEXT,      -- optional user-added information
 	"starred" INTEGER, -- like a bookmark; TODO: different numbers indicate different kinds of stars or something?
-	"thumb_hash" BLOB, -- bytes of the ThumbHash that represent a visual preview of the item (https://evanw.github.io/thumbhash/ and https://github.com/evanw/thumbhash)
+	"thumb_hash" BLOB, -- bytes of the ThumbHash (https://evanw.github.io/thumbhash/ and https://github.com/evanw/thumbhash) - prefixed with aspect ratio; stored here with item for fast, easy retrieval
 	"original_id_hash" BLOB, -- a hash of the data source and original ID of the item, also used for duplicate detection, optionally stored when item is deleted
 	"initial_content_hash" BLOB, -- a hash computed during initial import, used for duplicate detection (remains same even if item is modified by user)
 	"retrieval_key" BLOB UNIQUE, -- an optional opaque value that indicates this item may not be fully populated in a single import; not an ID but still a unique identifier
 	"hidden" INTEGER,  -- if owner would like to forget about this item, don't show it in search results, etc. TODO: keep?
 	"deleted" INTEGER, -- 1 = if the columns will be erased, they have been erased; >1 = a unix epoch timestamp after which the columns can be erased
-	FOREIGN KEY ("embedding_id") REFERENCES "embeddings"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE,
 	FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE, --TODO: maybe add ON DELETE CASCADE someday, which would rely on a regular sweeping of the files (garbage collection)! or we could do SET NULL
 	FOREIGN KEY ("modified_job_id") REFERENCES "jobs"("id") ON UPDATE CASCADE ON DELETE SET NULL, -- deleting that import won't undo the changes, however
@@ -216,7 +201,8 @@ CREATE TABLE IF NOT EXISTS "items" (
 	UNIQUE ("data_source_id", "original_id")
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
+CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp"); -- the need for this is obvious
+CREATE INDEX IF NOT EXISTS "idx_items_data_file" ON "items"("data_file"); -- used during imports especially for maintenance
 
 -- These next two partial indexes greatly speed up processing when importing items, or any queries that
 -- check for existing rows that may have been deleted or modified from their original content. Because
@@ -224,6 +210,10 @@ CREATE INDEX IF NOT EXISTS "idx_items_timestamp" ON "items"("timestamp");
 -- new items are not deleted or modified going in.
 CREATE INDEX IF NOT EXISTS "idx_items_deleted_original_id_hash" ON "items"("deleted", "original_id_hash") WHERE deleted IS NOT NULL OR original_id_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS "idx_items_initial_content_hash" ON "items"("initial_content_hash") WHERE modified IS NOT NULL OR deleted IS NOT NULL;
+
+-- This partial index speeds up processing for items that have incoming data and we need to check for
+-- existing item by its data (i.e. Collection items, very common with photo libraries; one per media item!)
+CREATE INDEX IF NOT EXISTS "idx_items_data_text_hash" ON "items"("data_text" COLLATE NOCASE, "data_hash") WHERE data_text IS NOT NULL OR data_hash IS NOT NULL;
 
 -- This partial index speeds up processing for items that have IDs assigned by their data source.
 CREATE INDEX IF NOT EXISTS "idx_items_original_id" ON "items"("original_id") WHERE original_ID IS NOT NULL;
@@ -357,19 +347,18 @@ CREATE TABLE IF NOT EXISTS "logs" (
 	FOREIGN KEY ("entity_attribute_id") REFERENCES "entity_attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS "settings" (
-	"key" TEXT PRIMARY KEY,
-	"title" TEXT,
-	"description" TEXT,
-	"type" TEXT,
-	"value",
+-- Embeddings enable "intelligent" search using ML models to derive semantics and meaning.
+-- By finding other embeddings that are close (dot product or euclidean distance),
+-- similarity searches are possible. This requires the sqlite-vec module.
+CREATE TABLE IF NOT EXISTS "embeddings" (
+	"id" INTEGER PRIMARY KEY,
 	"item_id" INTEGER,
-	"attribute_id" INTEGER,
-	"data_source_id" INTEGER, -- setting this implies this is a data source option, not merely a general setting that refers a data source
-	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("attribute_id") REFERENCES "attributes"("id") ON UPDATE CASCADE ON DELETE CASCADE,
-	FOREIGN KEY ("data_source_id") REFERENCES "data_sources"("id") ON UPDATE CASCADE ON DELETE CASCADE
-);
+	"generated" INTEGER NOT NULL DEFAULT (unixepoch()), -- when the embedding was generated (timestamp in unix seconds UTC)
+	"embedding" BLOB, -- TODO: could define as float[768] (unless STRICT) and then use `check(typeof(contents_embedding) == 'blob' AND vec_length(contents_embedding) == 768)`
+	FOREIGN KEY ("item_id") REFERENCES "items"("id") ON UPDATE CASCADE ON DELETE CASCADE
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS "idx_embeddings_item_id" ON "embeddings"("item_id");
 
 -- TODO: this is convenient -- will probably keep this, because the db-based enums like data sources and classifications
 -- don't get translated earlier; maybe we could, but I still need to think on that... if we do keep this,
@@ -398,7 +387,7 @@ CREATE TRIGGER IF NOT EXISTS prevent_stray_attributes
 	FOR EACH ROW
 	WHEN
 		(SELECT count(1) FROM
-			(SELECT id FROM entity_attributes WHERE attribute_id=OLD.attribute_id OR autolink_attribute_id=OLD.attribute_id LIMIT 1)) = 0
+			(SELECT id FROM entity_attributes WHERE attribute_id=OLD.attribute_id LIMIT 1)) = 0
 	BEGIN
 		DELETE FROM attributes WHERE id=OLD.attribute_id;
 	END;

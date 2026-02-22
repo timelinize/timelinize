@@ -54,7 +54,7 @@ func (b Browser) Get(ctx context.Context, expectedStateVal, authCodeURL string) 
 		return "", err
 	}
 
-	ln, err := net.Listen("tcp", redirURL.Host)
+	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", redirURL.Host)
 	if err != nil {
 		return "", err
 	}
@@ -91,7 +91,7 @@ func (b Browser) Get(ctx context.Context, expectedStateVal, authCodeURL string) 
 		srv.Serve(ln) //nolint:errcheck
 	}()
 
-	err = openBrowser(authCodeURL)
+	err = openBrowser(ctx, authCodeURL)
 	if err != nil {
 		fmt.Printf("Can't open browser: %s.\nPlease follow this link: %s", err, authCodeURL)
 	}
@@ -107,7 +107,7 @@ func (b Browser) Get(ctx context.Context, expectedStateVal, authCodeURL string) 
 }
 
 // openBrowser opens the browser to url.
-func openBrowser(url string) error {
+func openBrowser(ctx context.Context, url string) error {
 	osCommand := map[string][]string{
 		"darwin":  {"open"},
 		"freebsd": {"xdg-open"},
@@ -128,7 +128,7 @@ func openBrowser(url string) error {
 
 	buf := new(bytes.Buffer)
 
-	cmd := exec.Command(exe, append(args, url)...)
+	cmd := exec.CommandContext(ctx, exe, append(args, url)...)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err := cmd.Run()

@@ -268,6 +268,7 @@ async function updateRepoOwners(forced) {
 		store('open_repos', tlz.openRepos);
 
 		const repoOwner = tlz.openRepos[0].owner;
+		store('owner', repoOwner);
 		
 		let birthPlace = "";
 		if (repoOwner.attributes) {

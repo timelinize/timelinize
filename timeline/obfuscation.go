@@ -284,7 +284,7 @@ func (sr *SearchResults) Anonymize(opts ObfuscationOptions) {
 }
 
 // Anonymize obfuscates the entity.
-func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
+func (re *relatedEntity) Anonymize(opts ObfuscationOptions) {
 	if re == nil || re.ID == nil {
 		return
 	}
@@ -298,7 +298,7 @@ func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
 		re.Name = &name
 	}
 
-	if re.Attribute.Name != nil {
+	if re.Attribute.Name != nil && re.Attribute.Value != nil {
 		switch *re.Attribute.Name {
 		case AttributeEmail:
 			val := faker.Email()
@@ -311,6 +311,17 @@ func (re *relatedEntity) Anonymize(_ ObfuscationOptions) {
 			re.Attribute.Value = &val
 		}
 		re.Attribute.AltValue = nil
+
+		if re.Attribute.Latitude != nil && re.Attribute.Longitude != nil {
+			for _, locob := range opts.Locations {
+				if locob.Contains(*re.Attribute.Latitude, *re.Attribute.Longitude) {
+					lat, lon := locob.Obfuscate(*re.Attribute.Latitude, *re.Attribute.Longitude, *re.Attribute.ID)
+					re.Attribute.Latitude = &lat
+					re.Attribute.Longitude = &lon
+					break
+				}
+			}
+		}
 	}
 }
 
@@ -332,7 +343,7 @@ func (sr *SearchResult) Anonymize(opts ObfuscationOptions) {
 }
 
 // Anonymize obfuscates the entity.
-func (e *Entity) Anonymize() {
+func (e *Entity) Anonymize(opts ObfuscationOptions) {
 	if e == nil {
 		return
 	}
@@ -354,17 +365,30 @@ func (e *Entity) Anonymize() {
 	e.Name = consistentFakeEntityName(e.Name)
 
 	for i := range e.Attributes {
-		switch e.Attributes[i].Name {
-		case AttributeEmail:
-			e.Attributes[i].Value = faker.Email()
-		case AttributePhoneNumber:
-			e.Attributes[i].Value = faker.PhoneFormatted()
-		case "birth_date":
-			e.Attributes[i].Value = gofakeit.Date()
-		case "birth_place":
-			e.Attributes[i].Value = gofakeit.City() + ", " + gofakeit.StateAbr()
-		default:
-			e.Attributes[i].Value = safeRandomString(len(e.Attributes[i].valueString()), false, src)
+		if e.Attributes[i].Value != nil {
+			switch e.Attributes[i].Name {
+			case AttributeEmail:
+				e.Attributes[i].Value = faker.Email()
+			case AttributePhoneNumber:
+				e.Attributes[i].Value = faker.PhoneFormatted()
+			case "birth_date":
+				e.Attributes[i].Value = gofakeit.Date()
+			case "birth_place":
+				e.Attributes[i].Value = gofakeit.City() + ", " + gofakeit.StateAbr()
+			default:
+				e.Attributes[i].Value = safeRandomString(len(e.Attributes[i].valueString()), false, src)
+			}
+		}
+
+		if e.Attributes[i].Latitude != nil && e.Attributes[i].Longitude != nil {
+			for _, locob := range opts.Locations {
+				if locob.Contains(*e.Attributes[i].Latitude, *e.Attributes[i].Longitude) {
+					lat, lon := locob.Obfuscate(*e.Attributes[i].Latitude, *e.Attributes[i].Longitude, e.Attributes[i].ID)
+					e.Attributes[i].Latitude = &lat
+					e.Attributes[i].Longitude = &lon
+					break
+				}
+			}
 		}
 	}
 
@@ -400,7 +424,12 @@ func consistentFakeEntityName(realName string) string {
 		}
 		nameSrc := weakrand.NewPCG(dumbHash(name), 0)
 		nameFaker := gofakeit.NewFaker(nameSrc, false)
-		if fakeName == "" { //nolint:gocritic
+		if len(name) == 1 { //nolint:gocritic
+			if len(fakeName) > 0 {
+				fakeName += " "
+			}
+			fakeName += strings.ToUpper(nameFaker.Letter()) // name len 1 is likely an initial; generate a random initial in turn
+		} else if fakeName == "" {
 			fakeName = nameFaker.FirstName()
 		} else if i < len(names)-1 {
 			fakeName += " " + nameFaker.MiddleName()
@@ -413,7 +442,7 @@ func consistentFakeEntityName(realName string) string {
 
 func dumbHash(input string) uint64 {
 	var checksum uint64
-	for i, ch := range input {
+	for i, ch := range strings.ToLower(input) {
 		checksum += uint64(int(ch) * (i + 1)) //nolint:gosec
 	}
 	return checksum
@@ -448,7 +477,7 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 		ir.DataText = &txt
 	}
 
-	if ir.Filename != nil {
+	if ir.Filename != nil || ir.IntermediateLocation != nil || ir.OriginalLocation != nil {
 		// try to preserve the file extension, but we can't be sure what it is
 		// (what if it's .tar.gz? What if there's a dot in the middle of the filename?
 		// I don't want to chance preserving sensitive parts of the filename by parsing)
@@ -456,15 +485,19 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 		var extensions []string
 		var err error
 		if ir.DataType != nil {
-			extensions, err = mime.ExtensionsByType(*ir.DataType)
-			// prefer common extensions, not ".jfif" and ".f4v" or whatever
-			sort.Slice(extensions, func(i int, _ int) bool {
-				switch extensions[i] {
-				case ".jpg", ".jpeg", ".mp4", ".m4v", ".mov":
-					return true
-				}
-				return false
-			})
+			if *ir.DataType == "image/heic" {
+				extensions = []string{".heic"}
+			} else {
+				extensions, err = mime.ExtensionsByType(*ir.DataType)
+				// prefer common extensions, not ".jfif" and ".f4v" or whatever
+				sort.Slice(extensions, func(i int, _ int) bool {
+					switch extensions[i] {
+					case ".jpg", ".jpeg", ".mp4", ".m4v", ".mov", ".heic":
+						return true
+					}
+					return false
+				})
+			}
 		}
 		if err != nil || len(extensions) == 0 {
 			opts.Logger.Warn("no extensions for MIME type; generating a random one",
@@ -473,7 +506,17 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 			extensions = []string{"." + faker.FileExtension()}
 		}
 		fakeName := faker.Word() + faker.Password(true, true, true, false, false, weakrand.IntN(3)+2) + extensions[0] //nolint:gosec
-		ir.Filename = &fakeName
+		if ir.Filename != nil {
+			ir.Filename = &fakeName
+		}
+		if ir.IntermediateLocation != nil {
+			fakePath := fmt.Sprintf("demo/%s/%s", faker.Word(), fakeName)
+			ir.IntermediateLocation = &fakePath
+		}
+		if ir.OriginalLocation != nil {
+			fakePath := fmt.Sprintf("%s/%s", faker.Word(), fakeName)
+			ir.OriginalLocation = &fakePath
+		}
 	}
 
 	if ir.DataFile != nil {
@@ -482,21 +525,6 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 			// but if this setting is enabled, the frontend shouldn't be trying to request the data files anyway
 			fakePath := path.Join(path.Dir(*ir.DataFile), "(obfuscated)")
 			ir.DataFile = &fakePath
-		} else {
-			switch {
-			case ir.DataType != nil && strings.HasPrefix(*ir.DataType, "image/"):
-				// simply use thumbhash (TODO: if the image is requested anyways, return a blurred variant)
-				ir.DataFile = nil
-
-				// or use a random image completely... :shrug:
-				// pic := fmt.Sprintf("https://picsum.photos/seed/%d/1024/768", ir.ID)
-				// ir.DataFile = &pic
-			case ir.DataType != nil && strings.HasPrefix(*ir.DataType, "video/"):
-				// let frontend request videos; frontend handler will obfuscate them
-			default:
-				// TODO: not sure how to generate/obfuscate other stuff for now
-				ir.DataFile = nil
-			}
 		}
 	}
 
@@ -508,6 +536,10 @@ func (ir *ItemRow) Anonymize(opts ObfuscationOptions) {
 			ir.Metadata = nil
 		} else {
 			for key, val := range meta {
+				// confusing and not particularly useful to obfuscate the size of a location cluster
+				if key == "Cluster size" {
+					continue
+				}
 				// TODO: some field-aware replacement might be cool, for now just switch on type
 				switch v := val.(type) {
 				case int:
@@ -596,7 +628,7 @@ func (l ObfuscatedLocation) Contains(lat, lon float64) bool {
 func (l ObfuscatedLocation) Obfuscate(lat, lon float64, rowID uint64) (float64, float64) {
 	faker := gofakeit.New(rowID)
 
-	// translate all points within the circle a fixed vector; necessary to prevent
+	// translate all points within the circle a fixed vector; necessary to preven`t
 	// averaging the smattering of points to find the original center(s)
 	circleFaker := gofakeit.New(uint64((l.Lat + l.Lon) * 1e7))
 
