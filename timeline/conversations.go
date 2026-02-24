@@ -122,6 +122,7 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 	// make paging more efficient than using OFFSET; this way we just use
 	// the DB index to skip results with timestamps we've already traversed
 	var untilUnixMs int64
+	var untilItemID uint64
 
 	// worst case scenario is tens of thousands of items that pertain only to
 	// a few conversations that doesn't fill our quota... avoid super long
@@ -237,8 +238,10 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 			whereClause.WriteString(andItemsTimestampLessThanArg)
 			args = append(args, params.EndTimestamp.UnixMilli())
 		} else if untilUnixMs > 0 {
-			whereClause.WriteString(andItemsTimestampLessThanArg)
-			args = append(args, untilUnixMs)
+			// use the full sort key (timestamp, id) so items that share a
+			// timestamp are not lost at page boundaries
+			whereClause.WriteString(" AND (items.timestamp < ? OR (items.timestamp = ? AND items.id < ?))")
+			args = append(args, untilUnixMs, untilUnixMs, untilItemID)
 		}
 
 		args = append(args, rowLimit)
@@ -259,7 +262,7 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 			LEFT JOIN attributes AS from_attr ON from_attr.id = from_ea.attribute_id
 			LEFT JOIN attributes AS to_attr ON to_attr.id = to_ea.attribute_id
 			` + whereClause.String() + `
-			ORDER BY items.timestamp DESC
+			ORDER BY items.timestamp DESC, items.id DESC
 			LIMIT ?`
 
 		rows, err := tx.QueryContext(ctx, q, args...)
@@ -293,9 +296,12 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 			// remember this item ID for the next row so we can know if we've moved to the next item
 			lastItemID = ir.ID
 
-			// append this message to the current conversation aggregate
+			// append this message to the current conversation aggregate;
+			// guard against the same item appearing on multiple joined rows
 			if len(currentConvo.RecentMessages) < previewSize {
-				currentConvo.RecentMessages = append(currentConvo.RecentMessages, ir)
+				if len(currentConvo.RecentMessages) == 0 || currentConvo.RecentMessages[len(currentConvo.RecentMessages)-1].ID != ir.ID {
+					currentConvo.RecentMessages = append(currentConvo.RecentMessages, ir)
+				}
 			}
 
 			// move nullable ints into non-nullable fields that are read from (and which are easier and safer to work with)
@@ -347,6 +353,7 @@ func (tl *Timeline) loadRecentConversations(ctx context.Context, tx *sql.Tx, par
 
 			if ir.Timestamp != nil {
 				untilUnixMs = ir.Timestamp.UnixMilli()
+				untilItemID = ir.ID
 			}
 		}
 		if err := rows.Err(); err != nil {
@@ -634,9 +641,10 @@ JOIN entities ON from_ea.entity_id = entities.id`)
 type uint64Slice []uint64
 
 func (s uint64Slice) hash() string {
-	sort.Sort(s) // TODO: this doesn't seem to be working
+	sorted := append(uint64Slice(nil), s...)
+	sort.Sort(sorted)
 	var sb strings.Builder
-	for _, v := range s {
+	for _, v := range sorted {
 		sb.WriteString(strconv.FormatUint(v, 10))
 		sb.WriteRune(',')
 	}
