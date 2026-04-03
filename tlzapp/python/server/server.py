@@ -182,7 +182,7 @@ def embedding():
 	else:
 		return "Content-Type must be image/ or text/ media", 400
 
-	embedding = output.cpu().flatten().numpy().astype(np.float32).tolist()
+	embedding = output.pooler_output.cpu().flatten().numpy().astype(np.float32).tolist()
 	return json.dumps(embedding)
 
 @app.route("/classify", methods=["QUERY"])
