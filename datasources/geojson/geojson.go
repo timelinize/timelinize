@@ -293,6 +293,13 @@ func (f *feature) extractKnownProperties() error {
 	// we use this to try to guess whether Unix timestamp may be in seconds or milliseconds
 	const year2286ApproxUnixSec = 10000000000
 
+	// make sure we traverse properties case-insensitively; we can map the
+	// lowercased (normalized) property name to the original for value lookup
+	propKeysNormalizedToOriginal := make(map[string]string, len(f.Properties))
+	for k := range f.Properties {
+		propKeysNormalizedToOriginal[strings.ToLower(k)] = k
+	}
+
 	// time
 	for _, propName := range []string{
 		"time",
@@ -306,7 +313,7 @@ func (f *feature) extractKnownProperties() error {
 			break
 		}
 
-		switch val := f.Properties[propName].(type) {
+		switch val := f.Properties[propKeysNormalizedToOriginal[propName]].(type) {
 		case string:
 			for _, format := range []string{
 				time.RFC3339,
@@ -366,7 +373,7 @@ func (f *feature) extractKnownProperties() error {
 		if f.altitude != 0 {
 			break
 		}
-		switch val := f.Properties[propName].(type) {
+		switch val := f.Properties[propKeysNormalizedToOriginal[propName]].(type) {
 		case int:
 			f.altitude = float64(val)
 			delete(f.Properties, propName)
@@ -387,7 +394,7 @@ func (f *feature) extractKnownProperties() error {
 		if f.accuracy != 0 {
 			break
 		}
-		switch val := f.Properties[propName].(type) {
+		switch val := f.Properties[propKeysNormalizedToOriginal[propName]].(type) {
 		case int:
 			f.accuracy = float64(val)
 			delete(f.Properties, propName)
@@ -410,7 +417,7 @@ func (f *feature) extractKnownProperties() error {
 		if f.heading != 0 {
 			break
 		}
-		switch val := f.Properties[propName].(type) {
+		switch val := f.Properties[propKeysNormalizedToOriginal[propName]].(type) {
 		case int:
 			f.heading = float64(val)
 			delete(f.Properties, propName)
@@ -432,7 +439,7 @@ func (f *feature) extractKnownProperties() error {
 		if f.velocity != 0 {
 			break
 		}
-		switch val := f.Properties[propName].(type) {
+		switch val := f.Properties[propKeysNormalizedToOriginal[propName]].(type) {
 		case int:
 			f.velocity = float64(val)
 			delete(f.Properties, propName)
