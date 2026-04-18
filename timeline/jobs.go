@@ -436,6 +436,9 @@ func (tl *Timeline) runJob(row Job) error {
 			if _, err := tl.db.WritePool.ExecContext(ctx, "PRAGMA wal_checkpoint"); err != nil {
 				logger.Error("could not create WAL checkpoint", zap.Error(err))
 			}
+
+			// release resources even if job wasn't cancelled
+			job.cancel()
 		}()
 
 		// when we're done here, clean up our map of active jobs

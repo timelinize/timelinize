@@ -14,7 +14,7 @@ runs:
 
     - name: Cache libvips
       id: cache-libvips
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: /opt/libvips
         key: libvips-${{ steps.libvips-version.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
