@@ -15,6 +15,8 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
+var easternStandardTime = time.FixedZone("", -5*60*60)
+
 type testParticipant struct {
 	name  string
 	phone string
@@ -73,22 +75,9 @@ END:VCARD`),
 		t.Fatalf("fs.Stat(..., %q) err=%v, want=%v", "Voice", got, want)
 	}
 
-	timestampFromRFC3339 := func(input string) time.Time {
-		t.Helper()
-
-		parsedTime, err := time.Parse(time.RFC3339Nano, input)
-		if err != nil {
-			t.Fatalf("time.Parse(%q) err=%v", input, err)
-		}
-
-		return parsedTime
-	}
-
 	expectedMessages := []testMessage{
 		{
-			timestamp: timestampFromRFC3339(
-				"2011-12-15T20:08:08.451-05:00",
-			),
+			timestamp: time.Date(2011, time.December, 15, 20, 8, 8, 451_000_000, easternStandardTime),
 			owner: testParticipant{
 				name:  "Dummy Dummerson",
 				phone: "+12125551234",
@@ -100,9 +89,7 @@ END:VCARD`),
 			text: "Are you there?",
 		},
 		{
-			timestamp: timestampFromRFC3339(
-				"2011-12-15T20:14:11.911-05:00",
-			),
+			timestamp: time.Date(2011, time.December, 15, 20, 14, 11, 911_000_000, easternStandardTime),
 			owner: testParticipant{
 				name:  "Test User",
 				phone: "+16465559876",
@@ -114,9 +101,7 @@ END:VCARD`),
 			text: "Yes, Mr. Dummerson. What do you need?",
 		},
 		{
-			timestamp: timestampFromRFC3339(
-				"2011-12-15T20:48:12.265-05:00",
-			),
+			timestamp: time.Date(2011, time.December, 15, 20, 48, 12, 265_000_000, easternStandardTime),
 			owner: testParticipant{
 				name:  "Dummy Dummerson",
 				phone: "+12125551234",
