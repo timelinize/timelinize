@@ -15,26 +15,19 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-type testParticipant struct {
-	name  string
-	phone string
-}
-
-type testMessage struct {
-	timestamp time.Time
-	owner     testParticipant
-	recipient testParticipant
-	text      string
-}
-
-func mustParseRFC339(value string) time.Time {
-	ts, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		panic(err)
+type (
+	testParticipant struct {
+		name  string
+		phone string
 	}
 
-	return ts
-}
+	testMessage struct {
+		timestamp time.Time
+		owner     testParticipant
+		recipient testParticipant
+		text      string
+	}
+)
 
 func TestFileImportTextConversation(t *testing.T) {
 	mockFS := fstest.MapFS{
@@ -155,6 +148,15 @@ END:VCARD`),
 	if got, want := expectedMessages[2], actualMessages[2]; !reflect.DeepEqual(got, want) {
 		t.Errorf("got=%#v, want=%#v", got, want)
 	}
+}
+
+func mustParseRFC339(value string) time.Time {
+	ts, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		panic(err)
+	}
+
+	return ts
 }
 
 func mustReadMessagesFromPipeline(
