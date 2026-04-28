@@ -164,11 +164,11 @@ func mustReadMessagesFromPipeline(
 ) []testMessage {
 	t.Helper()
 
-	var actualMessages []testMessage
+	var messages []testMessage
 	for graph := range pipeline {
 		recipient := mustReadRecipient(t, graph)
 
-		actualMessages = append(actualMessages, testMessage{
+		messages = append(messages, testMessage{
 			timestamp: graph.Item.Timestamp,
 			owner: testParticipant{
 				name:  graph.Item.Owner.Name,
@@ -182,7 +182,7 @@ func mustReadMessagesFromPipeline(
 		})
 	}
 
-	return actualMessages
+	return messages
 }
 
 func mustReadRecipient(t *testing.T, graph *timeline.Graph) *timeline.Entity {
