@@ -15,8 +15,6 @@ import (
 	"github.com/timelinize/timelinize/timeline"
 )
 
-var easternStandardTime = time.FixedZone("", -5*60*60)
-
 type testParticipant struct {
 	name  string
 	phone string
@@ -27,6 +25,15 @@ type testMessage struct {
 	owner     testParticipant
 	recipient testParticipant
 	text      string
+}
+
+func mustParseRFC339(value string) time.Time {
+	ts, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		panic(err)
+	}
+
+	return ts
 }
 
 func TestFileImportTextConversation(t *testing.T) {
@@ -77,7 +84,7 @@ END:VCARD`),
 
 	expectedMessages := []testMessage{
 		{
-			timestamp: time.Date(2011, time.December, 15, 20, 8, 8, 451_000_000, easternStandardTime),
+			timestamp: mustParseRFC339("2011-12-15T20:08:08.451-05:00"),
 			owner: testParticipant{
 				name:  "Dummy Dummerson",
 				phone: "+12125551234",
@@ -89,7 +96,7 @@ END:VCARD`),
 			text: "Are you there?",
 		},
 		{
-			timestamp: time.Date(2011, time.December, 15, 20, 14, 11, 911_000_000, easternStandardTime),
+			timestamp: mustParseRFC339("2011-12-15T20:14:11.911-05:00"),
 			owner: testParticipant{
 				name:  "Test User",
 				phone: "+16465559876",
@@ -101,7 +108,7 @@ END:VCARD`),
 			text: "Yes, Mr. Dummerson. What do you need?",
 		},
 		{
-			timestamp: time.Date(2011, time.December, 15, 20, 48, 12, 265_000_000, easternStandardTime),
+			timestamp: mustParseRFC339("2011-12-15T20:48:12.265-05:00"),
 			owner: testParticipant{
 				name:  "Dummy Dummerson",
 				phone: "+12125551234",
