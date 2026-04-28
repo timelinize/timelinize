@@ -9,10 +9,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/timelinize/timelinize/datasources/googlevoice"
 	"github.com/timelinize/timelinize/timeline"
+	"go.uber.org/zap"
 )
 
 type (
@@ -71,8 +70,8 @@ END:VCARD`),
 	}
 
 	voiceInfo, err := fs.Stat(mockFS, "Voice")
-	if got, want := err, error(nil); got != want {
-		t.Fatalf("fs.Stat(..., %q) err=%v, want=%v", "Voice", got, want)
+	if err != nil {
+		t.Fatalf("fs.Stat failed with err=%v", err)
 	}
 
 	expectedMessages := []testMessage{
@@ -128,8 +127,8 @@ END:VCARD`),
 			Log:      zap.NewNop(),
 		},
 	)
-	if got, want := err, error(nil); got != want {
-		t.Fatalf("FileImport(...) err=%v, want=%v", got, want)
+	if err != nil {
+		t.Fatalf("FileImport failed with err=%v", err)
 	}
 	close(pipeline)
 
