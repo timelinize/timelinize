@@ -495,7 +495,7 @@ func (tl *Timeline) explainQueryPlan(ctx context.Context, tx *sql.Tx, q string, 
 	fmt.Fprintln(w, argsToDisplay...)
 	fmt.Fprintln(w, "============================================================================================")
 
-	explainQ := "EXPLAIN QUERY PLAN " + q //nolint:gosec
+	explainQ := "EXPLAIN QUERY PLAN " + q
 
 	var rows *sql.Rows
 	var err error
