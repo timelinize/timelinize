@@ -130,7 +130,7 @@ func openBrowser(ctx context.Context, url string) error {
 
 	buf := new(bytes.Buffer)
 
-	cmd := exec.CommandContext(ctx, exe, append(args, url)...) //nolint:gosec // (all args should be hard-coded or vetted earlier)
+	cmd := exec.CommandContext(ctx, exe, append(args, url)...)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err := cmd.Run()
