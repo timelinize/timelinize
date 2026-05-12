@@ -437,8 +437,8 @@ func (tl *Timeline) runJob(row Job) error {
 				logger.Error("could not create WAL checkpoint", zap.Error(err))
 			}
 
-			// release resources even if job wasn't cancelled
-			job.cancel()
+			// when done, release resources even if job wasn't cancelled (this has to come afer the checkpointing query above)
+			defer job.cancel()
 		}()
 
 		// when we're done here, clean up our map of active jobs
