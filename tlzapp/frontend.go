@@ -571,7 +571,7 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 		content = bytes.NewReader([]byte(*itemRow.DataText))
 
 	case itemRow.DataFile != nil:
-		f, err := os.Open(tl.FullPath(*itemRow.DataFile)) //nolint:gosec // This is a trusted path
+		f, err := os.Open(tl.FullPath(*itemRow.DataFile))
 		if err != nil {
 			return err
 		}
@@ -670,7 +670,7 @@ func (s server) dataSourceImage(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	w.Header().Set("Content-Type", *ds.MediaType)
-	_, err = w.Write(ds.Media) //nolint:gosec // This is a trusted path
+	_, err = w.Write(ds.Media)
 
 	return err
 }
@@ -708,7 +708,7 @@ func executeTemplate(rr *responseRecorder, r *http.Request, app *App) error {
 func executeTemplateInBuffer(tplName string, buf *bytes.Buffer, data any, app *App) error {
 	tpl := newTemplate(tplName, app)
 
-	_, err := tpl.Parse(buf.String())
+	_, err := tpl.Parse(buf.String()) //nolint:gosec // yeah, the whole point is to evaluate templates here
 	if err != nil {
 		return err
 	}

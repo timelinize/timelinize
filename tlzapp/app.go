@@ -196,7 +196,7 @@ func (app *App) RunCommand(ctx context.Context, args []string) error {
 	var resp *http.Response
 	if app.serverRunning() {
 		httpClient := &http.Client{Timeout: 1 * time.Minute}
-		resp, err = httpClient.Do(req) //nolint:gosec
+		resp, err = httpClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("running command on server: %w", err)
 		}
@@ -455,7 +455,7 @@ func (app *App) serve() error {
 	// since some operating systems sometimes do weird things with
 	// port reuse (*cough* Windows), poll until connection succeeds
 	for {
-		resp, err := client.Do(req) //nolint:gosec // c'mon linter, it's literally hard-coded
+		resp, err := client.Do(req)
 		if err == nil {
 			resp.Body.Close()
 			if resp.Header.Get("Server") == "Timelinize" {
@@ -483,7 +483,7 @@ func (app *App) serverRunning() bool {
 		return false
 	}
 	client := &http.Client{Timeout: time.Second}
-	resp, err := client.Do(req) //nolint:gosec // c'mon linter, it's literally hard-coded
+	resp, err := client.Do(req)
 	if err != nil {
 		return false
 	}

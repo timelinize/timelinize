@@ -96,7 +96,7 @@ func makeJSON(args []string) ([]byte, error) {
 			if k := strings.Index(part, "["); k > 0 && part[len(part)-1] == ']' {
 				keyPart := part[:k]
 				arrPart := part[k:]
-				newParts := []string{keyPart, arrPart}
+				newParts := []string{keyPart, arrPart} //nolint:prealloc
 				flagParts = append(flagParts[:j], append(newParts, flagParts[j+1:]...)...)
 			}
 		}

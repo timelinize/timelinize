@@ -176,7 +176,7 @@ func (s *server) handleChangeSettings(w http.ResponseWriter, r *http.Request) er
 
 func (s *server) handleFileStat(w http.ResponseWriter, r *http.Request) error {
 	filename := r.Context().Value(ctxKeyPayload).(*string)
-	info, err := os.Stat(*filename) //nolint:gosec // Path traversal OK tbh
+	info, err := os.Stat(*filename)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, fs.ErrNotExist) {
@@ -421,7 +421,7 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 	var filenamePrefix string
 
 	// get info about the path because we need to differentiate file from directory
-	info, err := os.Stat(listingReq.Path) //nolint:gosec // path traversal OK tbh
+	info, err := os.Stat(listingReq.Path)
 	if errors.Is(err, fs.ErrNotExist) && listingReq.Autocomplete {
 		// with autocomplete enabled, this means the user is likely typing their path manually, so
 		// we can expect incomplete paths; try accessing the path's dir instead, and use whatever
@@ -429,7 +429,7 @@ func (server) handleFileListing(w http.ResponseWriter, r *http.Request) error {
 		// is trying to get at
 		filenamePrefix = filepath.Base(listingReq.Path)
 		listingReq.Path = filepath.Dir(listingReq.Path)
-		info, err = os.Stat(listingReq.Path) //nolint:gosec // path traversal OK tbh
+		info, err = os.Stat(listingReq.Path)
 	}
 	if err != nil {
 		return properError(err)
