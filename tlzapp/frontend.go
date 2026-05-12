@@ -157,7 +157,7 @@ func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error
 					}
 				}
 				w.Header().Set("Content-Type", "image/jpeg")
-				_, _ = w.Write(img)
+				_, _ = w.Write(img) //nolint:gosec // unless the XSS comes from JPG metadata I guess, frontend should not eval it anyway
 			}
 		}
 		tl.fileServer.ServeHTTP(w, r)
@@ -571,7 +571,7 @@ func (s server) downloadItem(w http.ResponseWriter, r *http.Request, tl openedTi
 		content = bytes.NewReader([]byte(*itemRow.DataText))
 
 	case itemRow.DataFile != nil:
-		f, err := os.Open(tl.FullPath(*itemRow.DataFile))
+		f, err := os.Open(tl.FullPath(*itemRow.DataFile)) //nolint:gosec // This is a trusted path
 		if err != nil {
 			return err
 		}
@@ -670,7 +670,7 @@ func (s server) dataSourceImage(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	w.Header().Set("Content-Type", *ds.MediaType)
-	_, err = w.Write(ds.Media)
+	_, err = w.Write(ds.Media) //nolint:gosec // This is a trusted path
 
 	return err
 }

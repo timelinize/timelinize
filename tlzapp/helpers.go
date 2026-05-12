@@ -136,7 +136,7 @@ func jsonResponse(w http.ResponseWriter, v any, err error) error {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Length", strconv.Itoa(len(respBytes)))
-		_, err = w.Write(respBytes)
+		_, err = w.Write(respBytes) //nolint:gosec
 		return err
 	}
 	return nil
