@@ -279,7 +279,7 @@ func (app *App) CommandLineHelp() string {
 		return commands[i].command < commands[j].command
 	})
 
-	var sb strings.Builder
+	sb := new(strings.Builder)
 
 	sb.WriteString(`Timelinize is an application to curate your portion of the global digital record by organizing
 your own data on your own computer.
@@ -332,9 +332,9 @@ Available Commands:`)
 					}
 					optional := cut && omitEmpty == "omitempty"
 					if optional {
-						sb.WriteString(fmt.Sprintf(" [--%s <%s>]", argName, dataType))
+						fmt.Fprintf(sb, " [--%s <%s>]", argName, dataType)
 					} else {
-						sb.WriteString(fmt.Sprintf(" --%s <%s>", argName, dataType))
+						fmt.Fprintf(sb, " --%s <%s>", argName, dataType)
 					}
 				}
 			default:
