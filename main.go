@@ -34,6 +34,7 @@ import (
 	_ "github.com/timelinize/timelinize/datasources/generic"
 	_ "github.com/timelinize/timelinize/datasources/geojson"
 	_ "github.com/timelinize/timelinize/datasources/github"
+	_ "github.com/timelinize/timelinize/datasources/goodreads"
 	_ "github.com/timelinize/timelinize/datasources/googlelocation"
 	_ "github.com/timelinize/timelinize/datasources/googlephotos"
 	_ "github.com/timelinize/timelinize/datasources/googlevoice"
