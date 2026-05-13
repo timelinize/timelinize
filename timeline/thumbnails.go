@@ -660,7 +660,6 @@ func (task thumbnailTask) generateThumbnail(ctx context.Context, inputFilename s
 		case strings.HasPrefix(task.ThumbType, "image/"):
 			// I have found that smaller dimension and higher quality is a good tradeoff for keeping
 			// file size small -- it obviously doesn't look great, but lower quality looks REALLY bad
-			//nolint:gosec
 			cmd = exec.CommandContext(ctx, "ffmpeg",
 				"-i", inputFilename,
 				"-vf", fmt.Sprintf("scale=%d:-1", maxVideoThumbnailDimension),

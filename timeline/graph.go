@@ -762,7 +762,7 @@ func isNil(v any) bool {
 		return true
 	}
 	switch rv.Kind() {
-	case reflect.Ptr, reflect.Slice, reflect.Map, reflect.Func, reflect.Interface:
+	case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Func, reflect.Interface:
 		return rv.IsNil()
 	default:
 		return false
@@ -879,6 +879,7 @@ func scanItemRow(row sqlScanner, targetsAfterItemCols []any) (ItemRow, error) {
 	var ts, tspan, tframe, modified, deleted *int64 // will convert from Unix or Unix milli timestamp
 	var stored int64                                // will convert from Unix timestamp
 
+	//nolint:prealloc
 	itemTargets := []any{&ir.ID, &ir.DataSourceID, &ir.JobID, &ir.ModifiedJobID, &ir.AttributeID,
 		&ir.ClassificationID, &ir.OriginalID, &ir.OriginalLocation, &ir.IntermediateLocation, &ir.Filename,
 		&ts, &tspan, &tframe, &ir.TimeOffset, &ir.TimeOffsetOrigin, &ir.TimeUncertainty, &stored, &modified,
