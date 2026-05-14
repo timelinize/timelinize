@@ -1,14 +1,12 @@
 package whatsapp_test
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"io"
 	"os"
 	"testing"
 
 	"github.com/timelinize/timelinize/datasources/whatsapp"
+	"github.com/timelinize/timelinize/internal/testhelpers"
 	"github.com/timelinize/timelinize/timeline"
 )
 
@@ -106,7 +104,7 @@ func TestFileImport(t *testing.T) {
 			t.Fatalf("incorrect second for message %d, wanted %d but was %d", i, expected[i].index, message.Item.Timestamp.Second())
 		}
 
-		validateItemData(t, "", expected[i].text, message.Item.Content, "incorrect text for message %d", i)
+		testhelpers.ValidateItemData(t, "", expected[i].text, message.Item.Content, "incorrect text for message %d", i)
 
 		if len(expected[i].attachments) > 0 {
 			var attachedItems []*timeline.Item
@@ -125,7 +123,7 @@ func TestFileImport(t *testing.T) {
 					t.Errorf("unable to open fixture file (%s) as test data: %v", filename, err)
 				}
 
-				validateItemData(t, filename, expFile, attachedItems[j].Content, "incorrect %dth attachment for message %d", j, i)
+				testhelpers.ValidateItemData(t, filename, expFile, attachedItems[j].Content, "incorrect %dth attachment for message %d", j, i)
 			}
 		}
 
@@ -144,57 +142,5 @@ func TestFileImport(t *testing.T) {
 
 	if i != len(expected) {
 		t.Fatalf("received %d messages instead of %d", i, len(expected))
-	}
-}
-
-func validateItemData(t *testing.T, expectedFilename string, expectedData any, itemData timeline.ItemData, errorMessage string, errorArgs ...any) {
-	errMsg := fmt.Sprintf(errorMessage, errorArgs...)
-
-	expectedStr, isStr := expectedData.(string)
-
-	var expectedBytes []byte
-	if expectedData == nil || (isStr && expectedStr == "") {
-		if itemData.Data != nil {
-			t.Fatalf("%s; should not have had a DataFunc", errMsg)
-		}
-		return
-	} else if exp, ok := expectedData.(io.Reader); ok {
-		var err error
-		expectedBytes, err = io.ReadAll(exp)
-		if err != nil {
-			t.Errorf("%s; couldn't read expected data: %v", errMsg, err)
-			return
-		}
-	} else if isStr {
-		expectedBytes = []byte(expectedStr)
-	} else if exp, ok := expectedData.([]byte); ok {
-		expectedBytes = exp
-	} else {
-		t.Errorf("%s; unable to check content with expected data type: %T", errMsg, expectedData)
-		return
-	}
-
-	if itemData.Data == nil {
-		t.Fatalf("%s; DataFunc should be non-nil", errMsg)
-		return
-	}
-
-	actualR, err := itemData.Data(context.Background())
-	if err != nil {
-		t.Fatalf("%s; unable to retrieve actual data from dataFunc", errMsg)
-		return
-	}
-
-	actualBytes, err := io.ReadAll(actualR)
-	if err != nil {
-		t.Fatalf("%s; unable read data from dataFunc reader", errMsg)
-		return
-	}
-
-	if expectedFilename != "" && itemData.Filename != expectedFilename {
-		t.Fatalf("%s; filename incorrect, wanted %s but was %s", errMsg, expectedFilename, itemData.Filename)
-	}
-	if !bytes.Equal(actualBytes, expectedBytes) {
-		t.Fatalf("%s; item data incorrect, wanted:\n %v\n %s\nbut got:\n %v\n %s", errMsg, expectedBytes, string(expectedBytes), actualBytes, string(actualBytes))
 	}
 }
