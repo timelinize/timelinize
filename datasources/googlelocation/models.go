@@ -452,7 +452,7 @@ func (l location) metadata() timeline.Metadata {
 		meta["Activities"] = strings.Join(acts, ", ")
 	}
 
-	var wifis []string //nolint:prealloc
+	var wifis []string
 	for _, lm := range l.LocationMetadata {
 		for _, ap := range lm.WifiScan.AccessPoints {
 			wifis = append(wifis, fmt.Sprintf("[%s %d]", ap.MAC, ap.Strength))

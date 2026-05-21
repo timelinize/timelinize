@@ -398,7 +398,7 @@ func chatDBPath(input timeline.DirEntry) string {
 	if err != nil {
 		return ""
 	}
-	// To be 100% confident we should open chat.db and see if we can query it...
+	// TODO: To be 100% confident we should open chat.db and see if we can query it...
 	if !info.IsDir() &&
 		input.Name() == "chat.db" &&
 		timeline.FileExistsFS(input.FS, path.Join(path.Dir(input.Filename), "Attachments")) {

@@ -54,6 +54,8 @@ func (b Browser) Get(ctx context.Context, expectedStateVal, authCodeURL string) 
 		return "", err
 	}
 
+	// TODO: parse and validate authCodeURL since it will be used as a command line argument later
+
 	ln, err := new(net.ListenConfig).Listen(ctx, "tcp", redirURL.Host)
 	if err != nil {
 		return "", err
@@ -128,7 +130,7 @@ func openBrowser(ctx context.Context, url string) error {
 
 	buf := new(bytes.Buffer)
 
-	cmd := exec.CommandContext(ctx, exe, append(args, url)...)
+	cmd := exec.CommandContext(ctx, exe, append(args, url)...) //nolint:gosec // (all args should be hard-coded or vetted earlier)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err := cmd.Run()

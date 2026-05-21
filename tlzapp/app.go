@@ -320,7 +320,6 @@ func (app *App) startPythonServer(host string, port int) error {
 
 	// run the python server such that the venv is relocated to its own
 	// folder outside the project folder (but still in the app data dir)
-	//nolint:gosec
 	cmd := exec.CommandContext(app.ctx,
 		"uv", "run", "server.py",
 		"--host", host,

@@ -47,7 +47,7 @@ type Error struct {
 }
 
 func (e Error) Error() string {
-	var msg strings.Builder
+	msg := new(strings.Builder)
 	if e.Log != "" {
 		msg.WriteString(e.Log)
 		if e.Err != nil {
@@ -58,10 +58,10 @@ func (e Error) Error() string {
 		msg.WriteString(e.Err.Error())
 	}
 	if e.Message != "" {
-		msg.WriteString(fmt.Sprintf(" (%s)", e.Message))
+		fmt.Fprintf(msg, " (%s)", e.Message)
 	}
 	if e.ID != "" {
-		msg.WriteString(fmt.Sprintf(" {id=%s}", e.ID))
+		fmt.Fprintf(msg, " {id=%s}", e.ID)
 	}
 	return msg.String()
 }

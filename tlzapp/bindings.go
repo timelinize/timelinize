@@ -955,6 +955,8 @@ func (app *App) ChangeSettings(ctx context.Context, newSettings *changeSettingsP
 		}
 
 		if restart {
+			// Use a background context here, because the whole point is we're canceling the previous context and restarting the server.
+			//nolint:gosec
 			go func(oldApp *App) {
 				oldApp.cancel()
 

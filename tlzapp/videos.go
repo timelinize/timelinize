@@ -103,7 +103,7 @@ func (app *App) Transcode(ctx context.Context, inputPath string, inputStream io.
 	// finally, finish with the output ("-" is apparently equivalent to "pipe:" -- stdout is assumed in this position)
 	args = append(args, "-")
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...) //nolint:gosec // command is hard-coded
 	if inputStream != nil {
 		cmd.Stdin = inputStream
 	}
@@ -146,7 +146,7 @@ func determineVideoStream(ctx context.Context, inputPath string) (string, error)
 		return "", nil
 	}
 
-	probe := exec.CommandContext(ctx, "ffprobe",
+	probe := exec.CommandContext(ctx, "ffprobe", //nolint:gosec // command is hard-coded
 		"-output_format", "json",
 		"-show_streams",
 		"-i", inputPath,

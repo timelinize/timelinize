@@ -157,7 +157,7 @@ func (s server) handleRepoResource(w http.ResponseWriter, r *http.Request) error
 					}
 				}
 				w.Header().Set("Content-Type", "image/jpeg")
-				_, _ = w.Write(img)
+				_, _ = w.Write(img) //nolint:gosec // unless the XSS comes from JPG metadata I guess, frontend should not eval it anyway
 			}
 		}
 		tl.fileServer.ServeHTTP(w, r)
@@ -708,7 +708,7 @@ func executeTemplate(rr *responseRecorder, r *http.Request, app *App) error {
 func executeTemplateInBuffer(tplName string, buf *bytes.Buffer, data any, app *App) error {
 	tpl := newTemplate(tplName, app)
 
-	_, err := tpl.Parse(buf.String())
+	_, err := tpl.Parse(buf.String()) //nolint:gosec // yeah, the whole point is to evaluate templates here
 	if err != nil {
 		return err
 	}
