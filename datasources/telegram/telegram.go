@@ -206,12 +206,30 @@ func (fimp *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirE
 				context = objectKey
 			}
 
-		case ".chats.list.type",
+		case ".chats.list.name",
+			".chats.list.type",
 			".chats.list.id",
 			".chats.list.messages":
 			seenChats = true
 			if len(ownerEntity.Attributes) == 0 {
 				return nil // have to get owner account info first
+			}
+
+			if scope == ".chats.list.name" {
+				next, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				chatName, _ := next.(string)
+				// Reset currentChatEntity for each new chat using the peer's display name
+				// from the chat object itself. Without this reset, the Name field from the
+				// previous chat bleeds into the next one, causing messages to be attributed
+				// to the wrong contact when the owner sends the first message in a chat
+				currentChatEntity = timeline.Entity{Name: chatName}
+
+				nesting = nesting[:len(nesting)-1]
+				context = objectKey
+				return nil
 			}
 
 			if scope == ".chats.list.type" {
