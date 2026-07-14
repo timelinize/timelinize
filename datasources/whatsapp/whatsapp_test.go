@@ -147,6 +147,65 @@ func TestFileImport(t *testing.T) {
 	}
 }
 
+// TestFileImportGermanShortYear covers a real-world export variant that
+// differs from the primary fixture in two ways: dates use a 2-digit year
+// ("22.08.18" instead of "2020-01-01"), and the export has no LRO markers at
+// all, so WhatsApp's own placeholders (deleted message, media omitted, the
+// edited-message marker) show up as plain German text instead of being
+// separated out with U+200E.
+func TestFileImportGermanShortYear(t *testing.T) {
+	fixtures := os.DirFS("testdata/fixtures-de")
+	dirEntry := timeline.DirEntry{FS: fixtures}
+
+	pipeline := make(chan *timeline.Graph, 100)
+	params := timeline.ImportParams{Pipeline: pipeline}
+
+	runErr := new(whatsapp.Importer).FileImport(context.Background(), dirEntry, params)
+	if runErr != nil {
+		t.Errorf("unable to import file: %v", runErr)
+	}
+	close(params.Pipeline)
+
+	expected := []struct {
+		owner string
+		year  int
+		month int
+		day   int
+		text  string
+	}{
+		{owner: "Alice", year: 2018, month: 8, day: 22, text: "Hallo Bob"},
+		{owner: "Bob", year: 2018, month: 8, day: 22, text: "Hi Alice"},
+		// <Medien ausgeschlossen> (media omitted) is skipped
+		// "Diese Nachricht wurde gelöscht." (message deleted) is skipped
+		{owner: "Alice", year: 2018, month: 8, day: 23, text: "Testnachricht mit mehreren\nZeilen"},
+	}
+
+	i := 0
+	for message := range pipeline {
+		if i >= len(expected) {
+			t.Fatalf("received more messages than expected, extra message: %+v", message.Item)
+		}
+
+		if message.Item.Owner.Name != expected[i].owner {
+			t.Fatalf("incorrect owner for message %d, wanted %s but was %s", i, expected[i].owner, message.Item.Owner.Name)
+		}
+		if message.Item.Timestamp.Year() != expected[i].year ||
+			int(message.Item.Timestamp.Month()) != expected[i].month ||
+			message.Item.Timestamp.Day() != expected[i].day {
+			t.Fatalf("incorrect date for message %d, wanted %04d-%02d-%02d but was %s",
+				i, expected[i].year, expected[i].month, expected[i].day, message.Item.Timestamp.Format("2006-01-02"))
+		}
+
+		validateItemData(t, "", expected[i].text, message.Item.Content, "incorrect text for message %d", i)
+
+		i++
+	}
+
+	if i != len(expected) {
+		t.Fatalf("received %d messages instead of %d", i, len(expected))
+	}
+}
+
 func validateItemData(t *testing.T, expectedFilename string, expectedData any, itemData timeline.ItemData, errorMessage string, errorArgs ...any) {
 	errMsg := fmt.Sprintf(errorMessage, errorArgs...)
 

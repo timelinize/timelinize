@@ -1,0 +1,6 @@
+22.08.18, 14:42 - Alice: Hallo Bob
+22.08.18, 14:43 - Bob: Hi Alice
+23.08.18, 09:00 - Alice: <Medien ausgeschlossen>
+23.08.18, 09:05 - Bob: Diese Nachricht wurde gelöscht.
+23.08.18, 09:10 - Alice: Testnachricht mit mehreren
+Zeilen <Diese Nachricht wurde bearbeitet.>

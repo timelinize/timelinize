@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"testing"
+	"time"
 )
 
 func TestParseMessageHeader(t *testing.T) {
@@ -74,8 +75,22 @@ func TestParseMessageHeader(t *testing.T) {
 			wantLRO:  true,
 		},
 		{
+			name:     "dash DD.MM.YY HH:MM (2-digit year)",
+			line:     "22.08.18, 14:42 - Samuel: Hallo",
+			wantOK:   true,
+			wantDate: "22.08.18",
+			wantTime: "14:42",
+			wantName: "Samuel",
+			wantLen:  len("22.08.18, 14:42 - Samuel: "),
+		},
+		{
 			name:   "invalid date format",
 			line:   "[2024_12_31, 12:34] Bad: nope",
+			wantOK: false,
+		},
+		{
+			name:   "invalid 2-digit-year date (bad month)",
+			line:   "31.13.24, 12:34 - Bad: nope",
 			wantOK: false,
 		},
 		{
@@ -181,6 +196,41 @@ func TestChatSplitSingleMessage(t *testing.T) {
 	}
 	if tokens[0] == "" {
 		t.Fatalf("token should not be empty")
+	}
+}
+
+func TestChatSplitTwoMessagesShortYear(t *testing.T) {
+	tokens := scanTokens(t, "22.08.18, 14:42 - Alice: hello\n22.08.18, 14:43 - Bob: hi there\n")
+	if len(tokens) != 2 {
+		t.Fatalf("expected 2 tokens, got %d", len(tokens))
+	}
+	if tokens[0] != "22.08.18, 14:42 - Alice: hello\n" {
+		t.Fatalf("first token mismatch: got %q", tokens[0])
+	}
+	if tokens[1] != "22.08.18, 14:43 - Bob: hi there\n" {
+		t.Fatalf("second token mismatch: got %q", tokens[1])
+	}
+}
+
+func TestParseTimeShortYear(t *testing.T) {
+	got, err := parseTime("22.08.18", "14:42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := time.Date(2018, time.August, 22, 14, 42, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestParseTimeShortYearPivot(t *testing.T) {
+	// Go's "06" layout token pivots at 68/69: 00-68 -> 2000-2068, 69-99 -> 1969-1999.
+	got, err := parseTime("15.03.99", "08:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Year() != 1999 {
+		t.Fatalf("got year %d, want 1999", got.Year())
 	}
 }
 

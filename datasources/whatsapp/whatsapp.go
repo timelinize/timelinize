@@ -116,7 +116,7 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 		// However, for non-image files, this part of the line often includes the original filename instead, which we don't want to keep
 		var messageText string
 		if attachment == nil {
-			messageText = strings.TrimSpace(content[0])
+			messageText = stripEditedSuffix(strings.TrimSpace(content[0]))
 
 			if pollMessage, pollMeta, isPoll := extractPoll(content); isPoll {
 				messageText = pollMessage
@@ -126,8 +126,10 @@ func (i *Importer) FileImport(_ context.Context, dirEntry timeline.DirEntry, par
 				message.Item.Metadata = locationMeta
 			}
 
-			// Skip messages that have no content & no attachment
-			if messageText == "" {
+			// Skip messages that have no content, no attachment, or are
+			// just a placeholder WhatsApp inserted for content this
+			// export variant doesn't include (eg. a deleted message)
+			if messageText == "" || isPlaceholderOnlyMessage(messageText) {
 				continue
 			}
 
@@ -180,9 +182,17 @@ func parseTime(dateStr, timeStr string) (time.Time, error) {
 		}
 	}
 
+	// Some export locales (eg. German) use a 2-digit year: "22.08.18".
+	// There's no YY-MM-DD equivalent in the wild, so this only applies
+	// when the day comes first.
+	yearToken := "2006"
+	if yearAtEnd && len(dateStr) == dateLenShort {
+		yearToken = "06"
+	}
+
 	var format string
 	if yearAtEnd {
-		format = fmt.Sprintf("02%s01%s2006 15:04:05", sep, sep)
+		format = fmt.Sprintf("02%s01%s%s 15:04:05", sep, sep, yearToken)
 	} else {
 		format = fmt.Sprintf("2006%s01%s02 15:04:05", sep, sep)
 	}

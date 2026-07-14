@@ -8,16 +8,17 @@ import (
 
 var lro = []byte{0xE2, 0x80, 0x8E} // U+200E (LRM)
 const (
-	dateLen    = 10
-	timeLenHM  = 5
-	timeLenHMS = 8
-	splitTwo   = 2
-	minYear    = 1
-	minMonth   = 1
-	maxMonth   = 12
-	minDay     = 1
-	maxDay     = 31
-	scanOffset = 4
+	dateLenShort = 8  // DD?MM?YY
+	dateLenLong  = 10 // DD?MM?YYYY or YYYY?MM?DD
+	timeLenHM    = 5
+	timeLenHMS   = 8
+	splitTwo     = 2
+	minYear      = 1
+	minMonth     = 1
+	maxMonth     = 12
+	minDay       = 1
+	maxDay       = 31
+	scanOffset   = 4
 )
 
 type messageHeader struct {
@@ -75,7 +76,7 @@ func parseMessageHeader(b []byte) (messageHeader, bool) {
 		h.HasLRO = true
 		b = b[len(lro):]
 	}
-	if len(b) < dateLen {
+	if len(b) < dateLenShort {
 		return messageHeader{}, false
 	}
 
@@ -154,9 +155,18 @@ func parseMessageHeader(b []byte) (messageHeader, bool) {
 }
 
 func isDate(b []byte) bool {
-	if len(b) != dateLen {
+	switch len(b) {
+	case dateLenLong:
+		return isDateLongYear(b)
+	case dateLenShort:
+		return isDateShortYear(b)
+	default:
 		return false
 	}
+}
+
+// isDateLongYear checks YYYY?MM?DD or DD?MM?YYYY (4-digit year).
+func isDateLongYear(b []byte) bool {
 	sep4 := b[4]
 	sep2 := b[2]
 
@@ -190,6 +200,26 @@ func isDate(b []byte) bool {
 	}
 
 	return false
+}
+
+// isDateShortYear checks DD?MM?YY (2-digit year), eg. the format used by
+// some WhatsApp export locales: "22.08.18". There's no YY?MM?DD equivalent
+// in the wild, so only the day-first form is checked.
+func isDateShortYear(b []byte) bool {
+	sep := b[2]
+	if sep != '-' && sep != '/' && sep != '.' {
+		return false
+	}
+	if !isDigit(b[0]) || !isDigit(b[1]) ||
+		!isDigit(b[3]) || !isDigit(b[4]) ||
+		!isDigit(b[6]) || !isDigit(b[7]) ||
+		b[5] != sep {
+		return false
+	}
+
+	day, _ := strconv.Atoi(string(b[0:2]))
+	month, _ := strconv.Atoi(string(b[3:5]))
+	return month >= minMonth && month <= maxMonth && day >= minDay && day <= maxDay
 }
 
 func isTime(b []byte) bool {
