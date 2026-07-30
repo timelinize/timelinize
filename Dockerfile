@@ -31,7 +31,7 @@ RUN rm -rf /var/lib/apt/lists/*
 
 # Build latest libvips from source with caching
 RUN --mount=type=cache,target=/tmp/libvips-cache \
-    git clone --depth 1 https://github.com/libvips/libvips.git /tmp/libvips && \
+    git clone --depth 1 --branch v8.18.4 https://github.com/libvips/libvips.git /tmp/libvips && \
     cd /tmp/libvips && \
     meson setup build --buildtype=release --wrap-mode=forcefallback --backend=ninja -Dprefix=/usr -Dlibdir=/usr/lib && \
     ninja -C build && \
