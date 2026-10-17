@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"path"
 	"regexp"
 	"strings"
@@ -139,9 +138,6 @@ func (FileImporter) Recognize(_ context.Context, dirEntry timeline.DirEntry, _ t
 // FileImport imports data from the LINE chat export file.
 func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEntry, params timeline.ImportParams) error {
 	filename := dirEntry.Filename
-	if filename == "" || filename == "." {
-		return errors.New("no file specified")
-	}
 	sourceFilename := path.Base(filename)
 
 	file, err := dirEntry.FS.Open(filename)
@@ -197,7 +193,6 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 	var currentDate string
 	var currentMessage *parsedMessage
 	systemTimezone := time.Local
-	entryOrdinal := 0
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -223,10 +218,8 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 			}
 			// Add system message directly
 			if sysMsg.Item != nil {
-				entryOrdinal++
 				sysMsg.Item.IntermediateLocation = filename
 				sysMsg.Item.Content.Filename = sourceFilename
-				sysMsg.Item.Retrieval.SetKey(systemMessageRetrievalKey(filename, entryOrdinal, sysMsg.Item.Timestamp, systemText(sysMsg.Item)))
 			}
 			messages = append(messages, &sysMsg)
 			continue
@@ -234,8 +227,6 @@ func (fi *FileImporter) FileImport(ctx context.Context, dirEntry timeline.DirEnt
 
 		// Check if this is a regular message line (two tabs)
 		if msg, ok := parseMessageLine(line, currentDate, systemTimezone, cfg); ok {
-			entryOrdinal++
-			msg.ordinal = entryOrdinal
 			msg.intermediateLocation = filename
 			msg.sourceFilename = sourceFilename
 
@@ -301,7 +292,6 @@ type parsedMessage struct {
 	timestamp            time.Time
 	sender               string
 	content              string
-	ordinal              int
 	intermediateLocation string
 	sourceFilename       string
 	owner                timeline.Entity
@@ -354,10 +344,9 @@ func parseHeaderLineLang(headerLine string, cfg languageConfig) (bool, string) {
 	}
 
 	// Fallback: try to parse generic format
-	if strings.HasPrefix(headerLine, "[LINE] ") {
-		parts := strings.Fields(headerLine)
-		if len(parts) >= 3 {
-			return false, strings.Join(parts[2:], " ")
+	if rest, ok := strings.CutPrefix(headerLine, "[LINE] "); ok {
+		if _, name, ok := strings.Cut(rest, " "); ok && strings.TrimSpace(name) != "" {
+			return false, strings.TrimSpace(name)
 		}
 	}
 	return false, ""
@@ -457,40 +446,15 @@ func createSystemMessageGraph(systemText string, timestamp time.Time) timeline.G
 	}
 }
 
-func systemMessageRetrievalKey(filename string, ordinal int, timestamp time.Time, content string) string {
-	return fmt.Sprintf("line|system|%s|%d|%d|%s", filename, ordinal, timestamp.UnixMilli(), content)
-}
-
-func messageRetrievalKey(msg *parsedMessage) string {
-	return fmt.Sprintf("line|message|%s|%d|%d|%s|%s", msg.intermediateLocation, msg.ordinal, msg.timestamp.UnixMilli(), msg.sender, msg.content)
-}
-
-func systemText(item *timeline.Item) string {
-	if item == nil || item.Content.Data == nil {
-		return ""
-	}
-	r, err := item.Content.Data(context.Background())
-	if err != nil {
-		return ""
-	}
-	defer r.Close()
-	b, err := io.ReadAll(r)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
 // parseTimestampLang parses a LINE timestamp using the language config.
 func parseTimestampLang(dateLine, timeStr string, tz *time.Location, cfg languageConfig) (time.Time, error) {
 	if dateLine == "" {
 		return time.Time{}, errors.New("missing date")
 	}
-	parts := strings.SplitN(dateLine, ", ", 2)
-	if len(parts) != 2 {
+	_, dateStr, ok := strings.Cut(dateLine, ", ")
+	if !ok {
 		return time.Time{}, fmt.Errorf("invalid date format: %s", dateLine)
 	}
-	dateStr := parts[1]
 	dateTimeStr := dateStr + " " + timeStr
 
 	timestamp, err := time.ParseInLocation(cfg.dateLayout, dateTimeStr, tz)
@@ -523,19 +487,16 @@ func createMessageGraph(msg *parsedMessage) *timeline.Graph {
 		return nil
 	}
 
-	item := &timeline.Item{
-		Classification:       timeline.ClassMessage,
-		Timestamp:            msg.timestamp,
-		IntermediateLocation: msg.intermediateLocation,
-		Owner:                msg.owner,
-		Content: timeline.ItemData{
-			Filename: msg.sourceFilename,
-			Data:     timeline.StringData(msg.content),
-		},
-	}
-	item.Retrieval.SetKey(messageRetrievalKey(msg))
-
 	return &timeline.Graph{
-		Item: item,
+		Item: &timeline.Item{
+			Classification:       timeline.ClassMessage,
+			Timestamp:            msg.timestamp,
+			IntermediateLocation: msg.intermediateLocation,
+			Owner:                msg.owner,
+			Content: timeline.ItemData{
+				Filename: msg.sourceFilename,
+				Data:     timeline.StringData(msg.content),
+			},
+		},
 	}
 }
